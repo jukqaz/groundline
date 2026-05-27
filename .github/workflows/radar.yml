@@ -12,14 +12,14 @@ jobs:
       PYTHONDONTWRITEBYTECODE: "1"
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6.0.2
+      - uses: actions/setup-python@v6.2.0
         with:
-          python-version: "3.13"
+          python-version: "3.14"
       - name: Run radar
         run: python3 scripts/groundline_radar.py --json --network > groundline-radar.json
       - name: Upload radar packet
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: groundline-radar
           path: groundline-radar.json

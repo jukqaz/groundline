@@ -13,17 +13,19 @@ jobs:
       PYTHONDONTWRITEBYTECODE: "1"
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6.0.2
+      - uses: actions/setup-python@v6.2.0
         with:
-          python-version: "3.13"
-      - uses: actions/setup-go@v5
-        with:
-          go-version: stable
+          python-version: "3.14"
       - name: Install actionlint
-        run: go install github.com/rhysd/actionlint/cmd/actionlint@latest
+        env:
+          ACTIONLINT_VERSION: "1.7.12"
+        run: |
+          mkdir -p .tools
+          curl -sSfL "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" -o /tmp/actionlint.tar.gz
+          tar -xzf /tmp/actionlint.tar.gz -C .tools actionlint
       - name: Lint
-        run: python3 scripts/lint.py --json --require-actionlint --actionlint-bin "$(go env GOPATH)/bin/actionlint"
+        run: python3 scripts/lint.py --json --require-actionlint --actionlint-bin .tools/actionlint
       - name: Validate package
         run: python3 scripts/validate_pack.py --json
       - name: Check runtime layout

@@ -4,6 +4,8 @@
 
 - Force GitHub JavaScript actions onto Node 24 in validation and radar
   workflows.
+- Pin GitHub Actions to current release tags and install pinned actionlint from
+  its prebuilt Linux binary.
 
 ## v0.1.0
 

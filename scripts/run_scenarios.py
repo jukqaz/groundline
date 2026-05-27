@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DOCKER_IMAGE = "python:3.13-alpine"
+DOCKER_IMAGE = "python:3.14-alpine"
 
 
 def emit(payload: dict, code: int = 0) -> int:

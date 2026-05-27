@@ -261,12 +261,12 @@ class GroundLineScenarioContractTests(unittest.TestCase):
         self.assertTrue(result["docker"]["executed"])
         self.assertEqual(result["docker"]["exit_code"], 0)
         self.assertEqual(result["docker"]["platform"], "linux/arm64")
-        self.assertEqual(result["docker"]["image"], "python:3.13-alpine")
+        self.assertEqual(result["docker"]["image"], "python:3.14-alpine")
         self.assertIn("run", docker_args)
         self.assertIn("--rm", docker_args)
         self.assertIn("--platform", docker_args)
         self.assertIn("linux/arm64", docker_args)
-        self.assertIn("python:3.13-alpine", docker_args)
+        self.assertIn("python:3.14-alpine", docker_args)
 
     def test_run_scenarios_linux_docker_failure_reports_partial(self) -> None:
         with tempfile.TemporaryDirectory(prefix="groundline-docker-") as temp:

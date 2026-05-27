@@ -83,7 +83,8 @@ class GroundLineStaticContractTests(unittest.TestCase):
 
         self.assertIn("PYTHONDONTWRITEBYTECODE: \"1\"", text)
         self.assertIn("FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: \"true\"", text)
-        self.assertIn("go install github.com/rhysd/actionlint/cmd/actionlint@latest", text)
+        self.assertIn('ACTIONLINT_VERSION: "1.7.12"', text)
+        self.assertIn("actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz", text)
         self.assertIn("python3 scripts/lint.py --json --require-actionlint", text)
         self.assertIn("python3 -m unittest discover -s tests -v", text)
         self.assertIn("python3 scripts/validate_pack.py --json", text)
@@ -99,7 +100,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn("schedule:", text)
         self.assertIn("workflow_dispatch:", text)
         self.assertIn("python3 scripts/groundline_radar.py --json --network", text)
-        self.assertIn("actions/upload-artifact@v4", text)
+        self.assertIn("actions/upload-artifact@v7", text)
         self.assertIn("FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: \"true\"", text)
 
     def test_validate_pack_requires_ci_workflow(self) -> None:
