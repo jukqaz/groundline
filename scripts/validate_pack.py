@@ -24,9 +24,14 @@ EXPECTED_SKILLS = {
 REQUIRED_FILES = [
     ".codex-plugin/plugin.json",
     ".claude-plugin/plugin.json",
+    ".github/workflows/radar.yml",
     ".github/workflows/test.yml",
     "plugin.json",
+    "CHANGELOG.md",
     "README.md",
+    "docs/install.md",
+    "docs/update.md",
+    "docs/provider-smoke.md",
     "docs/runtime-support.md",
     "docs/examples.md",
     "docs/release-checklist.md",
@@ -39,6 +44,7 @@ REQUIRED_FILES = [
     "references/superpowers-interop.md",
     "references/tool-profiles.md",
     "references/workflow-modes.md",
+    "scripts/groundline_provider_smoke.py",
     "LICENSE",
 ]
 

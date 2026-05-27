@@ -105,10 +105,33 @@ def tool_status(name: str, fixture: dict, bin_dir: Path | None) -> dict:
     return {"available": available, "requirement": "optional"}
 
 
+def tool_recommendations(tools: dict) -> tuple[list[str], list[dict]]:
+    gaps: list[str] = []
+    recommendations: list[dict] = []
+    for name in ["github", "context7", "exa"]:
+        if tools[name]["available"]:
+            continue
+        gaps.append(name)
+        recommendations.append(
+            {
+                "tool": name,
+                "reason": "standard profile tool is not available",
+                "action": "configure the tool if this workflow needs repository evidence or current external research",
+            }
+        )
+    return gaps, recommendations
+
+
 def build_result(home: Path, explicit_home: bool, tools_fixture: dict, bin_dir: Path | None, probe_tools: bool) -> dict:
     superpowers_present = (home / ".codex/plugins/cache/openai-curated/superpowers").exists()
     antigravity_home = home / ("." + "gem" + "ini")
     mode = "companion-superpowers" if superpowers_present else "standalone-groundline"
+    tools = {
+        "github": tool_status("github", tools_fixture, bin_dir),
+        "context7": tool_status("context7", tools_fixture, bin_dir),
+        "exa": tool_status("exa", tools_fixture, bin_dir),
+    }
+    gaps, recommendations = tool_recommendations(tools)
     return {
         "status": "PASS",
         "home": str(home),
@@ -124,13 +147,10 @@ def build_result(home: Path, explicit_home: bool, tools_fixture: dict, bin_dir: 
             "antigravity": {"scope": "supported", "present": antigravity_home.exists()},
         },
         "superpowers": {"present": superpowers_present, "requirement": "recommended"},
-        "tools": {
-            "github": tool_status("github", tools_fixture, bin_dir),
-            "context7": tool_status("context7", tools_fixture, bin_dir),
-            "exa": tool_status("exa", tools_fixture, bin_dir),
-        },
+        "tools": tools,
         "external_tools": external_tool_status(bin_dir, probe_tools),
-        "capability_gaps": [],
+        "capability_gaps": gaps,
+        "setup_recommendations": recommendations,
     }
 
 

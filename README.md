@@ -33,6 +33,12 @@ MCP bundle.
 - Claude Code: `.claude-plugin/plugin.json`
 - Antigravity: `plugin.json`
 
+## Install And Update
+
+- Install: `docs/install.md`
+- Update: `docs/update.md`
+- Provider smoke: `docs/provider-smoke.md`
+
 ## Operating Loop
 
 ```text
@@ -81,3 +87,6 @@ Linux Docker run is a release gate:
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/run_scenarios.py --platform linux --sandbox docker --json
 ```
+
+`.github/workflows/radar.yml` runs a scheduled radar packet and uploads the JSON
+artifact for review.

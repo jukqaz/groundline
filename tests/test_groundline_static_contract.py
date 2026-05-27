@@ -30,8 +30,13 @@ class GroundLineStaticContractTests(unittest.TestCase):
             ".codex-plugin/plugin.json",
             ".claude-plugin/plugin.json",
             "plugin.json",
+            "CHANGELOG.md",
             "README.md",
             ".github/workflows/test.yml",
+            ".github/workflows/radar.yml",
+            "docs/install.md",
+            "docs/update.md",
+            "docs/provider-smoke.md",
             "docs/runtime-support.md",
             "docs/examples.md",
             "docs/release-checklist.md",
@@ -47,6 +52,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
             "scripts/check_runtime_layout.py",
             "scripts/groundline_doctor.py",
             "scripts/groundline_plan_update.py",
+            "scripts/groundline_provider_smoke.py",
             "scripts/groundline_radar.py",
             "scripts/run_scenarios.py",
             "scripts/validate_pack.py",
@@ -81,10 +87,37 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn("python3 scripts/run_scenarios.py --platform macos --sandbox local --json", text)
         self.assertIn("python3 scripts/run_scenarios.py --platform linux --sandbox docker --dry-run --json", text)
 
+    def test_radar_workflow_runs_on_schedule_and_uploads_artifact(self) -> None:
+        workflow = PACK_ROOT / ".github/workflows/radar.yml"
+        self.assertTrue(workflow.is_file(), "missing radar workflow")
+        text = workflow.read_text(encoding="utf-8")
+
+        self.assertIn("schedule:", text)
+        self.assertIn("workflow_dispatch:", text)
+        self.assertIn("python3 scripts/groundline_radar.py --json --network", text)
+        self.assertIn("actions/upload-artifact@v4", text)
+
     def test_validate_pack_requires_ci_workflow(self) -> None:
         validator = (PACK_ROOT / "scripts/validate_pack.py").read_text(encoding="utf-8")
 
         self.assertIn('".github/workflows/test.yml"', validator)
+        self.assertIn('".github/workflows/radar.yml"', validator)
+        self.assertIn('"docs/install.md"', validator)
+        self.assertIn('"docs/update.md"', validator)
+        self.assertIn('"docs/provider-smoke.md"', validator)
+        self.assertIn('"scripts/groundline_provider_smoke.py"', validator)
+
+    def test_install_and_update_docs_cover_private_repo_flow(self) -> None:
+        install = (PACK_ROOT / "docs/install.md").read_text(encoding="utf-8")
+        update = (PACK_ROOT / "docs/update.md").read_text(encoding="utf-8")
+        smoke = (PACK_ROOT / "docs/provider-smoke.md").read_text(encoding="utf-8")
+
+        self.assertIn("gh repo clone jukqaz/groundline", install)
+        self.assertIn("python3 scripts/groundline_provider_smoke.py --json", install)
+        self.assertIn("git pull --ff-only", update)
+        self.assertIn("python3 scripts/validate_pack.py --json", update)
+        self.assertIn("python3 scripts/groundline_provider_smoke.py --json", smoke)
+        self.assertIn("mutation_performed=false", smoke)
 
     def test_skill_surface_matches_v0_1_design(self) -> None:
         expected_skills = {

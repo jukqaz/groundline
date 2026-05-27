@@ -61,6 +61,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
             "check_runtime_layout.py",
             "groundline_doctor.py",
             "groundline_plan_update.py",
+            "groundline_provider_smoke.py",
             "groundline_radar.py",
             "run_scenarios.py",
             "validate_pack.py",
@@ -105,6 +106,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
             "check_runtime_layout.py",
             "groundline_doctor.py",
             "groundline_plan_update.py",
+            "groundline_provider_smoke.py",
             "groundline_radar.py",
             "run_scenarios.py",
             "validate_pack.py",
@@ -177,6 +179,9 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertFalse(result["tools"]["exa"]["available"])
         self.assertEqual(result["tools"]["context7"]["requirement"], "optional")
         self.assertEqual(result["tools"]["exa"]["requirement"], "optional")
+        self.assertIn("context7", result["capability_gaps"])
+        self.assertIn("exa", result["capability_gaps"])
+        self.assertIn("setup_recommendations", result)
 
     def test_doctor_can_probe_external_tools_when_explicit(self) -> None:
         with tempfile.TemporaryDirectory(prefix="groundline-external-tools-") as temp:
@@ -431,6 +436,24 @@ class GroundLineScriptContractTests(unittest.TestCase):
         combined_output = result.stdout + result.stderr
         self.assertNotIn("sk-test-secret-value", combined_output)
         self.assertNotIn("token", combined_output.lower())
+
+    def test_provider_smoke_reports_manifest_and_target_plan_without_mutation(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-provider-smoke-") as temp:
+            home = self.make_fake_home(Path(temp))
+            result = self.run_script_json(
+                "groundline_provider_smoke.py",
+                "--home",
+                str(home),
+                "--json",
+            )
+
+        self.assertEqual(result["status"], "PASS")
+        self.assertFalse(result["mutation_performed"])
+        self.assertTrue(result["fake_home_used"])
+        self.assertEqual(set(result["providers"].keys()), {"codex", "claude_code", "antigravity"})
+        self.assertTrue(result["providers"]["codex"]["manifest_present"])
+        self.assertIn("install_target", result["providers"]["codex"])
+        self.assertIn("update_command", result)
 
 
 if __name__ == "__main__":
