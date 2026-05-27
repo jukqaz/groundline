@@ -75,6 +75,7 @@ rejected.
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/lint.py --json --require-actionlint
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_runtime_layout.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/run_scenarios.py --platform macos --sandbox local --json

@@ -63,12 +63,14 @@ class GroundLineScriptContractTests(unittest.TestCase):
             "groundline_plan_update.py",
             "groundline_provider_smoke.py",
             "groundline_radar.py",
+            "lint.py",
             "run_scenarios.py",
             "validate_pack.py",
         ]
         allowed_roots = {
             "__future__",
             "argparse",
+            "ast",
             "dataclasses",
             "datetime",
             "hashlib",
@@ -108,6 +110,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
             "groundline_plan_update.py",
             "groundline_provider_smoke.py",
             "groundline_radar.py",
+            "lint.py",
             "run_scenarios.py",
             "validate_pack.py",
         ]
@@ -126,6 +129,38 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertFalse(result["mutation_performed"])
         self.assertEqual(result["supported_runtimes"], ["codex", "claude_code", "antigravity"])
         self.assertEqual(result["supported_platforms"], ["macos-arm64", "linux"])
+
+    def test_lint_emits_json_success_without_optional_actionlint(self) -> None:
+        result = self.run_script_json("lint.py", "--json")
+
+        self.assertEqual(result["status"], "PASS")
+        self.assertFalse(result["mutation_performed"])
+        self.assertTrue(result["checks"]["python_ast"])
+        self.assertTrue(result["checks"]["json"])
+        self.assertIn(result["checks"]["actionlint"], ["skipped", "passed"])
+
+    def test_lint_requires_actionlint_when_requested(self) -> None:
+        completed = self.run_script("lint.py", "--json", "--require-actionlint", "--actionlint-bin", "/missing/actionlint")
+
+        self.assertNotEqual(completed.returncode, 0)
+        result = json.loads(completed.stdout)
+        self.assertEqual(result["status"], "FAIL")
+        self.assertEqual(result["checks"]["actionlint"], "missing")
+
+    def test_lint_runs_actionlint_when_binary_is_available(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-actionlint-") as temp:
+            bin_dir = Path(temp)
+            actionlint = self.write_fake_executable(bin_dir, "actionlint", "ok")
+            result = self.run_script_json(
+                "lint.py",
+                "--json",
+                "--require-actionlint",
+                "--actionlint-bin",
+                str(actionlint),
+            )
+
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["checks"]["actionlint"], "passed")
 
     def test_check_runtime_layout_reports_three_supported_manifests(self) -> None:
         result = self.run_script_json("check_runtime_layout.py", "--json")

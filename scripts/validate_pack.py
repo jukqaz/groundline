@@ -45,6 +45,7 @@ REQUIRED_FILES = [
     "references/tool-profiles.md",
     "references/workflow-modes.md",
     "scripts/groundline_provider_smoke.py",
+    "scripts/lint.py",
     "LICENSE",
 ]
 

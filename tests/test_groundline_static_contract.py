@@ -54,6 +54,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
             "scripts/groundline_plan_update.py",
             "scripts/groundline_provider_smoke.py",
             "scripts/groundline_radar.py",
+            "scripts/lint.py",
             "scripts/run_scenarios.py",
             "scripts/validate_pack.py",
             "scenarios/fixtures/fresh-install.json",
@@ -81,6 +82,9 @@ class GroundLineStaticContractTests(unittest.TestCase):
         text = workflow.read_text(encoding="utf-8")
 
         self.assertIn("PYTHONDONTWRITEBYTECODE: \"1\"", text)
+        self.assertIn("FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: \"true\"", text)
+        self.assertIn("go install github.com/rhysd/actionlint/cmd/actionlint@latest", text)
+        self.assertIn("python3 scripts/lint.py --json --require-actionlint", text)
         self.assertIn("python3 -m unittest discover -s tests -v", text)
         self.assertIn("python3 scripts/validate_pack.py --json", text)
         self.assertIn("python3 scripts/check_runtime_layout.py --json", text)
@@ -96,6 +100,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn("workflow_dispatch:", text)
         self.assertIn("python3 scripts/groundline_radar.py --json --network", text)
         self.assertIn("actions/upload-artifact@v4", text)
+        self.assertIn("FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: \"true\"", text)
 
     def test_validate_pack_requires_ci_workflow(self) -> None:
         validator = (PACK_ROOT / "scripts/validate_pack.py").read_text(encoding="utf-8")
@@ -106,6 +111,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn('"docs/update.md"', validator)
         self.assertIn('"docs/provider-smoke.md"', validator)
         self.assertIn('"scripts/groundline_provider_smoke.py"', validator)
+        self.assertIn('"scripts/lint.py"', validator)
 
     def test_install_and_update_docs_cover_private_repo_flow(self) -> None:
         install = (PACK_ROOT / "docs/install.md").read_text(encoding="utf-8")

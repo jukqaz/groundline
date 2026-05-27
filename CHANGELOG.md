@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.1.1
+
+- Force GitHub JavaScript actions onto Node 24 in validation and radar
+  workflows.
+
 ## v0.1.0
 
 - Add GroundLine manifests for Codex, Claude Code, and Antigravity.

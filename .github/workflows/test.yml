@@ -11,11 +11,19 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PYTHONDONTWRITEBYTECODE: "1"
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@latest
+      - name: Lint
+        run: python3 scripts/lint.py --json --require-actionlint --actionlint-bin "$(go env GOPATH)/bin/actionlint"
       - name: Validate package
         run: python3 scripts/validate_pack.py --json
       - name: Check runtime layout
