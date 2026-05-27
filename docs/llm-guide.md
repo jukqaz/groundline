@@ -10,6 +10,11 @@ is needed before continuing, mutating, releasing, or handing off work.
 Do not treat GroundLine as permission to mutate user files, provider homes,
 remotes, production systems, billing, access, or secrets.
 
+Do not reimplement provider-native features. If the runtime already provides
+goal mode, subagents, hooks, plugin installation, browser control, app context,
+or MCP setup, use GroundLine to define the task packet, safety boundary, and
+verification evidence, then let the provider-owned feature execute it.
+
 ## Primary Flow
 
 1. Read the user's latest request.
@@ -27,12 +32,31 @@ remotes, production systems, billing, access, or secrets.
 - `close-live-work`: CI or local tests passed but live runtime proof is still needed
 - `align-agent-home`: provider home, config, hooks, rules, skill, or plugin boundary review
 - `recover-worktree-branch`: missing worktree, detached branch, cleanup, or recovery
+- `package-agent-task`: convert broad, resumed, or high-context requests into a concise task packet
+- `agent-ecosystem-radar`: research, compare, and recommend external workflow upgrades in one pass
+- `research-agent-ecosystem`: gather source-backed ecosystem candidates
+- `evaluate-agent-capability`: score an existing tool, skill, plugin, MCP server, hook, agent, or workflow pack before adoption
+- `evaluate-ai-usage-maturity`: assess a person or team's AI workflow maturity from artifacts without exposing raw transcripts
+- `hold-the-line`: stop scope growth when new ideas, more research, or extra tools appear before current work is closed
+- `polish-release-candidate`: run final docs, duplicate, privacy, gate, and commit-plan cleanup before release judgment
+- `stabilize-release-cut`: lock scope, classify remaining work, run release gates, collect dogfood evidence, and make a ship decision
+- `compare-release-delta`: compare a deployed release with the previous version and produce a post-deploy checklist
+- `compare-agent-workflows`: score candidates against GroundLine scope and risk
+- `recommend-groundline-upgrades`: convert findings into `adopt`, `adapt`, `watch`, or `reject` tasks
+- `evaluate-groundline-pack`: review this package for skill completeness, trigger clarity, tests, safety, and release fitness
+- `curate-groundline-skills`: maintain the skill portfolio and decide whether to create, adapt, merge, split, deprecate, or reject capabilities
+
+Use `references/skill-index.json` when a structured skill catalog is more
+useful than prose. Use `docs/skill-portfolio.md` when producing a maintainer
+summary for people.
 
 ## Safety Rules
 
 - Do not print secret values.
 - Do not copy provider auth files, sessions, logs, caches, shell snapshots, or
   local databases into source control.
+- Do not simulate provider-native tools inside GroundLine when a setup
+  recommendation is enough.
 - Treat `mutation_performed=false` as evidence only for that command, not for
   the whole task.
 - Ask for explicit approval before external mutation or destructive git work.

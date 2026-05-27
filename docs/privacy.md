@@ -21,6 +21,18 @@ that environment into source material.
 - local databases
 - caches
 
+## Assessment Boundary
+
+AI usage assessments default to `artifact-backed maturity`: repository diffs,
+docs, tests, validation logs, release notes, handoff packets, and redacted
+summaries. They do not scan every provider conversation by default.
+
+`collector-backed fluency` requires explicit approval, a provider inventory, and
+a redacted evidence packet before behavior extraction or CEFR-style scoring.
+Use a Provider Evidence Packet for provider-specific history evidence. The
+packet records a time window, provider coverage, task types, verification
+evidence, handoff evidence, and privacy boundary without secret values.
+
 ## Output Rules
 
 - `mutation_performed` must be explicit.

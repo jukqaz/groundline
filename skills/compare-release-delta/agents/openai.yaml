@@ -1,0 +1,4 @@
+interface:
+  display_name: "Compare Release Delta"
+  short_description: "Compare deployed release with prior version"
+  default_prompt: "Compare the deployed version with the previous version, build a GroundLine Release Delta checklist, classify each item, and report keep, monitor, or rollback recommendation."

@@ -50,12 +50,22 @@ class GroundLineStaticContractTests(unittest.TestCase):
             "docs/public-release.md",
             "docs/runtime-support.md",
             "docs/examples.md",
+            "docs/dogfood.md",
+            "docs/skill-portfolio.md",
             "docs/release-checklist.md",
             "references/capability-blueprint.md",
             "references/config-sync-boundary.md",
             "references/output-contracts.md",
             "references/platform-support.md",
             "references/runtime-matrix.md",
+            "references/external-workflow-interop.md",
+            "references/capability-evaluation.md",
+            "references/ai-usage-maturity.md",
+            "references/multi-provider-fluency-boundary.md",
+            "references/agent-task-packet.md",
+            "references/release-stabilization.md",
+            "references/skill-index.json",
+            "references/skill-lifecycle.md",
             "references/source-registry.json",
             "references/superpowers-interop.md",
             "references/tool-profiles.md",
@@ -121,6 +131,12 @@ class GroundLineStaticContractTests(unittest.TestCase):
 
         self.assertIn('".github/workflows/test.yml"', validator)
         self.assertIn('".github/workflows/radar.yml"', validator)
+        self.assertIn('"references/external-workflow-interop.md"', validator)
+        self.assertIn('"references/capability-evaluation.md"', validator)
+        self.assertIn('"references/ai-usage-maturity.md"', validator)
+        self.assertIn('"references/multi-provider-fluency-boundary.md"', validator)
+        self.assertIn('"references/agent-task-packet.md"', validator)
+        self.assertIn('"references/release-stabilization.md"', validator)
         self.assertIn('"docs/install.md"', validator)
         self.assertIn('"docs/git-history-privacy.md"', validator)
         self.assertIn('"docs/human-guide.md"', validator)
@@ -129,6 +145,10 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn('"docs/provider-smoke.md"', validator)
         self.assertIn('"docs/privacy.md"', validator)
         self.assertIn('"docs/public-release.md"', validator)
+        self.assertIn('"docs/dogfood.md"', validator)
+        self.assertIn('"docs/skill-portfolio.md"', validator)
+        self.assertIn('"references/skill-index.json"', validator)
+        self.assertIn('"references/skill-lifecycle.md"', validator)
         self.assertIn('"CONTRIBUTING.md"', validator)
         self.assertIn('"SECURITY.md"', validator)
         self.assertIn('"scripts/groundline_provider_smoke.py"', validator)
@@ -148,6 +168,29 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn("python3 scripts/groundline_provider_smoke.py --json", smoke)
         self.assertIn("mutation_performed=false", smoke)
         self.assertIn("displayed with `~`", smoke)
+
+    def test_dogfood_doc_tracks_provider_matrix_and_results(self) -> None:
+        text = (PACK_ROOT / "docs/dogfood.md").read_text(encoding="utf-8")
+
+        for term in [
+            "Dogfood Matrix",
+            "Provider",
+            "Scenario",
+            "Expected skill",
+            "Evidence",
+            "Result",
+            "Staged Install Evidence",
+            "Must fix",
+            "Defer",
+            "Real home mutation: false",
+            "fake_home_used=true",
+            "target_exists=true",
+            "target_skill_count=19",
+            "target_skill_count_matches_source=true",
+            "2026-05-28",
+        ]:
+            with self.subTest(term=term):
+                self.assertIn(term, text)
 
     def test_public_docs_cover_security_privacy_license_and_identity(self) -> None:
         readme = (PACK_ROOT / "README.md").read_text(encoding="utf-8")
@@ -180,12 +223,12 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertEqual(codex["author"]["name"], "GroundLine contributors")
         self.assertEqual(codex["interface"]["developerName"], "GroundLine")
         self.assertEqual(claude["author"]["name"], "GroundLine contributors")
-        self.assertNotIn(
-            "GroundLine contributors",
-            "\n".join(
-                [readme, security, contributing, history_privacy, human_guide, llm_guide, privacy, public_release, license_text]
-            ),
-        )
+        public_text = "\n".join(
+            [readme, security, contributing, history_privacy, human_guide, llm_guide, privacy, public_release, license_text]
+        ).lower()
+        local_home_name = Path.home().name.lower()
+        if local_home_name:
+            self.assertNotIn(local_home_name, public_text)
 
     def test_skill_surface_matches_v0_1_design(self) -> None:
         expected_skills = {
@@ -195,6 +238,19 @@ class GroundLineStaticContractTests(unittest.TestCase):
             "close-live-work",
             "align-agent-home",
             "recover-worktree-branch",
+            "agent-ecosystem-radar",
+            "research-agent-ecosystem",
+            "compare-agent-workflows",
+            "recommend-groundline-upgrades",
+            "evaluate-groundline-pack",
+            "curate-groundline-skills",
+            "evaluate-agent-capability",
+            "evaluate-ai-usage-maturity",
+            "package-agent-task",
+            "hold-the-line",
+            "polish-release-candidate",
+            "stabilize-release-cut",
+            "compare-release-delta",
         }
 
         skills_dir = PACK_ROOT / "skills"
@@ -206,6 +262,51 @@ class GroundLineStaticContractTests(unittest.TestCase):
                 skill_dir = skills_dir / skill_name
                 self.assertTrue((skill_dir / "SKILL.md").is_file())
                 self.assertTrue((skill_dir / "agents/openai.yaml").is_file())
+
+    def test_agent_ecosystem_skill_set_is_chained(self) -> None:
+        orchestrator = (PACK_ROOT / "skills/agent-ecosystem-radar/SKILL.md").read_text(encoding="utf-8")
+        outputs = (PACK_ROOT / "references/output-contracts.md").read_text(encoding="utf-8")
+        interop = (PACK_ROOT / "references/external-workflow-interop.md").read_text(encoding="utf-8")
+
+        for skill_name in [
+            "research-agent-ecosystem",
+            "evaluate-agent-capability",
+            "compare-agent-workflows",
+            "recommend-groundline-upgrades",
+        ]:
+            with self.subTest(skill=skill_name):
+                self.assertIn(skill_name, orchestrator)
+
+        for contract in [
+            "GroundLine Research",
+            "GroundLine Capability Evaluation",
+            "GroundLine Comparison",
+            "GroundLine Recommendation",
+            "GroundLine Pack Evaluation",
+        ]:
+            with self.subTest(contract=contract):
+                self.assertIn(contract, outputs)
+
+        for source in ["Spec Kit", "Agent OS", "BMAD", "gstack", "grill-me", "Promptfoo"]:
+            with self.subTest(source=source):
+                self.assertIn(source, interop)
+
+    def test_agent_ecosystem_orchestrator_uses_full_output_contract(self) -> None:
+        orchestrator = (PACK_ROOT / "skills/agent-ecosystem-radar/SKILL.md").read_text(encoding="utf-8")
+
+        required_fields = [
+            "secondary sources",
+            "confirmed facts",
+            "unverified claims",
+            "overlap with GroundLine",
+            "context and setup cost",
+            "comparison gaps",
+            "side-effect boundary",
+        ]
+
+        for field in required_fields:
+            with self.subTest(field=field):
+                self.assertIn(field, orchestrator)
 
     def test_product_text_has_no_old_brand_or_unsupported_scope(self) -> None:
         forbidden_patterns = {

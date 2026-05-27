@@ -8,6 +8,12 @@ current-state proof, side-effect boundaries, live evidence, and handoff.
 GroundLine is not a synced config dump, a heavy bootstrap CLI, or an always-on
 MCP bundle.
 
+GroundLine also does not reimplement provider-native features. Built-in goal
+modes, subagents, hook engines, plugin installers, MCP launchers, browser
+controls, and app context features stay owned by Codex, Claude Code, or
+Antigravity. GroundLine provides the provider-neutral task contracts, safety
+boundaries, and verification language around them.
+
 ## Supported Scope
 
 - Codex
@@ -26,6 +32,19 @@ MCP bundle.
 | `close-live-work` | Local tests or CI passed but runtime, endpoint, release, worker, queue, or browser evidence still matters. |
 | `align-agent-home` | Agent home config, guidance, skills, rules, hooks, manifests, tool profiles, or private source boundaries need alignment. |
 | `recover-worktree-branch` | A worktree path vanished, branch is detached or missing, or cleanup needs proof before deletion. |
+| `agent-ecosystem-radar` | One pass should research, compare, and recommend agent workflow upgrades. |
+| `research-agent-ecosystem` | External agent tools, skills, plugins, MCP servers, hooks, or workflow sources need source-backed research. |
+| `compare-agent-workflows` | Researched candidates need scoring against GroundLine scope, safety, context cost, and setup weight. |
+| `recommend-groundline-upgrades` | Research and comparison findings need `adopt`, `adapt`, `watch`, or `reject` decisions. |
+| `evaluate-agent-capability` | Existing tools, skills, plugins, MCP servers, hooks, agents, or workflow packs need quality, security, context cost, and fit evaluation. |
+| `evaluate-ai-usage-maturity` | A person or team's AI workflow maturity needs evidence-backed scoring and next upgrades. |
+| `package-agent-task` | A broad, resumed, or high-context request needs a concise LLM-ready task packet. |
+| `hold-the-line` | A task starts expanding with new ideas, extra research, more tools, or unclear finish criteria before current work is closed. |
+| `polish-release-candidate` | A release candidate needs docs polish, duplicate cleanup, privacy checks, gate ordering, or commit split planning before ship judgment. |
+| `stabilize-release-cut` | A growing change set needs scope lock, release gates, dogfood evidence, and a ship decision. |
+| `compare-release-delta` | A deployed release needs comparison with the previous version, runtime evidence, regression checks, or rollback notes. |
+| `evaluate-groundline-pack` | GroundLine itself needs review for repository readiness, skill completeness, safety, tests, and release fitness. |
+| `curate-groundline-skills` | Skills, references, scripts, agents, hooks, MCP recommendations, or docs need create, adapt, merge, split, deprecate, or reject decisions. |
 
 ## Runtime Manifests
 
@@ -43,11 +62,14 @@ MCP bundle.
 - Public release: `docs/public-release.md`
 - Privacy: `docs/privacy.md`
 - Git history privacy: `docs/git-history-privacy.md`
+- Skill portfolio: `docs/skill-portfolio.md`
+- Skill lifecycle: `references/skill-lifecycle.md`
+- LLM-readable skill index: `references/skill-index.json`
 
 ## Operating Loop
 
 ```text
-doctor -> radar -> research packet -> upgrade packet -> skill-guided work
+doctor -> package-agent-task -> hold-the-line -> skill-guided work -> verify -> polish-release-candidate -> stabilize-release-cut -> compare-release-delta
 ```
 
 GroundLine defaults to read-only and offline. Apply, install, sync, deploy,

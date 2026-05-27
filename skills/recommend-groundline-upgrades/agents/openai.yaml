@@ -1,0 +1,4 @@
+interface:
+  display_name: "Recommend GroundLine Upgrades"
+  short_description: "Turn research comparisons into upgrade tasks"
+  default_prompt: "Recommend which researched workflow candidates GroundLine should adopt, adapt, watch, or reject."

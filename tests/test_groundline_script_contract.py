@@ -1,6 +1,7 @@
 import ast
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -328,6 +329,41 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertEqual(result["network"], "disabled")
         self.assertEqual(result["skipped_sources"][0]["reason"], "network disabled")
 
+    def test_radar_network_includes_remote_sources_as_research_seeds(self) -> None:
+        registry = {
+            "sources": [
+                {
+                    "id": "spec-kit",
+                    "kind": "remote",
+                    "url": "https://github.com/github/spec-kit",
+                    "owner": "GitHub",
+                },
+                {
+                    "id": "agent-os",
+                    "kind": "remote",
+                    "url": "https://github.com/buildermethods/agent-os",
+                    "owner": "Builder Methods",
+                },
+            ]
+        }
+
+        with tempfile.TemporaryDirectory(prefix="groundline-radar-") as temp:
+            registry_path = Path(temp) / "source-registry.json"
+            registry_path.write_text(json.dumps(registry), encoding="utf-8")
+            result = self.run_script_json(
+                "groundline_radar.py",
+                "--registry",
+                str(registry_path),
+                "--json",
+                "--network",
+            )
+
+        self.assertEqual(result["network"], "enabled")
+        self.assertEqual(result["skipped_sources"], [])
+        self.assertEqual(result["research_packet"]["mode"], "ecosystem-scan")
+        self.assertEqual(result["research_packet"]["sources"], ["spec-kit", "agent-os"])
+        self.assertEqual(result["upgrade_task_candidates"], [])
+
     def test_radar_runs_local_command_sources_without_network(self) -> None:
         with tempfile.TemporaryDirectory(prefix="groundline-radar-command-") as temp:
             root = Path(temp)
@@ -485,10 +521,39 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertEqual(result["status"], "PASS")
         self.assertFalse(result["mutation_performed"])
         self.assertTrue(result["fake_home_used"])
+        self.assertIn("source_package", result)
+        self.assertGreaterEqual(result["source_package"]["skill_count"], 12)
+        self.assertTrue(result["source_package"]["skill_index_present"])
+        self.assertTrue(result["source_package"]["skill_index_consistent"])
+        self.assertTrue(result["source_package"]["human_portfolio_present"])
         self.assertEqual(set(result["providers"].keys()), {"codex", "claude_code", "antigravity"})
         self.assertTrue(result["providers"]["codex"]["manifest_present"])
         self.assertIn("install_target", result["providers"]["codex"])
+        self.assertIn("runtime_probe", result["providers"]["codex"])
+        self.assertFalse(result["providers"]["codex"]["runtime_probe"]["target_exists"])
         self.assertIn("update_command", result)
+
+    def test_provider_smoke_detects_staged_install_target_contents(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-provider-installed-") as temp:
+            home = self.make_fake_home(Path(temp))
+            target = home / ".codex/plugins/groundline"
+            target.mkdir(parents=True)
+            shutil.copytree(PACK_ROOT / ".codex-plugin", target / ".codex-plugin")
+            shutil.copytree(PACK_ROOT / "skills", target / "skills")
+
+            result = self.run_script_json(
+                "groundline_provider_smoke.py",
+                "--home",
+                str(home),
+                "--json",
+            )
+
+        probe = result["providers"]["codex"]["runtime_probe"]
+        self.assertTrue(probe["target_exists"])
+        self.assertTrue(probe["target_manifest_present"])
+        self.assertTrue(probe["target_skills_present"])
+        self.assertEqual(probe["target_skill_count"], result["source_package"]["skill_count"])
+        self.assertTrue(probe["target_skill_count_matches_source"])
 
 
 if __name__ == "__main__":

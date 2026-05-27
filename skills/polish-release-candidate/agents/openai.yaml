@@ -1,0 +1,4 @@
+interface:
+  display_name: "Polish Release Candidate"
+  short_description: "Run final cleanup before release judgment"
+  default_prompt: "Run a GroundLine Release Polish pass over the current release candidate, classify cleanup findings, apply only fix_now items in scope, and report verification."

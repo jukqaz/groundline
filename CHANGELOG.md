@@ -9,6 +9,15 @@
 - Redact default home paths in doctor and provider smoke output.
 - Align upgrade packet secret-like input detection with doctor and radar checks.
 - Verify the pinned actionlint archive checksum in CI.
+- Add an agent ecosystem radar skill set for research, comparison, and upgrade recommendations.
+- Add a GroundLine pack evaluation skill for skill completeness and release readiness review.
+- Add human-readable skill portfolio docs and an LLM-readable skill index.
+- Add skill lifecycle taxonomy and curation guidance.
+- Add read-only provider smoke runtime probes for staged install targets.
+- Add an existing capability evaluation skill and rubric for tools, skills, plugins, MCP servers, hooks, and agents.
+- Add an AI usage maturity assessment skill and rubric for evidence-backed workflow improvement.
+- Add task packet and release stabilization skills for context packaging, scope lock, dogfood evidence, and ship decisions.
+- Add a release delta comparison skill for post-deploy checklists against the previous version.
 
 ## v0.1.1
 

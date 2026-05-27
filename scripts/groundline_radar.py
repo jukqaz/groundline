@@ -103,8 +103,18 @@ def classify_sources(sources: list[dict], network_enabled: bool, command_sources
 
 def build_result(registry_path: Path, network_enabled: bool, command_sources_enabled: bool) -> dict:
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
-    classified = classify_sources(registry.get("sources", []), network_enabled, command_sources_enabled)
+    sources = registry.get("sources", [])
+    classified = classify_sources(sources, network_enabled, command_sources_enabled)
     impacted_ids = [item["id"] for key in ["changed_sources", "new_sources", "removed_sources"] for item in classified[key]]
+    skipped_ids = {item.get("id") for item in classified["skipped_sources"]}
+    removed_ids = {item.get("id") for item in classified["removed_sources"]}
+    review_ids = [
+        source["id"]
+        for source in sources
+        if isinstance(source.get("id"), str) and source.get("id") not in skipped_ids and source.get("id") not in removed_ids
+    ]
+    research_ids = impacted_ids if impacted_ids else review_ids
+    research_mode = "change-review" if impacted_ids else "ecosystem-scan"
     tasks = [
         {
             "title": f"Investigate {source_id}",
@@ -118,8 +128,14 @@ def build_result(registry_path: Path, network_enabled: bool, command_sources_ena
         "mutation_performed": False,
         "network": "enabled" if network_enabled else "disabled",
         "research_packet": {
-            "sources": impacted_ids,
-            "prompt": "Verify changed sources and propose GroundLine updates.",
+            "mode": research_mode,
+            "sources": research_ids,
+            "changed_or_new_sources": impacted_ids,
+            "prompt": (
+                "Verify changed sources and propose GroundLine updates."
+                if impacted_ids
+                else "Review tracked sources and propose GroundLine updates only when evidence supports it."
+            ),
         },
         "upgrade_task_candidates": tasks,
         "verification_checklist": ["validate references", "run tests"],

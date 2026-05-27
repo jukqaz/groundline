@@ -9,6 +9,9 @@ description: Use when analyzing local Codex, Claude Code, or Antigravity history
 
 Use this skill to understand local agent history as a storage and continuity surface, not as a prompt dump. Prefer compact inventory, metadata, and narrow keyword searches before opening any transcript content.
 
+This skill can prepare provider coverage notes or redacted evidence packets for
+an assessment, but it does not score AI fluency by itself.
+
 ## Trigger Examples
 
 - "Claude/Codex 대화내역 기반으로 만들 만한 스킬 찾아봐."
@@ -41,6 +44,7 @@ Use this skill to understand local agent history as a storage and continuity sur
    - retention or cleanup candidates
    - candidate skills, agents, hooks, or docs
    - facts that require live revalidation
+   - provider coverage gaps for assessment work
 
 ## Search Strategy
 

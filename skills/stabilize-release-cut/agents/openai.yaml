@@ -1,0 +1,4 @@
+interface:
+  display_name: "Stabilize Release Cut"
+  short_description: "Lock scope and prove release readiness"
+  default_prompt: "Stabilize this GroundLine release cut: lock scope, classify remaining work, run release gates, collect dogfood evidence, and make a ship decision."
