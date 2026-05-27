@@ -1,6 +1,6 @@
 # Update
 
-Use fast-forward updates so the local package stays aligned with the private
+Use fast-forward updates so the local package stays aligned with the upstream
 repository.
 
 ```bash

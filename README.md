@@ -35,9 +35,14 @@ MCP bundle.
 
 ## Install And Update
 
+- Human guide: `docs/human-guide.md`
+- LLM guide: `docs/llm-guide.md`
 - Install: `docs/install.md`
 - Update: `docs/update.md`
 - Provider smoke: `docs/provider-smoke.md`
+- Public release: `docs/public-release.md`
+- Privacy: `docs/privacy.md`
+- Git history privacy: `docs/git-history-privacy.md`
 
 ## Operating Loop
 
@@ -91,3 +96,13 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/run_scenarios.py --platform linux --sa
 
 `.github/workflows/radar.yml` runs a scheduled radar packet and uploads the JSON
 artifact for review.
+
+## Project Docs
+
+- Contributing: `CONTRIBUTING.md`
+- Security: `SECURITY.md`
+- License: MIT, see `LICENSE`
+
+GroundLine should not collect prompt text, raw transcripts, credentials, or
+provider runtime state. Reports should keep mutation status, verification
+evidence, and setup gaps explicit enough for both humans and LLM agents.

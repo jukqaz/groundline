@@ -28,7 +28,19 @@ PROVIDERS = {
 }
 
 
-def provider_status(home: Path) -> dict:
+def display_path(path: Path, home: Path, explicit_home: bool) -> str:
+    if explicit_home:
+        return str(path)
+    try:
+        relative = path.relative_to(home)
+    except ValueError:
+        return str(path)
+    if str(relative) == ".":
+        return "~"
+    return str(Path("~") / relative)
+
+
+def provider_status(home: Path, explicit_home: bool) -> dict:
     providers: dict[str, dict] = {}
     for name, config in PROVIDERS.items():
         manifest_path = ROOT / config["manifest"]
@@ -36,7 +48,7 @@ def provider_status(home: Path) -> dict:
         providers[name] = {
             "manifest": config["manifest"],
             "manifest_present": manifest_path.is_file(),
-            "install_target": str(install_target),
+            "install_target": display_path(install_target, home, explicit_home),
             "target_exists": install_target.exists(),
             "ready_for_manual_install": manifest_path.is_file(),
         }
@@ -44,11 +56,11 @@ def provider_status(home: Path) -> dict:
 
 
 def build_result(home: Path, explicit_home: bool) -> dict:
-    providers = provider_status(home)
+    providers = provider_status(home, explicit_home)
     missing = [name for name, item in providers.items() if not item["manifest_present"]]
     return {
         "status": "PASS" if not missing else "FAIL",
-        "home": str(home),
+        "home": display_path(home, home, explicit_home),
         "fake_home_used": explicit_home,
         "mutation_performed": False,
         "real_home_touched": False,

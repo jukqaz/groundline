@@ -12,6 +12,7 @@ Expected safety fields:
 - `mutation_performed=false`
 - `real_home_touched=false`
 - each provider reports `manifest_present=true`
+- default home paths are displayed with `~`
 
 Use `--home` with a temporary directory when testing install plans:
 

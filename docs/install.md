@@ -1,21 +1,27 @@
 # Install
 
-GroundLine is private by default. Install from an authenticated GitHub account
-that can read `jukqaz/groundline`.
+GroundLine is a public plugin package. Clone it with either GitHub CLI or git.
 
 ## Clone
 
 ```bash
-gh auth status
 gh repo clone jukqaz/groundline
 cd groundline
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
 ```
 
+Alternative:
+
+```bash
+git clone https://github.com/jukqaz/groundline.git
+cd groundline
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
+```
+
 The provider smoke command is read-only. It reports manifest presence and local
-target paths for Codex, Claude Code, and Antigravity without writing to the home
-directory.
+target paths for Codex, Claude Code, and Antigravity without writing to the
+home directory. Default home paths are displayed with `~`.
 
 ## Use
 

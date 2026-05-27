@@ -31,12 +31,23 @@ class GroundLineStaticContractTests(unittest.TestCase):
             ".claude-plugin/plugin.json",
             "plugin.json",
             "CHANGELOG.md",
+            "CONTRIBUTING.md",
+            "LICENSE",
             "README.md",
+            "SECURITY.md",
+            ".github/ISSUE_TEMPLATE/bug_report.md",
+            ".github/ISSUE_TEMPLATE/feature_request.md",
+            ".github/pull_request_template.md",
             ".github/workflows/test.yml",
             ".github/workflows/radar.yml",
             "docs/install.md",
+            "docs/git-history-privacy.md",
+            "docs/human-guide.md",
+            "docs/llm-guide.md",
             "docs/update.md",
             "docs/provider-smoke.md",
+            "docs/privacy.md",
+            "docs/public-release.md",
             "docs/runtime-support.md",
             "docs/examples.md",
             "docs/release-checklist.md",
@@ -84,7 +95,9 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn("PYTHONDONTWRITEBYTECODE: \"1\"", text)
         self.assertIn("FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: \"true\"", text)
         self.assertIn('ACTIONLINT_VERSION: "1.7.12"', text)
+        self.assertIn('ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"', text)
         self.assertIn("actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz", text)
+        self.assertIn("shasum -a 256 -c -", text)
         self.assertIn("python3 scripts/lint.py --json --require-actionlint", text)
         self.assertIn("python3 -m unittest discover -s tests -v", text)
         self.assertIn("python3 scripts/validate_pack.py --json", text)
@@ -109,22 +122,70 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn('".github/workflows/test.yml"', validator)
         self.assertIn('".github/workflows/radar.yml"', validator)
         self.assertIn('"docs/install.md"', validator)
+        self.assertIn('"docs/git-history-privacy.md"', validator)
+        self.assertIn('"docs/human-guide.md"', validator)
+        self.assertIn('"docs/llm-guide.md"', validator)
         self.assertIn('"docs/update.md"', validator)
         self.assertIn('"docs/provider-smoke.md"', validator)
+        self.assertIn('"docs/privacy.md"', validator)
+        self.assertIn('"docs/public-release.md"', validator)
+        self.assertIn('"CONTRIBUTING.md"', validator)
+        self.assertIn('"SECURITY.md"', validator)
         self.assertIn('"scripts/groundline_provider_smoke.py"', validator)
         self.assertIn('"scripts/lint.py"', validator)
 
-    def test_install_and_update_docs_cover_private_repo_flow(self) -> None:
+    def test_install_and_update_docs_cover_public_repo_flow(self) -> None:
         install = (PACK_ROOT / "docs/install.md").read_text(encoding="utf-8")
         update = (PACK_ROOT / "docs/update.md").read_text(encoding="utf-8")
         smoke = (PACK_ROOT / "docs/provider-smoke.md").read_text(encoding="utf-8")
 
         self.assertIn("gh repo clone jukqaz/groundline", install)
+        self.assertIn("git clone https://github.com/jukqaz/groundline.git", install)
+        self.assertIn("public plugin package", install)
         self.assertIn("python3 scripts/groundline_provider_smoke.py --json", install)
         self.assertIn("git pull --ff-only", update)
         self.assertIn("python3 scripts/validate_pack.py --json", update)
         self.assertIn("python3 scripts/groundline_provider_smoke.py --json", smoke)
         self.assertIn("mutation_performed=false", smoke)
+        self.assertIn("displayed with `~`", smoke)
+
+    def test_public_docs_cover_security_privacy_license_and_identity(self) -> None:
+        readme = (PACK_ROOT / "README.md").read_text(encoding="utf-8")
+        security = (PACK_ROOT / "SECURITY.md").read_text(encoding="utf-8")
+        contributing = (PACK_ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+        history_privacy = (PACK_ROOT / "docs/git-history-privacy.md").read_text(encoding="utf-8")
+        human_guide = (PACK_ROOT / "docs/human-guide.md").read_text(encoding="utf-8")
+        llm_guide = (PACK_ROOT / "docs/llm-guide.md").read_text(encoding="utf-8")
+        privacy = (PACK_ROOT / "docs/privacy.md").read_text(encoding="utf-8")
+        public_release = (PACK_ROOT / "docs/public-release.md").read_text(encoding="utf-8")
+        pr_template = (PACK_ROOT / ".github/pull_request_template.md").read_text(encoding="utf-8")
+        bug_template = (PACK_ROOT / ".github/ISSUE_TEMPLATE/bug_report.md").read_text(encoding="utf-8")
+        license_text = (PACK_ROOT / "LICENSE").read_text(encoding="utf-8")
+        codex = json.loads((PACK_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        claude = json.loads((PACK_ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
+
+        self.assertIn("License: MIT", readme)
+        self.assertIn("GitHub Security Advisories", security)
+        self.assertIn("Do not commit provider auth files", contributing)
+        self.assertIn("current tree", history_privacy)
+        self.assertIn("fresh public repository", history_privacy)
+        self.assertIn("This guide is for a person", human_guide)
+        self.assertIn("This guide is for LLM agents", llm_guide)
+        self.assertIn("Default home paths should be shown as `~`", privacy)
+        self.assertIn("author and committer metadata", public_release)
+        self.assertIn("CI downloads pinned tools and verifies checksums", public_release)
+        self.assertIn("No secrets", pr_template)
+        self.assertIn("This report does not include secrets", bug_template)
+        self.assertIn("GroundLine contributors", license_text)
+        self.assertEqual(codex["author"]["name"], "GroundLine contributors")
+        self.assertEqual(codex["interface"]["developerName"], "GroundLine")
+        self.assertEqual(claude["author"]["name"], "GroundLine contributors")
+        self.assertNotIn(
+            "GroundLine contributors",
+            "\n".join(
+                [readme, security, contributing, history_privacy, human_guide, llm_guide, privacy, public_release, license_text]
+            ),
+        )
 
     def test_skill_surface_matches_v0_1_design(self) -> None:
         expected_skills = {

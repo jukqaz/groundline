@@ -122,6 +122,12 @@ def tool_recommendations(tools: dict) -> tuple[list[str], list[dict]]:
     return gaps, recommendations
 
 
+def display_home_path(home: Path, explicit_home: bool) -> str:
+    if explicit_home:
+        return str(home)
+    return "~"
+
+
 def build_result(home: Path, explicit_home: bool, tools_fixture: dict, bin_dir: Path | None, probe_tools: bool) -> dict:
     superpowers_present = (home / ".codex/plugins/cache/openai-curated/superpowers").exists()
     antigravity_home = home / ("." + "gem" + "ini")
@@ -134,7 +140,7 @@ def build_result(home: Path, explicit_home: bool, tools_fixture: dict, bin_dir: 
     gaps, recommendations = tool_recommendations(tools)
     return {
         "status": "PASS",
-        "home": str(home),
+        "home": display_home_path(home, explicit_home),
         "platform": {"system": platform.system(), "machine": platform.machine()},
         "recommended_mode": mode,
         "mutation_performed": False,

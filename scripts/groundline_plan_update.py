@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 
-SECRET_PATTERN = re.compile(r"(sk-[A-Za-z0-9_-]+|secret-value)", re.IGNORECASE)
+SECRET_PATTERN = re.compile(r"(sk-[A-Za-z0-9_-]+|xox[baprs]-[A-Za-z0-9_-]+|(?i:api[_-]?key|token|secret|password))")
 
 
 def contains_secret_like_value(value: object) -> bool:

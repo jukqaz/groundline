@@ -24,14 +24,25 @@ EXPECTED_SKILLS = {
 REQUIRED_FILES = [
     ".codex-plugin/plugin.json",
     ".claude-plugin/plugin.json",
+    ".github/ISSUE_TEMPLATE/bug_report.md",
+    ".github/ISSUE_TEMPLATE/feature_request.md",
+    ".github/pull_request_template.md",
     ".github/workflows/radar.yml",
     ".github/workflows/test.yml",
     "plugin.json",
     "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "LICENSE",
     "README.md",
+    "SECURITY.md",
     "docs/install.md",
+    "docs/git-history-privacy.md",
+    "docs/human-guide.md",
+    "docs/llm-guide.md",
     "docs/update.md",
     "docs/provider-smoke.md",
+    "docs/privacy.md",
+    "docs/public-release.md",
     "docs/runtime-support.md",
     "docs/examples.md",
     "docs/release-checklist.md",
@@ -46,7 +57,6 @@ REQUIRED_FILES = [
     "references/workflow-modes.md",
     "scripts/groundline_provider_smoke.py",
     "scripts/lint.py",
-    "LICENSE",
 ]
 
 FORBIDDEN_PATTERNS = [
