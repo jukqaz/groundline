@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "sources": [
+    {
+      "id": "codex-docs",
+      "owner": "Codex",
+      "kind": "remote",
+      "url": "https://openai.com/academy/codex-plugins-and-skills/"
+    },
+    {
+      "id": "claude-code-docs",
+      "owner": "Claude Code",
+      "kind": "remote",
+      "url": "https://code.claude.com/docs/en/plugins"
+    },
+    {
+      "id": "antigravity-docs",
+      "owner": "Antigravity",
+      "kind": "remote",
+      "url": "https://antigravity.google/docs/plugins"
+    },
+    {
+      "id": "superpowers",
+      "owner": "Superpowers",
+      "kind": "remote",
+      "url": "https://github.com/openai/openai-codex"
+    },
+    {
+      "id": "github",
+      "owner": "GitHub",
+      "kind": "remote",
+      "url": "https://docs.github.com/"
+    },
+    {
+      "id": "context7",
+      "owner": "Context7",
+      "kind": "remote",
+      "url": "https://context7.com/"
+    },
+    {
+      "id": "exa",
+      "owner": "Exa",
+      "kind": "remote",
+      "url": "https://docs.exa.ai/"
+    }
+  ]
+}

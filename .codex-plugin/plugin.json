@@ -1,0 +1,34 @@
+{
+  "name": "groundline",
+  "version": "0.1.0",
+  "description": "Lightweight control plane skills for current agent runtime state, radar, and evidence.",
+  "author": {
+    "name": "GroundLine contributors"
+  },
+  "keywords": [
+    "codex",
+    "skills",
+    "superpowers",
+    "agent-history",
+    "verification",
+    "deployment",
+    "worktree",
+    "radar"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "GroundLine",
+    "shortDescription": "Control plane skills for agent state, radar, and evidence.",
+    "longDescription": "GroundLine is a lightweight control plane for Codex, Claude Code, and Antigravity. It keeps capability blueprints, detects runtime and ecosystem drift, prepares research and upgrade packets, and guides agents through current-state proof, side-effect boundaries, live evidence, and handoff.",
+    "developerName": "GroundLine contributors",
+    "category": "Productivity",
+    "capabilities": [
+      "Skills"
+    ],
+    "defaultPrompt": [
+      "Resume prior agent work after checking current state.",
+      "Close this deployment with live evidence.",
+      "Run GroundLine doctor and recommend the next agent mode."
+    ]
+  }
+}

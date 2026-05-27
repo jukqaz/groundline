@@ -1,0 +1,4 @@
+interface:
+  display_name: "Recover Worktree Branch"
+  short_description: "Recover missing or detached worktrees and branches"
+  default_prompt: "Recover this missing or detached worktree and branch safely."

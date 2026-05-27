@@ -1,0 +1,4 @@
+interface:
+  display_name: "Close Live Work"
+  short_description: "Close runtime work with live endpoint and smoke evidence"
+  default_prompt: "Check whether this deployment is really live and close it with evidence."
