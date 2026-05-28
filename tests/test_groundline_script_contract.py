@@ -257,6 +257,28 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertEqual(result["status"], "FAIL")
         self.assertIn("packaged conflict copy must be removed: plugins/groundline/docs 9", result["errors"])
 
+    def test_validate_pack_rejects_source_only_packaged_superpowers_docs(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-pack-source-only-") as temp:
+            pack_root = self.copy_pack(Path(temp))
+            stale_source_package_plan = pack_root / "plugins/groundline/docs/superpowers/stale.md"
+            stale_source_package_plan.parent.mkdir(parents=True)
+            stale_source_package_plan.write_text("stale packaged source-only plan\n", encoding="utf-8")
+
+            source_completed = self.run_script("validate_pack.py", "--json", pack_root=pack_root)
+            source_result = json.loads(source_completed.stdout)
+            package_completed = self.run_script("validate_pack.py", "--json", pack_root=pack_root / "plugins/groundline")
+            package_result = json.loads(package_completed.stdout)
+
+        self.assertNotEqual(source_completed.returncode, 0)
+        self.assertEqual(source_result["status"], "FAIL")
+        self.assertIn(
+            "source-only package path must be excluded: plugins/groundline/docs/superpowers",
+            source_result["errors"],
+        )
+        self.assertNotEqual(package_completed.returncode, 0)
+        self.assertEqual(package_result["status"], "FAIL")
+        self.assertIn("source-only package path must be excluded: docs/superpowers", package_result["errors"])
+
     def test_sync_provider_package_removes_conflict_copy_directories(self) -> None:
         with tempfile.TemporaryDirectory(prefix="groundline-pack-sync-") as temp:
             pack_root = self.copy_pack(Path(temp))

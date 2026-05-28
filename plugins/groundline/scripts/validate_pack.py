@@ -136,6 +136,10 @@ SOURCE_ONLY_REQUIRED_FILES = [
     "plugins/groundline/docs/ko/terms.md",
 ]
 
+SOURCE_ONLY_PACKAGE_EXCLUSIONS = [
+    "docs/superpowers",
+]
+
 FORBIDDEN_PATTERNS = [
     r"\b" + "State" + "First" + r"\b",
     r"\b" + "state-first" + "-pack" + r"\b",
@@ -189,6 +193,16 @@ def conflict_copy_has_payload(path: Path) -> bool:
     if not path.is_dir():
         return False
     return any(child.is_file() for child in path.rglob("*"))
+
+
+def reject_source_only_package_paths(root: Path, prefix: str = "") -> list[str]:
+    errors: list[str] = []
+    for rel in SOURCE_ONLY_PACKAGE_EXCLUSIONS:
+        path = root / rel
+        if path.exists():
+            display = f"{prefix}{rel}"
+            errors.append(f"source-only package path must be excluded: {display}")
+    return errors
 
 
 def collect_errors() -> list[str]:
@@ -261,6 +275,7 @@ def collect_errors() -> list[str]:
     if source_root:
         package_dir = ROOT / "plugins/groundline"
         if package_dir.is_dir():
+            errors.extend(reject_source_only_package_paths(package_dir, "plugins/groundline/"))
             for path in collect_conflict_copies(package_dir):
                 if conflict_copy_has_payload(path):
                     errors.append(f"packaged conflict copy must be removed: {path.relative_to(ROOT)}")
@@ -289,6 +304,7 @@ def collect_errors() -> list[str]:
                 if expected_version and manifest.get("version") != expected_version:
                     errors.append(f"{rel} manifest version must match plugin.json {expected_version}")
     else:
+        errors.extend(reject_source_only_package_paths(ROOT))
         for path in collect_conflict_copies(ROOT):
             if conflict_copy_has_payload(path):
                 errors.append(f"packaged conflict copy must be removed: {path.relative_to(ROOT)}")
