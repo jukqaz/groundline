@@ -88,6 +88,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
             "groundline_plan_update.py",
             "groundline_provider_smoke.py",
             "groundline_provider_validate.py",
+            "groundline_privacy_scan.py",
             "groundline_radar.py",
             "groundline_release_gate.py",
             "groundline_safety_eval.py",
@@ -140,6 +141,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
             "groundline_plan_update.py",
             "groundline_provider_smoke.py",
             "groundline_provider_validate.py",
+            "groundline_privacy_scan.py",
             "groundline_radar.py",
             "groundline_release_gate.py",
             "groundline_safety_eval.py",
@@ -178,6 +180,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
                 "offline-doctor",
                 "offline-radar",
                 "safety-eval",
+                "privacy-scan",
                 "provider-smoke",
                 "staged-dogfood",
                 "macos-local-scenario",
@@ -205,6 +208,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
         gate_ids = [gate["id"] for gate in result["gates"]]
         self.assertIn("linux-docker-execution", gate_ids)
         self.assertIn("provider-native-validation", gate_ids)
+        self.assertIn("privacy-scan", gate_ids)
         self.assertIn('git tag "$TAG"', result["approval_required_commands_excluded"])
         self.assertIn('git push origin "$TAG"', result["approval_required_commands_excluded"])
         self.assertIn('gh release create "$TAG"', result["approval_required_commands_excluded"])
@@ -283,6 +287,58 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertTrue(result["next_actions"])
         self.assertTrue(any("install or expose claude" in action for action in result["next_actions"]))
         self.assertTrue(any("install or expose agy" in action for action in result["next_actions"]))
+
+    def test_privacy_scan_emits_json_success_contract(self) -> None:
+        completed = self.run_script("groundline_privacy_scan.py", "--json")
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertNotIn(str(Path.home()), completed.stdout + completed.stderr)
+        result = json.loads(completed.stdout)
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["suite"], "privacy-scan")
+        self.assertFalse(result["mutation_performed"])
+        self.assertFalse(result["real_home_touched"])
+        self.assertFalse(result["secret_value_printed"])
+        self.assertEqual(result["finding_count"], 0)
+        self.assertGreater(result["scanned_file_count"], 0)
+
+    def test_privacy_scan_ignores_generic_container_home_name(self) -> None:
+        env = os.environ.copy()
+        env["HOME"] = "/" + "root"
+
+        with tempfile.TemporaryDirectory(prefix="groundline-privacy-scan-") as temp:
+            pack = self.copy_pack(Path(temp))
+            (pack / "docs/container-home.md").write_text("root\n", encoding="utf-8")
+
+            completed = self.run_script("groundline_privacy_scan.py", "--json", env=env, pack_root=pack)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result = json.loads(completed.stdout)
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["finding_count"], 0)
+
+    def test_privacy_scan_rejects_private_and_stale_values_without_printing_them(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-privacy-scan-") as temp:
+            pack = self.copy_pack(Path(temp))
+            leak = pack / "docs/privacy-leak.md"
+            stale_claim = "local release gates " + "pass"
+            secret_like_value = "sk-" + "live-secret-value"
+            leak.write_text(
+                f"{Path.home()}\n{stale_claim}\n{secret_like_value}\n",
+                encoding="utf-8",
+            )
+
+            completed = self.run_script("groundline_privacy_scan.py", "--json", pack_root=pack)
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertNotIn(str(Path.home()), completed.stdout + completed.stderr)
+        self.assertNotIn(secret_like_value, completed.stdout + completed.stderr)
+        result = json.loads(completed.stdout)
+        self.assertEqual(result["status"], "FAIL")
+        codes = {finding["code"] for finding in result["findings"]}
+        self.assertIn("local_home_path", codes)
+        self.assertIn("overstated_release_gate", codes)
+        self.assertIn("secret_like_value", codes)
 
     def test_release_gate_treats_exit_two_as_partial(self) -> None:
         script_path = SCRIPTS_DIR / "groundline_release_gate.py"

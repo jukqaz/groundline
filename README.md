@@ -226,6 +226,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/lint.py --json --require-actionlint
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_runtime_layout.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_safety_eval.py --json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_privacy_scan.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_dogfood.py --stage-package --probe-runtimes --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/run_scenarios.py --platform macos --sandbox local --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/run_scenarios.py --platform linux --sandbox docker --dry-run --json

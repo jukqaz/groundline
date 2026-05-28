@@ -113,6 +113,7 @@ BASE_REQUIRED_FILES = [
     "scripts/groundline_dogfood.py",
     "scripts/groundline_provider_smoke.py",
     "scripts/groundline_provider_validate.py",
+    "scripts/groundline_privacy_scan.py",
     "scripts/groundline_release_gate.py",
     "scripts/groundline_safety_eval.py",
     "scripts/lint.py",

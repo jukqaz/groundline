@@ -10,7 +10,7 @@
 GroundLine은 실사용 가능한 public beta입니다. Codex, Claude Code,
 Antigravity에 설치 target이 있고 19개 skill이 보이지만, 현재 provider smoke는
 same-version content drift를 잡아 `PARTIAL`을 보고합니다. validation, lint,
-provider-native validation, unit test, safety eval, offline doctor/radar,
+provider-native validation, unit test, safety eval, privacy scan, offline doctor/radar,
 staged dogfood, macOS local scenario, Linux Docker dry-run/execution gate는
 통과합니다. v0.3.3 patch draft에서 설치 상태, version drift 진단, skill
 graduation decision, compact workflow cookbook, artifact lifecycle, release
