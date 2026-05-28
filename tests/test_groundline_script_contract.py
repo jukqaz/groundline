@@ -270,6 +270,21 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertFalse(conflict_exists)
         self.assertEqual(result["remaining_conflict_copies"], [])
 
+    def test_sync_provider_package_excludes_source_only_superpowers_docs(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-pack-sync-") as temp:
+            pack_root = self.copy_pack(Path(temp))
+            stale_packaged_plan = pack_root / "plugins/groundline/docs/superpowers/stale.md"
+            stale_packaged_plan.parent.mkdir(parents=True)
+            stale_packaged_plan.write_text("stale packaged plan\n", encoding="utf-8")
+
+            result = self.run_script_json("sync_provider_package.py", "--json", pack_root=pack_root)
+            source_docs_exist = (pack_root / "docs/superpowers").is_dir()
+            packaged_docs_exist = (pack_root / "plugins/groundline/docs/superpowers").exists()
+
+        self.assertEqual(result["status"], "PASS")
+        self.assertTrue(source_docs_exist)
+        self.assertFalse(packaged_docs_exist)
+
     def test_safety_eval_emits_json_success_contract(self) -> None:
         result = self.run_script_json("groundline_safety_eval.py", "--json")
 

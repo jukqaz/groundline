@@ -51,6 +51,10 @@ codex plugin marketplace add .
 codex plugin add groundline@groundline
 ```
 
+`plugins/groundline` 패키지는 `skills/`, `docs/`, `references/`, `scripts/`,
+`assets/`를 포함합니다. 단, source-only release planning material인
+`docs/superpowers/`는 installable provider package에서 의도적으로 제외합니다.
+
 확인:
 
 ```bash

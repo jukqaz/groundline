@@ -60,6 +60,8 @@ codex plugin add groundline@groundline
 
 The Codex package must keep `.codex-plugin/plugin.json`, `skills/`, `docs/`,
 `references/`, `scripts/`, and `assets/` inside `plugins/groundline`.
+Source-only release planning material under `docs/superpowers/` is intentionally
+excluded from the installable provider package.
 
 Confirm:
 

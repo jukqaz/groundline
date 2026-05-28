@@ -408,6 +408,8 @@ class GroundLineStaticContractTests(unittest.TestCase):
         smoke = (PACK_ROOT / "docs/provider-smoke.md").read_text(encoding="utf-8")
         dogfood = (PACK_ROOT / "docs/provider-dogfood.md").read_text(encoding="utf-8")
         activation = (PACK_ROOT / "docs/provider-activation-matrix.md").read_text(encoding="utf-8")
+        provider_packaging = (PACK_ROOT / "docs/provider-packaging.md").read_text(encoding="utf-8")
+        korean_provider_packaging = (PACK_ROOT / "docs/ko/provider-packaging.md").read_text(encoding="utf-8")
 
         self.assertIn("gh repo clone jukqaz/groundline", install)
         self.assertIn("git clone https://github.com/jukqaz/groundline.git", install)
@@ -421,6 +423,10 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn("python3 scripts/groundline_radar.py --json --offline --command-sources", update)
         self.assertIn("python3 scripts/groundline_provider_smoke.py --json", smoke)
         self.assertIn("python3 scripts/groundline_dogfood.py --stage-package --probe-runtimes --json", dogfood)
+        self.assertIn("docs/superpowers/", provider_packaging)
+        self.assertIn("intentionally", provider_packaging)
+        self.assertIn("docs/superpowers/", korean_provider_packaging)
+        self.assertIn("의도적으로 제외", korean_provider_packaging)
         self.assertIn("Provider Activation Matrix", activation)
         for family in [
             "handoff",
