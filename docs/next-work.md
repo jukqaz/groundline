@@ -322,7 +322,9 @@ install through Codex, Claude Code, or Antigravity from the documented commands.
 ## Release Boundary
 
 These backlog items are not required to keep the current v0.3.3 patch draft
-valid. The release candidate remains bounded if the release decision is
-explicit, source validation, package validation, lint, unit tests, provider
-smoke, staged dogfood, macOS scenario, Linux Docker scenario, and diff checks
-remain PASS.
+bounded. The release candidate remains shippable only when the release decision
+is explicit, source validation, package validation, lint, unit tests, staged
+dogfood, macOS scenario, Linux Docker scenario, and diff checks pass. Treat
+real provider smoke as a release blocker when it reports missing source
+manifests or unsafe output, and as an accepted `PARTIAL` only when
+`next_actions` clearly point to post-publish provider install refresh.
