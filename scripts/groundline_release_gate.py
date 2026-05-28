@@ -209,6 +209,40 @@ def aggregate_status(gates: list[dict]) -> str:
     return "PASS"
 
 
+def summarize_non_passing_gates(gates: list[dict]) -> list[dict]:
+    summaries: list[dict] = []
+    for gate in gates:
+        status = gate.get("status")
+        if status == "PASS" or not gate.get("executed"):
+            continue
+        summary = {
+            "id": gate.get("id"),
+            "label": gate.get("label"),
+            "status": status,
+        }
+        if "exit_code" in gate:
+            summary["exit_code"] = gate["exit_code"]
+        if gate.get("error"):
+            summary["error"] = gate["error"]
+        if gate.get("json_summary"):
+            summary["json_summary"] = gate["json_summary"]
+        summaries.append(summary)
+    return summaries
+
+
+def collect_next_actions(gates: list[dict]) -> list[str]:
+    actions: set[str] = set()
+    for gate in gates:
+        if gate.get("status") == "PASS" or not gate.get("executed"):
+            continue
+        json_actions = gate.get("json_summary", {}).get("next_actions")
+        if isinstance(json_actions, list):
+            actions.update(action for action in json_actions if isinstance(action, str))
+        elif not gate.get("json_summary"):
+            actions.add(f"inspect the {gate.get('id')} gate output")
+    return sorted(actions)
+
+
 def build_result(args: argparse.Namespace) -> tuple[dict, int]:
     gates = build_gates(args.include_docker_execution, args.actionlint_bin)
     result = {
@@ -225,6 +259,8 @@ def build_result(args: argparse.Namespace) -> tuple[dict, int]:
             'git push origin "$TAG"',
             'gh release create "$TAG"',
         ],
+        "non_passing_gates": [],
+        "next_actions": [],
         "gates": [],
     }
 
@@ -240,6 +276,8 @@ def build_result(args: argparse.Namespace) -> tuple[dict, int]:
             break
     result["gates"] = gate_results
     result["status"] = aggregate_status(gate_results)
+    result["non_passing_gates"] = summarize_non_passing_gates(gate_results)
+    result["next_actions"] = collect_next_actions(gate_results)
 
     if result["status"] == "PASS":
         return result, 0

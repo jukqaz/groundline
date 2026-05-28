@@ -262,6 +262,56 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertEqual(result["json_summary"]["next_actions"], ["refresh the Codex provider install"])
         self.assertEqual(result["json_summary"]["install_issues"][0]["provider"], "codex")
         self.assertNotIn("large_payload", result["json_summary"])
+        non_passing = module.summarize_non_passing_gates([result])
+        self.assertEqual(non_passing[0]["id"], "provider-smoke")
+        self.assertEqual(non_passing[0]["json_summary"]["install_doctor_status"], "PARTIAL")
+        self.assertEqual(module.collect_next_actions([result]), ["refresh the Codex provider install"])
+
+    def test_release_gate_top_level_summary_lists_partial_next_actions(self) -> None:
+        script_path = SCRIPTS_DIR / "groundline_release_gate.py"
+        spec = importlib.util.spec_from_file_location("groundline_release_gate_top_level", script_path)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["groundline_release_gate_top_level"] = module
+        spec.loader.exec_module(module)
+
+        partial_gate = {
+            "id": "provider-smoke",
+            "label": "Run provider smoke",
+            "executed": True,
+            "status": "PARTIAL",
+            "exit_code": 2,
+            "json_summary": {
+                "status": "PARTIAL",
+                "install_doctor_status": "PARTIAL",
+                "next_actions": [
+                    "refresh the Codex provider install",
+                    "refresh the Claude Code provider install",
+                ],
+            },
+        }
+        fail_gate = {
+            "id": "lint",
+            "label": "Run lint and actionlint",
+            "executed": True,
+            "status": "FAIL",
+            "exit_code": 1,
+        }
+
+        self.assertEqual(module.aggregate_status([partial_gate]), "PARTIAL")
+        self.assertEqual(module.aggregate_status([partial_gate, fail_gate]), "FAIL")
+        self.assertEqual(
+            module.collect_next_actions([partial_gate, fail_gate]),
+            [
+                "inspect the lint gate output",
+                "refresh the Claude Code provider install",
+                "refresh the Codex provider install",
+            ],
+        )
+        summaries = module.summarize_non_passing_gates([partial_gate, fail_gate])
+        self.assertEqual([item["id"] for item in summaries], ["provider-smoke", "lint"])
+        self.assertEqual(summaries[0]["json_summary"]["install_doctor_status"], "PARTIAL")
 
     def test_validate_pack_emits_json_success_contract(self) -> None:
         result = self.run_script_json("validate_pack.py", "--json")
