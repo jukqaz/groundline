@@ -22,11 +22,10 @@ These are already done and should not be re-opened unless validation fails:
 
 ## Current Status: v0.3.3 Patch Draft
 
-The narrow v0.3.2 slice keeps the sanitized evidence path and improves prompt
-routing clarity without adding new skills or mandatory provider setup. Local
-installation through the GitHub guide succeeded for Codex, Claude Code, and
-Antigravity. The current v0.3.3 patch draft starts by closing the exposed
-install posture and version drift gap.
+The narrow v0.3.3 patch draft keeps the sanitized evidence path and prompt
+routing clarity from v0.3.2 while closing the exposed install posture and
+version drift gap. Local installation through the GitHub guide succeeded for
+Codex, Claude Code, and Antigravity.
 
 Completed:
 
