@@ -140,6 +140,27 @@ SOURCE_ONLY_PACKAGE_EXCLUSIONS = [
     "docs/superpowers",
 ]
 
+SYNC_TOP_LEVEL_FILES = [
+    "README.md",
+    "README.ko.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "LICENSE",
+    "SECURITY.md",
+    "plugin.json",
+    ".codex-plugin/plugin.json",
+    ".claude-plugin/plugin.json",
+]
+
+SYNC_TOP_LEVEL_DIRS = [
+    "assets",
+    "docs",
+    "references",
+    "scenarios",
+    "scripts",
+    "skills",
+]
+
 FORBIDDEN_PATTERNS = [
     r"\b" + "State" + "First" + r"\b",
     r"\b" + "state-first" + "-pack" + r"\b",
@@ -202,6 +223,47 @@ def reject_source_only_package_paths(root: Path, prefix: str = "") -> list[str]:
         if path.exists():
             display = f"{prefix}{rel}"
             errors.append(f"source-only package path must be excluded: {display}")
+    return errors
+
+
+def should_skip_synced_file(path: Path, root: Path) -> bool:
+    relative = path.relative_to(root)
+    return "__pycache__" in relative.parts or path.suffix == ".pyc" or relative.parts[:2] == ("docs", "superpowers")
+
+
+def collect_synced_files(root: Path, rel: str) -> set[Path]:
+    base = root / rel
+    if not base.is_dir():
+        return set()
+    return {
+        path.relative_to(base)
+        for path in base.rglob("*")
+        if path.is_file() and not should_skip_synced_file(path, root)
+    }
+
+
+def collect_package_sync_errors(package_dir: Path) -> list[str]:
+    errors: list[str] = []
+    for rel in SYNC_TOP_LEVEL_FILES:
+        source = ROOT / rel
+        packaged = package_dir / rel
+        if not source.is_file() or not packaged.is_file():
+            continue
+        if source.read_bytes() != packaged.read_bytes():
+            errors.append(f"packaged file drift: plugins/groundline/{rel}")
+
+    for rel in SYNC_TOP_LEVEL_DIRS:
+        source_files = collect_synced_files(ROOT, rel)
+        package_files = collect_synced_files(package_dir, rel)
+        for missing in sorted(source_files - package_files):
+            errors.append(f"packaged file missing: plugins/groundline/{rel}/{missing}")
+        for extra in sorted(package_files - source_files):
+            errors.append(f"packaged extra file: plugins/groundline/{rel}/{extra}")
+        for common in sorted(source_files & package_files):
+            source = ROOT / rel / common
+            packaged = package_dir / rel / common
+            if source.read_bytes() != packaged.read_bytes():
+                errors.append(f"packaged file drift: plugins/groundline/{rel}/{common}")
     return errors
 
 
@@ -276,6 +338,7 @@ def collect_errors() -> list[str]:
         package_dir = ROOT / "plugins/groundline"
         if package_dir.is_dir():
             errors.extend(reject_source_only_package_paths(package_dir, "plugins/groundline/"))
+            errors.extend(collect_package_sync_errors(package_dir))
             for path in collect_conflict_copies(package_dir):
                 if conflict_copy_has_payload(path):
                     errors.append(f"packaged conflict copy must be removed: {path.relative_to(ROOT)}")

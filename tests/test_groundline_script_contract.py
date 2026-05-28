@@ -279,6 +279,32 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertEqual(package_result["status"], "FAIL")
         self.assertIn("source-only package path must be excluded: docs/superpowers", package_result["errors"])
 
+    def test_validate_pack_rejects_stale_packaged_file_content(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-pack-drift-") as temp:
+            pack_root = self.copy_pack(Path(temp))
+            packaged_doc = pack_root / "plugins/groundline/docs/provider-packaging.md"
+            packaged_doc.write_text(packaged_doc.read_text(encoding="utf-8") + "\nstale packaged edit\n", encoding="utf-8")
+
+            completed = self.run_script("validate_pack.py", "--json", pack_root=pack_root)
+            result = json.loads(completed.stdout)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertEqual(result["status"], "FAIL")
+        self.assertIn("packaged file drift: plugins/groundline/docs/provider-packaging.md", result["errors"])
+
+    def test_validate_pack_rejects_extra_packaged_file(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-pack-extra-") as temp:
+            pack_root = self.copy_pack(Path(temp))
+            extra_doc = pack_root / "plugins/groundline/docs/extra-packaged.md"
+            extra_doc.write_text("unexpected packaged file\n", encoding="utf-8")
+
+            completed = self.run_script("validate_pack.py", "--json", pack_root=pack_root)
+            result = json.loads(completed.stdout)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertEqual(result["status"], "FAIL")
+        self.assertIn("packaged extra file: plugins/groundline/docs/extra-packaged.md", result["errors"])
+
     def test_sync_provider_package_removes_conflict_copy_directories(self) -> None:
         with tempfile.TemporaryDirectory(prefix="groundline-pack-sync-") as temp:
             pack_root = self.copy_pack(Path(temp))
