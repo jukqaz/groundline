@@ -21,7 +21,7 @@ implement, and close it before adding more.
   offline.
 - `tests/test_groundline_script_contract.py` covers the safety eval contract.
 
-## Now: v0.3.1 Partial Reduction
+## Completed: v0.3.1 Partial Reduction
 
 Goal: reduce or intentionally keep the accepted partials from v0.3.0 before
 adding new workflows.
@@ -37,6 +37,20 @@ Current status:
   commands, and provider-level agents stay opt-in.
 - Optional private MCP guidance is now the preferred extension path when skills
   need live or private tool access.
+- Local Superpowers companion dogfood is recorded and verified.
+
+## Now: Remote Install Proof
+
+Goal: prove the package can be installed from the pushed GitHub state before
+adding more workflows.
+
+Acceptance:
+
+- Push `main` with the v0.3.1 patch.
+- Tag and publish v0.3.1 after local gates pass.
+- Confirm CI passes for the pushed commit.
+- Run at least one provider install or update from the remote source.
+- Keep provider-home writes explicit and user-approved.
 
 Scope:
 

@@ -4,6 +4,19 @@
 
 - No unreleased changes.
 
+## v0.3.1 - 2026-05-28
+
+- Record the Claude Code follow-up proof that reduces the v0.3.0 release
+  closeout partial when read-only skill document inspection is allowed.
+- Keep the Antigravity constrained print-mode proof as an explicit accepted
+  defer while package validation and install validation remain passing.
+- Add optional provider guardrail and MCP recipe docs for Codex, Claude Code,
+  and Antigravity without enabling hooks, rules, MCP servers, commands, or
+  provider-level agents by default.
+- Record local Superpowers companion dogfood showing GroundLine as the state,
+  side-effect, live-proof, and release-control layer while Superpowers owns
+  planning, TDD, debugging, review, and final verification discipline.
+
 ## v0.3.0 - 2026-05-28
 
 - Add provider marketplace packaging for Codex and Claude Code, plus an

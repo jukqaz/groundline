@@ -1,12 +1,11 @@
 # Next Version Plan
 
-Target: v0.3.1
+Target: v0.3.2
 
-The next version should reduce accepted partials from v0.3.0, not expand the
-skill count first. GroundLine now has provider marketplace packaging for Codex,
-Claude Code, and Antigravity. v0.3.0 proved provider invocation with sanitized
-evidence, added an offline safety check, and kept provider-specific partials
-visible instead of hiding them.
+v0.3.1 reduces accepted partials from v0.3.0, records optional MCP and provider
+guardrail policy, and proves the local Superpowers companion loop. The next
+version should focus on remote install proof and first-use clarity before
+adding more skills.
 
 ## Completed Foundation
 
@@ -19,10 +18,10 @@ These are already done and should not be re-opened unless validation fails:
 - English and Korean provider packaging docs exist.
 - Local validation, provider validation, and CI pass on `main`.
 
-## Current Status: v0.3.0 Adoption Proof Implemented
+## Current Status: v0.3.1 Patch Ready
 
-The narrow v0.3.0 slice proves the sanitized evidence path and records provider
-invocation results without raw transcript collection or provider-home dumps.
+The narrow v0.3.1 slice keeps the sanitized evidence path and records follow-up
+dogfood without raw transcript collection or provider-home dumps.
 
 Completed:
 
@@ -32,6 +31,8 @@ Completed:
   expansion control
 - `docs/dogfood.md` updated with PASS/PARTIAL evidence
 - offline safety fixture and `scripts/groundline_safety_eval.py`
+- optional provider guardrail and MCP recipe docs
+- local Superpowers companion dogfood
 - no new skills added
 
 ## 1. Provider Invocation Dogfood
@@ -116,7 +117,7 @@ Ship gate:
 - optional MCP setup recipes
 - optional hooks after a specific reviewed use case exists
 
-## Non-goals For v0.3.1
+## Non-goals For The Next Patch
 
 - new provider runtimes
 - automatic real provider-home installation
@@ -124,9 +125,9 @@ Ship gate:
 - broad hook enablement
 - raw transcript analytics
 
-## v0.3.1 Closeout
+## Next Patch Closeout
 
-Before tagging v0.3.1, run package sync, source validation, packaged validation,
-lint, unit tests, staged dogfood, and provider package validation. If the
-Antigravity partial remains, record whether it is still an accepted defer or has
-been reduced.
+Before tagging the next patch, run package sync, source validation, packaged
+validation, lint, unit tests, staged dogfood, provider package validation, and
+at least one remote install proof when the package is meant to be installed
+from GitHub.

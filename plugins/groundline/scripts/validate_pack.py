@@ -248,8 +248,8 @@ def collect_errors() -> list[str]:
                     continue
                 if manifest.get("name") != "groundline":
                     errors.append(f"{rel} manifest name must be groundline")
-                if manifest.get("version") != "0.3.0":
-                    errors.append(f"{rel} manifest version must be 0.3.0")
+                if manifest.get("version") != "0.3.1":
+                    errors.append(f"{rel} manifest version must be 0.3.1")
 
     for skill_name in sorted(EXPECTED_SKILLS):
         skill_dir = skills_dir / skill_name

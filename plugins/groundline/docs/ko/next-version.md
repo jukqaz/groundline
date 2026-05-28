@@ -2,12 +2,11 @@
 
 영어 `docs/next-version.md`가 canonical입니다. 이 문서는 한국어 companion입니다.
 
-Target: v0.3.1
+Target: v0.3.2
 
-다음 버전은 skill 수를 먼저 늘리는 것보다, v0.3.0에서 남긴 accepted partial을
-줄이는 데 집중합니다. Codex, Claude Code, Antigravity용 provider marketplace
-packaging은 완료됐고, v0.3.0은 sanitized evidence, offline safety check,
-provider별 partial을 숨기지 않는 release였습니다.
+v0.3.1은 v0.3.0에서 남긴 accepted partial을 줄이고, optional MCP/provider
+guardrail 정책과 Superpowers companion dogfood를 기록하는 패치입니다. 다음
+버전은 skill 추가보다 remote install proof와 first-use clarity에 집중합니다.
 
 ## 완료된 기반
 
@@ -20,8 +19,8 @@ provider별 partial을 숨기지 않는 release였습니다.
 
 ## 현재 상태
 
-v0.3.0 adoption proof는 구현됐습니다. 실제 provider session에서 skill이 선택되는
-증거를 남기되, raw transcript나 provider home dump는 저장하지 않았습니다.
+v0.3.1 patch는 준비됐습니다. 실제 provider session에서 skill이 선택되는 증거를
+남기되, raw transcript나 provider home dump는 저장하지 않았습니다.
 
 완료된 것:
 
@@ -30,6 +29,8 @@ v0.3.0 adoption proof는 구현됐습니다. 실제 provider session에서 skill
 - handoff, release closeout, expansion control prompt family 확인
 - `docs/dogfood.md`에 PASS/PARTIAL 증거 기록
 - offline safety fixture와 `scripts/groundline_safety_eval.py`
+- optional MCP/provider guardrail docs
+- Superpowers companion dogfood
 - 새 skill 추가 없음
 
 ## 1. Provider Invocation Dogfood
@@ -86,8 +87,8 @@ post-release review 사이의 artifact 흐름을 명확히 합니다.
 - 각 template가 하나의 skill과 output contract에 연결됨
 - provider-native 기능을 중복 구현하지 않는다는 거절 규칙이 있음
 
-## v0.3.1 closeout
+## 다음 patch closeout
 
 tagging 전에 package sync, source validation, packaged validation, lint, unit
-tests, staged dogfood, provider package validation을 실행합니다. Antigravity
-partial이 남으면 accepted defer인지, 줄였는지 명확히 기록합니다.
+tests, staged dogfood, provider package validation을 실행합니다. GitHub에서
+설치하는 배포라면 remote install proof도 최소 1개 남깁니다.
