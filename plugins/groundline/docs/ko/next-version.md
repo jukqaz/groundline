@@ -144,8 +144,9 @@ post-release review 사이의 artifact 흐름을 명확히 합니다.
 
 tagging 전에 package sync, source validation, packaged validation, lint,
 provider-native validation, unit tests, offline doctor, offline radar,
-safety eval, provider smoke, staged dogfood, macOS local scenario,
-Linux Docker dry-run, Linux Docker execution을 실행합니다. GitHub에서 설치하는
-배포라면 remote install proof도 최소 1개 남깁니다. provider smoke가 같은 version의 local target에서
+safety eval, privacy scan, provider smoke, staged dogfood, macOS local
+scenario, Linux Docker dry-run, Linux Docker execution을 실행합니다.
+GitHub에서 설치하는 배포라면 remote install proof도 최소 1개 남깁니다.
+provider smoke가 같은 version의 local target에서
 `content_fingerprint_mismatch`를 보고하면, published ref로 target을 새로
 설치하기 전까지 full closeout은 PARTIAL로 봅니다.

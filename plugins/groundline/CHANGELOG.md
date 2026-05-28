@@ -35,8 +35,10 @@
   validation, changelog movement, and `v`-prefixed release tags.
 - Add the deterministic offline safety eval harness to the default CI release
   gate and manual release evidence checklist.
-- Align README and update validation docs with source, packaged, safety, smoke,
-  dogfood, and scenario release gates.
+- Add a deterministic privacy scan gate for local home paths, generic
+  secret-like values, stale proof counts, and overstated release claims.
+- Align README and update validation docs with source, packaged, safety,
+  privacy, smoke, dogfood, and scenario release gates.
 - Keep package validation strict for conflict-copy payloads while ignoring
   empty conflict-copy directories that contain no files.
 - Prevent installable provider package copies from running package sync and

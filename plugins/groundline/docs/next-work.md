@@ -70,10 +70,11 @@ Current patch draft status:
 - Validation now compares provider manifest versions against canonical
   `plugin.json` instead of a hard-coded patch version.
 - Package sync, source validation, packaged validation, lint,
-  provider-native validation, unit tests, safety eval, offline doctor, offline
-  radar, staged dogfood, macOS local scenario, Linux Docker dry-run, and Linux
-  Docker execution pass in the current patch draft. Real provider smoke is
-  PARTIAL until local provider targets are refreshed from the published ref.
+  provider-native validation, unit tests, safety eval, privacy scan, offline
+  doctor, offline radar, staged dogfood, macOS local scenario, Linux Docker
+  dry-run, and Linux Docker execution pass in the current patch draft. Real
+  provider smoke is PARTIAL until local provider targets are refreshed from the
+  published ref.
 - A release gate runner now prints or executes the same local gate sequence
   without including approval-required publish commands.
 - Remaining before release: decide whether to publish with existing sanitized
