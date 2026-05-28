@@ -67,6 +67,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
             "groundline_radar.py",
             "lint.py",
             "run_scenarios.py",
+            "sync_provider_package.py",
             "validate_pack.py",
         ]
         allowed_roots = {
@@ -115,6 +116,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
             "groundline_radar.py",
             "lint.py",
             "run_scenarios.py",
+            "sync_provider_package.py",
             "validate_pack.py",
         ]
 

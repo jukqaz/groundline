@@ -1,0 +1,22 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "groundline",
+  "description": "GroundLine plugin marketplace for agent state, radar, evidence, and release control plane skills.",
+  "owner": {
+    "name": "GroundLine contributors",
+    "email": "jukqaz@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "groundline",
+      "description": "Lightweight control plane skills for current agent state, radar, and evidence.",
+      "author": {
+        "name": "GroundLine contributors",
+        "email": "jukqaz@gmail.com"
+      },
+      "category": "development",
+      "source": "./plugins/groundline",
+      "homepage": "https://github.com/jukqaz/groundline"
+    }
+  ]
+}

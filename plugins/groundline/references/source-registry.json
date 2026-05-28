@@ -1,0 +1,111 @@
+{
+  "schema": 1,
+  "sources": [
+    {
+      "id": "codex-docs",
+      "owner": "Codex",
+      "kind": "remote",
+      "url": "https://openai.com/academy/codex-plugins-and-skills/"
+    },
+    {
+      "id": "claude-code-docs",
+      "owner": "Claude Code",
+      "kind": "remote",
+      "url": "https://code.claude.com/docs/en/plugins"
+    },
+    {
+      "id": "antigravity-docs",
+      "owner": "Antigravity",
+      "kind": "remote",
+      "url": "https://antigravity.google/docs/plugins"
+    },
+    {
+      "id": "superpowers",
+      "owner": "Superpowers",
+      "kind": "remote",
+      "url": "https://github.com/obra/superpowers",
+      "category": "workflow"
+    },
+    {
+      "id": "spec-kit",
+      "owner": "GitHub",
+      "kind": "remote",
+      "url": "https://github.com/github/spec-kit",
+      "category": "workflow"
+    },
+    {
+      "id": "agent-os",
+      "owner": "Builder Methods",
+      "kind": "remote",
+      "url": "https://github.com/buildermethods/agent-os",
+      "category": "workflow"
+    },
+    {
+      "id": "bmad-method",
+      "owner": "BMAD",
+      "kind": "remote",
+      "url": "https://bmad.fr/en/bmad-method",
+      "category": "workflow"
+    },
+    {
+      "id": "gstack",
+      "owner": "gstack",
+      "kind": "remote",
+      "url": "https://github.com/garrytan/gstack",
+      "category": "workflow"
+    },
+    {
+      "id": "grill-me",
+      "owner": "grill-me",
+      "kind": "remote",
+      "url": "https://gist.github.com/usirin/0f01923f7b2126b0cce817f9f8d97788",
+      "category": "workflow"
+    },
+    {
+      "id": "promptfoo-coding-agent-redteam",
+      "owner": "Promptfoo",
+      "kind": "remote",
+      "url": "https://www.promptfoo.dev/docs/red-team/coding-agents/",
+      "category": "security"
+    },
+    {
+      "id": "ai-fluency-assessment-skill",
+      "owner": "n-pillai",
+      "kind": "remote",
+      "url": "https://github.com/n-pillai/ai-fluency-assessment-skill",
+      "category": "assessment"
+    },
+    {
+      "id": "mcpmarket-ai-fluency-assessment",
+      "owner": "MCPMarket",
+      "kind": "remote",
+      "url": "https://mcpmarket.com/tools/skills/ai-fluency-assessment",
+      "category": "assessment"
+    },
+    {
+      "id": "paolomoz-ai-fluency",
+      "owner": "paolomoz",
+      "kind": "remote",
+      "url": "https://github.com/paolomoz/ai-fluency",
+      "category": "assessment"
+    },
+    {
+      "id": "github",
+      "owner": "GitHub",
+      "kind": "remote",
+      "url": "https://docs.github.com/"
+    },
+    {
+      "id": "context7",
+      "owner": "Context7",
+      "kind": "remote",
+      "url": "https://context7.com/"
+    },
+    {
+      "id": "exa",
+      "owner": "Exa",
+      "kind": "remote",
+      "url": "https://docs.exa.ai/"
+    }
+  ]
+}

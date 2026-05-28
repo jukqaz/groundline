@@ -1,0 +1,4 @@
+interface:
+  display_name: "Guard Side Effects"
+  short_description: "Separate read-only checks from sensitive mutations"
+  default_prompt: "Classify the side effects before running this operation."

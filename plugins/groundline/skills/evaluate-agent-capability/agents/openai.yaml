@@ -1,0 +1,4 @@
+interface:
+  display_name: "Evaluate Agent Capability"
+  short_description: "Score existing tools and skills before adoption"
+  default_prompt: "Evaluate this agent tool or skill for quality, security, context cost, maintenance, and GroundLine fit."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Research Agent Ecosystem"
+  short_description: "Gather source-backed agent workflow candidates"
+  default_prompt: "Research agent tools and workflow patterns that may improve GroundLine."

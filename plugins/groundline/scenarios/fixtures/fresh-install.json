@@ -1,0 +1,6 @@
+{
+  "name": "fresh-install",
+  "manifests": true,
+  "skills": true,
+  "references": true
+}

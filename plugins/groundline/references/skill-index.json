@@ -1,0 +1,195 @@
+{
+  "schema": 1,
+  "skills": [
+    {
+      "name": "reconcile-current-state",
+      "workflow_stage": "orient",
+      "artifact_type": "skill",
+      "risk_level": "read-only",
+      "provider_scope": "provider-neutral",
+      "lifecycle": "active",
+      "human_summary": "Proves current branch, runtime, and handoff state before acting.",
+      "llm_trigger": "Use when continuing prior Claude Code, Codex, Antigravity, or subagent work; when handoff notes may be stale; when a previous agent claimed progress; or when current repository, runtime, CI, PR, or endpoint state must be rechecked before acting."
+    },
+    {
+      "name": "audit-agent-history",
+      "workflow_stage": "research",
+      "artifact_type": "skill",
+      "risk_level": "secret-sensitive",
+      "provider_scope": "provider-neutral",
+      "lifecycle": "active",
+      "human_summary": "Inventories local agent histories without dumping raw transcripts.",
+      "llm_trigger": "Use when analyzing local Codex, Claude Code, or Antigravity history stores; when comparing current provider storage; when improving retention; when recovering prior context; or when deriving reusable skills from past agent work."
+    },
+    {
+      "name": "guard-side-effects",
+      "workflow_stage": "decide",
+      "artifact_type": "skill",
+      "risk_level": "secret-sensitive",
+      "provider_scope": "provider-neutral",
+      "lifecycle": "active",
+      "human_summary": "Classifies side effects and approval needs before risky actions.",
+      "llm_trigger": "Use when a requested or planned action may mutate files, git state, remotes, production, money, access, secrets, user data, provider homes, or external systems."
+    },
+    {
+      "name": "close-live-work",
+      "workflow_stage": "verify",
+      "artifact_type": "skill",
+      "risk_level": "read-only",
+      "provider_scope": "provider-neutral",
+      "lifecycle": "active",
+      "human_summary": "Closes work with runtime, endpoint, release, or user-flow evidence.",
+      "llm_trigger": "Use when local tests or CI passed but runtime, endpoint, release, worker, queue, browser, mobile, or user-facing evidence still matters before claiming completion."
+    },
+    {
+      "name": "align-agent-home",
+      "workflow_stage": "maintain",
+      "artifact_type": "skill",
+      "risk_level": "provider-home-write",
+      "provider_scope": "provider-neutral",
+      "lifecycle": "active",
+      "human_summary": "Separates shareable provider config from local runtime state.",
+      "llm_trigger": "Use when agent home config, guidance, skills, rules, hooks, manifests, tool profiles, private sync boundaries, or provider-specific setup need alignment across Codex, Claude Code, or Antigravity."
+    },
+    {
+      "name": "recover-worktree-branch",
+      "workflow_stage": "orient",
+      "artifact_type": "skill",
+      "risk_level": "local-write",
+      "provider_scope": "provider-neutral",
+      "lifecycle": "active",
+      "human_summary": "Proves branch and worktree state before recovery or cleanup.",
+      "llm_trigger": "Use when a worktree path vanished, a branch is detached or missing, checkout state is confusing, cleanup is requested, or branch recovery needs proof before deletion or recreation."
+    },
+    {
+      "name": "agent-ecosystem-radar",
+      "workflow_stage": "research",
+      "artifact_type": "skill",
+      "risk_level": "read-only",
+      "provider_scope": "provider-neutral",
+      "lifecycle": "experimental",
+      "human_summary": "Runs the research, comparison, and recommendation skill set.",
+      "llm_trigger": "Use when the user wants one pass that researches external agent tools, compares them, and recommends GroundLine upgrades for Codex, Claude Code, or Antigravity."
+    },
+    {
+      "name": "research-agent-ecosystem",
+      "workflow_stage": "research",
+      "artifact_type": "skill",
+      "risk_level": "read-only",
+      "provider_scope": "provider-neutral",
+      "lifecycle": "experimental",
+      "human_summary": "Collects source-backed external agent workflow candidates.",
+      "llm_trigger": "Use when gathering current sources about agent tools, skills, plugins, MCP servers, hooks, provider features, or workflow frameworks before comparison or upgrade planning."
+    },
+    {
+      "name": "compare-agent-workflows",
+      "workflow_stage": "compare",
+      "artifact_type": "skill",
+      "risk_level": "read-only",
+      "provider_scope": "provider-neutral",
+      "lifecycle": "experimental",
+      "human_summary": "Scores researched workflow candidates against GroundLine scope.",
+      "llm_trigger": "Use when comparing agent tools, skills, plugins, MCP servers, hooks, workflow frameworks, or provider features against GroundLine scope and supported runtimes."
+    },
+    {
+      "name": "recommend-groundline-upgrades",
+      "workflow_stage": "decide",
+      "artifact_type": "skill",
+      "risk_level": "read-only",
+      "provider_scope": "provider-neutral",
+      "lifecycle": "experimental",
+      "human_summary": "Turns research and comparison into adopt, adapt, watch, or reject decisions.",
+      "llm_trigger": "Use when turning research and comparison findings into GroundLine upgrade candidates, adoption decisions, source registry entries, skills, references, scripts, docs, hooks, or MCP recommendations."
+    },
+    {
+      "name": "evaluate-agent-capability",
+      "workflow_stage": "verify",
+      "artifact_type": "skill",
+      "risk_level": "read-only",
+      "provider_scope": "provider-neutral",
+      "lifecycle": "experimental",
+      "human_summary": "Scores existing tools, skills, plugins, MCP servers, hooks, agents, and workflow packs before adoption.",
+      "llm_trigger": "Use when evaluating existing agent tools, skills, plugins, MCP servers, hooks, agents, prompt packs, or workflow frameworks for quality, security, context cost, maintenance, and GroundLine fit."
+    },
+    {
+      "name": "evaluate-ai-usage-maturity",
+      "workflow_stage": "verify",
+      "artifact_type": "skill",
+      "risk_level": "secret-sensitive",
+      "provider_scope": "provider-neutral",
+      "lifecycle": "experimental",
+      "human_summary": "Assesses AI workflow maturity from artifacts without exposing raw transcripts.",
+      "llm_trigger": "Use when assessing a person or team's AI usage maturity, AI fluency, agent workflow habits, verification discipline, tool orchestration, reuse, automation, safety, and next improvement steps."
+    },
+    {
+      "name": "package-agent-task",
+      "workflow_stage": "orient",
+      "artifact_type": "skill",
+      "risk_level": "secret-sensitive",
+      "provider_scope": "provider-neutral",
+      "lifecycle": "experimental",
+      "human_summary": "Turns broad or resumed requests into concise LLM-ready task packets.",
+      "llm_trigger": "Use when a broad, ambiguous, multi-agent, resumed, or high-context request needs an LLM-ready task packet with goal, context, constraints, non-goals, mutation boundary, success criteria, verification, and handoff."
+    },
+    {
+      "name": "hold-the-line",
+      "workflow_stage": "decide",
+      "artifact_type": "skill",
+      "risk_level": "read-only",
+      "provider_scope": "provider-neutral",
+      "lifecycle": "experimental",
+      "human_summary": "Stops scope growth and chooses finish, budget, defer, watch, or reject before more work starts.",
+      "llm_trigger": "Use when a request, task, research thread, plugin package, or active change set starts expanding with new ideas, extra tools, broad cleanup, or unclear finish criteria before the current work is closed."
+    },
+    {
+      "name": "polish-release-candidate",
+      "workflow_stage": "verify",
+      "artifact_type": "skill",
+      "risk_level": "secret-sensitive",
+      "provider_scope": "provider-neutral",
+      "lifecycle": "experimental",
+      "human_summary": "Runs final docs, duplicate, privacy, gate, and commit-plan cleanup before release judgment.",
+      "llm_trigger": "Use when a release candidate needs final cleanup, docs polish, duplicate or stale surface review, privacy checks, validation gate ordering, commit split planning, or public readiness review before a ship decision."
+    },
+    {
+      "name": "stabilize-release-cut",
+      "workflow_stage": "verify",
+      "artifact_type": "skill",
+      "risk_level": "local-write",
+      "provider_scope": "provider-neutral",
+      "lifecycle": "experimental",
+      "human_summary": "Locks release scope, classifies remaining work, and proves release readiness.",
+      "llm_trigger": "Use when a growing change set, plugin package, skill set, or release candidate needs scope lock, change budget, must-fix triage, dogfood evidence, release gates, regression checks, or a ship decision."
+    },
+    {
+      "name": "compare-release-delta",
+      "workflow_stage": "verify",
+      "artifact_type": "skill",
+      "risk_level": "read-only",
+      "provider_scope": "provider-neutral",
+      "lifecycle": "experimental",
+      "human_summary": "Compares deployed and previous versions with runtime, install, regression, and rollback evidence.",
+      "llm_trigger": "Use when a deployed release must be compared with a previous version, expected changes, runtime evidence, regression signals, install state, rollback notes, or post-deploy checklist items."
+    },
+    {
+      "name": "evaluate-groundline-pack",
+      "workflow_stage": "verify",
+      "artifact_type": "skill",
+      "risk_level": "read-only",
+      "provider_scope": "provider-neutral",
+      "lifecycle": "active",
+      "human_summary": "Reviews repository readiness, skill completeness, safety, and release fitness.",
+      "llm_trigger": "Use when reviewing GroundLine itself for repository readiness, skill completeness, trigger clarity, documentation coverage, safety posture, tests, release quality, or public package fitness."
+    },
+    {
+      "name": "curate-groundline-skills",
+      "workflow_stage": "maintain",
+      "artifact_type": "skill",
+      "risk_level": "read-only",
+      "provider_scope": "provider-neutral",
+      "lifecycle": "experimental",
+      "human_summary": "Maintains the skill portfolio taxonomy and create, adapt, merge, split, deprecate, or reject decisions.",
+      "llm_trigger": "Use when deciding whether GroundLine should create, adapt, merge, split, deprecate, or reject skills, references, scripts, agents, hooks, MCP recommendations, or docs."
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Ecosystem Radar"
+  short_description: "Research, compare, and recommend agent workflow upgrades"
+  default_prompt: "Research current agent workflow tools, compare them against GroundLine, and recommend upgrades."

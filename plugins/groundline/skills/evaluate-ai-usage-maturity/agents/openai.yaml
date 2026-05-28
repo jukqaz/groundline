@@ -1,0 +1,4 @@
+interface:
+  display_name: "Evaluate AI Usage Maturity"
+  short_description: "Assess AI workflow maturity from evidence"
+  default_prompt: "Assess AI usage maturity from artifacts and summarize score, level, strengths, gaps, and next upgrades without exposing raw transcripts."

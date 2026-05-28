@@ -1,0 +1,4 @@
+interface:
+  display_name: "Compare Agent Workflows"
+  short_description: "Score external workflow candidates against GroundLine"
+  default_prompt: "Compare these agent workflow candidates against GroundLine's supported runtimes and safety model."

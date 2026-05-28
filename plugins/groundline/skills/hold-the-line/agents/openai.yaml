@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hold The Line"
+  short_description: "Stop scope growth before accepting new work"
+  default_prompt: "Classify the expansion trigger, choose finish_current, accept_with_budget, defer, watch, or reject, and return a GroundLine Scope Hold with one next action."

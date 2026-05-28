@@ -1,0 +1,4 @@
+interface:
+  display_name: "Evaluate GroundLine Pack"
+  short_description: "Review GroundLine's repo, skills, docs, and release gates"
+  default_prompt: "Evaluate this GroundLine package for skill completeness, trigger clarity, safety, and release readiness."

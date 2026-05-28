@@ -1,0 +1,4 @@
+interface:
+  display_name: "Curate GroundLine Skills"
+  short_description: "Manage skill taxonomy, lifecycle, and portfolio clarity"
+  default_prompt: "Review GroundLine's skills and recommend what to create, adapt, merge, split, deprecate, or reject."

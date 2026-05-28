@@ -1,0 +1,4 @@
+interface:
+  display_name: "Align Agent Home"
+  short_description: "Align current agent homes, skills, rules, hooks, and guidance"
+  default_prompt: "Align my agent runtime configuration and run GroundLine doctor."

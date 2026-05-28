@@ -13,6 +13,9 @@ class GroundLineStaticContractTests(unittest.TestCase):
             PACK_ROOT / ".codex-plugin/plugin.json",
             PACK_ROOT / ".claude-plugin/plugin.json",
             PACK_ROOT / "plugin.json",
+            PACK_ROOT / "plugins/groundline/.codex-plugin/plugin.json",
+            PACK_ROOT / "plugins/groundline/.claude-plugin/plugin.json",
+            PACK_ROOT / "plugins/groundline/plugin.json",
         ]
 
         for manifest_path in manifest_paths:
@@ -27,11 +30,18 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertEqual(claude.get("version"), "0.2.2")
         self.assertEqual(interface.get("displayName"), "GroundLine")
         self.assertIn("control plane", interface.get("longDescription", "").lower())
+        self.assertEqual(interface.get("composerIcon"), "./assets/groundline-icon.svg")
+        self.assertEqual(interface.get("logo"), "./assets/groundline-logo.svg")
+        self.assertEqual(codex.get("homepage"), "https://github.com/jukqaz/groundline")
+        self.assertEqual(codex.get("repository"), "https://github.com/jukqaz/groundline")
+        self.assertEqual(codex.get("license"), "MIT")
 
     def test_required_groundline_files_exist(self) -> None:
         required_files = [
             ".codex-plugin/plugin.json",
+            ".agents/plugins/marketplace.json",
             ".claude-plugin/plugin.json",
+            ".claude-plugin/marketplace.json",
             "plugin.json",
             "CHANGELOG.md",
             "CONTRIBUTING.md",
@@ -39,6 +49,8 @@ class GroundLineStaticContractTests(unittest.TestCase):
             "README.md",
             "README.ko.md",
             "SECURITY.md",
+            "assets/groundline-icon.svg",
+            "assets/groundline-logo.svg",
             "docs/language-policy.md",
             ".github/ISSUE_TEMPLATE/bug_report.md",
             ".github/ISSUE_TEMPLATE/feature_request.md",
@@ -55,6 +67,8 @@ class GroundLineStaticContractTests(unittest.TestCase):
             "docs/next-work.md",
             "docs/next-version.md",
             "docs/privacy.md",
+            "docs/terms.md",
+            "docs/provider-packaging.md",
             "docs/public-release.md",
             "docs/runtime-support.md",
             "docs/examples.md",
@@ -68,6 +82,8 @@ class GroundLineStaticContractTests(unittest.TestCase):
             "docs/ko/examples.md",
             "docs/ko/skill-portfolio.md",
             "docs/ko/privacy.md",
+            "docs/ko/terms.md",
+            "docs/ko/provider-packaging.md",
             "docs/ko/release-checklist.md",
             "docs/ko/next-version.md",
             "references/capability-blueprint.md",
@@ -95,7 +111,17 @@ class GroundLineStaticContractTests(unittest.TestCase):
             "scripts/groundline_radar.py",
             "scripts/lint.py",
             "scripts/run_scenarios.py",
+            "scripts/sync_provider_package.py",
             "scripts/validate_pack.py",
+            "plugins/groundline/.codex-plugin/plugin.json",
+            "plugins/groundline/.claude-plugin/plugin.json",
+            "plugins/groundline/plugin.json",
+            "plugins/groundline/assets/groundline-icon.svg",
+            "plugins/groundline/assets/groundline-logo.svg",
+            "plugins/groundline/docs/provider-packaging.md",
+            "plugins/groundline/docs/terms.md",
+            "plugins/groundline/docs/ko/provider-packaging.md",
+            "plugins/groundline/docs/ko/terms.md",
             "scenarios/fixtures/fresh-install.json",
             "scenarios/expected/standalone-groundline.json",
         ]
@@ -112,6 +138,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn("English is the default and canonical language", readme)
         self.assertIn("README.ko.md", readme)
         self.assertIn("docs/ko/index.md", readme)
+        self.assertIn("docs/ko/provider-packaging.md", readme)
         self.assertIn("English is the default and canonical language", language_policy)
         self.assertIn("LLM-readable references", language_policy)
         self.assertIn("영어 문서가 기본", korean_index)
@@ -173,6 +200,10 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn('"references/release-stabilization.md"', validator)
         self.assertIn('"docs/install.md"', validator)
         self.assertIn('"README.ko.md"', validator)
+        self.assertIn('".agents/plugins/marketplace.json"', validator)
+        self.assertIn('".claude-plugin/marketplace.json"', validator)
+        self.assertIn('"assets/groundline-icon.svg"', validator)
+        self.assertIn('"assets/groundline-logo.svg"', validator)
         self.assertIn('"docs/language-policy.md"', validator)
         self.assertIn('"docs/git-history-privacy.md"', validator)
         self.assertIn('"docs/human-guide.md"', validator)
@@ -183,6 +214,8 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn('"docs/next-work.md"', validator)
         self.assertIn('"docs/next-version.md"', validator)
         self.assertIn('"docs/privacy.md"', validator)
+        self.assertIn('"docs/terms.md"', validator)
+        self.assertIn('"docs/provider-packaging.md"', validator)
         self.assertIn('"docs/public-release.md"', validator)
         self.assertIn('"docs/dogfood.md"', validator)
         self.assertIn('"docs/skill-portfolio.md"', validator)
@@ -193,6 +226,8 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn('"docs/ko/examples.md"', validator)
         self.assertIn('"docs/ko/skill-portfolio.md"', validator)
         self.assertIn('"docs/ko/privacy.md"', validator)
+        self.assertIn('"docs/ko/terms.md"', validator)
+        self.assertIn('"docs/ko/provider-packaging.md"', validator)
         self.assertIn('"docs/ko/release-checklist.md"', validator)
         self.assertIn('"docs/ko/next-version.md"', validator)
         self.assertIn('"references/skill-index.json"', validator)
@@ -202,6 +237,8 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn('"scripts/groundline_dogfood.py"', validator)
         self.assertIn('"scripts/groundline_provider_smoke.py"', validator)
         self.assertIn('"scripts/lint.py"', validator)
+        self.assertIn('"scripts/sync_provider_package.py"', validator)
+        self.assertIn('"plugins/groundline/.codex-plugin/plugin.json"', validator)
 
     def test_install_and_update_docs_cover_public_repo_flow(self) -> None:
         install = (PACK_ROOT / "docs/install.md").read_text(encoding="utf-8")
@@ -217,8 +254,33 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn("python3 scripts/validate_pack.py --json", update)
         self.assertIn("python3 scripts/groundline_provider_smoke.py --json", smoke)
         self.assertIn("python3 scripts/groundline_dogfood.py --stage-package --probe-runtimes --json", dogfood)
+        self.assertIn("codex plugin marketplace add jukqaz/groundline --ref main", install)
+        self.assertIn("claude plugin marketplace add jukqaz/groundline", install)
+        self.assertIn("agy plugin install https://github.com/jukqaz/groundline", install)
         self.assertIn("mutation_performed=false", smoke)
         self.assertIn("displayed with `~`", smoke)
+
+    def test_provider_marketplaces_point_to_packaged_plugin(self) -> None:
+        codex_marketplace = json.loads((PACK_ROOT / ".agents/plugins/marketplace.json").read_text(encoding="utf-8"))
+        claude_marketplace = json.loads((PACK_ROOT / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
+        package_root = PACK_ROOT / "plugins/groundline"
+
+        self.assertEqual(codex_marketplace["name"], "groundline")
+        self.assertEqual(codex_marketplace["plugins"][0]["name"], "groundline")
+        self.assertEqual(codex_marketplace["plugins"][0]["source"]["path"], "./plugins/groundline")
+        self.assertEqual(codex_marketplace["plugins"][0]["policy"]["installation"], "AVAILABLE")
+        self.assertEqual(codex_marketplace["plugins"][0]["category"], "Coding")
+
+        self.assertEqual(claude_marketplace["name"], "groundline")
+        self.assertEqual(claude_marketplace["plugins"][0]["name"], "groundline")
+        self.assertEqual(claude_marketplace["plugins"][0]["source"], "./plugins/groundline")
+
+        packaged_skills = {path.name for path in (package_root / "skills").iterdir() if path.is_dir()}
+        root_skills = {path.name for path in (PACK_ROOT / "skills").iterdir() if path.is_dir()}
+        self.assertEqual(packaged_skills, root_skills)
+        self.assertTrue((package_root / ".codex-plugin/plugin.json").is_file())
+        self.assertTrue((package_root / ".claude-plugin/plugin.json").is_file())
+        self.assertTrue((package_root / "plugin.json").is_file())
 
     def test_dogfood_doc_tracks_provider_matrix_and_results(self) -> None:
         text = (PACK_ROOT / "docs/dogfood.md").read_text(encoding="utf-8")

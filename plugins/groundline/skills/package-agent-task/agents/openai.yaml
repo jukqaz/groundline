@@ -1,0 +1,4 @@
+interface:
+  display_name: "Package Agent Task"
+  short_description: "Create an LLM-ready task packet"
+  default_prompt: "Package this request into a concise GroundLine Task Packet with goal, context, constraints, non-goals, mutation boundary, success criteria, verification, and handoff."

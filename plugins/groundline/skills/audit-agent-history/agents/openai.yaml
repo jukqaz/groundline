@@ -1,0 +1,4 @@
+interface:
+  display_name: "Audit Agent History"
+  short_description: "Inventory local agent histories without raw log dumps"
+  default_prompt: "Audit my local agent histories and suggest structure improvements."
