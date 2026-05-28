@@ -35,6 +35,8 @@
   dogfood, and scenario release gates.
 - Keep package validation strict for conflict-copy payloads while ignoring
   empty conflict-copy directories that contain no files.
+- Prevent installable provider package copies from running package sync and
+  creating nested `plugins/groundline` payloads.
 
 ## v0.3.2 - 2026-05-28
 

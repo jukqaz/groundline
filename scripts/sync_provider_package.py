@@ -39,6 +39,11 @@ MANIFEST_FILES = [
 ]
 CONFLICT_COPY_PATTERN = re.compile(r" \d+$")
 
+SOURCE_ROOT_MARKERS = [
+    ".agents/plugins/marketplace.json",
+    ".claude-plugin/marketplace.json",
+]
+
 
 def copy_file(src_rel: str, dest_rel: str) -> None:
     src = ROOT / src_rel
@@ -85,6 +90,20 @@ def ensure_package_root() -> None:
     PACKAGE_ROOT.mkdir(parents=True, exist_ok=True)
 
 
+def ensure_source_root() -> None:
+    missing = [marker for marker in SOURCE_ROOT_MARKERS if not (ROOT / marker).is_file()]
+    if missing:
+        raise RuntimeError(
+            "sync_provider_package.py must run from the GroundLine source root; "
+            f"missing source root marker(s): {', '.join(missing)}"
+        )
+    if ROOT.name == "groundline" and ROOT.parent.name == "plugins":
+        raise RuntimeError(
+            "sync_provider_package.py must not run from an installable provider package; "
+            "run the source-root script instead"
+        )
+
+
 def conflict_copy_paths() -> list[Path]:
     if not PACKAGE_ROOT.is_dir():
         return []
@@ -123,6 +142,7 @@ def clean_conflict_copies(timeout_seconds: float = 8.0, interval_seconds: float 
 
 
 def sync_package() -> dict:
+    ensure_source_root()
     ensure_package_root()
 
     for src_rel, dest_rel in MANIFEST_FILES:
@@ -157,11 +177,31 @@ def main() -> int:
     parser.add_argument("--json", action="store_true", help="emit JSON")
     args = parser.parse_args()
 
-    result = sync_package()
+    try:
+        result = sync_package()
+    except RuntimeError as exc:
+        result = {
+            "status": "FAIL",
+            "errors": [str(exc)],
+            "mutation_performed": False,
+            "package_path": str(PACKAGE_ROOT),
+            "skill_count": 0,
+            "conflict_copies_removed": [],
+            "remaining_conflict_copies": [],
+            "marketplace_files": [
+                ".agents/plugins/marketplace.json",
+                ".claude-plugin/marketplace.json",
+            ],
+        }
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
-        print(f"staged {result['package_path']} with {result['skill_count']} skills")
+        if result["status"] == "PASS":
+            print(f"staged {result['package_path']} with {result['skill_count']} skills")
+        else:
+            print("sync_provider_package.py failed:")
+            for error in result["errors"]:
+                print(f"- {error}")
     return 0 if result["status"] == "PASS" else 1
 
 

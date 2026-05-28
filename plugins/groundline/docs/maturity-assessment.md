@@ -27,7 +27,7 @@ next package sync and release gates.
 - Packaged validation: `plugins/groundline` validation returned `status=PASS`.
 - Lint validation: `lint.py --json --require-actionlint` returned
   `status=PASS`.
-- Unit tests: `python3 -m unittest discover -s tests -v` returned 106 tests OK.
+- Unit tests: `python3 -m unittest discover -s tests -v` returned 107 tests OK.
 - Safety eval: `groundline_safety_eval.py --json` returned `status=PASS` with
   4 synthetic cases and `mutation_performed=false`.
 - Offline doctor and radar checks: `groundline_doctor.py --json --offline

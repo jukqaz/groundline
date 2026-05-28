@@ -333,6 +333,29 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertTrue(source_docs_exist)
         self.assertFalse(packaged_docs_exist)
 
+    def test_sync_provider_package_rejects_packaged_script_execution(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-pack-sync-packaged-") as temp:
+            pack_root = self.copy_pack(Path(temp))
+            packaged_root = pack_root / "plugins/groundline"
+            script_path = packaged_root / "scripts/sync_provider_package.py"
+
+            completed = subprocess.run(
+                [sys.executable, str(script_path), "--json"],
+                cwd=packaged_root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            result = json.loads(completed.stdout)
+            nested_package_exists = (packaged_root / "plugins/groundline").exists()
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertEqual(result["status"], "FAIL")
+        self.assertFalse(result["mutation_performed"])
+        self.assertIn("source root", result["errors"][0])
+        self.assertFalse(nested_package_exists)
+
     def test_safety_eval_emits_json_success_contract(self) -> None:
         result = self.run_script_json("groundline_safety_eval.py", "--json")
 
