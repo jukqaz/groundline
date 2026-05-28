@@ -47,6 +47,8 @@ Completed:
 - version-aware provider smoke reports source version, installed version,
   payload presence, skill count drift, same-version content drift, and
   `install_doctor_status`
+- staged provider smoke proves a fake refreshed install with
+  `--stage-package --require-installed`
 - validation compares provider manifest versions against canonical
   `plugin.json`
 - `docs/provider-activation-matrix.md` defines the five live prompt families
@@ -80,6 +82,8 @@ Deliverables:
   implemented in `scripts/groundline_provider_smoke.py`.
 - Fake-home tests for installed version, source ref drift, stale cache, missing
   package payload, and skill count mismatch: added to script contract tests.
+- Staged provider smoke for fake refreshed installs: implemented in
+  `scripts/groundline_provider_smoke.py`.
 - Canonical manifest version comparison instead of hard-coded patch versions:
   implemented in `scripts/validate_pack.py`.
 - Install and provider packaging docs updated with the new confirmation command:
@@ -90,6 +94,7 @@ Ship gate:
 - install doctor reports `PASS`, `PARTIAL`, or `FAIL`
 - no provider auth, session, log, or raw home dump is printed
 - provider package sync and validation still pass
+- staged provider smoke passes before real provider install refresh is claimed
 - local provider install can be confirmed after a GitHub install
 - release cut can pass an explicit `--release-version` and prove all source and
   packaged manifests match it before tag creation

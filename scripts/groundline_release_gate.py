@@ -67,6 +67,12 @@ def build_gates(include_docker_execution: bool, actionlint_bin: str | None) -> l
         Gate("safety-eval", "Run safety eval", python_command("scripts/groundline_safety_eval.py", "--json"), ROOT),
         Gate("privacy-scan", "Run privacy scan", python_command("scripts/groundline_privacy_scan.py", "--json"), ROOT),
         Gate(
+            "staged-provider-smoke",
+            "Run staged provider smoke",
+            python_command("scripts/groundline_provider_smoke.py", "--json", "--stage-package", "--require-installed"),
+            ROOT,
+        ),
+        Gate(
             "provider-smoke",
             "Run provider smoke",
             python_command("scripts/groundline_provider_smoke.py", "--json", "--require-installed"),
@@ -123,6 +129,8 @@ SUMMARY_KEYS = [
     "real_home_touched",
     "secret_value_printed",
     "fake_home_used",
+    "stage_package",
+    "temp_state_created",
     "network",
     "case_count",
     "finding_count",

@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shutil
+import tempfile
 from pathlib import Path
 
 
@@ -19,18 +21,23 @@ PROVIDERS = {
         "target_parts": [".codex", "plugins", "groundline"],
         "cache_root_parts": [".codex", "plugins", "cache", "groundline", "groundline"],
         "version_required": True,
+        "payload_scope": "full_package",
     },
     "claude_code": {
         "manifest": ".claude-plugin/plugin.json",
         "target_parts": [".claude", "plugins", "groundline"],
         "cache_root_parts": [".claude", "plugins", "cache", "groundline", "groundline"],
         "version_required": True,
+        "payload_scope": "full_package",
     },
     "antigravity": {
         "manifest": "plugin.json",
         "target_parts": [HIDDEN_ANTIGRAVITY_HOME, "config", "plugins", "groundline"],
         "cache_root_parts": [],
         "version_required": False,
+        "payload_scope": "skill_import",
+        "payload_files": [],
+        "payload_dirs": ["skills"],
     },
 }
 
@@ -99,9 +106,15 @@ def manifest_fingerprint_bytes(path: Path) -> bytes:
     return json.dumps(data, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
-def payload_fingerprint(root: Path) -> str:
+def payload_fingerprint(
+    root: Path,
+    payload_files: list[str] | None = None,
+    payload_dirs: list[str] | None = None,
+) -> str:
+    payload_files = PAYLOAD_FILES if payload_files is None else payload_files
+    payload_dirs = PAYLOAD_DIRS if payload_dirs is None else payload_dirs
     digest = hashlib.sha256()
-    for rel in PAYLOAD_FILES:
+    for rel in payload_files:
         path = root / rel
         digest.update(rel.encode("utf-8"))
         digest.update(b"\0")
@@ -114,7 +127,7 @@ def payload_fingerprint(root: Path) -> str:
         else:
             digest.update(path.read_bytes())
         digest.update(b"\0")
-    for rel in PAYLOAD_DIRS:
+    for rel in payload_dirs:
         directory = root / rel
         digest.update(rel.encode("utf-8"))
         digest.update(b"\0")
@@ -178,6 +191,39 @@ def display_path(path: Path, home: Path, explicit_home: bool) -> str:
     return str(Path("~") / relative)
 
 
+def is_real_home(path: Path) -> bool:
+    return path.expanduser().resolve() == Path.home().resolve()
+
+
+def provider_package_source() -> Path:
+    source = ROOT / "plugins/groundline"
+    if not source.is_dir():
+        source = ROOT
+    return source
+
+
+def copy_provider_package(target: Path, config: dict) -> None:
+    source = provider_package_source()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        shutil.rmtree(target)
+    if config["payload_scope"] == "skill_import":
+        target.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source / config["manifest"], target / config["manifest"])
+        shutil.copytree(source / "skills", target / "skills")
+        return
+    shutil.copytree(source, target)
+
+
+def stage_provider_package(home: Path) -> list[str]:
+    staged = []
+    for config in PROVIDERS.values():
+        target = home.joinpath(*config["target_parts"])
+        copy_provider_package(target, config)
+        staged.append(display_path(target, home, explicit_home=False))
+    return staged
+
+
 def version_sort_key(value: str) -> tuple[int, ...]:
     parts: list[int] = []
     for part in value.split("."):
@@ -228,6 +274,9 @@ def runtime_probe(
     version_required: bool,
     install_source: str,
     source_fingerprint: str,
+    payload_scope: str,
+    payload_files: list[str],
+    payload_dirs: list[str],
 ) -> dict:
     target_skill_count = count_skill_dirs(install_target)
     manifest_path = install_target / manifest
@@ -237,7 +286,7 @@ def runtime_probe(
     installed_version = load_json(manifest_path).get("version") if manifest_present else None
     skill_count_matches_source = target_skill_count == source_skill_count if target_exists else False
     version_matches_source = installed_version == source_version if manifest_present else False
-    target_fingerprint = payload_fingerprint(install_target) if target_exists else None
+    target_fingerprint = payload_fingerprint(install_target, payload_files, payload_dirs) if target_exists else None
     content_matches_source = target_fingerprint == source_fingerprint if target_exists else False
     version_check = "not_installed"
     if manifest_present:
@@ -278,6 +327,7 @@ def runtime_probe(
         "version_check": version_check,
         "source_content_fingerprint": source_fingerprint,
         "target_content_fingerprint": target_fingerprint,
+        "payload_scope": payload_scope,
         "content_matches_source": content_matches_source,
         "issues": issues,
         "read_only": True,
@@ -307,16 +357,19 @@ def recommended_actions(provider: str, manifest_present: bool, probe: dict) -> l
 
 
 def provider_status(
+    source_root: Path,
     home: Path,
     explicit_home: bool,
     source_skill_count: int,
     source_version: str | None,
-    source_fingerprint: str,
 ) -> dict:
     providers: dict[str, dict] = {}
     for name, config in PROVIDERS.items():
-        manifest_path = ROOT / config["manifest"]
+        manifest_path = source_root / config["manifest"]
         install_target, install_source, candidate_versions = select_install_target(home, config, source_version)
+        payload_files = config.get("payload_files", PAYLOAD_FILES)
+        payload_dirs = config.get("payload_dirs", PAYLOAD_DIRS)
+        source_fingerprint = payload_fingerprint(source_root, payload_files, payload_dirs)
         probe = runtime_probe(
             install_target,
             config["manifest"],
@@ -325,6 +378,9 @@ def provider_status(
             config["version_required"],
             install_source,
             source_fingerprint,
+            config["payload_scope"],
+            payload_files,
+            payload_dirs,
         )
         providers[name] = {
             "manifest": config["manifest"],
@@ -341,14 +397,23 @@ def provider_status(
     return providers
 
 
-def build_result(home: Path, explicit_home: bool, require_installed: bool) -> dict:
-    source_package = source_package_status(ROOT)
+def build_result(
+    home: Path,
+    explicit_home: bool,
+    require_installed: bool,
+    *,
+    stage_package: bool = False,
+    temp_state_created: bool = False,
+    staged_targets: list[str] | None = None,
+) -> dict:
+    source_root = provider_package_source()
+    source_package = source_package_status(source_root)
     providers = provider_status(
+        source_root,
         home,
         explicit_home,
         source_package["skill_count"],
         source_package["version"],
-        source_package["content_fingerprint"],
     )
     missing = [name for name, item in providers.items() if not item["manifest_present"]]
     drift = [
@@ -376,8 +441,11 @@ def build_result(home: Path, explicit_home: bool, require_installed: bool) -> di
     return {
         "status": install_doctor_status,
         "home": display_path(home, home, explicit_home),
-        "fake_home_used": explicit_home,
+        "fake_home_used": explicit_home or stage_package,
         "install_required": require_installed,
+        "stage_package": stage_package,
+        "temp_state_created": temp_state_created,
+        "staged_targets": staged_targets or [],
         "mutation_performed": False,
         "secret_value_printed": False,
         "real_home_touched": False,
@@ -395,6 +463,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run GroundLine provider smoke checks.")
     parser.add_argument("--home", help="fake or target home directory")
     parser.add_argument("--json", action="store_true", help="emit JSON")
+    parser.add_argument("--stage-package", action="store_true", help="stage the provider package into a temporary or explicit fake home before checking")
     parser.add_argument(
         "--require-installed",
         action="store_true",
@@ -403,8 +472,44 @@ def main() -> int:
     args = parser.parse_args()
 
     explicit_home = args.home is not None
-    home = Path(args.home).expanduser() if args.home else Path.home()
-    result = build_result(home, explicit_home, args.require_installed)
+    if args.stage_package and explicit_home and is_real_home(Path(args.home).expanduser()):
+        result = {
+            "status": "FAIL",
+            "home": "~",
+            "fake_home_used": False,
+            "install_required": args.require_installed,
+            "stage_package": True,
+            "temp_state_created": False,
+            "staged_targets": [],
+            "mutation_performed": False,
+            "secret_value_printed": False,
+            "real_home_touched": False,
+            "install_doctor_status": "FAIL",
+            "error": "refusing to stage provider package into the real home directory",
+            "next_actions": ["choose a temporary --home or omit --home when using --stage-package"],
+        }
+    elif args.stage_package and not explicit_home:
+        with tempfile.TemporaryDirectory(prefix="groundline-provider-smoke-") as temp:
+            home = Path(temp) / "home"
+            staged_targets = stage_provider_package(home)
+            result = build_result(
+                home,
+                explicit_home=False,
+                require_installed=args.require_installed,
+                stage_package=True,
+                temp_state_created=True,
+                staged_targets=staged_targets,
+            )
+    else:
+        home = Path(args.home).expanduser() if args.home else Path.home()
+        staged_targets = stage_provider_package(home) if args.stage_package else []
+        result = build_result(
+            home,
+            explicit_home,
+            args.require_installed,
+            stage_package=args.stage_package,
+            staged_targets=staged_targets,
+        )
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:

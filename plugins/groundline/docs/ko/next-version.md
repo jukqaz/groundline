@@ -42,6 +42,8 @@ GitHub 가이드 설치 과정에서 드러난 provider별 설치 상태와 cach
 - `docs/maturity-assessment.md`에 85/100 public beta 평가와 다음 작업 기록
 - provider smoke가 source version, installed version, payload 존재 여부,
   skill count drift, same-version content drift, `install_doctor_status`를 보고
+- staged provider smoke가 `--stage-package --require-installed`로 fake refreshed
+  install을 증명
 - validation이 hard-coded patch version 대신 canonical `plugin.json` 기준으로
   provider manifest version을 비교
 - `docs/provider-activation-matrix.md`가 다섯 live prompt family를 정의하고
@@ -73,11 +75,14 @@ GitHub 가이드 설치 과정에서 드러난 provider별 설치 상태와 cach
   `scripts/groundline_provider_smoke.py`에 구현
 - source ref drift, stale cache, package payload 누락, skill count mismatch 탐지:
   fake-home unit test 추가
+- fake refreshed install을 위한 staged provider smoke:
+  `scripts/groundline_provider_smoke.py`에 구현
 - provider auth, session, log, raw home dump 출력 금지
 - hard-coded patch version 대신 canonical manifest 비교:
   `scripts/validate_pack.py`에 구현
 - 실제 release cut에서는 `--release-version`으로 source와 packaged manifest가
   모두 의도한 version인지 tag 생성 전에 확인
+- real provider install refresh를 주장하기 전 staged provider smoke가 PASS
 
 ## 2. Provider Invocation Dogfood
 

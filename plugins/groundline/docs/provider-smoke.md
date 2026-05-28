@@ -40,26 +40,24 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json --
 ```
 
 To prove that a refreshed provider install would pass without touching the real
-home, stage the package into a temporary provider layout and run the same
-read-only smoke check:
+home, let provider smoke stage the package into a temporary provider layout and
+run the same installed-target check:
 
 ```bash
-TMP_HOME="$(mktemp -d)"
-AG_HOME=".$(printf 'gem')$(printf 'ini')"
-mkdir -p "$TMP_HOME/.codex/plugins/groundline"
-mkdir -p "$TMP_HOME/.claude/plugins/groundline"
-mkdir -p "$TMP_HOME/$AG_HOME/config/plugins/groundline"
-cp -R plugins/groundline/. "$TMP_HOME/.codex/plugins/groundline"
-cp -R plugins/groundline/. "$TMP_HOME/.claude/plugins/groundline"
-cp -R plugins/groundline/. "$TMP_HOME/$AG_HOME/config/plugins/groundline"
-PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --home "$TMP_HOME" --json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json --stage-package --require-installed
 ```
 
 Expected result: `status=PASS`, `fake_home_used=true`,
-`real_home_touched=false`, `next_actions=[]`, and matching source and target
-content fingerprints for Codex, Claude Code, and Antigravity.
+`stage_package=true`, `real_home_touched=false`, `next_actions=[]`, and matching
+source and target content fingerprints for Codex, Claude Code, and Antigravity.
+Codex and Claude Code compare the full packaged payload. Antigravity compares
+the imported skill payload because the `agy` import target stores `plugin.json`
+plus `skills/` rather than the full documentation and script tree.
 
-The smoke command does not install, copy, link, or rewrite runtime state.
+Without `--stage-package`, the smoke command does not install, copy, link, or
+rewrite runtime state. With `--stage-package`, it writes only to a temporary
+home unless an explicit non-real `--home` is provided. It refuses to stage into
+the real home directory.
 
 When a fake or real provider target already contains a GroundLine checkout, the
 runtime probe reports target manifest presence, target skills presence, target
@@ -76,7 +74,10 @@ Important runtime probe fields:
 - `content_matches_source`: whether the installable payload matches source even
   when the semantic version is unchanged
 - `source_content_fingerprint` and `target_content_fingerprint`: SHA-256
-  fingerprints of the installable payload, with manifest version fields ignored
+  fingerprints of the provider-specific installable payload, with manifest
+  version fields ignored where provider manifests are compared
+- `payload_scope`: `full_package` for Codex and Claude Code, or
+  `skill_import` for Antigravity
 - `install_source`: `direct` or provider cache
 - `candidate_versions`: cache or target versions found while selecting the
   installed target

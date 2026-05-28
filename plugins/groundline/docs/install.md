@@ -15,6 +15,7 @@ gh repo clone jukqaz/groundline
 cd groundline
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json --stage-package --require-installed
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_dogfood.py --stage-package --probe-runtimes --json
 ```
 
@@ -29,6 +30,8 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
 Expected result:
 
 - package validation returns `status=PASS`
+- staged provider smoke returns `status=PASS`, `fake_home_used=true`, and
+  `real_home_touched=false`
 - staged dogfood returns `status=PASS`
 - provider smoke returns `status=PASS` for a matching install, or `PARTIAL`
   when an existing provider target is stale relative to the checked-out package
@@ -43,9 +46,9 @@ should also make provider smoke return `PARTIAL`.
 
 If provider smoke is `PARTIAL` only because real provider targets are stale,
 you can prove the package itself is install-ready with a fake refreshed provider
-home. See `docs/provider-smoke.md` for the temporary layout command.
-That proof should return `status=PASS`, `fake_home_used=true`, and
-`real_home_touched=false`.
+home by running `groundline_provider_smoke.py --json --stage-package
+--require-installed`. That proof should return `status=PASS`,
+`fake_home_used=true`, and `real_home_touched=false`.
 
 The provider smoke command is read-only. It reports manifest presence, local
 target paths, installed package version, source package version, payload

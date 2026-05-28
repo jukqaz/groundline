@@ -8,17 +8,19 @@
 현재 성숙도는 85/100입니다.
 
 GroundLine은 실사용 가능한 public beta입니다. Codex, Claude Code,
-Antigravity에 설치 target이 있고 19개 skill이 보이지만, 현재 provider smoke는
-same-version content drift를 잡아 `PARTIAL`을 보고합니다. validation, lint,
-provider-native validation, unit test, safety eval, privacy scan, offline doctor/radar,
-staged dogfood, macOS local scenario, Linux Docker dry-run/execution gate는
-통과합니다. v0.3.3 patch draft에서 설치 상태, version drift 진단, skill
+Antigravity에 설치 target이 있고 19개 skill이 보이지만, 현재 real provider
+smoke는 Codex와 Claude Code의 same-version content drift를 잡아 `PARTIAL`을
+보고합니다. staged provider smoke, validation, lint, provider-native validation,
+unit test, safety eval, privacy scan, offline doctor/radar, staged dogfood,
+macOS local scenario, Linux Docker dry-run/execution gate는 통과합니다.
+v0.3.3 patch draft에서 설치 상태, version drift 진단, skill
 graduation decision, compact workflow cookbook, artifact lifecycle, release
 gate runner는 크게 보강됐지만, 1.0 안정판이라고 부르기에는 아직 부족합니다.
 
 핵심 부족분은 기능 수가 아니라 운영 증거입니다.
 
-- provider별 설치 상태 진단은 구현됐고, GitHub 배포 뒤 재설치 확인이 필요함
+- provider별 설치 상태 진단과 fake refreshed install proof는 구현됐고, GitHub
+  배포 뒤 real provider 재설치 확인이 필요함
 - activation matrix와 staged 6-scenario contract coverage는 구현됐지만, 실제
   provider session에서 어떤 skill이 선택되는지 sanitized proof가 더 필요함
 - 12개 experimental skill은 graduate, keep experimental, merge, defer로 정리됐지만 실제 active promotion은 아직 보류됨

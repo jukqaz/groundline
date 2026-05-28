@@ -67,6 +67,8 @@ Current patch draft status:
 - Version-aware provider smoke now reports source version, installed version,
   payload presence, skill count drift, same-version content drift, and
   `install_doctor_status`.
+- Staged provider smoke proves that a fake refreshed install passes without
+  touching real provider homes.
 - Validation now compares provider manifest versions against canonical
   `plugin.json` instead of a hard-coded patch version.
 - Package sync, source validation, packaged validation, lint,
@@ -90,6 +92,7 @@ Acceptance:
   drift.
 - Report `PASS`, `PARTIAL`, or `FAIL` without printing provider auth, sessions,
   logs, or raw home dumps.
+- Prove fake refreshed installs with `--stage-package --require-installed`.
 - Add fake-home unit tests for all three providers.
 - Replace hard-coded package version checks with canonical manifest comparison.
 - Update install and provider packaging docs with the new confirmation command.

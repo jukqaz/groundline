@@ -181,6 +181,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
                 "offline-radar",
                 "safety-eval",
                 "privacy-scan",
+                "staged-provider-smoke",
                 "provider-smoke",
                 "staged-dogfood",
                 "macos-local-scenario",
@@ -196,6 +197,9 @@ class GroundLineScriptContractTests(unittest.TestCase):
                 self.assertNotIn("git", gate["command"][0])
         provider_smoke_gate = next(gate for gate in result["gates"] if gate["id"] == "provider-smoke")
         self.assertIn("--require-installed", provider_smoke_gate["command"])
+        staged_smoke_gate = next(gate for gate in result["gates"] if gate["id"] == "staged-provider-smoke")
+        self.assertIn("--stage-package", staged_smoke_gate["command"])
+        self.assertIn("--require-installed", staged_smoke_gate["command"])
 
     def test_release_gate_can_plan_full_local_release_gate(self) -> None:
         result = self.run_script_json(
@@ -1092,6 +1096,49 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertEqual(probe["target_content_fingerprint"], result["source_package"]["content_fingerprint"])
         self.assertEqual(result["providers"]["codex"]["recommended_actions"], ["no action required"])
 
+    def test_provider_smoke_stage_package_proves_refresh_without_real_home(self) -> None:
+        result = self.run_script_json(
+            "groundline_provider_smoke.py",
+            "--json",
+            "--stage-package",
+            "--require-installed",
+        )
+
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["install_doctor_status"], "PASS")
+        self.assertTrue(result["install_required"])
+        self.assertTrue(result["stage_package"])
+        self.assertTrue(result["fake_home_used"])
+        self.assertTrue(result["temp_state_created"])
+        self.assertFalse(result["mutation_performed"])
+        self.assertFalse(result["real_home_touched"])
+        self.assertEqual(result["next_actions"], [])
+        self.assertEqual(len(result["staged_targets"]), 3)
+        for provider_name in ["codex", "claude_code", "antigravity"]:
+            with self.subTest(provider=provider_name):
+                provider = result["providers"][provider_name]
+                probe = provider["runtime_probe"]
+                self.assertEqual(provider["install_state"], "PASS")
+                self.assertTrue(probe["target_exists"])
+                self.assertTrue(probe["content_matches_source"])
+                self.assertEqual(probe["issues"], [])
+
+    def test_provider_smoke_refuses_stage_package_into_real_home(self) -> None:
+        completed = self.run_script(
+            "groundline_provider_smoke.py",
+            "--home",
+            str(Path.home()),
+            "--json",
+            "--stage-package",
+        )
+        result = json.loads(completed.stdout)
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertEqual(result["status"], "FAIL")
+        self.assertFalse(result["real_home_touched"])
+        self.assertFalse(result["mutation_performed"])
+        self.assertIn("refusing to stage provider package into the real home directory", result["error"])
+
     def test_provider_smoke_reports_installed_versions_and_drift(self) -> None:
         with tempfile.TemporaryDirectory(prefix="groundline-provider-drift-") as temp:
             root = Path(temp)
@@ -1275,6 +1322,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="groundline-provider-missing-manifest-") as temp:
             pack_root = self.copy_pack(Path(temp))
             (pack_root / ".codex-plugin/plugin.json").unlink()
+            (pack_root / "plugins/groundline/.codex-plugin/plugin.json").unlink()
             home = self.make_fake_home(Path(temp))
 
             completed = self.run_script(
@@ -1315,6 +1363,30 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertTrue(probe["content_matches_source"])
         self.assertEqual(probe["issues"], [])
         self.assertEqual(result["providers"]["antigravity"]["candidate_versions"], [])
+
+    def test_provider_smoke_accepts_antigravity_imported_skill_surface(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-antigravity-import-") as temp:
+            home = self.make_fake_home(Path(temp))
+            target = home / ".gemini/config/plugins/groundline"
+            target.mkdir(parents=True)
+            (target / "plugin.json").write_text('{"name":"groundline"}', encoding="utf-8")
+            shutil.copytree(PACK_ROOT / "skills", target / "skills")
+
+            result = self.run_script_json(
+                "groundline_provider_smoke.py",
+                "--home",
+                str(home),
+                "--json",
+            )
+
+        probe = result["providers"]["antigravity"]["runtime_probe"]
+        self.assertEqual(result["install_doctor_status"], "PASS")
+        self.assertEqual(probe["status"], "PASS")
+        self.assertEqual(probe["payload_scope"], "skill_import")
+        self.assertIsNone(probe["installed_version"])
+        self.assertEqual(probe["version_check"], "unavailable")
+        self.assertTrue(probe["content_matches_source"])
+        self.assertEqual(probe["issues"], [])
 
     def test_dogfood_harness_runs_staged_provider_suite(self) -> None:
         with tempfile.TemporaryDirectory(prefix="groundline-dogfood-") as temp:

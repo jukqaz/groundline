@@ -31,6 +31,8 @@
 - Add an optional `--release-version` release gate preflight so actual release
   cuts fail when source or packaged manifests still point at the wrong version,
   or when the requested version is not plain `X.Y.Z` semver.
+- Add staged provider smoke so a fake refreshed install can be proven with
+  `--stage-package --require-installed` before touching real provider homes.
 - Add a provider-native validation gate for read-only Claude Code and
   Antigravity package validation during local release closeout.
 - Redact local home paths from release gate and Docker scenario evidence
