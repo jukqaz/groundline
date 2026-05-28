@@ -17,8 +17,10 @@ These are already done and should not be re-opened unless validation fails:
 - `plugins/groundline` contains the installable payload.
 - English and Korean provider packaging docs exist.
 - The v0.3.2 baseline passed local validation, provider validation, and CI on
-  `main`; the current patch draft passes the local closeout gates, and tagging
-  still waits for an explicit ship decision.
+  `main`; the current patch draft has passing local validation, provider-native
+  validation, staged dogfood, and scenario evidence, while the full release gate
+  remains PARTIAL until provider installs are refreshed from the published ref.
+  Tagging still waits for an explicit ship decision.
 
 ## Current Status: v0.3.3 Patch Draft
 

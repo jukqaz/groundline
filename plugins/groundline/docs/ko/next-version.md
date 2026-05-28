@@ -17,8 +17,10 @@ version drift control, compact proof workflow에 집중합니다.
 - `plugins/groundline` installable payload 존재
 - 영어/한국어 provider packaging 문서 존재
 - v0.3.2 baseline은 `main`에서 local validation, provider validation, CI를
-  통과했고, 현재 patch draft도 local closeout gate를 통과했습니다. tag는
-  명시적인 ship decision 뒤에만 진행합니다.
+  통과했고, 현재 patch draft는 local validation, provider-native validation,
+  staged dogfood, scenario evidence가 통과합니다. full release gate는 provider
+  install이 published ref에서 refresh되기 전까지 PARTIAL입니다. tag는 명시적인
+  ship decision 뒤에만 진행합니다.
 
 ## 현재 상태
 
