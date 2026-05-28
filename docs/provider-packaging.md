@@ -68,7 +68,7 @@ Confirm:
 
 ```bash
 codex plugin list --marketplace groundline
-PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json --require-installed
 ```
 
 ## Claude Code
@@ -100,7 +100,7 @@ Confirm:
 
 ```bash
 claude plugin list
-PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json --require-installed
 ```
 
 ## Antigravity
@@ -124,6 +124,11 @@ agy plugin install ./plugins/groundline
 ```
 
 Use `agy plugin list` after install to confirm the package is imported.
+Then run:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json --require-installed
+```
 
 Antigravity may report imported plugin metadata rather than a semantic version
 in every list view. In that case, use `agy plugin validate ./plugins/groundline`
@@ -145,7 +150,7 @@ against a clone to confirm the package shape, and use
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
-PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json --require-installed
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_validate.py --json
 claude plugin validate ./plugins/groundline --strict
 agy plugin validate ./plugins/groundline

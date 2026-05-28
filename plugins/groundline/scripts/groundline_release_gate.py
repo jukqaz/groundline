@@ -56,7 +56,12 @@ def build_gates(include_docker_execution: bool, actionlint_bin: str | None) -> l
         Gate("offline-radar", "Run offline radar", python_command("scripts/groundline_radar.py", "--json", "--offline", "--command-sources"), ROOT),
         Gate("safety-eval", "Run safety eval", python_command("scripts/groundline_safety_eval.py", "--json"), ROOT),
         Gate("privacy-scan", "Run privacy scan", python_command("scripts/groundline_privacy_scan.py", "--json"), ROOT),
-        Gate("provider-smoke", "Run provider smoke", python_command("scripts/groundline_provider_smoke.py", "--json"), ROOT),
+        Gate(
+            "provider-smoke",
+            "Run provider smoke",
+            python_command("scripts/groundline_provider_smoke.py", "--json", "--require-installed"),
+            ROOT,
+        ),
         Gate(
             "staged-dogfood",
             "Run staged dogfood",

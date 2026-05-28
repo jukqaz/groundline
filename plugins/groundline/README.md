@@ -32,8 +32,10 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
 `validate_pack.py` should report `status=PASS`. The provider smoke command is
 read-only: it should report `mutation_performed=false` and no real provider
 home writes, but it may return `PARTIAL` when an existing provider install is
-stale relative to the checked-out package. Read top-level `next_actions` before
-installing or refreshing Codex, Claude Code, or Antigravity.
+stale relative to the checked-out package. Use `--require-installed` when the
+goal is post-install release proof rather than package/path validation. Read
+top-level `next_actions` before installing or refreshing Codex, Claude Code, or
+Antigravity.
 
 If you want to install from the public repository:
 
@@ -239,7 +241,7 @@ scenario:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --json --keep-going --include-docker-execution
-PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json --require-installed
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/run_scenarios.py --platform linux --sandbox docker --json
 ```
 

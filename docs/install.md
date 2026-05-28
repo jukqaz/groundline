@@ -37,7 +37,15 @@ Expected result:
 - provider target paths are printed with `~`, not full home dumps
 
 Treat provider smoke `FAIL` as an install blocker. Treat provider smoke
-`PARTIAL` as actionable only after reading top-level `next_actions`.
+`PARTIAL` as actionable only after reading top-level `next_actions`. Use
+`--require-installed` after provider installation when missing provider targets
+should also make provider smoke return `PARTIAL`.
+
+If provider smoke is `PARTIAL` only because real provider targets are stale,
+you can prove the package itself is install-ready with a fake refreshed provider
+home. See `docs/provider-smoke.md` for the temporary layout command.
+That proof should return `status=PASS`, `fake_home_used=true`, and
+`real_home_touched=false`.
 
 The provider smoke command is read-only. It reports manifest presence, local
 target paths, installed package version, source package version, payload
@@ -49,10 +57,10 @@ Read `install_doctor_status`:
 
 - `PASS`: source manifests are present and any existing provider target matches
   the source package.
-- `PARTIAL`: an installed provider target exists but has stale version,
-  stale provider cache, missing payload, skill count drift, or
-  `content_fingerprint_mismatch`. The command exits 2 while still printing
-  JSON.
+- `PARTIAL`: an installed provider target has stale version, stale provider
+  cache, missing payload, skill count drift, or `content_fingerprint_mismatch`.
+  With `--require-installed`, a missing provider target is also `PARTIAL`. The
+  command exits 2 while still printing JSON.
 - `FAIL`: source manifests needed for provider install are missing.
 
 When the result is `PARTIAL` or `FAIL`, read top-level `next_actions` first.
@@ -127,7 +135,7 @@ from the cloned repository:
 claude plugin validate ./plugins/groundline --strict
 agy plugin validate ./plugins/groundline
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_validate.py --json
-PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json --require-installed
 ```
 
 ## What To Do First After Install

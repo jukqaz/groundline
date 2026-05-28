@@ -60,7 +60,7 @@ codex plugin add groundline@groundline
 
 ```bash
 codex plugin list --marketplace groundline
-PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json --require-installed
 ```
 
 ## Claude Code
@@ -79,7 +79,7 @@ claude plugin install groundline@groundline
 
 ```bash
 claude plugin list
-PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json --require-installed
 ```
 
 ## Antigravity
@@ -92,6 +92,10 @@ agy plugin install ./plugins/groundline
 ```
 
 설치 후 `agy plugin list`로 import 상태를 확인합니다.
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json --require-installed
+```
 
 Antigravity list가 semantic version 대신 import metadata만 보여줄 수 있습니다.
 그 경우 clone에서 `agy plugin validate ./plugins/groundline`으로 package shape를
@@ -112,7 +116,7 @@ Antigravity list가 semantic version 대신 import metadata만 보여줄 수 있
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
-PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json --require-installed
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_validate.py --json
 claude plugin validate ./plugins/groundline --strict
 agy plugin validate ./plugins/groundline

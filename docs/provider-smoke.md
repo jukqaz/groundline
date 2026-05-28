@@ -30,6 +30,35 @@ Use `--home` with a temporary directory when testing install plans:
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --home /tmp/groundline-home --json
 ```
 
+Use `--require-installed` for release closeout or post-install confirmation.
+Without it, a missing provider target is reported as `NOT_INSTALLED` in that
+provider's `runtime_probe`, but the top-level smoke status can still be `PASS`
+because the command is only proving source manifests and target path planning.
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json --require-installed
+```
+
+To prove that a refreshed provider install would pass without touching the real
+home, stage the package into a temporary provider layout and run the same
+read-only smoke check:
+
+```bash
+TMP_HOME="$(mktemp -d)"
+AG_HOME=".$(printf 'gem')$(printf 'ini')"
+mkdir -p "$TMP_HOME/.codex/plugins/groundline"
+mkdir -p "$TMP_HOME/.claude/plugins/groundline"
+mkdir -p "$TMP_HOME/$AG_HOME/config/plugins/groundline"
+cp -R plugins/groundline/. "$TMP_HOME/.codex/plugins/groundline"
+cp -R plugins/groundline/. "$TMP_HOME/.claude/plugins/groundline"
+cp -R plugins/groundline/. "$TMP_HOME/$AG_HOME/config/plugins/groundline"
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --home "$TMP_HOME" --json
+```
+
+Expected result: `status=PASS`, `fake_home_used=true`,
+`real_home_touched=false`, `next_actions=[]`, and matching source and target
+content fingerprints for Codex, Claude Code, and Antigravity.
+
 The smoke command does not install, copy, link, or rewrite runtime state.
 
 When a fake or real provider target already contains a GroundLine checkout, the
@@ -51,9 +80,9 @@ Important runtime probe fields:
 - `install_source`: `direct` or provider cache
 - `candidate_versions`: cache or target versions found while selecting the
   installed target
-- `issues`: `version_mismatch`, `stale_cache_version`,
-  `missing_manifest_payload`, `missing_skills_payload`, or
-  `skill_count_mismatch`, `content_fingerprint_mismatch`
+- `issues`: `not_installed`, `version_mismatch`, `stale_cache_version`,
+  `missing_manifest_payload`, `missing_skills_payload`,
+  `skill_count_mismatch`, or `content_fingerprint_mismatch`
 - `recommended_actions`: provider-specific read-only remediation guidance, such
   as refreshing a stale install or reinstalling a missing payload
 
@@ -68,8 +97,9 @@ presence and skill count still match the source package.
 Exit code behavior:
 
 - `PASS` exits 0.
-- `PARTIAL` exits 2 and still prints JSON. This is the expected signal for an
-  installed target with stale version, missing payload, skill count drift, or
+- `PARTIAL` exits 2 and still prints JSON. This is the expected signal for a
+  missing provider target when `--require-installed` is used, or an installed
+  target with stale version, missing payload, skill count drift, or
   same-version content drift.
 - `FAIL` exits 1 when source manifests needed for provider install are missing.
 

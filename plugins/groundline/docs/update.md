@@ -34,4 +34,5 @@ and the intended mutation is explicit.
 If `groundline_provider_smoke.py` returns `PARTIAL`, read
 `install_doctor_status` and provider `runtime_probe.issues` before reinstalling.
 Common causes are stale installed version, missing provider payload, or skill
-count drift.
+count drift. Use `--require-installed` when the update is meant to prove an
+installed provider target, not only package and target-path readiness.

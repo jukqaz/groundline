@@ -194,6 +194,8 @@ class GroundLineScriptContractTests(unittest.TestCase):
                 self.assertIsInstance(gate["command"], list)
                 self.assertEqual(gate["command"][0], "python3")
                 self.assertNotIn("git", gate["command"][0])
+        provider_smoke_gate = next(gate for gate in result["gates"] if gate["id"] == "provider-smoke")
+        self.assertIn("--require-installed", provider_smoke_gate["command"])
 
     def test_release_gate_can_plan_full_local_release_gate(self) -> None:
         result = self.run_script_json(
@@ -975,6 +977,8 @@ class GroundLineScriptContractTests(unittest.TestCase):
             )
 
         self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["install_doctor_status"], "PASS")
+        self.assertFalse(result["install_required"])
         self.assertFalse(result["mutation_performed"])
         self.assertFalse(result["secret_value_printed"])
         self.assertTrue(result["fake_home_used"])
@@ -989,7 +993,32 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertIn("install_target", result["providers"]["codex"])
         self.assertIn("runtime_probe", result["providers"]["codex"])
         self.assertFalse(result["providers"]["codex"]["runtime_probe"]["target_exists"])
+        self.assertEqual(result["providers"]["codex"]["runtime_probe"]["status"], "NOT_INSTALLED")
+        self.assertIn("not_installed", result["providers"]["codex"]["runtime_probe"]["issues"])
+        self.assertEqual(result["install_issues"], [])
         self.assertIn("update_command", result)
+
+    def test_provider_smoke_require_installed_reports_missing_targets_partial(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-provider-smoke-required-") as temp:
+            home = self.make_fake_home(Path(temp))
+            completed = self.run_script(
+                "groundline_provider_smoke.py",
+                "--home",
+                str(home),
+                "--json",
+                "--require-installed",
+            )
+            result = json.loads(completed.stdout)
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertEqual(result["status"], "PARTIAL")
+        self.assertEqual(result["install_doctor_status"], "PARTIAL")
+        self.assertTrue(result["install_required"])
+        self.assertIn({"provider": "codex", "issues": ["not_installed"]}, result["install_issues"])
+        self.assertIn(
+            "install GroundLine for Codex from the documented command if this runtime should use it",
+            result["next_actions"],
+        )
 
     def test_provider_smoke_detects_staged_install_target_contents(self) -> None:
         with tempfile.TemporaryDirectory(prefix="groundline-provider-installed-") as temp:

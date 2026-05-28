@@ -41,6 +41,14 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
 
 provider smoke `FAIL`은 설치 blocker입니다. provider smoke `PARTIAL`이면
 먼저 top-level `next_actions`를 보고 조치 범위를 판단합니다.
+provider 설치 확인이 목적이라면 `--require-installed`를 붙여 provider target
+부재도 `PARTIAL`로 처리합니다.
+
+provider smoke가 실제 provider target의 stale 상태 때문에만 `PARTIAL`이면,
+임시 fake provider home에 현재 package를 배치해서 package 자체가 설치 가능한지
+증명할 수 있습니다. 절차는 `docs/provider-smoke.md`의 temporary layout 명령을
+봅니다. 이 proof는 `status=PASS`, `fake_home_used=true`,
+`real_home_touched=false`를 반환해야 합니다.
 
 ## 주의
 
@@ -49,8 +57,9 @@ provider smoke는 설치된 target이 있으면 source version, installed versio
 payload 존재 여부, skill count drift, same-version content drift, provider
 cache candidate를 비교합니다. `PARTIAL`은 stale version, stale provider
 cache, payload 누락, skill count mismatch, `content_fingerprint_mismatch`를
-의미하며 JSON을 출력한 뒤 exit 2로 끝납니다. 실제 provider home에 쓰는
-작업은 사용자가 명시적으로 요청한 경우에만 진행합니다.
+의미합니다. `--require-installed`를 쓰면 not installed도 `PARTIAL`입니다.
+이 경우 JSON을 출력한 뒤 exit 2로 끝납니다. 실제 provider home에 쓰는 작업은
+사용자가 명시적으로 요청한 경우에만 진행합니다.
 
 결과가 `PARTIAL` 또는 `FAIL`이면 먼저 top-level `next_actions`를 봅니다.
 각 provider 항목의 `recommended_actions`에는 해당 target을 위한 조치가
@@ -118,7 +127,7 @@ doctor를 다시 실행합니다.
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_validate.py --json
-PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json --require-installed
 ```
 
 설치 뒤 첫 요청 예시:

@@ -23,18 +23,19 @@ next package sync and release gates.
 - Baseline repository state before this assessment: `main` at `v0.3.2`, clean
   against `origin/main`.
 - Release evidence: GitHub run `26563682592` passed for commit `6c75911`.
-- Current local patch evidence: commit `f043c63` adds the release privacy scan;
-  `groundline_release_gate.py --json --keep-going --include-docker-execution`
-  returned `status=PARTIAL` only because provider smoke reported same-version
-  `content_fingerprint_mismatch` for installed Codex, Claude Code, and
-  Antigravity targets. All other local gates returned `PASS`.
+- Current local patch evidence: the release privacy scan and provider smoke
+  `--require-installed` gate are present; `groundline_release_gate.py --json
+  --keep-going --include-docker-execution` returned `status=PARTIAL` only
+  because provider smoke reported same-version `content_fingerprint_mismatch`
+  for installed Codex, Claude Code, and Antigravity targets. All other local
+  gates returned `PASS`.
 - Source validation: `validate_pack.py --json` returned `status=PASS`.
 - Packaged validation: `plugins/groundline` validation returned `status=PASS`.
 - Lint validation: `lint.py --json --require-actionlint` returned
   `status=PASS`.
 - Provider-native validation: `groundline_provider_validate.py --json`
   returned `status=PASS` for local Claude Code and Antigravity validators.
-- Unit tests: `python3 -m unittest discover -s tests -v` returned 118 tests OK.
+- Unit tests: `python3 -m unittest discover -s tests -v` returned 119 tests OK.
 - Safety eval: `groundline_safety_eval.py --json` returned `status=PASS` with
   4 synthetic cases and `mutation_performed=false`.
 - Privacy scan: `groundline_privacy_scan.py --json` returned `status=PASS`

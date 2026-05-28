@@ -250,6 +250,8 @@ def runtime_probe(
     issues: list[str] = []
     if target_exists and not manifest_present:
         issues.append("missing_manifest_payload")
+    if not target_exists:
+        issues.append("not_installed")
     if target_exists and not target_skills_present:
         issues.append("missing_skills_payload")
     if target_exists and target_skills_present and not skill_count_matches_source:
@@ -339,7 +341,7 @@ def provider_status(
     return providers
 
 
-def build_result(home: Path, explicit_home: bool) -> dict:
+def build_result(home: Path, explicit_home: bool, require_installed: bool) -> dict:
     source_package = source_package_status(ROOT)
     providers = provider_status(
         home,
@@ -354,19 +356,28 @@ def build_result(home: Path, explicit_home: bool) -> dict:
         for name, item in providers.items()
         if item["runtime_probe"]["status"] == "PARTIAL"
     ]
+    not_installed = [
+        {"provider": name, "issues": item["runtime_probe"]["issues"]}
+        for name, item in providers.items()
+        if item["runtime_probe"]["status"] == "NOT_INSTALLED"
+    ]
     next_actions = sorted(
         {
             action
             for item in providers.values()
-            if item["runtime_probe"]["status"] == "PARTIAL" or not item["manifest_present"]
+            if item["runtime_probe"]["status"] == "PARTIAL"
+            or (require_installed and item["runtime_probe"]["status"] == "NOT_INSTALLED")
+            or not item["manifest_present"]
             for action in item["recommended_actions"]
         }
     )
-    install_doctor_status = "FAIL" if missing else "PARTIAL" if drift else "PASS"
+    install_issues = drift + (not_installed if require_installed else [])
+    install_doctor_status = "FAIL" if missing else "PARTIAL" if install_issues else "PASS"
     return {
         "status": install_doctor_status,
         "home": display_path(home, home, explicit_home),
         "fake_home_used": explicit_home,
+        "install_required": require_installed,
         "mutation_performed": False,
         "secret_value_printed": False,
         "real_home_touched": False,
@@ -374,7 +385,7 @@ def build_result(home: Path, explicit_home: bool) -> dict:
         "source_package": source_package,
         "providers": providers,
         "missing_manifests": missing,
-        "install_issues": drift,
+        "install_issues": install_issues,
         "next_actions": next_actions,
         "update_command": "git pull --ff-only && PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json",
     }
@@ -384,11 +395,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run GroundLine provider smoke checks.")
     parser.add_argument("--home", help="fake or target home directory")
     parser.add_argument("--json", action="store_true", help="emit JSON")
+    parser.add_argument(
+        "--require-installed",
+        action="store_true",
+        help="treat missing provider targets as PARTIAL instead of plan-only PASS",
+    )
     args = parser.parse_args()
 
     explicit_home = args.home is not None
     home = Path(args.home).expanduser() if args.home else Path.home()
-    result = build_result(home, explicit_home)
+    result = build_result(home, explicit_home, args.require_installed)
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
