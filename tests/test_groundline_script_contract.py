@@ -454,6 +454,46 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertEqual(non_passing[0]["json_summary"]["install_doctor_status"], "PARTIAL")
         self.assertEqual(module.collect_next_actions([result]), ["refresh the Codex provider install"])
 
+    def test_release_gate_preserves_staged_smoke_summary_fields(self) -> None:
+        script_path = SCRIPTS_DIR / "groundline_release_gate.py"
+        spec = importlib.util.spec_from_file_location("groundline_release_gate_staged_summary", script_path)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["groundline_release_gate_staged_summary"] = module
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory(prefix="groundline-release-staged-summary-") as temp:
+            temp_root = Path(temp)
+            staged_script = temp_root / "staged_json.py"
+            payload = {
+                "status": "PASS",
+                "fake_home_used": True,
+                "stage_package": True,
+                "temp_state_created": True,
+                "real_home_touched": False,
+                "staged_targets": ["~/.codex/plugins/groundline"],
+            }
+            staged_script.write_text(
+                "import json\n"
+                f"print(json.dumps({payload!r}))\n",
+                encoding="utf-8",
+            )
+            gate = module.Gate(
+                "staged-provider-smoke",
+                "Run staged provider smoke",
+                [sys.executable, str(staged_script)],
+                temp_root,
+            )
+            result = module.run_gate(gate, timeout=5)
+
+        self.assertEqual(result["status"], "PASS")
+        self.assertTrue(result["json_summary"]["fake_home_used"])
+        self.assertTrue(result["json_summary"]["stage_package"])
+        self.assertTrue(result["json_summary"]["temp_state_created"])
+        self.assertFalse(result["json_summary"]["real_home_touched"])
+        self.assertNotIn("staged_targets", result["json_summary"])
+
     def test_release_gate_top_level_summary_lists_partial_next_actions(self) -> None:
         script_path = SCRIPTS_DIR / "groundline_release_gate.py"
         spec = importlib.util.spec_from_file_location("groundline_release_gate_top_level", script_path)

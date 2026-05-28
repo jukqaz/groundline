@@ -69,10 +69,11 @@ later dogfood and scenario gates from producing evidence. The wrapper still
 returns `PARTIAL` when any gate is partial.
 
 When a gate emits JSON, the wrapper preserves a compact `json_summary` with
-fields such as `status`, `install_doctor_status`, `install_issues`, and
-`next_actions`. Use that summary before reading long `stdout_tail` output.
-The top-level `non_passing_gates` and `next_actions` fields summarize the
-current blocker set for people and LLM handoff.
+fields such as `status`, `install_doctor_status`, `install_issues`,
+`stage_package`, `temp_state_created`, and `next_actions`. Use that summary
+before reading long `stdout_tail` output. The top-level `non_passing_gates` and
+`next_actions` fields summarize the current blocker set for people and LLM
+handoff.
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json

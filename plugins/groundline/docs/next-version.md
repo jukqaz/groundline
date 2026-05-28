@@ -18,9 +18,10 @@ These are already done and should not be re-opened unless validation fails:
 - English and Korean provider packaging docs exist.
 - The v0.3.2 baseline passed local validation, provider validation, and CI on
   `main`; the current patch draft has passing local validation, provider-native
-  validation, staged dogfood, and scenario evidence, while the full release gate
-  remains PARTIAL until provider installs are refreshed from the published ref.
-  Tagging still waits for an explicit ship decision.
+  validation, staged dogfood, staged provider smoke, and scenario evidence.
+  Real provider smoke remains PARTIAL until Codex and Claude Code provider
+  targets are refreshed. Tagging still waits for an explicit ship decision and
+  the `0.3.3` manifest bump.
 
 ## Current Status: v0.3.3 Patch Draft
 
@@ -69,6 +70,10 @@ Completed:
 - release gate accepts `--release-version` so the actual release cut fails when
   source or packaged manifests still point at the previous public version or the
   requested version is not plain `X.Y.Z` semver
+- staged provider smoke passes, while real provider smoke remains PARTIAL until
+  stale same-version Codex and Claude Code targets are refreshed
+- the explicit `--release-version 0.3.3` preflight still fails until manifests
+  are bumped
 - no new skills added
 
 ## 1. Install Posture And Version Drift
@@ -210,4 +215,6 @@ macOS local scenario, Linux Docker dry-run, Linux Docker execution, and at least
 one remote install proof when the package is meant to be installed from GitHub.
 If provider smoke reports `content_fingerprint_mismatch` against same-version
 local targets, treat the full closeout as PARTIAL until those targets are
-refreshed from the published ref.
+refreshed from the pushed package. Once provider smoke is green, the next
+release blocker is the explicit `--release-version 0.3.3` preflight until the
+manifest bump and changelog move are performed.

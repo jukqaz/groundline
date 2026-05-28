@@ -18,9 +18,10 @@ version drift control, compact proof workflow에 집중합니다.
 - 영어/한국어 provider packaging 문서 존재
 - v0.3.2 baseline은 `main`에서 local validation, provider validation, CI를
   통과했고, 현재 patch draft는 local validation, provider-native validation,
-  staged dogfood, scenario evidence가 통과합니다. full release gate는 provider
-  install이 published ref에서 refresh되기 전까지 PARTIAL입니다. tag는 명시적인
-  ship decision 뒤에만 진행합니다.
+  staged dogfood, staged provider smoke, scenario evidence가 통과합니다.
+  real provider smoke는 Codex와 Claude Code의 stale same-version target이
+  refresh되기 전까지 PARTIAL입니다. tag는 명시적인 ship decision과 `0.3.3`
+  manifest bump 뒤에만 진행합니다.
 
 ## 현재 상태
 
@@ -63,6 +64,9 @@ GitHub 가이드 설치 과정에서 드러난 provider별 설치 상태와 cach
 - release gate는 `--release-version`을 받아 실제 release cut에서 source 또는
   packaged manifest가 이전 public version에 남아 있거나 요청 version이 plain
   `X.Y.Z` semver가 아니면 실패
+- staged provider smoke는 통과하지만, real provider smoke는 stale same-version
+  Codex/Claude Code target이 refresh되기 전까지 PARTIAL
+- 명시적인 `--release-version 0.3.3` preflight는 manifest bump 전까지 실패
 - 새 skill 추가 없음
 
 ## 1. Install posture와 version drift
@@ -158,5 +162,7 @@ safety eval, privacy scan, provider smoke, staged dogfood, macOS local
 scenario, Linux Docker dry-run, Linux Docker execution을 실행합니다.
 GitHub에서 설치하는 배포라면 remote install proof도 최소 1개 남깁니다.
 provider smoke가 같은 version의 local target에서
-`content_fingerprint_mismatch`를 보고하면, published ref로 target을 새로
-설치하기 전까지 full closeout은 PARTIAL로 봅니다.
+`content_fingerprint_mismatch`를 보고하면, pushed package로 target을 새로
+설치하기 전까지 full closeout은 PARTIAL로 봅니다. provider smoke가 통과하면
+다음 release blocker는 manifest bump와 changelog 이동 전까지 명시적인
+`--release-version 0.3.3` preflight입니다.

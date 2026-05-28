@@ -56,8 +56,9 @@ provider cache가 이전 버전이라 provider smoke가 정상적으로 `PARTIAL
 partial gate가 있으면 wrapper 결과도 계속 `PARTIAL`입니다.
 
 gate가 JSON을 출력하면 wrapper는 `status`, `install_doctor_status`,
-`install_issues`, `next_actions` 같은 핵심 필드를 `json_summary`로 보존합니다.
-긴 `stdout_tail`을 읽기 전에 이 요약을 먼저 봅니다.
+`install_issues`, `stage_package`, `temp_state_created`, `next_actions` 같은
+핵심 필드를 `json_summary`로 보존합니다. 긴 `stdout_tail`을 읽기 전에 이 요약을
+먼저 봅니다.
 top-level `non_passing_gates`와 `next_actions`는 현재 blocker set을 사람과
 LLM handoff용으로 요약합니다.
 

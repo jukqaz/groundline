@@ -33,6 +33,8 @@
   or when the requested version is not plain `X.Y.Z` semver.
 - Add staged provider smoke so a fake refreshed install can be proven with
   `--stage-package --require-installed` before touching real provider homes.
+- Preserve staged provider smoke summary fields in release gate output and
+  refresh maturity evidence against the current remote CI run.
 - Add a provider-native validation gate for read-only Claude Code and
   Antigravity package validation during local release closeout.
 - Redact local home paths from release gate and Docker scenario evidence
