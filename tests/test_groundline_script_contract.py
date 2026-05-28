@@ -765,6 +765,66 @@ class GroundLineScriptContractTests(unittest.TestCase):
                 self.assertEqual(probe["version_check"], "match")
                 self.assertEqual(probe["issues"], [])
 
+    def test_version_bump_sync_validates_and_smoke_reports_stale_cache(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-version-bump-") as temp:
+            root = Path(temp)
+            pack_root = self.copy_pack(root)
+            next_version = "9.9.9"
+            stale_version = "0.0.1"
+            for relative in ["plugin.json", ".codex-plugin/plugin.json", ".claude-plugin/plugin.json"]:
+                manifest = pack_root / relative
+                data = json.loads(manifest.read_text(encoding="utf-8"))
+                data["version"] = next_version
+                manifest.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+            sync = self.run_script("sync_provider_package.py", "--json", pack_root=pack_root)
+            source_validate = self.run_script("validate_pack.py", "--json", pack_root=pack_root)
+            package_validate = self.run_script("validate_pack.py", "--json", pack_root=pack_root / "plugins/groundline")
+            manifest_versions = {}
+            for relative in [
+                "plugin.json",
+                ".codex-plugin/plugin.json",
+                ".claude-plugin/plugin.json",
+                "plugins/groundline/plugin.json",
+                "plugins/groundline/.codex-plugin/plugin.json",
+                "plugins/groundline/.claude-plugin/plugin.json",
+            ]:
+                manifest_versions[relative] = json.loads((pack_root / relative).read_text(encoding="utf-8"))["version"]
+
+            home = self.make_fake_home(root)
+            codex_target = home / ".codex/plugins/cache/groundline/groundline" / stale_version
+            claude_target = home / ".claude/plugins/cache/groundline/groundline" / stale_version
+            codex_target.mkdir(parents=True)
+            claude_target.mkdir(parents=True)
+            shutil.copytree(pack_root / ".codex-plugin", codex_target / ".codex-plugin")
+            shutil.copytree(pack_root / ".claude-plugin", claude_target / ".claude-plugin")
+            shutil.copytree(pack_root / "skills", codex_target / "skills")
+            shutil.copytree(pack_root / "skills", claude_target / "skills")
+            for manifest in [codex_target / ".codex-plugin/plugin.json", claude_target / ".claude-plugin/plugin.json"]:
+                data = json.loads(manifest.read_text(encoding="utf-8"))
+                data["version"] = stale_version
+                manifest.write_text(json.dumps(data), encoding="utf-8")
+
+            smoke = self.run_script("groundline_provider_smoke.py", "--home", str(home), "--json", pack_root=pack_root)
+            smoke_result = json.loads(smoke.stdout)
+
+        self.assertEqual(sync.returncode, 0, sync.stdout + sync.stderr)
+        self.assertEqual(source_validate.returncode, 0, source_validate.stdout + source_validate.stderr)
+        self.assertEqual(package_validate.returncode, 0, package_validate.stdout + package_validate.stderr)
+        for relative, version in manifest_versions.items():
+            with self.subTest(manifest=relative):
+                self.assertEqual(version, next_version)
+
+        self.assertEqual(smoke.returncode, 2)
+        self.assertEqual(smoke_result["status"], "PARTIAL")
+        self.assertEqual(smoke_result["source_package"]["version"], next_version)
+        for provider_name in ["codex", "claude_code"]:
+            with self.subTest(provider=provider_name):
+                probe = smoke_result["providers"][provider_name]["runtime_probe"]
+                self.assertEqual(probe["installed_version"], stale_version)
+                self.assertEqual(probe["source_version"], next_version)
+                self.assertIn("stale_cache_version", probe["issues"])
+
     def test_provider_smoke_reports_missing_payload_and_antigravity_target(self) -> None:
         with tempfile.TemporaryDirectory(prefix="groundline-provider-payload-") as temp:
             home = self.make_fake_home(Path(temp))
