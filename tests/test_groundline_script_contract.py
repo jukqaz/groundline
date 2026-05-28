@@ -155,6 +155,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertFalse(result["mutation_performed"])
         self.assertFalse(result["publishing_performed"])
         self.assertFalse(result["real_home_touched"])
+        self.assertNotIn(str(Path.home()), json.dumps(result))
         gate_ids = [gate["id"] for gate in result["gates"]]
         self.assertEqual(
             gate_ids,
@@ -178,6 +179,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
             with self.subTest(gate=gate["id"]):
                 self.assertFalse(gate["executed"])
                 self.assertIsInstance(gate["command"], list)
+                self.assertEqual(gate["command"][0], "python3")
                 self.assertNotIn("git", gate["command"][0])
 
     def test_release_gate_can_plan_full_local_release_gate(self) -> None:

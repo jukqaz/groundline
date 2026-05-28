@@ -33,6 +33,13 @@ def relative_path(path: Path) -> str:
         return str(path)
 
 
+def sanitize_text(value: str) -> str:
+    home = str(Path.home())
+    if home and value.startswith(home):
+        return "~" + value[len(home) :]
+    return value.replace(home + "/", "~/") if home else value
+
+
 def build_gates(include_docker_execution: bool, actionlint_bin: str | None) -> list[Gate]:
     lint_command = python_command("scripts/lint.py", "--json", "--require-actionlint")
     if actionlint_bin:
@@ -84,7 +91,8 @@ def output_tail(value: str | bytes | None, line_limit: int = 30) -> str:
         return ""
     if isinstance(value, bytes):
         value = value.decode("utf-8", errors="replace")
-    return "\n".join(value.splitlines()[-line_limit:])
+    text = "\n".join(value.splitlines()[-line_limit:])
+    return sanitize_text(text)
 
 
 def gate_to_result(gate: Gate, executed: bool) -> dict:

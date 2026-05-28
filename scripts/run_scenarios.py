@@ -82,17 +82,29 @@ def docker_command(docker_bin: str, image: str) -> list[str]:
     ]
 
 
+def sanitize_text(text: str) -> str:
+    home = str(Path.home())
+    if home and text.startswith(home):
+        return "~" + text[len(home) :]
+    return text.replace(home + "/", "~/") if home else text
+
+
+def sanitize_command(command: list[str]) -> list[str]:
+    return [sanitize_text(item) for item in command]
+
+
 def output_tail(text: str | bytes | None, line_limit: int = 40) -> str:
     if text is None:
         return ""
     if isinstance(text, bytes):
         text = text.decode("utf-8", errors="replace")
-    return "\n".join(text.splitlines()[-line_limit:])
+    return sanitize_text("\n".join(text.splitlines()[-line_limit:]))
 
 
 def run_docker_scenario(result: dict, docker_bin: str | None, image: str, dry_run: bool) -> tuple[dict, int]:
     resolved = docker_bin or shutil.which("docker")
-    result["docker"].update({"image": image, "command": docker_command(resolved or "docker", image)})
+    command = docker_command(resolved or "docker", image)
+    result["docker"].update({"image": image, "command": sanitize_command(command)})
     if dry_run:
         return result, 0
     if not resolved:
@@ -102,7 +114,7 @@ def run_docker_scenario(result: dict, docker_bin: str | None, image: str, dry_ru
 
     try:
         completed = subprocess.run(
-            result["docker"]["command"],
+            command,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

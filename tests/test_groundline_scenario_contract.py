@@ -231,6 +231,10 @@ class GroundLineScenarioContractTests(unittest.TestCase):
         self.assertEqual(result["docker"]["platform"], "linux/arm64")
         self.assertFalse(result["docker"]["executed"])
         self.assertFalse(result["real_home_touched"])
+        payload = json.dumps(result)
+        self.assertNotIn(str(Path.home()), payload)
+        if str(PACK_ROOT).startswith(str(Path.home())):
+            self.assertIn("~/", payload)
 
     def write_fake_docker(
         self,
