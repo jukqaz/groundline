@@ -1,4 +1,5 @@
 import ast
+import importlib.util
 import json
 import os
 import shutil
@@ -200,6 +201,26 @@ class GroundLineScriptContractTests(unittest.TestCase):
         lint_gate = next(gate for gate in result["gates"] if gate["id"] == "lint")
         self.assertIn("--actionlint-bin", lint_gate["command"])
         self.assertIn("/tmp/actionlint", lint_gate["command"])
+
+    def test_release_gate_treats_exit_two_as_partial(self) -> None:
+        script_path = SCRIPTS_DIR / "groundline_release_gate.py"
+        spec = importlib.util.spec_from_file_location("groundline_release_gate", script_path)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["groundline_release_gate"] = module
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory(prefix="groundline-release-partial-") as temp:
+            temp_root = Path(temp)
+            partial_script = temp_root / "partial.py"
+            partial_script.write_text("raise SystemExit(2)\n", encoding="utf-8")
+            gate = module.Gate("provider-smoke", "Provider smoke partial", [sys.executable, str(partial_script)], temp_root)
+            result = module.run_gate(gate, timeout=5)
+
+        self.assertEqual(result["status"], "PARTIAL")
+        self.assertEqual(result["exit_code"], 2)
+        self.assertEqual(module.aggregate_status([result]), "PARTIAL")
 
     def test_validate_pack_emits_json_success_contract(self) -> None:
         result = self.run_script_json("validate_pack.py", "--json")
