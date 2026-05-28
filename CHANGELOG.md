@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.1 - 2026-05-28
+
+- Add a provider dogfood harness for staged package, runtime probe, and shared
+  scenario contract validation.
+- Add provider dogfood runbook and release checklist gate.
+- Record v0.2.1 dogfood evidence and accepted defers.
+
 ## v0.2.0 - 2026-05-28
 
 - Add public release, privacy, contribution, and security documentation.

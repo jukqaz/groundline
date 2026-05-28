@@ -61,6 +61,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
         expected_scripts = [
             "check_runtime_layout.py",
             "groundline_doctor.py",
+            "groundline_dogfood.py",
             "groundline_plan_update.py",
             "groundline_provider_smoke.py",
             "groundline_radar.py",
@@ -108,6 +109,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
         script_names = [
             "check_runtime_layout.py",
             "groundline_doctor.py",
+            "groundline_dogfood.py",
             "groundline_plan_update.py",
             "groundline_provider_smoke.py",
             "groundline_radar.py",
@@ -554,6 +556,65 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertTrue(probe["target_skills_present"])
         self.assertEqual(probe["target_skill_count"], result["source_package"]["skill_count"])
         self.assertTrue(probe["target_skill_count_matches_source"])
+
+    def test_dogfood_harness_runs_staged_provider_suite(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-dogfood-") as temp:
+            root = Path(temp)
+            home = self.make_fake_home(root)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            self.write_fake_executable(bin_dir, "codex", "codex-cli 0.134.0")
+            self.write_fake_executable(bin_dir, "claude", "2.1.152 (Claude Code)")
+            self.write_fake_executable(bin_dir, "agy", "1.0.2")
+
+            result = self.run_script_json(
+                "groundline_dogfood.py",
+                "--home",
+                str(home),
+                "--bin-dir",
+                str(bin_dir),
+                "--stage-package",
+                "--probe-runtimes",
+                "--json",
+            )
+
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["suite"], "provider-dogfood")
+        self.assertEqual(result["scenario_count"], 3)
+        self.assertTrue(result["stage_package"])
+        self.assertTrue(result["fake_home_used"])
+        self.assertFalse(result["real_home_touched"])
+        self.assertFalse(result["mutation_performed"])
+        self.assertEqual(set(result["providers"].keys()), {"codex", "claude_code", "antigravity"})
+        for provider in result["providers"].values():
+            with self.subTest(provider=provider["name"]):
+                self.assertEqual(provider["status"], "PASS")
+                self.assertTrue(provider["runtime"]["available"])
+                self.assertTrue(provider["install"]["target_exists"])
+                self.assertTrue(provider["install"]["target_manifest_present"])
+                self.assertTrue(provider["install"]["target_skills_present"])
+                self.assertEqual(provider["install"]["target_skill_count"], result["source_package"]["skill_count"])
+                self.assertTrue(provider["install"]["target_skill_count_matches_source"])
+                self.assertEqual(len(provider["scenario_results"]), 3)
+                self.assertTrue(all(item["status"] == "PASS" for item in provider["scenario_results"]))
+
+    def test_dogfood_harness_refuses_real_home_staging(self) -> None:
+        completed = self.run_script(
+            "groundline_dogfood.py",
+            "--home",
+            str(Path.home()),
+            "--stage-package",
+            "--json",
+        )
+
+        self.assertNotEqual(completed.returncode, 0)
+        result = json.loads(completed.stdout)
+        self.assertEqual(result["status"], "FAIL")
+        self.assertEqual(result["suite"], "provider-dogfood")
+        self.assertEqual(result["home"], "~")
+        self.assertFalse(result["real_home_touched"])
+        self.assertFalse(result["mutation_performed"])
+        self.assertIn("refusing to stage package", result["error"])
 
 
 if __name__ == "__main__":

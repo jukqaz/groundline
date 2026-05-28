@@ -28,3 +28,6 @@ When a fake or real provider target already contains a GroundLine checkout, the
 runtime probe reports target manifest presence, target skills presence, and
 whether the target skill count matches the source package. It still performs no
 mutation.
+
+Use `docs/provider-dogfood.md` and `scripts/groundline_dogfood.py` when a staged
+package plus shared scenario contract check is required.

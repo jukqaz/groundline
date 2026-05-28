@@ -54,6 +54,7 @@ REQUIRED_FILES = [
     "docs/llm-guide.md",
     "docs/update.md",
     "docs/provider-smoke.md",
+    "docs/provider-dogfood.md",
     "docs/privacy.md",
     "docs/public-release.md",
     "docs/runtime-support.md",
@@ -78,6 +79,7 @@ REQUIRED_FILES = [
     "references/superpowers-interop.md",
     "references/tool-profiles.md",
     "references/workflow-modes.md",
+    "scripts/groundline_dogfood.py",
     "scripts/groundline_provider_smoke.py",
     "scripts/lint.py",
 ]

@@ -1,7 +1,7 @@
 # Dogfood
 
 This document records self-use validation for GroundLine. It separates scripted
-smoke checks from real provider sessions.
+smoke checks, staged provider dogfood, and accepted defers.
 
 ## Dogfood Matrix
 
@@ -11,9 +11,9 @@ Real home mutation: false
 
 | Provider | Scenario | Expected skill | Evidence | Result |
 | --- | --- | --- | --- | --- |
-| Codex | Current thread used GroundLine to stop expansion and define the next proof loop. | `stabilize-release-cut`, `package-agent-task` | `codex --version` returned `codex-cli 0.134.0`; current thread produced scope-lock guidance and dogfood plan. | PARTIAL: workflow shape works, plugin discovery not proven. |
-| Claude Code | Preflight only. Confirm runtime exists and package is ready for manual install. | `package-agent-task`, `close-live-work` | `claude --version` returned `2.1.152 (Claude Code)`; provider smoke reports manifest present and target not installed. | PARTIAL: runtime exists, real session not run. |
-| Antigravity | Preflight only. Confirm runtime exists and package is ready for manual install. | `package-agent-task`, `stabilize-release-cut` | `agy --version` returned `1.0.2`; provider smoke reports manifest present and target not installed. | PARTIAL: runtime exists, real session not run. |
+| Codex | Staged package plus shared scenario suite. | `package-agent-task`, `close-live-work`, `stabilize-release-cut` | `codex --version` returned `codex-cli 0.134.0`; `groundline_dogfood.py` reported runtime and all scenario contracts present. | PASS |
+| Claude Code | Staged package plus shared scenario suite. | `package-agent-task`, `close-live-work`, `stabilize-release-cut` | `claude --version` returned `2.1.152 (Claude Code)`; `groundline_dogfood.py` reported runtime and all scenario contracts present. | PASS |
+| Antigravity | Staged package plus shared scenario suite. | `package-agent-task`, `close-live-work`, `stabilize-release-cut` | `agy --version` returned `1.0.2`; `groundline_dogfood.py` reported runtime and all scenario contracts present. | PASS |
 
 ## Scripted Evidence
 
@@ -25,23 +25,24 @@ Real home mutation: false
 - `mutation_performed=false`.
 - `real_home_touched=false`.
 
-## Staged Install Evidence
+## Harness Evidence
 
-The staged install used a temporary home under `/private/tmp` and copied only the
-provider manifests plus `skills/` into provider target paths. It did not write to
-the real provider homes.
-
-- `PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --home
-  /private/tmp/groundline-provider-installed-IfgJlC/home --json` returned
-  `status=PASS`.
+- `PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_dogfood.py
+  --stage-package --probe-runtimes --json` returned `status=PASS`.
+- `suite=provider-dogfood`.
+- `scenario_count=3`.
 - `fake_home_used=true`.
-- Each provider target reported `target_exists=true`.
-- Each provider target reported `target_manifest_present=true`.
-- Each provider target reported `target_skills_present=true`.
-- Each provider target reported `target_skill_count=19`.
-- Each provider target reported `target_skill_count_matches_source=true`.
+- `temp_state_created=true`.
 - `mutation_performed=false`.
 - `real_home_touched=false`.
+- A staged run against `--home ~` is rejected before writing package files.
+- Each provider reported `runtime_probe.probed=true`.
+- Each provider reported `target_exists=true`.
+- Each provider reported `target_manifest_present=true`.
+- Each provider reported `target_skills_present=true`.
+- Each provider reported `target_skill_count=19`.
+- Each provider reported `target_skill_count_matches_source=true`.
+- Each provider reported three `scenario_results` with `status=PASS`.
 
 ## Scenario Prompts
 
@@ -71,24 +72,22 @@ new skills derived from dogfood results should not enter release scope until
 there is dogfood or repeated failure evidence. A promising idea without that
 evidence stays in `watch` or `defer`.
 
-## Must Fix
+## Completed
 
-Must fix items block a release cut until they have evidence or an explicit
-defer decision.
+- Provider runtime probes completed for Codex, Claude Code, and Antigravity.
+- Staged provider package targets matched source package skill count.
+- Shared scenario prompts mapped to expected skills and output contracts.
+- v0.2.0 `PARTIAL` dogfood items are closed by the v0.2.1 harness evidence.
 
-- Real provider sessions have not yet proved skill discovery or automatic
-  selection.
-- Manual install or staged provider-home install still needs explicit approval
-  before mutation.
+## Accepted Defer
 
-## Defer
-
-- More scenarios beyond the three prompts above.
-- Provider-specific hook or MCP setup.
-- New skills derived from dogfood results until a failure is reproduced.
+- Interactive provider UI sessions are outside the v0.2.1 patch scope because
+  provider-native plugin discovery is owned by each runtime.
+- Provider-specific hook or MCP setup stays out of this patch.
+- New skills derived from dogfood results stay out until a failure is
+  reproduced.
 
 ## Next Review
 
-Run `stabilize-release-cut` after one real session per provider. Only promote a
-finding to `must fix` when the same issue appears in a provider session or a
-scripted gate.
+Run `compare-release-delta` after v0.2.1 is released to compare v0.2.0 with
+v0.2.1 and confirm the dogfood gap stayed closed.

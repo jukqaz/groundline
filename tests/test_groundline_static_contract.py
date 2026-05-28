@@ -23,8 +23,8 @@ class GroundLineStaticContractTests(unittest.TestCase):
         codex = json.loads((PACK_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
         claude = json.loads((PACK_ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
         interface = codex.get("interface", {})
-        self.assertEqual(codex.get("version"), "0.2.0")
-        self.assertEqual(claude.get("version"), "0.2.0")
+        self.assertEqual(codex.get("version"), "0.2.1")
+        self.assertEqual(claude.get("version"), "0.2.1")
         self.assertEqual(interface.get("displayName"), "GroundLine")
         self.assertIn("control plane", interface.get("longDescription", "").lower())
 
@@ -49,6 +49,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
             "docs/llm-guide.md",
             "docs/update.md",
             "docs/provider-smoke.md",
+            "docs/provider-dogfood.md",
             "docs/privacy.md",
             "docs/public-release.md",
             "docs/runtime-support.md",
@@ -75,6 +76,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
             "references/workflow-modes.md",
             "scripts/check_runtime_layout.py",
             "scripts/groundline_doctor.py",
+            "scripts/groundline_dogfood.py",
             "scripts/groundline_plan_update.py",
             "scripts/groundline_provider_smoke.py",
             "scripts/groundline_radar.py",
@@ -99,6 +101,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
                 self.assertIn("--command-sources", text)
 
         self.assertIn(".github/workflows/test.yml", checklist)
+        self.assertIn("scripts/groundline_dogfood.py --stage-package --probe-runtimes --json", checklist)
 
     def test_ci_workflow_runs_offline_validation_gates(self) -> None:
         workflow = PACK_ROOT / ".github/workflows/test.yml"
@@ -117,6 +120,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn("python3 scripts/check_runtime_layout.py --json", text)
         self.assertIn("python3 scripts/run_scenarios.py --platform macos --sandbox local --json", text)
         self.assertIn("python3 scripts/run_scenarios.py --platform linux --sandbox docker --dry-run --json", text)
+        self.assertIn("python3 scripts/groundline_dogfood.py --stage-package --json", text)
 
     def test_radar_workflow_runs_on_schedule_and_uploads_artifact(self) -> None:
         workflow = PACK_ROOT / ".github/workflows/radar.yml"
@@ -146,6 +150,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn('"docs/llm-guide.md"', validator)
         self.assertIn('"docs/update.md"', validator)
         self.assertIn('"docs/provider-smoke.md"', validator)
+        self.assertIn('"docs/provider-dogfood.md"', validator)
         self.assertIn('"docs/privacy.md"', validator)
         self.assertIn('"docs/public-release.md"', validator)
         self.assertIn('"docs/dogfood.md"', validator)
@@ -154,6 +159,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn('"references/skill-lifecycle.md"', validator)
         self.assertIn('"CONTRIBUTING.md"', validator)
         self.assertIn('"SECURITY.md"', validator)
+        self.assertIn('"scripts/groundline_dogfood.py"', validator)
         self.assertIn('"scripts/groundline_provider_smoke.py"', validator)
         self.assertIn('"scripts/lint.py"', validator)
 
@@ -161,6 +167,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
         install = (PACK_ROOT / "docs/install.md").read_text(encoding="utf-8")
         update = (PACK_ROOT / "docs/update.md").read_text(encoding="utf-8")
         smoke = (PACK_ROOT / "docs/provider-smoke.md").read_text(encoding="utf-8")
+        dogfood = (PACK_ROOT / "docs/provider-dogfood.md").read_text(encoding="utf-8")
 
         self.assertIn("gh repo clone jukqaz/groundline", install)
         self.assertIn("git clone https://github.com/jukqaz/groundline.git", install)
@@ -169,6 +176,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn("git pull --ff-only", update)
         self.assertIn("python3 scripts/validate_pack.py --json", update)
         self.assertIn("python3 scripts/groundline_provider_smoke.py --json", smoke)
+        self.assertIn("python3 scripts/groundline_dogfood.py --stage-package --probe-runtimes --json", dogfood)
         self.assertIn("mutation_performed=false", smoke)
         self.assertIn("displayed with `~`", smoke)
 
@@ -182,15 +190,18 @@ class GroundLineStaticContractTests(unittest.TestCase):
             "Expected skill",
             "Evidence",
             "Result",
-            "Staged Install Evidence",
-            "Must fix",
-            "Defer",
+            "Harness Evidence",
+            "provider-dogfood",
             "Real home mutation: false",
+            "status=PASS",
+            "scenario_count=3",
+            "runtime_probe",
             "fake_home_used=true",
             "target_exists=true",
             "target_skill_count=19",
             "target_skill_count_matches_source=true",
             "2026-05-28",
+            "Accepted Defer",
         ]:
             with self.subTest(term=term):
                 self.assertIn(term, text)
