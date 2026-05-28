@@ -1,6 +1,6 @@
 # Next Work
 
-This backlog captures work intentionally left outside the v0.2.1 release. Do
+This backlog captures work intentionally left outside the v0.2.x release line. Do
 not expand the current release scope from this document. Pick one item, define
 evidence, implement, and close it before adding more.
 
@@ -83,6 +83,6 @@ Acceptance:
 
 ## Release Boundary
 
-These items are not required to keep v0.2.1 valid. The v0.2.1 release remains
+These items are not required to keep v0.2.2 valid. The v0.2.2 release remains
 complete if the release URL, tag, CI run, package validation, provider smoke,
 and staged dogfood remain PASS.

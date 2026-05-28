@@ -23,8 +23,8 @@ class GroundLineStaticContractTests(unittest.TestCase):
         codex = json.loads((PACK_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
         claude = json.loads((PACK_ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
         interface = codex.get("interface", {})
-        self.assertEqual(codex.get("version"), "0.2.1")
-        self.assertEqual(claude.get("version"), "0.2.1")
+        self.assertEqual(codex.get("version"), "0.2.2")
+        self.assertEqual(claude.get("version"), "0.2.2")
         self.assertEqual(interface.get("displayName"), "GroundLine")
         self.assertIn("control plane", interface.get("longDescription", "").lower())
 
@@ -51,6 +51,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
             "docs/provider-smoke.md",
             "docs/provider-dogfood.md",
             "docs/next-work.md",
+            "docs/next-version.md",
             "docs/privacy.md",
             "docs/public-release.md",
             "docs/runtime-support.md",
@@ -153,6 +154,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn('"docs/provider-smoke.md"', validator)
         self.assertIn('"docs/provider-dogfood.md"', validator)
         self.assertIn('"docs/next-work.md"', validator)
+        self.assertIn('"docs/next-version.md"', validator)
         self.assertIn('"docs/privacy.md"', validator)
         self.assertIn('"docs/public-release.md"', validator)
         self.assertIn('"docs/dogfood.md"', validator)

@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.2 - 2026-05-28
+
+- Add the next work backlog for provider invocation dogfood, safety evaluation,
+  representative workflows, artifact lifecycle, ecosystem refresh, and install
+  UX.
+- Link the backlog and next version plan from README and make package
+  validation require both.
+
 ## v0.2.1 - 2026-05-28
 
 - Add a provider dogfood harness for staged package, runtime probe, and shared

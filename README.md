@@ -64,6 +64,7 @@ boundaries, and verification language around them.
 - Privacy: `docs/privacy.md`
 - Git history privacy: `docs/git-history-privacy.md`
 - Next work: `docs/next-work.md`
+- Next version: `docs/next-version.md`
 - Skill portfolio: `docs/skill-portfolio.md`
 - Skill lifecycle: `references/skill-lifecycle.md`
 - LLM-readable skill index: `references/skill-index.json`
