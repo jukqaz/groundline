@@ -23,7 +23,7 @@
   release delta handoffs.
 - Add a release gate runner that prints or executes the local release gate
   sequence while excluding approval-required tag, push, and GitHub Release
-  commands.
+  commands, and preserves compact JSON summaries for partial gates.
 - Redact local home paths from release gate and Docker scenario evidence
   outputs before they are copied into release review.
 - Separate approval-required publishing commands from read-only release

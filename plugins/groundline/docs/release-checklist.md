@@ -62,6 +62,10 @@ Use `--keep-going` during release closeout so an expected provider smoke
 later dogfood and scenario gates from producing evidence. The wrapper still
 returns `PARTIAL` when any gate is partial.
 
+When a gate emits JSON, the wrapper preserves a compact `json_summary` with
+fields such as `status`, `install_doctor_status`, `install_issues`, and
+`next_actions`. Use that summary before reading long `stdout_tail` output.
+
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
 (cd plugins/groundline && PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json)

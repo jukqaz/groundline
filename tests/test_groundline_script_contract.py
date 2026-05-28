@@ -228,6 +228,41 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertEqual(result["exit_code"], 2)
         self.assertEqual(module.aggregate_status([result]), "PARTIAL")
 
+    def test_release_gate_preserves_json_summary_for_partial_gates(self) -> None:
+        script_path = SCRIPTS_DIR / "groundline_release_gate.py"
+        spec = importlib.util.spec_from_file_location("groundline_release_gate_summary", script_path)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["groundline_release_gate_summary"] = module
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory(prefix="groundline-release-summary-") as temp:
+            temp_root = Path(temp)
+            partial_script = temp_root / "partial_json.py"
+            payload = {
+                "status": "PARTIAL",
+                "install_doctor_status": "PARTIAL",
+                "next_actions": ["refresh the Codex provider install"],
+                "install_issues": [{"provider": "codex", "issues": ["content_fingerprint_mismatch"]}],
+                "mutation_performed": False,
+                "real_home_touched": False,
+                "large_payload": ["x" * 200 for _ in range(80)],
+            }
+            partial_script.write_text(
+                "import json\n"
+                f"print(json.dumps({payload!r}))\n"
+                "raise SystemExit(2)\n",
+                encoding="utf-8",
+            )
+            gate = module.Gate("provider-smoke", "Provider smoke partial", [sys.executable, str(partial_script)], temp_root)
+            result = module.run_gate(gate, timeout=5)
+
+        self.assertEqual(result["status"], "PARTIAL")
+        self.assertEqual(result["json_summary"]["next_actions"], ["refresh the Codex provider install"])
+        self.assertEqual(result["json_summary"]["install_issues"][0]["provider"], "codex")
+        self.assertNotIn("large_payload", result["json_summary"])
+
     def test_validate_pack_emits_json_success_contract(self) -> None:
         result = self.run_script_json("validate_pack.py", "--json")
 

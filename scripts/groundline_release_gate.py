@@ -95,6 +95,45 @@ def output_tail(value: str | bytes | None, line_limit: int = 30) -> str:
     return sanitize_text(text)
 
 
+SUMMARY_KEYS = [
+    "status",
+    "install_doctor_status",
+    "next_actions",
+    "install_issues",
+    "missing_manifests",
+    "mutation_performed",
+    "publishing_performed",
+    "real_home_touched",
+    "secret_value_printed",
+    "fake_home_used",
+    "network",
+    "case_count",
+]
+
+
+def sanitized_json_value(value):
+    if isinstance(value, str):
+        return sanitize_text(value)
+    if isinstance(value, list):
+        return [sanitized_json_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: sanitized_json_value(item) for key, item in value.items()}
+    return value
+
+
+def json_summary(stdout: str | None) -> dict | None:
+    if not stdout:
+        return None
+    try:
+        payload = json.loads(stdout)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    summary = {key: sanitized_json_value(payload[key]) for key in SUMMARY_KEYS if key in payload}
+    return summary or None
+
+
 def gate_to_result(gate: Gate, executed: bool) -> dict:
     return {
         "id": gate.gate_id,
@@ -155,6 +194,9 @@ def run_gate(gate: Gate, timeout: int) -> dict:
             "stderr_tail": output_tail(completed.stderr),
         }
     )
+    summary = json_summary(completed.stdout)
+    if summary:
+        result["json_summary"] = summary
     return result
 
 

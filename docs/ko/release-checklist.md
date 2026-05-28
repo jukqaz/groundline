@@ -50,6 +50,10 @@ provider cache가 이전 버전이라 provider smoke가 정상적으로 `PARTIAL
 뒤의 dogfood와 scenario gate 증거를 계속 수집하기 위해서입니다. 단 하나라도
 partial gate가 있으면 wrapper 결과도 계속 `PARTIAL`입니다.
 
+gate가 JSON을 출력하면 wrapper는 `status`, `install_doctor_status`,
+`install_issues`, `next_actions` 같은 핵심 필드를 `json_summary`로 보존합니다.
+긴 `stdout_tail`을 읽기 전에 이 요약을 먼저 봅니다.
+
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
 (cd plugins/groundline && PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json)
