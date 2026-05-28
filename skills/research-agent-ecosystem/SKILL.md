@@ -10,6 +10,13 @@ description: Use when gathering current sources about agent tools, skills, plugi
 Use this skill to gather current, source-backed information before comparing or
 adopting external agent workflow ideas.
 
+## Routing Boundary
+
+Use this only for source gathering. If the user asks for comparison or recommendation in the same request, use `agent-ecosystem-radar`.
+If the candidate list already exists, move to `evaluate-agent-capability`,
+`compare-agent-workflows`, or `recommend-groundline-upgrades` instead of
+repeating research.
+
 ## Workflow
 
 1. Restate the research scope and supported GroundLine runtimes.

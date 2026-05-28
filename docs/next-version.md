@@ -1,11 +1,11 @@
 # Next Version Plan
 
-Target: v0.3.2
+Target: v0.3.3
 
-v0.3.1 reduces accepted partials from v0.3.0, records optional MCP and provider
-guardrail policy, and proves the local Superpowers companion loop. The next
-version should focus on remote install proof and first-use clarity before
-adding more skills.
+v0.3.2 tightens first-use skill routing, separates staged dogfood checks from
+real provider invocation proof, and links provider-history inventory to AI usage
+maturity assessment. The next version should reduce the remaining provider
+invocation partial and add only the smallest representative workflows.
 
 ## Completed Foundation
 
@@ -18,14 +18,15 @@ These are already done and should not be re-opened unless validation fails:
 - English and Korean provider packaging docs exist.
 - Local validation, provider validation, and CI pass on `main`.
 
-## Current Status: v0.3.1 Patch Ready
+## Current Status: v0.3.2 Patch Ready
 
-The narrow v0.3.1 slice keeps the sanitized evidence path and records follow-up
-dogfood without raw transcript collection or provider-home dumps.
+The narrow v0.3.2 slice keeps the sanitized evidence path and improves prompt
+routing clarity without adding new skills or provider setup.
 
 Completed:
 
 - sanitized invocation proof format in `docs/provider-dogfood.md`
+- staged contract harness language separated from real provider invocation proof
 - one sanitized proof row each for Codex, Claude Code, and Antigravity
 - one proof row for each core prompt family: handoff, release closeout, and
   expansion control
@@ -33,6 +34,8 @@ Completed:
 - offline safety fixture and `scripts/groundline_safety_eval.py`
 - optional provider guardrail and MCP recipe docs
 - local Superpowers companion dogfood
+- explicit routing for research, evaluation, comparison, recommendation, AI
+  usage assessment, and release triage skills
 - no new skills added
 
 ## 1. Provider Invocation Dogfood

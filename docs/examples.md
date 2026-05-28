@@ -204,6 +204,34 @@ GroundLine Recommendation:
 - verification checklist: ...
 ```
 
+## Gather Sources Only
+
+Prompt:
+
+```text
+Find current source-backed references for agent workflow tools, but do not compare or recommend yet.
+```
+
+Expected skill:
+
+```text
+research-agent-ecosystem
+```
+
+## Compare Existing Candidates
+
+Prompt:
+
+```text
+Compare these three researched workflow candidates against GroundLine and tell me the tradeoffs.
+```
+
+Expected skill:
+
+```text
+compare-agent-workflows
+```
+
 ## Evaluate Existing Tool Or Skill
 
 Prompt:
@@ -271,6 +299,20 @@ GroundLine AI Usage Maturity:
 - next upgrades:
 - safety notes:
 - verification needed:
+```
+
+## Evaluate AI Usage From Provider History
+
+Prompt:
+
+```text
+Read my local provider histories safely, build a redacted evidence packet, and assess my AI usage maturity.
+```
+
+Expected flow:
+
+```text
+audit-agent-history -> evaluate-ai-usage-maturity
 ```
 
 ## Stabilize A Release Cut

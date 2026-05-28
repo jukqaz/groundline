@@ -10,6 +10,12 @@ description: Use when turning research and comparison findings into GroundLine u
 Use this skill to convert research and comparison output into actionable
 GroundLine changes.
 
+## Routing Boundary
+
+Use this after research or comparison findings already exist. If current sources still need to be gathered, use `research-agent-ecosystem` or `agent-ecosystem-radar` first.
+If the user asks to judge a single artifact, use `evaluate-agent-capability`
+before recommending adoption.
+
 ## Decision Labels
 
 - `adopt`: add the pattern directly because it fits GroundLine with low risk

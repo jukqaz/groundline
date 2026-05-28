@@ -10,6 +10,13 @@ description: Use when comparing agent tools, skills, plugins, MCP servers, hooks
 Use this skill after research has produced candidates. The goal is to decide
 which ideas are useful for GroundLine and which are noise.
 
+## Routing Boundary
+
+Use this after research has produced two or more candidates, or one candidate plus a clear GroundLine baseline.
+Use `evaluate-agent-capability` first when the user asks whether one artifact is any good.
+Use `recommend-groundline-upgrades` when the ranking already exists and the
+remaining task is a GroundLine change decision.
+
 ## Comparison Axes
 
 Score each candidate in plain text:

@@ -4,6 +4,16 @@
 
 - No unreleased changes.
 
+## v0.3.2 - 2026-05-28
+
+- Clarify routing boundaries for ecosystem research, single-candidate
+  evaluation, candidate comparison, and GroundLine upgrade recommendation.
+- Separate staged dogfood contract checks from real provider invocation proof.
+- Link provider-history inventory to AI usage maturity assessment through a
+  redacted Provider Evidence Packet.
+- Make release triage priority explicit across scope hold, pre-ship polish, and
+  final ship decision skills.
+
 ## v0.3.1 - 2026-05-28
 
 - Record the Claude Code follow-up proof that reduces the v0.3.0 release

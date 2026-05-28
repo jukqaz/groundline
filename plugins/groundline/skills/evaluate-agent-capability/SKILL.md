@@ -11,6 +11,13 @@ Use this skill during research before comparing or recommending external
 capabilities. It evaluates one existing tool or skill-like artifact on its own
 merits.
 
+## Routing Boundary
+
+Use this for one candidate at a time. If there are two or more candidates to rank, use `compare-agent-workflows`.
+If the user asks for source discovery first, use `research-agent-ecosystem`.
+If the user asks for research, comparison, and recommendation together, use
+`agent-ecosystem-radar`.
+
 ## Workflow
 
 1. Identify the artifact type: skill, plugin, MCP server, hook, agent, prompt

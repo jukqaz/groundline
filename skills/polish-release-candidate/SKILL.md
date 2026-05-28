@@ -10,6 +10,8 @@ description: Use when a release candidate needs final cleanup, docs polish, dupl
 Use this skill after scope is locked but before the final ship decision. It
 turns repeated pre-release cleanup into a small, evidence-backed pass.
 
+Use after scope is already locked but before the ship decision.
+
 ## Workflow
 
 1. Confirm scope is locked. If new capability appears, run `hold-the-line`.

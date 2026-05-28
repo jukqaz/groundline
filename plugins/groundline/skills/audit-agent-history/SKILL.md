@@ -12,6 +12,11 @@ Use this skill to understand local agent history as a storage and continuity sur
 This skill can prepare provider coverage notes or redacted evidence packets for
 an assessment, but it does not score AI fluency by itself.
 
+For AI usage assessment from provider histories, use
+`audit-agent-history -> evaluate-ai-usage-maturity`. This skill produces a
+redacted Provider Evidence Packet, then `evaluate-ai-usage-maturity` scores the
+workflow from that packet and durable artifacts.
+
 ## Trigger Examples
 
 - "Claude/Codex 대화내역 기반으로 만들 만한 스킬 찾아봐."

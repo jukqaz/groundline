@@ -39,15 +39,32 @@ Current status:
   need live or private tool access.
 - Local Superpowers companion dogfood is recorded and verified.
 
-## Now: Remote Install Proof
+## Completed: v0.3.2 First-use And Routing Clarity
 
-Goal: prove the package can be installed from the pushed GitHub state before
-adding more workflows.
+Goal: make user prompts route to the correct existing skill without expanding
+the skill set.
+
+Current status:
+
+- Human onboarding docs were expanded with clearer start paths.
+- Ecosystem research skills now separate source gathering, single-candidate
+  evaluation, multi-candidate comparison, and recommendation.
+- Provider-history AI usage assessment now routes through
+  `audit-agent-history -> evaluate-ai-usage-maturity`.
+- Release triage now names when to use `hold-the-line`,
+  `polish-release-candidate`, and `stabilize-release-cut`.
+- Dogfood docs now separate staged contract harness checks from real provider
+  invocation proof.
+
+## Now: Provider Invocation Partial Reduction
+
+Goal: reduce the remaining accepted provider invocation partial before adding
+more workflows.
 
 Acceptance:
 
-- Push `main` with the v0.3.1 patch.
-- Tag and publish v0.3.1 after local gates pass.
+- Push `main` with the v0.3.2 patch.
+- Tag and publish v0.3.2 after local gates pass.
 - Confirm CI passes for the pushed commit.
 - Run at least one provider install or update from the remote source.
 - Keep provider-home writes explicit and user-approved.
@@ -127,7 +144,7 @@ Acceptance:
   verification evidence, and stop condition.
 - Keep examples short enough to be scanned during an active agent session.
 
-For v0.3.1, include only examples that support the invocation dogfood evidence.
+For v0.3.2, include only examples that support the invocation dogfood evidence.
 Move the full cookbook to a later patch if it starts growing.
 
 ## P2: Artifact Lifecycle

@@ -27,28 +27,38 @@ verification evidence, then let the provider-owned feature execute it.
 ## Skill Selection
 
 - `reconcile-current-state`: stale handoff, previous agent claim, current worktree proof
-- `audit-agent-history`: derive reusable improvements from agent history
+- `audit-agent-history`: derive reusable improvements from agent history; use before maturity scoring when provider histories are the evidence source
 - `guard-side-effects`: any action touching files, remotes, money, access, secrets, or production
 - `close-live-work`: CI or local tests passed but live runtime proof is still needed
 - `align-agent-home`: provider home, config, hooks, rules, skill, or plugin boundary review
 - `recover-worktree-branch`: missing worktree, detached branch, cleanup, or recovery
 - `package-agent-task`: convert broad, resumed, or high-context requests into a concise task packet
 - `agent-ecosystem-radar`: research, compare, and recommend external workflow upgrades in one pass
-- `research-agent-ecosystem`: gather source-backed ecosystem candidates
-- `evaluate-agent-capability`: score an existing tool, skill, plugin, MCP server, hook, agent, or workflow pack before adoption
-- `evaluate-ai-usage-maturity`: assess a person or team's AI workflow maturity from artifacts without exposing raw transcripts
+- `research-agent-ecosystem`: gather source-backed ecosystem candidates only
+- `evaluate-agent-capability`: single candidate evaluation before adoption
+- `evaluate-ai-usage-maturity`: assess a person or team's AI workflow maturity from artifacts or a Provider Evidence Packet without exposing raw transcripts
 - `hold-the-line`: stop scope growth when new ideas, more research, or extra tools appear before current work is closed
 - `polish-release-candidate`: run final docs, duplicate, privacy, gate, and commit-plan cleanup before release judgment
 - `stabilize-release-cut`: lock scope, classify remaining work, run release gates, collect dogfood evidence, and make a ship decision
 - `compare-release-delta`: compare a deployed release with the previous version and produce a post-deploy checklist
-- `compare-agent-workflows`: score candidates against GroundLine scope and risk
-- `recommend-groundline-upgrades`: convert findings into `adopt`, `adapt`, `watch`, or `reject` tasks
+- `compare-agent-workflows`: score two or more researched candidates against GroundLine scope and risk
+- `recommend-groundline-upgrades`: convert existing findings into `adopt`, `adapt`, `watch`, or `reject` tasks
 - `evaluate-groundline-pack`: review this package for skill completeness, trigger clarity, tests, safety, and release fitness
 - `curate-groundline-skills`: maintain the skill portfolio and decide whether to create, adapt, merge, split, deprecate, or reject capabilities
 
 Use `references/skill-index.json` when a structured skill catalog is more
 useful than prose. Use `docs/skill-portfolio.md` when producing a maintainer
 summary for people.
+
+## Routing Priority
+
+- For single candidate evaluation, use `evaluate-agent-capability`.
+- For two or more researched candidates, use `compare-agent-workflows`.
+- For research, comparison, and recommendation in one pass, use `agent-ecosystem-radar`.
+- For provider-history AI assessment, use `audit-agent-history -> evaluate-ai-usage-maturity` and pass a redacted Provider Evidence Packet.
+- Use `hold-the-line before accepting expansion`.
+- Use `polish-release-candidate for locked pre-ship cleanup`.
+- Use `stabilize-release-cut for the final ship decision`.
 
 ## Safety Rules
 

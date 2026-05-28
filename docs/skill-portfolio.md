@@ -17,18 +17,18 @@ is easier to scan during planning, release review, and cleanup.
 | Skill | Stage | Risk | Status | Human summary |
 | --- | --- | --- | --- | --- |
 | `reconcile-current-state` | orient | read-only | active | Proves current branch, runtime, and handoff state before acting. |
-| `audit-agent-history` | research | secret-sensitive | active | Inventories local agent histories without dumping raw transcripts. |
+| `audit-agent-history` | research | secret-sensitive | active | Inventories local agent histories and prepares redacted evidence packets without dumping raw transcripts. |
 | `guard-side-effects` | decide | secret-sensitive | active | Classifies side effects and approval needs before risky actions. |
 | `close-live-work` | verify | read-only | active | Closes work with runtime, endpoint, release, or user-flow evidence. |
 | `align-agent-home` | maintain | provider-home-write | active | Separates shareable provider config from local runtime state. |
 | `recover-worktree-branch` | orient | local-write | active | Proves branch and worktree state before recovery or cleanup. |
 | `package-agent-task` | orient | secret-sensitive | experimental | Turns broad or resumed requests into concise LLM-ready task packets. |
-| `agent-ecosystem-radar` | research | read-only | experimental | Runs the research, comparison, and recommendation skill set. |
+| `agent-ecosystem-radar` | research | read-only | experimental | Runs the research, evaluation, comparison, and recommendation skill set. |
 | `research-agent-ecosystem` | research | read-only | experimental | Collects source-backed external agent workflow candidates. |
 | `compare-agent-workflows` | compare | read-only | experimental | Scores researched workflow candidates against GroundLine scope. |
 | `recommend-groundline-upgrades` | decide | read-only | experimental | Turns research and comparison into adopt, adapt, watch, or reject decisions. |
-| `evaluate-agent-capability` | verify | read-only | experimental | Scores existing tools, skills, plugins, MCP servers, hooks, agents, and workflow packs before adoption. |
-| `evaluate-ai-usage-maturity` | verify | secret-sensitive | experimental | Assesses AI workflow maturity from artifacts without exposing raw transcripts. |
+| `evaluate-agent-capability` | verify | read-only | experimental | Scores one existing tool, skill, plugin, MCP server, hook, agent, or workflow pack before adoption. |
+| `evaluate-ai-usage-maturity` | verify | secret-sensitive | experimental | Assesses AI workflow maturity from artifacts or a redacted Provider Evidence Packet. |
 | `hold-the-line` | decide | read-only | experimental | Stops scope growth and chooses finish, budget, defer, watch, or reject before more work starts. |
 | `polish-release-candidate` | verify | secret-sensitive | experimental | Runs final docs, duplicate, privacy, gate, and commit-plan cleanup before release judgment. |
 | `stabilize-release-cut` | verify | local-write | experimental | Locks release scope, classifies remaining work, and proves release readiness. |
@@ -46,3 +46,14 @@ is easier to scan during planning, release review, and cleanup.
 - A merged or deprecated skill should leave a note explaining where its behavior
   moved.
 - Human-facing docs should stay readable without requiring provider internals.
+
+## Routing Notes
+
+- Use `research-agent-ecosystem` only for source gathering.
+- Use `evaluate-agent-capability` for one candidate.
+- Use `compare-agent-workflows` for two or more researched candidates.
+- Use `recommend-groundline-upgrades` after findings exist.
+- Use `agent-ecosystem-radar` when the user asks for the whole research,
+  comparison, and recommendation loop.
+- Use `audit-agent-history -> evaluate-ai-usage-maturity` when provider
+  histories are evidence for an AI usage assessment.

@@ -10,6 +10,8 @@ description: Use when a request, task, research thread, plugin package, or activ
 Use this skill to counter expansion pressure before it turns useful work into
 an unbounded queue. It forces a scope decision before accepting another idea.
 
+Use first when expansion pressure appears before the current work is closed.
+
 ## Workflow
 
 1. State the current work and the nearest finish point.

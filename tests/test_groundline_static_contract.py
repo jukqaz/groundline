@@ -26,8 +26,8 @@ class GroundLineStaticContractTests(unittest.TestCase):
         codex = json.loads((PACK_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
         claude = json.loads((PACK_ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
         interface = codex.get("interface", {})
-        self.assertEqual(codex.get("version"), "0.3.1")
-        self.assertEqual(claude.get("version"), "0.3.1")
+        self.assertEqual(codex.get("version"), "0.3.2")
+        self.assertEqual(claude.get("version"), "0.3.2")
         self.assertEqual(interface.get("displayName"), "GroundLine")
         self.assertIn("control plane", interface.get("longDescription", "").lower())
         self.assertEqual(interface.get("composerIcon"), "./assets/groundline-icon.svg")
@@ -459,6 +459,93 @@ class GroundLineStaticContractTests(unittest.TestCase):
         for field in required_fields:
             with self.subTest(field=field):
                 self.assertIn(field, orchestrator)
+
+    def test_agent_ecosystem_routing_boundaries_are_explicit(self) -> None:
+        skill_files = {
+            name: (PACK_ROOT / f"skills/{name}/SKILL.md").read_text(encoding="utf-8")
+            for name in [
+                "agent-ecosystem-radar",
+                "research-agent-ecosystem",
+                "evaluate-agent-capability",
+                "compare-agent-workflows",
+                "recommend-groundline-upgrades",
+            ]
+        }
+        llm_guide = (PACK_ROOT / "docs/llm-guide.md").read_text(encoding="utf-8")
+
+        expected_terms = {
+            "agent-ecosystem-radar": [
+                "Use this when the user asks for research, comparison, and recommendation in one pass.",
+                "Return all four sections in order",
+            ],
+            "research-agent-ecosystem": [
+                "Use this only for source gathering.",
+                "If the user asks for comparison or recommendation in the same request, use `agent-ecosystem-radar`.",
+            ],
+            "evaluate-agent-capability": [
+                "Use this for one candidate at a time.",
+                "If there are two or more candidates to rank, use `compare-agent-workflows`.",
+            ],
+            "compare-agent-workflows": [
+                "Use this after research has produced two or more candidates, or one candidate plus a clear GroundLine baseline.",
+                "Use `evaluate-agent-capability` first when the user asks whether one artifact is any good.",
+            ],
+            "recommend-groundline-upgrades": [
+                "Use this after research or comparison findings already exist.",
+                "If current sources still need to be gathered, use `research-agent-ecosystem` or `agent-ecosystem-radar` first.",
+            ],
+        }
+
+        for skill_name, terms in expected_terms.items():
+            for term in terms:
+                with self.subTest(skill=skill_name, term=term):
+                    self.assertIn(term, skill_files[skill_name])
+
+        for term in [
+            "single candidate evaluation",
+            "two or more researched candidates",
+            "research, comparison, and recommendation in one pass",
+        ]:
+            with self.subTest(term=term):
+                self.assertIn(term, llm_guide)
+
+    def test_history_assessment_flow_links_inventory_to_maturity(self) -> None:
+        audit = (PACK_ROOT / "skills/audit-agent-history/SKILL.md").read_text(encoding="utf-8")
+        maturity = (PACK_ROOT / "skills/evaluate-ai-usage-maturity/SKILL.md").read_text(encoding="utf-8")
+        llm_guide = (PACK_ROOT / "docs/llm-guide.md").read_text(encoding="utf-8")
+
+        for text in [audit, maturity, llm_guide]:
+            with self.subTest(document=text[:20]):
+                self.assertIn("audit-agent-history -> evaluate-ai-usage-maturity", text)
+                self.assertIn("Provider Evidence Packet", text)
+
+    def test_release_skill_priority_is_explicit(self) -> None:
+        hold = (PACK_ROOT / "skills/hold-the-line/SKILL.md").read_text(encoding="utf-8")
+        polish = (PACK_ROOT / "skills/polish-release-candidate/SKILL.md").read_text(encoding="utf-8")
+        stabilize = (PACK_ROOT / "skills/stabilize-release-cut/SKILL.md").read_text(encoding="utf-8")
+        llm_guide = (PACK_ROOT / "docs/llm-guide.md").read_text(encoding="utf-8")
+
+        self.assertIn("Use first when expansion pressure appears before the current work is closed.", hold)
+        self.assertIn("Use after scope is already locked but before the ship decision.", polish)
+        self.assertIn("Use when the active question is ship, hold, or continue.", stabilize)
+
+        for term in [
+            "hold-the-line before accepting expansion",
+            "polish-release-candidate for locked pre-ship cleanup",
+            "stabilize-release-cut for the final ship decision",
+        ]:
+            with self.subTest(term=term):
+                self.assertIn(term, llm_guide)
+
+    def test_provider_dogfood_separates_contract_harness_from_invocation_proof(self) -> None:
+        provider_dogfood = (PACK_ROOT / "docs/provider-dogfood.md").read_text(encoding="utf-8")
+        dogfood = (PACK_ROOT / "docs/dogfood.md").read_text(encoding="utf-8")
+
+        for text in [provider_dogfood, dogfood]:
+            with self.subTest(document=text[:20]):
+                self.assertIn("staged contract harness", text)
+                self.assertIn("does not prove live LLM skill selection", text)
+                self.assertIn("real provider invocation proof", text)
 
     def test_product_text_has_no_old_brand_or_unsupported_scope(self) -> None:
         forbidden_patterns = {

@@ -96,6 +96,34 @@ agent-ecosystem-radar -> research-agent-ecosystem -> compare-agent-workflows -> 
 
 결과는 adopt, adapt, watch, reject로 나눕니다.
 
+## 3-1. Source만 수집
+
+Prompt:
+
+```text
+agent workflow 도구의 현재 source-backed reference만 찾아줘. 비교나 추천은 아직 하지 마.
+```
+
+Skill:
+
+```text
+research-agent-ecosystem
+```
+
+## 3-2. 이미 조사한 후보 비교
+
+Prompt:
+
+```text
+이미 조사한 세 후보를 GroundLine 기준으로 비교하고 tradeoff를 알려줘.
+```
+
+Skill:
+
+```text
+compare-agent-workflows
+```
+
 ## 4. AI 활용도 평가
 
 Prompt:
@@ -115,6 +143,9 @@ evaluate-ai-usage-maturity
 - raw transcript를 기본으로 수집하지 않습니다.
 - durable artifact와 provider evidence packet을 우선합니다.
 - 문제점, 개선 계획, 다음 upgrade를 분리합니다.
+
+Provider history가 근거라면 먼저 `audit-agent-history`로 redacted evidence
+packet을 만들고, 그 다음 `evaluate-ai-usage-maturity`로 평가합니다.
 
 ## 5. 위험한 작업 경계 잡기
 

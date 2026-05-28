@@ -11,6 +11,11 @@ Use this skill when the user wants to understand how effectively a person or
 team uses AI agents. It evaluates operating behavior from evidence, not from
 raw prompt dumps or secret-bearing history.
 
+When the evidence starts in local provider histories, use
+`audit-agent-history -> evaluate-ai-usage-maturity`. The first step prepares a
+redacted Provider Evidence Packet; this skill then scores the workflow without
+requiring raw transcript review.
+
 ## Workflow
 
 1. Define scope: individual or team, time window, agent providers, repositories,

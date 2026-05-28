@@ -1,10 +1,11 @@
 # Provider Dogfood
 
-Provider dogfood proves that GroundLine can be staged for Codex, Claude Code,
-and Antigravity and that the shared scenario prompts resolve to expected skills
-and output contracts.
+Provider dogfood has two evidence levels. The staged contract harness proves
+that GroundLine can be staged for Codex, Claude Code, and Antigravity, and that
+the shared scenario contracts are present. It does not prove live LLM skill selection.
+Record real provider invocation proof separately with the sanitized shape below.
 
-Run the reproducible staged harness:
+Run the reproducible staged contract harness:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_dogfood.py --stage-package --probe-runtimes --json

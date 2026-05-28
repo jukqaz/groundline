@@ -10,6 +10,8 @@ description: Use when a growing change set, plugin package, skill set, or releas
 Use this skill when improvement work needs to stop expanding and start proving.
 It turns a growing change set into a bounded release candidate.
 
+Use when the active question is ship, hold, or continue.
+
 ## Workflow
 
 1. Check current branch, dirty files, version, and changed surface.

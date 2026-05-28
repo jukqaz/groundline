@@ -1,7 +1,8 @@
 # Dogfood
 
 This document records self-use validation for GroundLine. It separates scripted
-smoke checks, staged provider dogfood, and accepted defers.
+smoke checks, staged provider dogfood, real provider invocation proof, and
+accepted defers. The staged contract harness does not prove live LLM skill selection.
 
 ## Dogfood Matrix
 

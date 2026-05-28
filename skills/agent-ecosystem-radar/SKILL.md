@@ -7,7 +7,7 @@ description: Use when the user wants one pass that researches external agent too
 
 ## Purpose
 
-Use this as the set entrypoint for agent ecosystem discovery. It chains three
+Use this as the set entrypoint for agent ecosystem discovery. It chains four
 GroundLine skills into one decision loop:
 
 ```text
@@ -16,6 +16,13 @@ research-agent-ecosystem -> evaluate-agent-capability -> compare-agent-workflows
 
 If the runtime can load named skills, use them in that order. If not, run the
 same phases inline using the contracts in `references/output-contracts.md`.
+
+## Routing Boundary
+
+Use this when the user asks for research, comparison, and recommendation in one pass.
+Use the individual skills when the request clearly asks for only one stage:
+source gathering, single-candidate evaluation, candidate comparison, or upgrade
+recommendation from existing findings.
 
 ## Workflow
 
@@ -48,7 +55,7 @@ signals until a primary source confirms the claim.
 
 ## Output Contract
 
-Return all three sections in order:
+Return all four sections in order:
 
 ```text
 GroundLine Research:
