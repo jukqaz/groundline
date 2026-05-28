@@ -29,6 +29,19 @@ Provider home dumped: false
 | Claude Code | release-closeout | `groundline:polish-release-candidate` | `release_polish_report` | PARTIAL | `claude -p` selected an installed GroundLine skill, but did not return the canonical `GroundLine Release Polish` contract name. |
 | Antigravity | expansion-control | not captured | not captured | PARTIAL | `agy --print` could not complete a constrained no-tool proof in this environment and timed out after tool-driven exploration; no repository mutation was observed. |
 
+## Provider Invocation Follow-up
+
+Date: 2026-05-28
+
+Raw transcript stored: false
+
+Provider home dumped: false
+
+| Provider | Prompt family | Selected skill | Output contract | Result | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| Claude Code | release-closeout | `stabilize-release-cut` | `GroundLine Release Cut` | PASS | `claude -p` returned the canonical skill and contract after the proof prompt allowed read-only skill doc inspection with `mutation_performed=false`. |
+| Antigravity | expansion-control | not captured | not captured | PARTIAL | `agy --print` still entered tool exploration and hit Antigravity CLI app-data write constraints before returning a sanitized proof; package validation and install remain PASS. |
+
 ## Scripted Evidence
 
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json`
@@ -92,16 +105,23 @@ evidence stays in `watch` or `defer`.
 - Staged provider package targets matched source package skill count.
 - Shared scenario prompts mapped to expected skills and output contracts.
 - v0.2.0 `PARTIAL` dogfood items are closed by the v0.2.1 harness evidence.
+- v0.3.0 shipped with sanitized provider invocation evidence and offline safety
+  eval coverage.
+- The v0.3.1 follow-up reduced the Claude Code contract naming partial with a
+  read-only skill doc proof.
 
 ## Accepted Defer
 
-- Interactive provider UI sessions are outside the v0.2.1 patch scope because
+- Interactive provider UI sessions are outside the current patch scope because
   provider-native plugin discovery is owned by each runtime.
 - Provider-specific hook or MCP setup stays out of this patch.
 - New skills derived from dogfood results stay out until a failure is
   reproduced.
+- Antigravity print-mode proof remains partial until the CLI can run the
+  constrained proof without tool exploration or app-data write failures.
 
 ## Next Review
 
-Run `compare-release-delta` after v0.2.1 is released to compare v0.2.0 with
-v0.2.1 and confirm the dogfood gap stayed closed.
+Run `compare-release-delta` after the next release to compare it with v0.3.0
+and confirm the remaining provider invocation partial was reduced or still
+accepted intentionally.

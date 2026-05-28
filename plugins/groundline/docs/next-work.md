@@ -26,6 +26,14 @@ implement, and close it before adding more.
 Goal: reduce or intentionally keep the accepted partials from v0.3.0 before
 adding new workflows.
 
+Current status:
+
+- Claude Code contract naming partial is reduced: allowing read-only skill doc
+  inspection returns `stabilize-release-cut` and `GroundLine Release Cut`.
+- Antigravity print-mode proof remains partial: `agy --print` still enters tool
+  exploration and hits CLI app-data write constraints before returning a
+  sanitized proof.
+
 Scope:
 
 - provider invocation partial triage
@@ -59,9 +67,10 @@ Acceptance:
 
 Immediate tasks:
 
-- Re-run Claude Code release-closeout proof with clearer contract wording.
+- Keep the Claude Code proof prompt in the runbook: allow read-only skill doc
+  inspection, forbid mutation, and require canonical skill and contract names.
 - Re-run Antigravity expansion-control proof only when it can be constrained
-  without a tool loop.
+  without a tool loop or app-data write failures.
 - If either remains partial, keep the release decision explicit instead of
   masking it as PASS.
 - Re-run validation and provider package sync after any document change.

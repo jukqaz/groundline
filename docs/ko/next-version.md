@@ -40,7 +40,8 @@ v0.3.0 adoption proof는 구현됐습니다. 실제 provider session에서 skill
 상태:
 
 - Codex: handoff family PASS
-- Claude Code: installed skill은 선택했지만 canonical contract name을 반환하지 않아 PARTIAL
+- Claude Code: read-only skill doc 확인을 허용하면 `stabilize-release-cut`과
+  `GroundLine Release Cut`을 반환해 PASS
 - Antigravity: constrained print mode가 proof 반환 전에 timeout되어 PARTIAL
 - raw transcript나 auth material을 repository에 넣지 않음
 
@@ -88,5 +89,5 @@ post-release review 사이의 artifact 흐름을 명확히 합니다.
 ## v0.3.1 closeout
 
 tagging 전에 package sync, source validation, packaged validation, lint, unit
-tests, staged dogfood, provider package validation을 실행합니다. Claude Code와
-Antigravity partial이 남으면 accepted defer인지, 줄였는지 명확히 기록합니다.
+tests, staged dogfood, provider package validation을 실행합니다. Antigravity
+partial이 남으면 accepted defer인지, 줄였는지 명확히 기록합니다.

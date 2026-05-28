@@ -42,8 +42,8 @@ reducing accepted partials, not by adding more skills.
 Status:
 
 - Codex: PASS for the handoff family.
-- Claude Code: PARTIAL for release closeout because the selected skill was
-  installed, but the returned contract name was not canonical.
+- Claude Code: PASS after the proof prompt allowed read-only skill doc
+  inspection and returned `stabilize-release-cut` with `GroundLine Release Cut`.
 - Antigravity: PARTIAL for expansion control because constrained print mode
   timed out before returning a proof.
 - No raw transcript archives or auth material were added to the repository.
@@ -127,6 +127,6 @@ Ship gate:
 ## v0.3.1 Closeout
 
 Before tagging v0.3.1, run package sync, source validation, packaged validation,
-lint, unit tests, staged dogfood, and provider package validation. If the Claude
-Code and Antigravity partials remain, record whether they are still accepted
-defers or have been reduced.
+lint, unit tests, staged dogfood, and provider package validation. If the
+Antigravity partial remains, record whether it is still an accepted defer or has
+been reduced.
