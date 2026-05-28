@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add Korean companion docs for human-facing setup, workflow selection, skill
+  overview, privacy, release, and next-version planning while keeping English
+  as the default and canonical documentation language.
+- Add a language policy and validation coverage for bilingual human docs.
+
 ## v0.2.2 - 2026-05-28
 
 - Add the next work backlog for provider invocation dogfood, safety evaluation,

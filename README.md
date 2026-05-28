@@ -14,6 +14,18 @@ controls, and app context features stay owned by Codex, Claude Code, or
 Antigravity. GroundLine provides the provider-neutral task contracts, safety
 boundaries, and verification language around them.
 
+## Languages
+
+English is the default and canonical language for GroundLine documentation.
+Korean companion docs are available for human-facing setup and workflow reading:
+
+- Korean README: `README.ko.md`
+- Korean human docs index: `docs/ko/index.md`
+- Language policy: `docs/language-policy.md`
+
+LLM-readable references, output contracts, manifests, and skill instructions
+stay in English unless a release explicitly changes that policy.
+
 ## Supported Scope
 
 - Codex
@@ -55,17 +67,23 @@ boundaries, and verification language around them.
 ## Install And Update
 
 - Human guide: `docs/human-guide.md`
+- Korean human guide: `docs/ko/human-guide.md`
 - LLM guide: `docs/llm-guide.md`
 - Install: `docs/install.md`
+- Korean install: `docs/ko/install.md`
 - Update: `docs/update.md`
+- Korean update: `docs/ko/update.md`
 - Provider smoke: `docs/provider-smoke.md`
 - Provider dogfood: `docs/provider-dogfood.md`
 - Public release: `docs/public-release.md`
 - Privacy: `docs/privacy.md`
+- Korean privacy: `docs/ko/privacy.md`
 - Git history privacy: `docs/git-history-privacy.md`
+- Language policy: `docs/language-policy.md`
 - Next work: `docs/next-work.md`
 - Next version: `docs/next-version.md`
 - Skill portfolio: `docs/skill-portfolio.md`
+- Korean skill portfolio: `docs/ko/skill-portfolio.md`
 - Skill lifecycle: `references/skill-lifecycle.md`
 - LLM-readable skill index: `references/skill-index.json`
 

@@ -37,7 +37,9 @@ class GroundLineStaticContractTests(unittest.TestCase):
             "CONTRIBUTING.md",
             "LICENSE",
             "README.md",
+            "README.ko.md",
             "SECURITY.md",
+            "docs/language-policy.md",
             ".github/ISSUE_TEMPLATE/bug_report.md",
             ".github/ISSUE_TEMPLATE/feature_request.md",
             ".github/pull_request_template.md",
@@ -59,6 +61,15 @@ class GroundLineStaticContractTests(unittest.TestCase):
             "docs/dogfood.md",
             "docs/skill-portfolio.md",
             "docs/release-checklist.md",
+            "docs/ko/index.md",
+            "docs/ko/human-guide.md",
+            "docs/ko/install.md",
+            "docs/ko/update.md",
+            "docs/ko/examples.md",
+            "docs/ko/skill-portfolio.md",
+            "docs/ko/privacy.md",
+            "docs/ko/release-checklist.md",
+            "docs/ko/next-version.md",
             "references/capability-blueprint.md",
             "references/config-sync-boundary.md",
             "references/output-contracts.md",
@@ -91,6 +102,20 @@ class GroundLineStaticContractTests(unittest.TestCase):
 
         missing = [path for path in required_files if not (PACK_ROOT / path).is_file()]
         self.assertEqual(missing, [])
+
+    def test_human_docs_are_bilingual_with_english_default(self) -> None:
+        readme = (PACK_ROOT / "README.md").read_text(encoding="utf-8")
+        korean_readme = (PACK_ROOT / "README.ko.md").read_text(encoding="utf-8")
+        language_policy = (PACK_ROOT / "docs/language-policy.md").read_text(encoding="utf-8")
+        korean_index = (PACK_ROOT / "docs/ko/index.md").read_text(encoding="utf-8")
+
+        self.assertIn("English is the default and canonical language", readme)
+        self.assertIn("README.ko.md", readme)
+        self.assertIn("docs/ko/index.md", readme)
+        self.assertIn("English is the default and canonical language", language_policy)
+        self.assertIn("LLM-readable references", language_policy)
+        self.assertIn("영어 문서가 기본", korean_index)
+        self.assertIn("한국어 companion", korean_readme)
 
     def test_release_docs_cover_ci_external_probes_and_clean_python_runs(self) -> None:
         readme = (PACK_ROOT / "README.md").read_text(encoding="utf-8")
@@ -147,6 +172,8 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn('"references/agent-task-packet.md"', validator)
         self.assertIn('"references/release-stabilization.md"', validator)
         self.assertIn('"docs/install.md"', validator)
+        self.assertIn('"README.ko.md"', validator)
+        self.assertIn('"docs/language-policy.md"', validator)
         self.assertIn('"docs/git-history-privacy.md"', validator)
         self.assertIn('"docs/human-guide.md"', validator)
         self.assertIn('"docs/llm-guide.md"', validator)
@@ -159,6 +186,15 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn('"docs/public-release.md"', validator)
         self.assertIn('"docs/dogfood.md"', validator)
         self.assertIn('"docs/skill-portfolio.md"', validator)
+        self.assertIn('"docs/ko/index.md"', validator)
+        self.assertIn('"docs/ko/human-guide.md"', validator)
+        self.assertIn('"docs/ko/install.md"', validator)
+        self.assertIn('"docs/ko/update.md"', validator)
+        self.assertIn('"docs/ko/examples.md"', validator)
+        self.assertIn('"docs/ko/skill-portfolio.md"', validator)
+        self.assertIn('"docs/ko/privacy.md"', validator)
+        self.assertIn('"docs/ko/release-checklist.md"', validator)
+        self.assertIn('"docs/ko/next-version.md"', validator)
         self.assertIn('"references/skill-index.json"', validator)
         self.assertIn('"references/skill-lifecycle.md"', validator)
         self.assertIn('"CONTRIBUTING.md"', validator)
