@@ -50,6 +50,7 @@ STALE_CLAIM_PATTERNS = [
         re.compile("Provider install evidence: the read-only install doctor reports " + "PASS"),
         "overstated_provider_install_evidence",
     ),
+    (re.compile(r"GitHub run `\d{6,}`"), "stale_remote_ci_run_id"),
 ]
 
 

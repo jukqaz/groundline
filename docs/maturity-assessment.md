@@ -23,8 +23,9 @@ needs to be stronger before calling the package stable.
 
 - Baseline repository state before this assessment: `main` at `v0.3.2`, clean
   against `origin/main`.
-- Remote CI evidence checked during this assessment: GitHub run `26578390989`
-  passed for code commit `bacc0c4`.
+- Remote CI evidence is intentionally not frozen into this static assessment.
+  Before a release decision, check the latest GroundLine workflow for the
+  release-candidate HEAD and record the result in the release notes or handoff.
 - Current local patch evidence: `groundline_release_gate.py --json
   --keep-going --include-docker-execution` returned `status=PARTIAL` only
   because real provider smoke reported same-version

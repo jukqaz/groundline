@@ -378,8 +378,9 @@ class GroundLineScriptContractTests(unittest.TestCase):
             leak = pack / "docs/privacy-leak.md"
             stale_claim = "local release gates " + "pass"
             secret_like_value = "sk-" + "live-secret-value"
+            stale_ci_claim = "GitHub run `" + "123456789" + "` passed"
             leak.write_text(
-                f"{Path.home()}\n{stale_claim}\n{secret_like_value}\n",
+                f"{Path.home()}\n{stale_claim}\n{secret_like_value}\n{stale_ci_claim}\n",
                 encoding="utf-8",
             )
 
@@ -394,6 +395,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertIn("local_home_path", codes)
         self.assertIn("overstated_release_gate", codes)
         self.assertIn("secret_like_value", codes)
+        self.assertIn("stale_remote_ci_run_id", codes)
 
     def test_release_gate_treats_exit_two_as_partial(self) -> None:
         script_path = SCRIPTS_DIR / "groundline_release_gate.py"
