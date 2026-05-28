@@ -640,6 +640,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn("author and committer metadata", public_release)
         self.assertIn("CI downloads pinned tools and verifies checksums", public_release)
         self.assertIn("scripts/groundline_safety_eval.py --json", public_release)
+        self.assertIn("scripts/groundline_provider_validate.py --json", public_release)
         self.assertIn("scripts/groundline_doctor.py --json --offline --probe-tools", public_release)
         self.assertIn("scripts/groundline_radar.py --json --offline --command-sources", public_release)
         self.assertIn("scripts/run_scenarios.py --platform linux --sandbox docker --dry-run --json", public_release)
