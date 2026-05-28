@@ -42,6 +42,48 @@ Provider home dumped: false
 | Claude Code | release-closeout | `stabilize-release-cut` | `GroundLine Release Cut` | PASS | `claude -p` returned the canonical skill and contract after the proof prompt allowed read-only skill doc inspection with `mutation_performed=false`. |
 | Antigravity | expansion-control | not captured | not captured | PARTIAL | `agy --print` still entered tool exploration and hit Antigravity CLI app-data write constraints before returning a sanitized proof; package validation and install remain PASS. |
 
+## Superpowers Companion Dogfood
+
+Date: 2026-05-28
+
+Raw transcript stored: false
+
+Provider home dumped: false
+
+Real home mutation: false
+
+Result: PASS for the local operating loop, PARTIAL for live/private evidence.
+
+Fresh local checks:
+
+- `groundline_doctor.py --json --offline` returned `status=PASS`.
+- Doctor selected `recommended_mode=companion-superpowers`.
+- Doctor reported `superpowers.present=true`.
+- Doctor reported all three supported runtimes present.
+- Doctor reported `github` available and `context7` plus `exa` as optional gaps.
+- Staged provider dogfood returned `status=PASS`, `scenario_count=3`, and
+  `real_home_touched=false`.
+- The staged run observed `codex-cli 0.134.0`, `Claude Code 2.1.152`, and
+  `Antigravity 1.0.3`.
+
+Coverage judgment:
+
+| Work type | Primary owner | GroundLine role | Superpowers role | Result |
+| --- | --- | --- | --- | --- |
+| Resume or handoff | GroundLine | `reconcile-current-state`, `package-agent-task` | execution plan after state proof | PASS |
+| Planning or creative design | Superpowers | scope and side-effect boundary | brainstorming and plan writing | PASS |
+| Implementation | Superpowers | guard risky mutations and handoff context | TDD, debugging, executing plans | PASS |
+| Parallel agent work | Superpowers | task packet and state reconciliation | dispatch and subagent workflow | PASS |
+| Release cut | GroundLine | `stabilize-release-cut`, `polish-release-candidate` | verification before completion | PASS |
+| Live runtime proof | GroundLine | `close-live-work` | final evidence discipline | PASS when evidence source is reachable |
+| External or private live data | Provider MCP or native tools | decide when optional MCP is needed | use results inside the workflow | PARTIAL by design |
+| Provider-specific automation | Provider runtime | keep hooks, rules, MCP, and agents opt-in | avoid replacing provider controls | PARTIAL by design |
+
+Conclusion: Superpowers plus GroundLine covers the general agent operating loop.
+It does not try to cover provider-owned live data access, private MCP setup,
+global hooks, provider rules, or catalog-specific plugin behavior. Those remain
+optional provider integrations.
+
 ## Scripted Evidence
 
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json`
