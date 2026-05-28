@@ -25,12 +25,14 @@ GroundLine은 Codex, Claude Code, Antigravity에서 쓰는 가벼운 control pla
 git clone https://github.com/jukqaz/groundline.git
 cd groundline
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --plan --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_dogfood.py --stage-package --probe-runtimes --json
 ```
 
 기본 검증은 실제 provider home을 수정하지 않습니다. 출력에서
 `mutation_performed=false`와 `real_home_touched=false`를 확인하세요.
+release 직전에는 `docs/ko/release-checklist.md`에 있는 전체 gate를 실행하세요.
 
 ## 무엇이 바뀌나
 
@@ -63,8 +65,12 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_dogfood.py --stage-package 
 - 처음 쓰는 사람: `docs/ko/human-guide.md`
 - 설치: `docs/ko/install.md`
 - workflow 예시: `docs/ko/examples.md`
+- workflow cookbook: `docs/ko/workflow-cookbook.md`
+- artifact lifecycle: `docs/ko/artifact-lifecycle.md`
 - skill 선택: `docs/ko/skill-portfolio.md`
+- skill 졸업 결정: `docs/ko/skill-graduation-plan.md`
 - provider 설치: `docs/ko/provider-packaging.md`
+- provider activation proof: `docs/ko/provider-activation-matrix.md`
 
 ## 한국어 문서
 
@@ -73,11 +79,15 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_dogfood.py --stage-package 
 - 업데이트: `docs/ko/update.md`
 - 사람용 가이드: `docs/ko/human-guide.md`
 - 스킬 포트폴리오: `docs/ko/skill-portfolio.md`
+- 스킬 졸업 계획: `docs/ko/skill-graduation-plan.md`
 - 예시 workflow: `docs/ko/examples.md`
+- workflow cookbook: `docs/ko/workflow-cookbook.md`
+- artifact lifecycle: `docs/ko/artifact-lifecycle.md`
 - privacy: `docs/ko/privacy.md`
 - release checklist: `docs/ko/release-checklist.md`
 - 다음 버전 계획: `docs/ko/next-version.md`
 - provider 패키징: `docs/ko/provider-packaging.md`
+- provider activation matrix: `docs/ko/provider-activation-matrix.md`
 - 이용 조건: `docs/ko/terms.md`
 
 LLM용 reference, output contract, skill 본문은 영어를 기준으로 유지합니다.

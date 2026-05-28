@@ -36,6 +36,27 @@ is easier to scan during planning, release review, and cleanup.
 | `evaluate-groundline-pack` | verify | read-only | active | Reviews repository readiness, skill completeness, safety, and release fitness. |
 | `curate-groundline-skills` | maintain | read-only | experimental | Maintains the skill portfolio taxonomy and lifecycle decisions. |
 
+## Graduation Decisions
+
+`docs/skill-graduation-plan.md` is the release-facing plan for reducing the
+experimental surface. The table below mirrors the LLM-readable
+`graduation_decision` fields in `references/skill-index.json`.
+
+| Skill | Decision | Release note |
+| --- | --- | --- |
+| `package-agent-task` | graduate | Promote after v0.3.3 post-install proof stays green. |
+| `stabilize-release-cut` | graduate | Promote after package sync and provider install proof stay green. |
+| `agent-ecosystem-radar` | merge | Test whether cookbook routing can replace the one-pass wrapper. |
+| `research-agent-ecosystem` | keep experimental | Keep until examples and source cadence are stronger. |
+| `compare-agent-workflows` | keep experimental | Keep until complete comparison examples exist. |
+| `recommend-groundline-upgrades` | keep experimental | Keep until recommendations reliably avoid release-scope expansion. |
+| `evaluate-agent-capability` | keep experimental | Needs a sanitized provider activation row and example. |
+| `evaluate-ai-usage-maturity` | keep experimental | Needs a safe Provider Evidence Packet example and activation proof. |
+| `hold-the-line` | keep experimental | Needs cookbook evidence and provider activation proof. |
+| `polish-release-candidate` | keep experimental | Needs clearer separation from release-cut examples. |
+| `compare-release-delta` | defer | Revisit after a published patch can be compared. |
+| `curate-groundline-skills` | keep experimental | Keep while graduation examples and schema expectations settle. |
+
 ## Lifecycle Notes
 
 - Active skills are part of the supported GroundLine surface.
@@ -46,6 +67,21 @@ is easier to scan during planning, release review, and cleanup.
 - A merged or deprecated skill should leave a note explaining where its behavior
   moved.
 - Human-facing docs should stay readable without requiring provider internals.
+
+## Graduation Decisions
+
+Experimental skills now have explicit graduation decisions in
+`references/skill-index.json` and the human-readable
+`docs/skill-graduation-plan.md`.
+
+- `graduate` means the skill is a candidate for the active core after the next
+  release verification pass.
+- `keep experimental` means the skill remains usable, but needs more examples,
+  output contracts, or dogfood evidence.
+- `merge` means the behavior is useful, but should be folded into a neighboring
+  workflow before promotion.
+- `defer` means the skill depends on evidence that this release cannot yet
+  produce.
 
 ## Routing Notes
 

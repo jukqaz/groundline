@@ -68,6 +68,8 @@
       "risk_level": "read-only",
       "provider_scope": "provider-neutral",
       "lifecycle": "experimental",
+      "graduation_decision": "merge",
+      "graduation_rationale": "The one-pass radar is useful, but it duplicates the four-stage research, evaluation, comparison, and recommendation chain. Keep it until a routed cookbook path proves the same outcome without a dedicated orchestrator skill.",
       "human_summary": "Runs the research, evaluation, comparison, and recommendation skill set.",
       "llm_trigger": "Use when the user wants research, comparison, and recommendation in one pass for external agent tools, skills, plugins, MCP servers, hooks, or workflow frameworks."
     },
@@ -78,6 +80,8 @@
       "risk_level": "read-only",
       "provider_scope": "provider-neutral",
       "lifecycle": "experimental",
+      "graduation_decision": "keep experimental",
+      "graduation_rationale": "The research boundary is clear and source-backed, but it still needs representative workflow examples and activation proof before it becomes part of the stable core.",
       "human_summary": "Collects source-backed external agent workflow candidates.",
       "llm_trigger": "Use when only current source gathering is needed for agent tools, skills, plugins, MCP servers, hooks, provider features, or workflow frameworks before comparison or upgrade planning."
     },
@@ -88,6 +92,8 @@
       "risk_level": "read-only",
       "provider_scope": "provider-neutral",
       "lifecycle": "experimental",
+      "graduation_decision": "keep experimental",
+      "graduation_rationale": "The comparison contract is useful after research exists, but the package needs more end-to-end examples that show candidate scoring and rejected items before promotion.",
       "human_summary": "Scores researched workflow candidates against GroundLine scope.",
       "llm_trigger": "Use when comparing two or more researched agent tools, skills, plugins, MCP servers, hooks, workflow frameworks, or provider features against GroundLine scope and supported runtimes."
     },
@@ -98,6 +104,8 @@
       "risk_level": "read-only",
       "provider_scope": "provider-neutral",
       "lifecycle": "experimental",
+      "graduation_decision": "keep experimental",
+      "graduation_rationale": "Upgrade recommendation is the right decision surface, but it needs more proof that agents park watch and reject items instead of expanding the release scope.",
       "human_summary": "Turns research and comparison into adopt, adapt, watch, or reject decisions.",
       "llm_trigger": "Use when research or comparison findings already exist and need to become GroundLine upgrade candidates, adoption decisions, source registry entries, skills, references, scripts, docs, hooks, or MCP recommendations."
     },
@@ -108,6 +116,8 @@
       "risk_level": "read-only",
       "provider_scope": "provider-neutral",
       "lifecycle": "experimental",
+      "graduation_decision": "keep experimental",
+      "graduation_rationale": "Single-candidate evaluation has a strong output contract, but it still needs a sanitized provider activation row and a short worked example before promotion.",
       "human_summary": "Scores one existing tool, skill, plugin, MCP server, hook, agent, or workflow pack before adoption.",
       "llm_trigger": "Use when evaluating one existing agent tool, skill, plugin, MCP server, hook, agent, prompt pack, or workflow framework for quality, security, context cost, maintenance, and GroundLine fit."
     },
@@ -118,6 +128,8 @@
       "risk_level": "secret-sensitive",
       "provider_scope": "provider-neutral",
       "lifecycle": "experimental",
+      "graduation_decision": "keep experimental",
+      "graduation_rationale": "The maturity assessment is valuable and well-scoped, but promotion requires a redacted Provider Evidence Packet example and live activation proof without raw transcript storage.",
       "human_summary": "Assesses AI workflow maturity from artifacts or a redacted Provider Evidence Packet.",
       "llm_trigger": "Use when assessing a person or team's AI usage maturity, AI fluency, agent workflow habits, verification discipline, tool orchestration, reuse, automation, safety, and next improvement steps from artifacts or a redacted Provider Evidence Packet."
     },
@@ -128,6 +140,8 @@
       "risk_level": "secret-sensitive",
       "provider_scope": "provider-neutral",
       "lifecycle": "experimental",
+      "graduation_decision": "graduate",
+      "graduation_rationale": "The task packet contract is exercised by staged dogfood and live handoff proof, and it is central to resumed high-context work. Promote after the v0.3.3 install doctor passes from a fresh provider install.",
       "human_summary": "Turns broad or resumed requests into concise LLM-ready task packets.",
       "llm_trigger": "Use when a broad, ambiguous, multi-agent, resumed, or high-context request needs an LLM-ready task packet with goal, context, constraints, non-goals, mutation boundary, success criteria, verification, and handoff."
     },
@@ -138,6 +152,8 @@
       "risk_level": "read-only",
       "provider_scope": "provider-neutral",
       "lifecycle": "experimental",
+      "graduation_decision": "keep experimental",
+      "graduation_rationale": "Scope control matches repeated user behavior and has a clear contract, but it needs cookbook examples and provider rows before becoming stable.",
       "human_summary": "Stops scope growth and chooses finish, budget, defer, watch, or reject before more work starts.",
       "llm_trigger": "Use when a request, task, research thread, plugin package, or active change set starts expanding with new ideas, extra tools, broad cleanup, or unclear finish criteria before the current work is closed."
     },
@@ -148,6 +164,8 @@
       "risk_level": "secret-sensitive",
       "provider_scope": "provider-neutral",
       "lifecycle": "experimental",
+      "graduation_decision": "keep experimental",
+      "graduation_rationale": "Release polish is useful after scope lock, but it overlaps adjacent release skills and needs clearer examples before promotion.",
       "human_summary": "Runs final docs, duplicate, privacy, gate, and commit-plan cleanup before release judgment.",
       "llm_trigger": "Use when scope is locked and a release candidate needs final cleanup, docs polish, duplicate or stale surface review, privacy checks, validation gate ordering, commit split planning, or public readiness review before a ship decision."
     },
@@ -158,6 +176,8 @@
       "risk_level": "local-write",
       "provider_scope": "provider-neutral",
       "lifecycle": "experimental",
+      "graduation_decision": "graduate",
+      "graduation_rationale": "The release cut skill has a canonical contract, current release dogfood, and sanitized provider proof for release-cut routing. Promote after package sync and post-install verification remain green.",
       "human_summary": "Locks release scope, classifies remaining work, and proves release readiness.",
       "llm_trigger": "Use when a growing change set, plugin package, skill set, or release candidate needs final scope lock, change budget, must-fix triage, dogfood evidence, release gates, regression checks, or a ship decision."
     },
@@ -168,6 +188,8 @@
       "risk_level": "read-only",
       "provider_scope": "provider-neutral",
       "lifecycle": "experimental",
+      "graduation_decision": "defer",
+      "graduation_rationale": "Post-release delta review is important, but it depends on a published patch and install evidence. Keep it out of the active core until v0.3.3 is released and compared against the prior version.",
       "human_summary": "Compares deployed and previous versions with runtime, install, regression, and rollback evidence.",
       "llm_trigger": "Use when a deployed release must be compared with a previous version, expected changes, runtime evidence, regression signals, install state, rollback notes, or post-deploy checklist items."
     },
@@ -188,6 +210,8 @@
       "risk_level": "read-only",
       "provider_scope": "provider-neutral",
       "lifecycle": "experimental",
+      "graduation_decision": "keep experimental",
+      "graduation_rationale": "Portfolio curation is now used for this release line, but it needs stable graduation examples and schema expectations before becoming a supported maintainer skill.",
       "human_summary": "Maintains the skill portfolio taxonomy and create, adapt, merge, split, deprecate, or reject decisions.",
       "llm_trigger": "Use when deciding whether GroundLine should create, adapt, merge, split, deprecate, or reject skills, references, scripts, agents, hooks, MCP recommendations, or docs."
     }

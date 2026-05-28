@@ -14,13 +14,20 @@ SCRIPTS_DIR = PACK_ROOT / "scripts"
 
 
 class GroundLineScriptContractTests(unittest.TestCase):
-    def run_script(self, script_name: str, *args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-        script_path = SCRIPTS_DIR / script_name
+    def run_script(
+        self,
+        script_name: str,
+        *args: str,
+        env: dict[str, str] | None = None,
+        pack_root: Path | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        root = pack_root or PACK_ROOT
+        script_path = root / "scripts" / script_name
         self.assertTrue(script_path.is_file(), f"missing script: scripts/{script_name}")
         command = [sys.executable, str(script_path), *args]
         completed = subprocess.run(
             command,
-            cwd=PACK_ROOT,
+            cwd=root,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -29,8 +36,8 @@ class GroundLineScriptContractTests(unittest.TestCase):
         )
         return completed
 
-    def run_script_json(self, script_name: str, *args: str) -> dict:
-        completed = self.run_script(script_name, *args)
+    def run_script_json(self, script_name: str, *args: str, pack_root: Path | None = None) -> dict:
+        completed = self.run_script(script_name, *args, pack_root=pack_root)
         self.assertEqual(
             completed.returncode,
             0,
@@ -41,11 +48,20 @@ class GroundLineScriptContractTests(unittest.TestCase):
         except json.JSONDecodeError as exc:
             self.fail(f"{script_name} did not emit JSON: {exc}\nstdout:\n{completed.stdout}")
 
+    def copy_pack(self, root: Path) -> Path:
+        target = root / "pack"
+        shutil.copytree(
+            PACK_ROOT,
+            target,
+            ignore=shutil.ignore_patterns(".git", "__pycache__", "*.pyc"),
+        )
+        return target
+
     def make_fake_home(self, root: Path) -> Path:
         home = root / "home"
         (home / ".codex").mkdir(parents=True)
         (home / ".claude").mkdir(parents=True)
-        (home / ".gemini/config/plugins/groundline").mkdir(parents=True)
+        (home / ".gemini/config/plugins").mkdir(parents=True)
         return home
 
     def write_fake_executable(self, bin_dir: Path, name: str, output: str, exit_code: int = 0) -> Path:
@@ -65,6 +81,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
             "groundline_plan_update.py",
             "groundline_provider_smoke.py",
             "groundline_radar.py",
+            "groundline_release_gate.py",
             "groundline_safety_eval.py",
             "lint.py",
             "run_scenarios.py",
@@ -115,6 +132,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
             "groundline_plan_update.py",
             "groundline_provider_smoke.py",
             "groundline_radar.py",
+            "groundline_release_gate.py",
             "groundline_safety_eval.py",
             "lint.py",
             "run_scenarios.py",
@@ -128,6 +146,59 @@ class GroundLineScriptContractTests(unittest.TestCase):
                 self.assertEqual(completed.returncode, 0)
                 self.assertIn("usage:", completed.stdout.lower())
 
+    def test_release_gate_plan_lists_release_checks_without_running_them(self) -> None:
+        result = self.run_script_json("groundline_release_gate.py", "--plan", "--json")
+
+        self.assertEqual(result["suite"], "release-gate")
+        self.assertEqual(result["mode"], "plan")
+        self.assertEqual(result["status"], "PASS")
+        self.assertFalse(result["mutation_performed"])
+        self.assertFalse(result["publishing_performed"])
+        self.assertFalse(result["real_home_touched"])
+        gate_ids = [gate["id"] for gate in result["gates"]]
+        self.assertEqual(
+            gate_ids,
+            [
+                "source-validation",
+                "packaged-validation",
+                "lint",
+                "runtime-layout",
+                "unit-tests",
+                "offline-doctor",
+                "offline-radar",
+                "safety-eval",
+                "provider-smoke",
+                "staged-dogfood",
+                "macos-local-scenario",
+                "linux-docker-dry-run",
+            ],
+        )
+        self.assertNotIn("linux-docker-execution", gate_ids)
+        for gate in result["gates"]:
+            with self.subTest(gate=gate["id"]):
+                self.assertFalse(gate["executed"])
+                self.assertIsInstance(gate["command"], list)
+                self.assertNotIn("git", gate["command"][0])
+
+    def test_release_gate_can_plan_full_local_release_gate(self) -> None:
+        result = self.run_script_json(
+            "groundline_release_gate.py",
+            "--plan",
+            "--json",
+            "--include-docker-execution",
+            "--actionlint-bin",
+            "/tmp/actionlint",
+        )
+
+        gate_ids = [gate["id"] for gate in result["gates"]]
+        self.assertIn("linux-docker-execution", gate_ids)
+        self.assertIn('git tag "$TAG"', result["approval_required_commands_excluded"])
+        self.assertIn('git push origin "$TAG"', result["approval_required_commands_excluded"])
+        self.assertIn('gh release create "$TAG"', result["approval_required_commands_excluded"])
+        lint_gate = next(gate for gate in result["gates"] if gate["id"] == "lint")
+        self.assertIn("--actionlint-bin", lint_gate["command"])
+        self.assertIn("/tmp/actionlint", lint_gate["command"])
+
     def test_validate_pack_emits_json_success_contract(self) -> None:
         result = self.run_script_json("validate_pack.py", "--json")
 
@@ -136,6 +207,45 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertFalse(result["mutation_performed"])
         self.assertEqual(result["supported_runtimes"], ["codex", "claude_code", "antigravity"])
         self.assertEqual(result["supported_platforms"], ["macos-arm64", "linux"])
+
+    def test_validate_pack_ignores_empty_packaged_conflict_copy_directories(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-pack-conflict-") as temp:
+            pack_root = self.copy_pack(Path(temp))
+            conflict_dir = pack_root / "plugins/groundline/docs 9"
+            conflict_dir.mkdir(parents=True)
+
+            completed = self.run_script("validate_pack.py", "--json", pack_root=pack_root)
+            result = json.loads(completed.stdout)
+
+        self.assertEqual(completed.returncode, 0)
+        self.assertEqual(result["status"], "PASS")
+
+    def test_validate_pack_rejects_packaged_conflict_copy_payload(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-pack-conflict-") as temp:
+            pack_root = self.copy_pack(Path(temp))
+            conflict_dir = pack_root / "plugins/groundline/docs 9"
+            conflict_dir.mkdir(parents=True)
+            (conflict_dir / "payload.md").write_text("unexpected payload\n", encoding="utf-8")
+
+            completed = self.run_script("validate_pack.py", "--json", pack_root=pack_root)
+            result = json.loads(completed.stdout)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertEqual(result["status"], "FAIL")
+        self.assertIn("packaged conflict copy must be removed: plugins/groundline/docs 9", result["errors"])
+
+    def test_sync_provider_package_removes_conflict_copy_directories(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-pack-sync-") as temp:
+            pack_root = self.copy_pack(Path(temp))
+            conflict_dir = pack_root / "plugins/groundline/docs 9"
+            conflict_dir.mkdir(parents=True)
+
+            result = self.run_script_json("sync_provider_package.py", "--json", pack_root=pack_root)
+            conflict_exists = conflict_dir.exists()
+
+        self.assertEqual(result["status"], "PASS")
+        self.assertFalse(conflict_exists)
+        self.assertEqual(result["remaining_conflict_copies"], [])
 
     def test_safety_eval_emits_json_success_contract(self) -> None:
         result = self.run_script_json("groundline_safety_eval.py", "--json")
@@ -534,6 +644,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "PASS")
         self.assertFalse(result["mutation_performed"])
+        self.assertFalse(result["secret_value_printed"])
         self.assertTrue(result["fake_home_used"])
         self.assertIn("source_package", result)
         self.assertGreaterEqual(result["source_package"]["skill_count"], 12)
@@ -569,6 +680,123 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertEqual(probe["target_skill_count"], result["source_package"]["skill_count"])
         self.assertTrue(probe["target_skill_count_matches_source"])
 
+    def test_provider_smoke_reports_installed_versions_and_drift(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-provider-drift-") as temp:
+            root = Path(temp)
+            home = self.make_fake_home(root)
+            target = home / ".codex/plugins/groundline"
+            target.mkdir(parents=True)
+            shutil.copytree(PACK_ROOT / ".codex-plugin", target / ".codex-plugin")
+            shutil.copytree(PACK_ROOT / "skills", target / "skills")
+            target_manifest = target / ".codex-plugin/plugin.json"
+            data = json.loads(target_manifest.read_text(encoding="utf-8"))
+            data["version"] = "0.0.1"
+            target_manifest.write_text(json.dumps(data), encoding="utf-8")
+
+            completed = self.run_script(
+                "groundline_provider_smoke.py",
+                "--home",
+                str(home),
+                "--json",
+            )
+            result = json.loads(completed.stdout)
+
+        self.assertEqual(completed.returncode, 1)
+        probe = result["providers"]["codex"]["runtime_probe"]
+        self.assertEqual(result["install_doctor_status"], "PARTIAL")
+        self.assertEqual(result["status"], "PARTIAL")
+        self.assertFalse(result["secret_value_printed"])
+        self.assertEqual(probe["source_version"], result["source_package"]["version"])
+        self.assertEqual(probe["installed_version"], "0.0.1")
+        self.assertFalse(probe["version_matches_source"])
+        self.assertIn("version_mismatch", probe["issues"])
+
+    def test_provider_smoke_detects_codex_and_claude_cache_installs(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-provider-cache-") as temp:
+            home = self.make_fake_home(Path(temp))
+            version = json.loads((PACK_ROOT / "plugin.json").read_text(encoding="utf-8"))["version"]
+            codex_target = home / ".codex/plugins/cache/groundline/groundline" / version
+            claude_target = home / ".claude/plugins/cache/groundline/groundline" / version
+            codex_target.mkdir(parents=True)
+            claude_target.mkdir(parents=True)
+            shutil.copytree(PACK_ROOT / ".codex-plugin", codex_target / ".codex-plugin")
+            shutil.copytree(PACK_ROOT / ".claude-plugin", claude_target / ".claude-plugin")
+            shutil.copytree(PACK_ROOT / "skills", codex_target / "skills")
+            shutil.copytree(PACK_ROOT / "skills", claude_target / "skills")
+
+            result = self.run_script_json(
+                "groundline_provider_smoke.py",
+                "--home",
+                str(home),
+                "--json",
+            )
+
+        self.assertEqual(result["install_doctor_status"], "PASS")
+        for provider_name in ["codex", "claude_code"]:
+            with self.subTest(provider=provider_name):
+                provider = result["providers"][provider_name]
+                probe = provider["runtime_probe"]
+                self.assertEqual(provider["install_source"], "cache")
+                self.assertTrue(probe["target_exists"])
+                self.assertEqual(probe["installed_version"], result["source_package"]["version"])
+                self.assertEqual(probe["version_check"], "match")
+                self.assertEqual(probe["issues"], [])
+
+    def test_provider_smoke_reports_missing_payload_and_antigravity_target(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-provider-payload-") as temp:
+            home = self.make_fake_home(Path(temp))
+            codex_target = home / ".codex/plugins/groundline"
+            codex_target.mkdir(parents=True)
+            shutil.copytree(PACK_ROOT / ".codex-plugin", codex_target / ".codex-plugin")
+
+            antigravity_target = home / ".gemini/config/plugins/groundline"
+            antigravity_target.mkdir(parents=True)
+            shutil.copy2(PACK_ROOT / "plugin.json", antigravity_target / "plugin.json")
+            shutil.copytree(PACK_ROOT / "skills", antigravity_target / "skills")
+
+            completed = self.run_script(
+                "groundline_provider_smoke.py",
+                "--home",
+                str(home),
+                "--json",
+            )
+            result = json.loads(completed.stdout)
+
+        self.assertEqual(completed.returncode, 1)
+        codex_probe = result["providers"]["codex"]["runtime_probe"]
+        antigravity_probe = result["providers"]["antigravity"]["runtime_probe"]
+        self.assertEqual(result["install_doctor_status"], "PARTIAL")
+        self.assertFalse(result["secret_value_printed"])
+        self.assertIn("missing_skills_payload", codex_probe["issues"])
+        self.assertTrue(antigravity_probe["target_exists"])
+        self.assertTrue(antigravity_probe["target_manifest_present"])
+        self.assertTrue(antigravity_probe["version_matches_source"])
+
+    def test_provider_smoke_allows_antigravity_shape_without_installed_version(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-antigravity-shape-") as temp:
+            home = self.make_fake_home(Path(temp))
+            target = home / ".gemini/config/plugins/groundline"
+            target.mkdir(parents=True)
+            target_manifest = json.loads((PACK_ROOT / "plugin.json").read_text(encoding="utf-8"))
+            target_manifest.pop("version", None)
+            (target / "plugin.json").write_text(json.dumps(target_manifest), encoding="utf-8")
+            shutil.copytree(PACK_ROOT / "skills", target / "skills")
+
+            result = self.run_script_json(
+                "groundline_provider_smoke.py",
+                "--home",
+                str(home),
+                "--json",
+            )
+
+        probe = result["providers"]["antigravity"]["runtime_probe"]
+        self.assertEqual(result["install_doctor_status"], "PASS")
+        self.assertEqual(probe["status"], "PASS")
+        self.assertIsNone(probe["installed_version"])
+        self.assertEqual(probe["version_check"], "unavailable")
+        self.assertEqual(probe["issues"], [])
+        self.assertEqual(result["providers"]["antigravity"]["candidate_versions"], [])
+
     def test_dogfood_harness_runs_staged_provider_suite(self) -> None:
         with tempfile.TemporaryDirectory(prefix="groundline-dogfood-") as temp:
             root = Path(temp)
@@ -592,7 +820,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "PASS")
         self.assertEqual(result["suite"], "provider-dogfood")
-        self.assertEqual(result["scenario_count"], 3)
+        self.assertEqual(result["scenario_count"], 6)
         self.assertTrue(result["stage_package"])
         self.assertTrue(result["fake_home_used"])
         self.assertFalse(result["real_home_touched"])
@@ -607,7 +835,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
                 self.assertTrue(provider["install"]["target_skills_present"])
                 self.assertEqual(provider["install"]["target_skill_count"], result["source_package"]["skill_count"])
                 self.assertTrue(provider["install"]["target_skill_count_matches_source"])
-                self.assertEqual(len(provider["scenario_results"]), 3)
+                self.assertEqual(len(provider["scenario_results"]), 6)
                 self.assertTrue(all(item["status"] == "PASS" for item in provider["scenario_results"]))
 
     def test_dogfood_harness_refuses_real_home_staging(self) -> None:

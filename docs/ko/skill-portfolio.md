@@ -32,6 +32,26 @@
 | `compare-release-delta` | 배포 뒤 이전 버전과 비교하고 rollback note를 남길 때 |
 | `curate-groundline-skills` | skill을 만들지, 합칠지, 나눌지, 거절할지 결정할 때 |
 
+## 졸업 결정 요약
+
+자세한 기준은 `skill-graduation-plan.md`를 봅니다. 영어
+`docs/skill-graduation-plan.md`와 `references/skill-index.json`이 canonical입니다.
+
+| Skill | Decision | 의미 |
+| --- | --- | --- |
+| `package-agent-task` | graduate | v0.3.3 설치 확인 뒤 active promotion 후보 |
+| `stabilize-release-cut` | graduate | package sync와 provider proof 뒤 active promotion 후보 |
+| `agent-ecosystem-radar` | merge | one-pass wrapper를 cookbook routing으로 대체 가능한지 검증 |
+| `research-agent-ecosystem` | keep experimental | source gathering 예시와 cadence 보강 필요 |
+| `compare-agent-workflows` | keep experimental | 완전한 비교 예시 필요 |
+| `recommend-groundline-upgrades` | keep experimental | release scope 확장을 막는 증거 필요 |
+| `evaluate-agent-capability` | keep experimental | provider activation row와 예시 필요 |
+| `evaluate-ai-usage-maturity` | keep experimental | 안전한 Provider Evidence Packet 예시 필요 |
+| `hold-the-line` | keep experimental | cookbook evidence와 provider proof 필요 |
+| `polish-release-candidate` | keep experimental | release-cut과 구분되는 예시 필요 |
+| `compare-release-delta` | defer | v0.3.3 배포 뒤 비교 evidence 필요 |
+| `curate-groundline-skills` | keep experimental | curation 예시와 schema expectation 보강 필요 |
+
 ## 선택 기준
 
 - 먼저 current state를 증명합니다.

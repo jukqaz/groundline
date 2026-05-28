@@ -82,6 +82,14 @@ def docker_command(docker_bin: str, image: str) -> list[str]:
     ]
 
 
+def output_tail(text: str | bytes | None, line_limit: int = 40) -> str:
+    if text is None:
+        return ""
+    if isinstance(text, bytes):
+        text = text.decode("utf-8", errors="replace")
+    return "\n".join(text.splitlines()[-line_limit:])
+
+
 def run_docker_scenario(result: dict, docker_bin: str | None, image: str, dry_run: bool) -> tuple[dict, int]:
     resolved = docker_bin or shutil.which("docker")
     result["docker"].update({"image": image, "command": docker_command(resolved or "docker", image)})
@@ -101,7 +109,20 @@ def run_docker_scenario(result: dict, docker_bin: str | None, image: str, dry_ru
             check=False,
             timeout=180,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except subprocess.TimeoutExpired as exc:
+        result["error"] = "docker scenario failed"
+        result["docker"].update(
+            {
+                "available": True,
+                "executed": True,
+                "exit_code": None,
+                "exception": type(exc).__name__,
+                "stdout_tail": output_tail(exc.stdout),
+                "stderr_tail": output_tail(exc.stderr),
+            }
+        )
+        return result, 2
+    except OSError as exc:
         result["error"] = "docker scenario failed"
         result["docker"].update({"available": True, "executed": True, "exit_code": None, "exception": type(exc).__name__})
         return result, 2
@@ -109,6 +130,12 @@ def run_docker_scenario(result: dict, docker_bin: str | None, image: str, dry_ru
     result["docker"].update({"available": True, "executed": True, "exit_code": completed.returncode})
     if completed.returncode != 0:
         result["error"] = "docker scenario failed"
+        result["docker"].update(
+            {
+                "stdout_tail": output_tail(completed.stdout),
+                "stderr_tail": output_tail(completed.stderr),
+            }
+        )
         return result, 2
     return result, 0
 

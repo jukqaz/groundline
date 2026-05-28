@@ -26,6 +26,11 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
 The validation phase is read-only. Provider install commands are not read-only:
 they write to provider-owned plugin state.
 
+`groundline_provider_smoke.py` is also the version-aware install doctor. It
+reports `install_doctor_status`, source version, installed version, missing
+payload, skill count mismatch, provider cache candidates, and package drift
+without printing auth, sessions, logs, or provider home dumps.
+
 ## Which Install Path Should I Use?
 
 | Goal | Path |
@@ -60,6 +65,7 @@ Confirm:
 
 ```bash
 codex plugin list --marketplace groundline
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
 ```
 
 ## Claude Code
@@ -91,6 +97,7 @@ Confirm:
 
 ```bash
 claude plugin list
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
 ```
 
 ## Antigravity
@@ -117,12 +124,13 @@ Use `agy plugin list` after install to confirm the package is imported.
 
 Antigravity may report imported plugin metadata rather than a semantic version
 in every list view. In that case, use `agy plugin validate ./plugins/groundline`
-against a clone to confirm the package shape.
+against a clone to confirm the package shape, and use
+`groundline_provider_smoke.py` to compare installed payload and skill count.
 
 ## Publishing Rules
 
 - Do not claim official listing until the provider catalog actually lists it.
-- Keep provider manifests on the same version.
+- Keep provider manifests on the same version as canonical `plugin.json`.
 - Keep plugin paths relative to the plugin root.
 - Keep all runtime references inside the packaged plugin directory.
 - Do not add hooks or MCP servers by default; document them as opt-in work.
@@ -134,6 +142,7 @@ against a clone to confirm the package shape.
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
 claude plugin validate ./plugins/groundline --strict
 agy plugin validate ./plugins/groundline
 ```

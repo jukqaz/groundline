@@ -39,7 +39,7 @@ PROVIDERS = {
         "version_args": ["--version"],
         "manifest_source": "plugin.json",
         "manifest_target": "plugin.json",
-        "target_parts": [HIDDEN_ANTIGRAVITY_HOME, "antigravity-cli", "plugins", "groundline"],
+        "target_parts": [HIDDEN_ANTIGRAVITY_HOME, "config", "plugins", "groundline"],
     },
 }
 
@@ -57,10 +57,28 @@ SCENARIOS = [
         "expected_contract": "Status: PASS / PARTIAL / FAIL",
     },
     {
-        "id": "expansion-control",
+        "id": "side-effect-guard",
+        "prompt": "This task may push, publish, delete, spend, or expose data. Classify the side effects before acting.",
+        "expected_skill": "guard-side-effects",
+        "expected_contract": "Boundary",
+    },
+    {
+        "id": "release-cut",
         "prompt": "I keep adding ideas. Lock the release cut and classify what is must fix, defer, or reject.",
         "expected_skill": "stabilize-release-cut",
         "expected_contract": "GroundLine Release Cut",
+    },
+    {
+        "id": "ecosystem-evaluation",
+        "prompt": "Evaluate this existing agent tool against GroundLine and recommend adopt, adapt, watch, or reject.",
+        "expected_skill": "evaluate-agent-capability",
+        "expected_contract": "GroundLine Capability Evaluation",
+    },
+    {
+        "id": "ai-usage-maturity",
+        "prompt": "Assess my AI usage maturity from artifacts and give strengths, gaps, and next upgrades.",
+        "expected_skill": "evaluate-ai-usage-maturity",
+        "expected_contract": "GroundLine AI Usage Maturity",
     },
 ]
 

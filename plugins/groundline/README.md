@@ -101,8 +101,13 @@ stay in English unless a release explicitly changes that policy.
 - Korean overview: `README.ko.md`
 - Install and update: `docs/install.md`, `docs/update.md`
 - Provider install details: `docs/provider-packaging.md`
+- Provider activation proof: `docs/provider-activation-matrix.md`
 - Workflow examples: `docs/examples.md`
+- Workflow cookbook: `docs/workflow-cookbook.md`
+- Artifact lifecycle: `docs/artifact-lifecycle.md`
 - Skill overview: `docs/skill-portfolio.md`
+- Skill graduation plan: `docs/skill-graduation-plan.md`
+- Maturity and next work: `docs/maturity-assessment.md`
 - LLM-facing contract guide: `docs/llm-guide.md`
 
 ## Skills
@@ -148,8 +153,11 @@ stay in English unless a release explicitly changes that policy.
 - Korean update: `docs/ko/update.md`
 - Provider smoke: `docs/provider-smoke.md`
 - Provider dogfood: `docs/provider-dogfood.md`
+- Provider activation matrix: `docs/provider-activation-matrix.md`
 - Provider guardrails: `docs/provider-guardrails.md`
 - Optional MCP recipes: `docs/mcp-recipes.md`
+- Workflow cookbook: `docs/workflow-cookbook.md`
+- Artifact lifecycle: `docs/artifact-lifecycle.md`
 - Public release: `docs/public-release.md`
 - Privacy: `docs/privacy.md`
 - Korean privacy: `docs/ko/privacy.md`
@@ -157,10 +165,13 @@ stay in English unless a release explicitly changes that policy.
 - Korean terms: `docs/ko/terms.md`
 - Git history privacy: `docs/git-history-privacy.md`
 - Language policy: `docs/language-policy.md`
+- Maturity assessment: `docs/maturity-assessment.md`
 - Next work: `docs/next-work.md`
 - Next version: `docs/next-version.md`
 - Skill portfolio: `docs/skill-portfolio.md`
 - Korean skill portfolio: `docs/ko/skill-portfolio.md`
+- Skill graduation plan: `docs/skill-graduation-plan.md`
+- Korean skill graduation plan: `docs/ko/skill-graduation-plan.md`
 - Skill lifecycle: `references/skill-lifecycle.md`
 - LLM-readable skill index: `references/skill-index.json`
 - Optional MCP profiles: `references/optional-mcp-profiles.md`
@@ -199,20 +210,32 @@ rejected.
 
 ## Validation
 
+To inspect the release gate order without running the checks:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --plan --json
+```
+
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
+(cd plugins/groundline && PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json)
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/lint.py --json --require-actionlint
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_runtime_layout.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_safety_eval.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_dogfood.py --stage-package --probe-runtimes --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/run_scenarios.py --platform macos --sandbox local --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/run_scenarios.py --platform linux --sandbox docker --dry-run --json
 ```
 
-CI should run the same offline gates from `.github/workflows/test.yml`. A real
-Linux Docker run is a release gate:
+CI runs the deterministic offline subset from `.github/workflows/test.yml`.
+Before a release, also run the full release checklist in
+`docs/release-checklist.md`, including provider smoke and the real Linux Docker
+scenario:
 
 ```bash
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --json --include-docker-execution
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/run_scenarios.py --platform linux --sandbox docker --json
 ```
 

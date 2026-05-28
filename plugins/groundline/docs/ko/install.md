@@ -31,13 +31,19 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
 
 - `status=PASS`
 - `mutation_performed=false`
+- `secret_value_printed=false`
+- `install_doctor_status=PASS | PARTIAL | FAIL`
 - `real_home_touched=false`
 - provider target path는 기본적으로 `~`로 표시
 
 ## 주의
 
 provider smoke와 staged dogfood는 실제 provider home에 설치하지 않습니다.
-실제 provider home에 쓰는 작업은 사용자가 명시적으로 요청한 경우에만 진행합니다.
+provider smoke는 설치된 target이 있으면 source version, installed version,
+payload 존재 여부, skill count drift, provider cache candidate를 비교합니다.
+`PARTIAL`은 stale version, stale provider cache, payload 누락, skill count
+mismatch를 의미하며 JSON을 출력한 뒤 exit 1로 끝납니다. 실제 provider home에
+쓰는 작업은 사용자가 명시적으로 요청한 경우에만 진행합니다.
 
 Context7, Exa, GitHub 같은 외부 도구는 optional입니다. 없으면 doctor가 setup
 recommendation만 출력해야 합니다.
@@ -94,6 +100,13 @@ Antigravity:
 
 ```bash
 agy plugin list
+```
+
+provider list가 version을 명확히 보여주지 않으면 clone에서 read-only install
+doctor를 다시 실행합니다.
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
 ```
 
 설치 뒤 첫 요청 예시:

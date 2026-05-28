@@ -61,6 +61,19 @@ frontmatter focused on `name` and `description`; use
 - `merged`: folded into another skill or reference.
 - `rejected`: intentionally kept out.
 
+### graduation_decision
+
+Experimental skills also record a release decision in
+`references/skill-index.json`:
+
+- `graduate`: promote after the named release gates and install proof pass.
+- `keep experimental`: keep using the skill, but collect more examples,
+  output-contract proof, or provider activation evidence before promotion.
+- `merge`: keep the current surface for now, but test a smaller replacement in
+  docs, references, or a neighboring skill.
+- `defer`: wait for a future release event or missing evidence before making a
+  lifecycle change.
+
 ## Curation Actions
 
 - `create`: add a focused skill for a repeatable judgment workflow.
@@ -82,6 +95,8 @@ frontmatter focused on `name` and `description`; use
 
 - Put exact `workflow_stage`, `artifact_type`, `risk_level`, `provider_scope`,
   and `lifecycle` fields in `references/skill-index.json`.
+- For experimental skills, also put exact `graduation_decision` and
+  `graduation_rationale` fields in `references/skill-index.json`.
 - Keep `llm_trigger` aligned with the skill frontmatter description.
 - Keep `human_summary` short enough for compact reports.
 - Update tests when adding or removing a skill.

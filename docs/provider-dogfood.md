@@ -15,13 +15,13 @@ Expected safety fields:
 
 - `suite=provider-dogfood`
 - `status=PASS`
-- `scenario_count=3`
+- `scenario_count=6`
 - `mutation_performed=false`
 - `real_home_touched=false`
 - each provider reports `runtime_probe.probed=true`
 - each provider reports `install.target_exists=true`
 - each provider reports `install.target_skill_count_matches_source=true`
-- each provider reports three `scenario_results`
+- each provider reports six `scenario_results`
 
 Use `--home` and `--bin-dir` when a deterministic test home or fake runtime bin
 directory is needed:
@@ -42,7 +42,7 @@ provider cache dumps, or provider runtime state.
 
 ```text
 provider: Codex | Claude Code | Antigravity
-prompt_family: handoff | release-closeout | expansion-control
+prompt_family: handoff | side-effect-guard | release-cut | ecosystem-evaluation | ai-usage-maturity
 selected_skill: <groundline skill name>
 output_contract: <contract name>
 evidence: short sanitized summary
@@ -56,13 +56,32 @@ Evidence should be short enough to audit during release review. Prefer selected
 skill, selected output contract, verification command, and stop condition over
 conversation excerpts.
 
+Use `docs/provider-activation-matrix.md` to track live provider rows for the
+five prompt families. Keep this document focused on staged contract harness
+evidence and the sanitized proof schema.
+
 ## Scenario Suite
+
+The staged harness checks the six release-critical contract paths below.
 
 | Scenario | Expected skill | Expected contract |
 | --- | --- | --- |
 | `long-context-handoff` | `package-agent-task` | `GroundLine Task Packet` |
 | `completion-proof` | `close-live-work` | `Status: PASS / PARTIAL / FAIL` |
-| `expansion-control` | `stabilize-release-cut` | `GroundLine Release Cut` |
+| `side-effect-guard` | `guard-side-effects` | `Boundary` |
+| `release-cut` | `stabilize-release-cut` | `GroundLine Release Cut` |
+| `ecosystem-evaluation` | `evaluate-agent-capability` | `GroundLine Capability Evaluation` |
+| `ai-usage-maturity` | `evaluate-ai-usage-maturity` | `GroundLine AI Usage Maturity` |
+
+## Prompt Family Coverage
+
+| Prompt family | Primary skill | Evidence source |
+| --- | --- | --- |
+| `handoff` | `package-agent-task` | staged harness plus live matrix |
+| `side-effect-guard` | `guard-side-effects` | staged harness plus live matrix |
+| `release-cut` | `stabilize-release-cut` | staged harness plus live matrix |
+| `ecosystem-evaluation` | `evaluate-agent-capability` | staged harness plus live matrix |
+| `ai-usage-maturity` | `evaluate-ai-usage-maturity` | staged harness plus live matrix |
 
 ## Result Rules
 

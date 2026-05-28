@@ -22,6 +22,11 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
 이 단계는 provider home을 쓰지 않습니다. 아래 provider install 명령은 provider
 plugin state를 씁니다.
 
+`groundline_provider_smoke.py`는 version-aware install doctor 역할도 합니다.
+`install_doctor_status`, source version, installed version, payload 누락,
+skill count mismatch, provider cache candidate, package drift를 보고하되 auth,
+session, log, provider home dump는 출력하지 않습니다.
+
 ## 어떤 경로를 쓰나
 
 | 목표 | 경로 |
@@ -50,6 +55,7 @@ codex plugin add groundline@groundline
 
 ```bash
 codex plugin list --marketplace groundline
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
 ```
 
 ## Claude Code
@@ -68,6 +74,7 @@ claude plugin install groundline@groundline
 
 ```bash
 claude plugin list
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
 ```
 
 ## Antigravity
@@ -83,18 +90,20 @@ agy plugin install ./plugins/groundline
 
 Antigravity list가 semantic version 대신 import metadata만 보여줄 수 있습니다.
 그 경우 clone에서 `agy plugin validate ./plugins/groundline`으로 package shape를
-확인합니다.
+확인하고, `groundline_provider_smoke.py`로 installed payload와 skill count를
+비교합니다.
 
 ## 배포 규칙
 
 - 실제 catalog에 올라가기 전에는 공식 등재라고 표현하지 않습니다.
-- 세 provider manifest의 version을 맞춥니다.
+- 세 provider manifest의 version을 canonical `plugin.json`과 맞춥니다.
 - runtime 참조는 packaged plugin directory 내부에 둡니다.
 - hooks와 MCP 서버는 기본 활성화하지 않고 opt-in으로 문서화합니다.
 - 릴리스 전 provider check를 실행합니다.
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
 claude plugin validate ./plugins/groundline --strict
 agy plugin validate ./plugins/groundline
 ```

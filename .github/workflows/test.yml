@@ -28,12 +28,23 @@ jobs:
           tar -xzf /tmp/actionlint.tar.gz -C .tools actionlint
       - name: Lint
         run: python3 scripts/lint.py --json --require-actionlint --actionlint-bin .tools/actionlint
+      - name: Check release gate plan
+        run: python3 scripts/groundline_release_gate.py --plan --json --actionlint-bin .tools/actionlint
       - name: Validate package
         run: python3 scripts/validate_pack.py --json
+      - name: Validate packaged plugin
+        run: python3 scripts/validate_pack.py --json
+        working-directory: plugins/groundline
       - name: Check runtime layout
         run: python3 scripts/check_runtime_layout.py --json
+      - name: Run offline doctor
+        run: python3 scripts/groundline_doctor.py --json --offline --probe-tools
+      - name: Run offline radar
+        run: python3 scripts/groundline_radar.py --json --offline --command-sources
       - name: Run tests
         run: python3 -m unittest discover -s tests -v
+      - name: Run safety eval harness
+        run: python3 scripts/groundline_safety_eval.py --json
       - name: Run staged dogfood harness
         run: python3 scripts/groundline_dogfood.py --stage-package --json
       - name: Run macOS local scenario contract

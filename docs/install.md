@@ -33,9 +33,20 @@ Expected result:
 - `real_home_touched=false` for staged dogfood
 - provider target paths are printed with `~`, not full home dumps
 
-The provider smoke command is read-only. It reports manifest presence and local
-target paths for Codex, Claude Code, and Antigravity without writing to the
-home directory. Default home paths are displayed with `~`.
+The provider smoke command is read-only. It reports manifest presence, local
+target paths, installed package version, source package version, payload
+presence, skill count, and provider cache candidates for Codex, Claude Code,
+and Antigravity without writing to the home directory. Default home paths are
+displayed with `~`.
+
+Read `install_doctor_status`:
+
+- `PASS`: source manifests are present and any existing provider target matches
+  the source package.
+- `PARTIAL`: an installed provider target exists but has stale version,
+  stale provider cache, missing payload, or skill count drift. The command
+  exits 1 while still printing JSON.
+- `FAIL`: source manifests needed for provider install are missing.
 
 ## 2. Check Local Runtime Posture
 
@@ -99,11 +110,13 @@ agy plugin list
 ```
 
 Look for `groundline` and the expected version. If the provider only shows an
-import record, also run provider validation from the cloned repository:
+import record, also run provider validation and the read-only install doctor
+from the cloned repository:
 
 ```bash
 claude plugin validate ./plugins/groundline --strict
 agy plugin validate ./plugins/groundline
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
 ```
 
 ## What To Do First After Install

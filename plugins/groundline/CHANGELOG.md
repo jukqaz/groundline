@@ -2,7 +2,37 @@
 
 ## Unreleased
 
-- No unreleased changes.
+- Version-aware provider smoke now reports installed version, source version,
+  install source, cache candidates, payload presence, skill count drift,
+  `install_doctor_status`, and `secret_value_printed=false` for Codex, Claude
+  Code, and Antigravity.
+- Add single-source version control so validation compares provider manifests
+  against canonical `plugin.json` instead of a hard-coded patch version.
+- Add a provider activation matrix and expand staged dogfood to six prompt
+  families while keeping live provider proof separate from staged contract
+  checks.
+- Align the AI usage maturity activation matrix row with the canonical
+  `GroundLine AI Usage Maturity` output contract.
+- Add a skill graduation plan with machine-readable decisions for all 12
+  experimental skills. No lifecycle values are promoted in this patch draft.
+- Add a workflow cookbook that maps five common prompts to selected skills,
+  output contracts, verification evidence, and stop conditions.
+- Add an artifact lifecycle map for research packet, comparison report,
+  upgrade decision, implementation task, dogfood evidence, release cut, and
+  release delta handoffs.
+- Add a release gate runner that prints or executes the local release gate
+  sequence while excluding approval-required tag, push, and GitHub Release
+  commands.
+- Separate approval-required publishing commands from read-only release
+  evidence in the public release checklist.
+- Document the exact version bump sequence for source manifests, package sync,
+  validation, changelog movement, and `v`-prefixed release tags.
+- Add the deterministic offline safety eval harness to the default CI release
+  gate and manual release evidence checklist.
+- Align README and update validation docs with source, packaged, safety, smoke,
+  dogfood, and scenario release gates.
+- Keep package validation strict for conflict-copy payloads while ignoring
+  empty conflict-copy directories that contain no files.
 
 ## v0.3.2 - 2026-05-28
 

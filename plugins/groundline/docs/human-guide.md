@@ -36,6 +36,8 @@ orient -> bound -> act -> prove -> polish -> cut -> compare
 You do not need every step for every task. Use the smallest step that answers
 the current risk.
 
+For complete prompt-to-evidence examples, read `docs/workflow-cookbook.md`.
+
 ## First Run
 
 ```bash

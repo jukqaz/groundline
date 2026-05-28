@@ -50,6 +50,9 @@ Use `references/skill-index.json` when a structured skill catalog is more
 useful than prose. Use `docs/skill-portfolio.md` when producing a maintainer
 summary for people.
 
+Use `docs/workflow-cookbook.md` when the user needs a complete path from prompt
+to selected skill, output contract, verification evidence, and stop condition.
+
 ## Routing Priority
 
 - For single candidate evaluation, use `evaluate-agent-capability`.

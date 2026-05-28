@@ -54,8 +54,10 @@ BASE_REQUIRED_FILES = [
     "docs/update.md",
     "docs/provider-smoke.md",
     "docs/provider-dogfood.md",
+    "docs/provider-activation-matrix.md",
     "docs/provider-guardrails.md",
     "docs/mcp-recipes.md",
+    "docs/maturity-assessment.md",
     "docs/next-work.md",
     "docs/next-version.md",
     "docs/privacy.md",
@@ -64,20 +66,28 @@ BASE_REQUIRED_FILES = [
     "docs/public-release.md",
     "docs/runtime-support.md",
     "docs/examples.md",
+    "docs/workflow-cookbook.md",
+    "docs/artifact-lifecycle.md",
     "docs/dogfood.md",
     "docs/skill-portfolio.md",
+    "docs/skill-graduation-plan.md",
     "docs/release-checklist.md",
     "docs/ko/index.md",
     "docs/ko/human-guide.md",
     "docs/ko/install.md",
     "docs/ko/update.md",
     "docs/ko/examples.md",
+    "docs/ko/workflow-cookbook.md",
+    "docs/ko/artifact-lifecycle.md",
     "docs/ko/skill-portfolio.md",
+    "docs/ko/skill-graduation-plan.md",
     "docs/ko/privacy.md",
     "docs/ko/terms.md",
     "docs/ko/provider-packaging.md",
+    "docs/ko/provider-activation-matrix.md",
     "docs/ko/provider-guardrails.md",
     "docs/ko/mcp-recipes.md",
+    "docs/ko/maturity-assessment.md",
     "docs/ko/release-checklist.md",
     "docs/ko/next-version.md",
     "references/capability-blueprint.md",
@@ -101,6 +111,7 @@ BASE_REQUIRED_FILES = [
     "scenarios/fixtures/safety-eval.json",
     "scripts/groundline_dogfood.py",
     "scripts/groundline_provider_smoke.py",
+    "scripts/groundline_release_gate.py",
     "scripts/groundline_safety_eval.py",
     "scripts/lint.py",
     "scripts/sync_provider_package.py",
@@ -160,10 +171,31 @@ def parse_frontmatter(path: Path) -> dict[str, str]:
     return data
 
 
+def canonical_version() -> str | None:
+    manifest = load_json(ROOT / "plugin.json")
+    version = manifest.get("version")
+    return version if isinstance(version, str) else None
+
+
+def collect_conflict_copies(root: Path) -> list[Path]:
+    if not root.is_dir():
+        return []
+    return sorted(path for path in root.rglob("*") if re.search(r" \d+$", path.name))
+
+
+def conflict_copy_has_payload(path: Path) -> bool:
+    if path.is_file():
+        return True
+    if not path.is_dir():
+        return False
+    return any(child.is_file() for child in path.rglob("*"))
+
+
 def collect_errors() -> list[str]:
     errors: list[str] = []
     source_root = (ROOT / ".agents/plugins/marketplace.json").is_file()
     required_files = BASE_REQUIRED_FILES + (SOURCE_ONLY_REQUIRED_FILES if source_root else [])
+    expected_version = canonical_version()
 
     for rel in required_files:
         if not (ROOT / rel).is_file():
@@ -183,6 +215,8 @@ def collect_errors() -> list[str]:
                 continue
             if manifest.get("name") != "groundline":
                 errors.append(f"{label} manifest name must be groundline")
+            if expected_version and manifest.get("version") != expected_version:
+                errors.append(f"{label} manifest version must match plugin.json {expected_version}")
 
     codex_manifest = ROOT / ".codex-plugin/plugin.json"
     if codex_manifest.is_file():
@@ -226,6 +260,10 @@ def collect_errors() -> list[str]:
 
     if source_root:
         package_dir = ROOT / "plugins/groundline"
+        if package_dir.is_dir():
+            for path in collect_conflict_copies(package_dir):
+                if conflict_copy_has_payload(path):
+                    errors.append(f"packaged conflict copy must be removed: {path.relative_to(ROOT)}")
         package_skills = (
             {path.name for path in (package_dir / "skills").iterdir() if path.is_dir()}
             if (package_dir / "skills").is_dir()
@@ -248,8 +286,12 @@ def collect_errors() -> list[str]:
                     continue
                 if manifest.get("name") != "groundline":
                     errors.append(f"{rel} manifest name must be groundline")
-                if manifest.get("version") != "0.3.2":
-                    errors.append(f"{rel} manifest version must be 0.3.2")
+                if expected_version and manifest.get("version") != expected_version:
+                    errors.append(f"{rel} manifest version must match plugin.json {expected_version}")
+    else:
+        for path in collect_conflict_copies(ROOT):
+            if conflict_copy_has_payload(path):
+                errors.append(f"packaged conflict copy must be removed: {path.relative_to(ROOT)}")
 
     for skill_name in sorted(EXPECTED_SKILLS):
         skill_dir = skills_dir / skill_name

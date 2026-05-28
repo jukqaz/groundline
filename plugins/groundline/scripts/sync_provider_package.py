@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
+import time
 from pathlib import Path
 
 
@@ -35,6 +37,7 @@ MANIFEST_FILES = [
     (".codex-plugin/plugin.json", ".codex-plugin/plugin.json"),
     (".claude-plugin/plugin.json", ".claude-plugin/plugin.json"),
 ]
+CONFLICT_COPY_PATTERN = re.compile(r" \d+$")
 
 
 def copy_file(src_rel: str, dest_rel: str) -> None:
@@ -49,6 +52,7 @@ def copy_file(src_rel: str, dest_rel: str) -> None:
 def copy_dir(rel: str) -> None:
     src = ROOT / rel
     dest = PACKAGE_ROOT / rel
+    expected_files: set[Path] = set()
     for path in sorted(src.rglob("*")):
         if path.is_dir():
             continue
@@ -56,23 +60,70 @@ def copy_dir(rel: str) -> None:
             continue
         if rel == "docs" and "superpowers" in path.relative_to(src).parts:
             continue
-        target = dest / path.relative_to(src)
+        relative = path.relative_to(src)
+        expected_files.add(relative)
+        target = dest / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.exists():
             target.unlink()
         target.write_bytes(path.read_bytes())
 
+    if not dest.is_dir():
+        return
+    for path in sorted(dest.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+        if CONFLICT_COPY_PATTERN.search(path.name):
+            continue
+        relative = path.relative_to(dest)
+        if path.is_file() and relative not in expected_files:
+            path.unlink()
+        elif path.is_dir() and not any(path.iterdir()):
+            path.rmdir()
 
-def clean_package_root() -> None:
+def ensure_package_root() -> None:
     if PACKAGE_ROOT == ROOT or ROOT not in PACKAGE_ROOT.parents:
         raise RuntimeError(f"refusing to clean unsafe package path: {PACKAGE_ROOT}")
-    if PACKAGE_ROOT.exists():
-        shutil.rmtree(PACKAGE_ROOT)
-    PACKAGE_ROOT.mkdir(parents=True)
+    PACKAGE_ROOT.mkdir(parents=True, exist_ok=True)
+
+
+def conflict_copy_paths() -> list[Path]:
+    if not PACKAGE_ROOT.is_dir():
+        return []
+    return sorted(
+        (path for path in PACKAGE_ROOT.rglob("*") if CONFLICT_COPY_PATTERN.search(path.name)),
+        key=lambda item: len(item.parts),
+        reverse=True,
+    )
+
+
+def clean_conflict_copies(timeout_seconds: float = 8.0, interval_seconds: float = 0.25) -> dict[str, list[str]]:
+    removed: set[str] = set()
+    clean_scans = 0
+    deadline = time.monotonic() + timeout_seconds
+    paths: list[Path] = []
+
+    while time.monotonic() < deadline:
+        paths = conflict_copy_paths()
+        if not paths:
+            clean_scans += 1
+            if clean_scans >= 8:
+                return {"removed": sorted(removed), "remaining": []}
+            time.sleep(interval_seconds)
+            continue
+
+        clean_scans = 0
+        for path in paths:
+            removed.add(str(path.relative_to(PACKAGE_ROOT)))
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+        time.sleep(interval_seconds)
+
+    return {"removed": sorted(removed), "remaining": [str(path.relative_to(PACKAGE_ROOT)) for path in conflict_copy_paths()]}
 
 
 def sync_package() -> dict:
-    clean_package_root()
+    ensure_package_root()
 
     for src_rel, dest_rel in MANIFEST_FILES:
         copy_file(src_rel, dest_rel)
@@ -80,13 +131,20 @@ def sync_package() -> dict:
         copy_file(rel, rel)
     for rel in TOP_LEVEL_DIRS:
         copy_dir(rel)
+    conflict_cleanup = clean_conflict_copies()
 
     skill_count = len([path for path in (PACKAGE_ROOT / "skills").iterdir() if path.is_dir()])
+    status = "PASS" if not conflict_cleanup["remaining"] else "FAIL"
     return {
-        "status": "PASS",
+        "status": status,
+        "errors": [
+            f"packaged conflict copy remained after cleanup: {path}" for path in conflict_cleanup["remaining"]
+        ],
         "mutation_performed": True,
         "package_path": str(PACKAGE_ROOT),
         "skill_count": skill_count,
+        "conflict_copies_removed": conflict_cleanup["removed"],
+        "remaining_conflict_copies": conflict_cleanup["remaining"],
         "marketplace_files": [
             ".agents/plugins/marketplace.json",
             ".claude-plugin/marketplace.json",
@@ -104,7 +162,7 @@ def main() -> int:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
         print(f"staged {result['package_path']} with {result['skill_count']} skills")
-    return 0
+    return 0 if result["status"] == "PASS" else 1
 
 
 if __name__ == "__main__":

@@ -12,9 +12,9 @@ Real home mutation: false
 
 | Provider | Scenario | Expected skill | Evidence | Result |
 | --- | --- | --- | --- | --- |
-| Codex | Staged package plus shared scenario suite. | `package-agent-task`, `close-live-work`, `stabilize-release-cut` | `codex --version` returned `codex-cli 0.134.0`; `groundline_dogfood.py` reported runtime and all scenario contracts present. | PASS |
-| Claude Code | Staged package plus shared scenario suite. | `package-agent-task`, `close-live-work`, `stabilize-release-cut` | `claude --version` returned `2.1.152 (Claude Code)`; `groundline_dogfood.py` reported runtime and all scenario contracts present. | PASS |
-| Antigravity | Staged package plus shared scenario suite. | `package-agent-task`, `close-live-work`, `stabilize-release-cut` | `agy --version` returned `1.0.2`; `groundline_dogfood.py` reported runtime and all scenario contracts present. | PASS |
+| Codex | Staged package plus shared scenario suite. | six expected staged skills | `codex --version` returned `codex-cli 0.134.0`; `groundline_dogfood.py` reported runtime and all scenario contracts present. | PASS |
+| Claude Code | Staged package plus shared scenario suite. | six expected staged skills | `claude --version` returned `2.1.152 (Claude Code)`; `groundline_dogfood.py` reported runtime and all scenario contracts present. | PASS |
+| Antigravity | Staged package plus shared scenario suite. | six expected staged skills | `agy --version` returned `1.0.3`; `groundline_dogfood.py` reported runtime and all scenario contracts present. | PASS |
 
 ## Provider Invocation Evidence
 
@@ -27,8 +27,8 @@ Provider home dumped: false
 | Provider | Prompt family | Selected skill | Output contract | Result | Evidence |
 | --- | --- | --- | --- | --- | --- |
 | Codex | handoff | `package-agent-task` | `GroundLine Task Packet` | PASS | Read-only `codex exec --ephemeral` loaded the GroundLine skill and returned the canonical contract with `mutation_performed=false`. |
-| Claude Code | release-closeout | `groundline:polish-release-candidate` | `release_polish_report` | PARTIAL | `claude -p` selected an installed GroundLine skill, but did not return the canonical `GroundLine Release Polish` contract name. |
-| Antigravity | expansion-control | not captured | not captured | PARTIAL | `agy --print` could not complete a constrained no-tool proof in this environment and timed out after tool-driven exploration; no repository mutation was observed. |
+| Claude Code | release-cut | `groundline:polish-release-candidate` | `release_polish_report` | PARTIAL | `claude -p` selected an installed GroundLine skill, but did not return the canonical `GroundLine Release Polish` contract name. |
+| Antigravity | release-cut | not captured | not captured | PARTIAL | `agy --print` could not complete a constrained no-tool proof in this environment and timed out after tool-driven exploration; no repository mutation was observed. |
 
 ## Provider Invocation Follow-up
 
@@ -40,8 +40,8 @@ Provider home dumped: false
 
 | Provider | Prompt family | Selected skill | Output contract | Result | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| Claude Code | release-closeout | `stabilize-release-cut` | `GroundLine Release Cut` | PASS | `claude -p` returned the canonical skill and contract after the proof prompt allowed read-only skill doc inspection with `mutation_performed=false`. |
-| Antigravity | expansion-control | not captured | not captured | PARTIAL | `agy --print` still entered tool exploration and hit Antigravity CLI app-data write constraints before returning a sanitized proof; package validation and install remain PASS. |
+| Claude Code | release-cut | `stabilize-release-cut` | `GroundLine Release Cut` | PASS | `claude -p` returned the canonical skill and contract after the proof prompt allowed read-only skill doc inspection with `mutation_performed=false`. |
+| Antigravity | release-cut | not captured | not captured | PARTIAL | `agy --print` still entered tool exploration and hit Antigravity CLI app-data write constraints before returning a sanitized proof; package validation and install remain PASS. |
 
 ## Superpowers Companion Dogfood
 
@@ -62,7 +62,7 @@ Fresh local checks:
 - Doctor reported `superpowers.present=true`.
 - Doctor reported all three supported runtimes present.
 - Doctor reported `github` available and `context7` plus `exa` as optional gaps.
-- Staged provider dogfood returned `status=PASS`, `scenario_count=3`, and
+- Staged provider dogfood returned `status=PASS`, `scenario_count=6`, and
   `real_home_touched=false`.
 - The staged run observed `codex-cli 0.134.0`, `Claude Code 2.1.152`, and
   `Antigravity 1.0.3`.
@@ -100,7 +100,7 @@ optional provider integrations.
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_dogfood.py
   --stage-package --probe-runtimes --json` returned `status=PASS`.
 - `suite=provider-dogfood`.
-- `scenario_count=3`.
+- `scenario_count=6`.
 - `fake_home_used=true`.
 - `temp_state_created=true`.
 - `mutation_performed=false`.
@@ -112,7 +112,7 @@ optional provider integrations.
 - Each provider reported `target_skills_present=true`.
 - Each provider reported `target_skill_count=19`.
 - Each provider reported `target_skill_count_matches_source=true`.
-- Each provider reported three `scenario_results` with `status=PASS`.
+- Each provider reported six `scenario_results` with `status=PASS`.
 
 ## Scenario Prompts
 
@@ -130,10 +130,28 @@ Use the same prompts across providers after installing or staging GroundLine:
    Tests passed. Decide whether this work is actually complete and what evidence is still missing.
    ```
 
-3. Expansion control:
+3. Side-effect guard:
+
+   ```text
+   This task may push, publish, delete, spend, or expose data. Classify the side effects before acting.
+   ```
+
+4. Release cut:
 
    ```text
    I keep adding ideas. Lock the release cut and classify what is must fix, defer, or reject.
+   ```
+
+5. Ecosystem evaluation:
+
+   ```text
+   Evaluate this existing agent tool against GroundLine and recommend adopt, adapt, watch, or reject.
+   ```
+
+6. AI usage maturity:
+
+   ```text
+   Assess my AI usage maturity from artifacts and give strengths, gaps, and next upgrades.
    ```
 
 ## Release Discipline
@@ -165,6 +183,6 @@ evidence stays in `watch` or `defer`.
 
 ## Next Review
 
-Run `compare-release-delta` after the next release to compare it with v0.3.0
-and confirm the remaining provider invocation partial was reduced or still
-accepted intentionally.
+Run `compare-release-delta` after the next release to compare it with the
+previous published release, currently v0.3.2, and confirm whether the remaining
+provider invocation partial was reduced or still accepted intentionally.

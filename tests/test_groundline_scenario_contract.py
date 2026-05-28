@@ -232,11 +232,22 @@ class GroundLineScenarioContractTests(unittest.TestCase):
         self.assertFalse(result["docker"]["executed"])
         self.assertFalse(result["real_home_touched"])
 
-    def write_fake_docker(self, root: Path, *, exit_code: int = 0) -> tuple[Path, Path]:
+    def write_fake_docker(
+        self,
+        root: Path,
+        *,
+        exit_code: int = 0,
+        stdout: str = "",
+        stderr: str = "",
+    ) -> tuple[Path, Path]:
         log_path = root / "docker-args.log"
         docker_path = root / "docker"
         docker_path.write_text(
-            f"#!/bin/sh\nprintf '%s\\n' \"$@\" > '{log_path}'\nexit {exit_code}\n",
+            "#!/bin/sh\n"
+            f"printf '%s\\n' \"$@\" > '{log_path}'\n"
+            f"printf '%s\\n' '{stdout}'\n"
+            f"printf '%s\\n' '{stderr}' >&2\n"
+            f"exit {exit_code}\n",
             encoding="utf-8",
         )
         docker_path.chmod(0o755)
@@ -270,7 +281,12 @@ class GroundLineScenarioContractTests(unittest.TestCase):
 
     def test_run_scenarios_linux_docker_failure_reports_partial(self) -> None:
         with tempfile.TemporaryDirectory(prefix="groundline-docker-") as temp:
-            docker_bin, _ = self.write_fake_docker(Path(temp), exit_code=42)
+            docker_bin, _ = self.write_fake_docker(
+                Path(temp),
+                exit_code=42,
+                stdout="validation failed",
+                stderr="container stderr",
+            )
             completed = self.run_script(
                 "run_scenarios.py",
                 "--platform",
@@ -288,6 +304,8 @@ class GroundLineScenarioContractTests(unittest.TestCase):
         self.assertEqual(result["error"], "docker scenario failed")
         self.assertTrue(result["docker"]["executed"])
         self.assertEqual(result["docker"]["exit_code"], 42)
+        self.assertIn("validation failed", result["docker"]["stdout_tail"])
+        self.assertIn("container stderr", result["docker"]["stderr_tail"])
         self.assertFalse(result["real_home_touched"])
 
 
