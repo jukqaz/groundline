@@ -27,7 +27,7 @@ next package sync and release gates.
 - Packaged validation: `plugins/groundline` validation returned `status=PASS`.
 - Lint validation: `lint.py --json --require-actionlint` returned
   `status=PASS`.
-- Unit tests: `python3 -m unittest discover -s tests -v` returned 107 tests OK.
+- Unit tests: `python3 -m unittest discover -s tests -v` returned 108 tests OK.
 - Safety eval: `groundline_safety_eval.py --json` returned `status=PASS` with
   4 synthetic cases and `mutation_performed=false`.
 - Offline doctor and radar checks: `groundline_doctor.py --json --offline
@@ -43,8 +43,10 @@ next package sync and release gates.
 - Artifact lifecycle: research, comparison, recommendation, implementation,
   dogfood, release, and post-release review artifacts map to existing skills
   and output contracts.
-- Provider install evidence: the read-only install doctor reports PASS for
-  Codex, Claude Code, and Antigravity on this machine.
+- Provider install evidence: the read-only install doctor reports PARTIAL for
+  Codex, Claude Code, and Antigravity on this machine because the installed
+  provider targets still point at same-version content that differs from the
+  current v0.3.3 patch draft.
 - Staged dogfood evidence: six scenario contracts pass for Codex, Claude Code,
   and Antigravity with `real_home_touched=false`.
 - Scenario evidence: macOS local, Linux Docker dry-run, and Linux Docker
@@ -67,16 +69,17 @@ next package sync and release gates.
 | Trigger clarity | 84 | PASS | v0.3.2 clarified ecosystem, maturity, and release routing; more provider activation evidence is still needed. |
 | Context weight | 86 | PASS | Long guidance mostly lives in docs and references; skills stay short enough to load on demand. |
 | Workflow coverage | 82 | PARTIAL | Core loops and compact workflow examples are covered; representative real-provider workflows are still sparse. |
-| Verification strength | 88 | PASS | Source, package, lint, unit, scenario, dogfood, provider smoke, and local install doctor gates pass. Real LLM activation is not automated. |
+| Verification strength | 86 | PARTIAL | Source, package, lint, unit, staged dogfood, and scenario gates pass; real provider smoke is PARTIAL until installed payloads match the draft. |
 | Security posture | 90 | PASS | Default behavior is read-only/offline, secret-sensitive docs exist, and provider state is kept out of source. |
-| Provider install posture | 84 | PASS | The install doctor now detects provider cache, installed version, payload, and skill count drift; post-publish confirmation remains a release gate. |
+| Provider install posture | 84 | PARTIAL | The install doctor now detects provider cache, installed version, payload, skill count drift, and same-version content drift; the current installed provider targets are stale relative to the draft. |
 | Maintenance discipline | 84 | PASS | Manifest version checks now use canonical `plugin.json`, and package validation catches conflict-copy artifacts. |
 
 ## Main Findings
 
-1. The package is already good enough for real local use.
-   Evidence: provider installs succeeded, 19 skills are visible, and validation
-   gates pass.
+1. The package is already good enough for staged local use.
+   Evidence: source/package validation, staged dogfood, and macOS/Linux
+   scenarios pass. Real provider targets exist with 19 skills, but the new
+   content fingerprint check correctly marks them PARTIAL until refreshed.
 
 2. The remaining risk is not feature absence. It is proof quality.
    The staged dogfood harness now covers six scenario contracts, including all
@@ -87,8 +90,9 @@ next package sync and release gates.
 
 3. Installation diagnostics are now first-class.
    Provider smoke reports `install_doctor_status`, cache candidates, installed
-   versions, payload presence, and skill count drift without printing provider
-   homes or auth material.
+   versions, payload presence, skill count drift, and same-version content
+   drift without printing provider homes or auth material. It now catches stale
+   cache content even when the semantic version still matches.
 
 4. Experimental surface is still large, but now bounded.
    Twelve experimental skills remain acceptable for v0.3, and each now has a
@@ -208,8 +212,9 @@ GroundLine should not call itself 1.0 until all of these are true:
 v0.3.2 remains the current public release. The current v0.3.3 patch draft has
 closed the P0 install posture and version drift diagnostics, added staged
 provider activation coverage, recorded skill graduation decisions, added a
-compact workflow cookbook, and mapped the artifact lifecycle. Local release
-gates pass in the source tree and the packaged plugin.
+compact workflow cookbook, and mapped the artifact lifecycle. Source, packaged,
+staged dogfood, and scenario gates pass; the full release gate remains PARTIAL
+when real provider targets still contain same-version stale content.
 
 Ship decision for the draft: `hold` until either the user approves publishing
 with the current sanitized proof set or live provider activation proof is

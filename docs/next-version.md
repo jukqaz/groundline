@@ -43,7 +43,8 @@ Completed:
 - `docs/maturity-assessment.md` records the 85/100 public beta assessment and
   the next bounded work items
 - version-aware provider smoke reports source version, installed version,
-  payload presence, skill count drift, and `install_doctor_status`
+  payload presence, skill count drift, same-version content drift, and
+  `install_doctor_status`
 - validation compares provider manifest versions against canonical
   `plugin.json`
 - `docs/provider-activation-matrix.md` defines the five live prompt families
@@ -194,4 +195,7 @@ Before tagging the next patch, run package sync, source validation, packaged
 validation, lint, unit tests, offline doctor, offline radar, safety eval,
 provider smoke, staged dogfood, macOS local scenario, Linux Docker dry-run,
 Linux Docker execution, and at least one remote install proof when the package
-is meant to be installed from GitHub.
+is meant to be installed from GitHub. If provider smoke reports
+`content_fingerprint_mismatch` against same-version local targets, treat the
+full closeout as PARTIAL until those targets are refreshed from the published
+ref.

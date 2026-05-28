@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -33,6 +34,29 @@ PROVIDERS = {
     },
 }
 
+PAYLOAD_FILES = [
+    "README.md",
+    "README.ko.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "LICENSE",
+    "SECURITY.md",
+    "plugin.json",
+    ".codex-plugin/plugin.json",
+    ".claude-plugin/plugin.json",
+]
+
+PAYLOAD_DIRS = [
+    "docs",
+    "references",
+    "scripts",
+    "skills",
+]
+
+SOURCE_ONLY_PARTS = {
+    ("docs", "superpowers"),
+}
+
 
 def load_json(path: Path) -> dict:
     try:
@@ -46,6 +70,64 @@ def count_skill_dirs(root: Path) -> int:
     if not skills_dir.is_dir():
         return 0
     return sum(1 for path in skills_dir.iterdir() if path.is_dir() and (path / "SKILL.md").is_file())
+
+
+def should_skip_payload_path(path: Path, root: Path) -> bool:
+    relative = path.relative_to(root)
+    if "__pycache__" in relative.parts or path.suffix == ".pyc":
+        return True
+    for source_only in SOURCE_ONLY_PARTS:
+        if relative.parts[: len(source_only)] == source_only:
+            return True
+    return False
+
+
+def manifest_fingerprint_bytes(path: Path) -> bytes:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return path.read_bytes()
+    if isinstance(data, dict):
+        data = dict(data)
+        data.pop("version", None)
+    return json.dumps(data, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def payload_fingerprint(root: Path) -> str:
+    digest = hashlib.sha256()
+    for rel in PAYLOAD_FILES:
+        path = root / rel
+        digest.update(rel.encode("utf-8"))
+        digest.update(b"\0")
+        if not path.is_file():
+            digest.update(b"MISSING")
+            digest.update(b"\0")
+            continue
+        if rel.endswith("plugin.json"):
+            digest.update(manifest_fingerprint_bytes(path))
+        else:
+            digest.update(path.read_bytes())
+        digest.update(b"\0")
+    for rel in PAYLOAD_DIRS:
+        directory = root / rel
+        digest.update(rel.encode("utf-8"))
+        digest.update(b"\0")
+        if not directory.is_dir():
+            digest.update(b"MISSING_DIR")
+            digest.update(b"\0")
+            continue
+        for path in sorted(directory.rglob("*")):
+            if path.is_dir() or should_skip_payload_path(path, root):
+                continue
+            relative = path.relative_to(root)
+            digest.update(str(relative).encode("utf-8"))
+            digest.update(b"\0")
+            if relative.name == "plugin.json":
+                digest.update(manifest_fingerprint_bytes(path))
+            else:
+                digest.update(path.read_bytes())
+            digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def load_skill_index_names(root: Path) -> set[str]:
@@ -74,6 +156,7 @@ def source_package_status(root: Path) -> dict:
         "skill_index_consistent": bool(skill_names) and skill_names == index_names,
         "human_portfolio_present": (root / "docs/skill-portfolio.md").is_file(),
         "runtime_docs_present": (root / "docs/runtime-support.md").is_file(),
+        "content_fingerprint": payload_fingerprint(root),
     }
 
 
@@ -138,6 +221,7 @@ def runtime_probe(
     source_version: str | None,
     version_required: bool,
     install_source: str,
+    source_fingerprint: str,
 ) -> dict:
     target_skill_count = count_skill_dirs(install_target)
     manifest_path = install_target / manifest
@@ -147,6 +231,8 @@ def runtime_probe(
     installed_version = load_json(manifest_path).get("version") if manifest_present else None
     skill_count_matches_source = target_skill_count == source_skill_count if target_exists else False
     version_matches_source = installed_version == source_version if manifest_present else False
+    target_fingerprint = payload_fingerprint(install_target) if target_exists else None
+    content_matches_source = target_fingerprint == source_fingerprint if target_exists else False
     version_check = "not_installed"
     if manifest_present:
         if installed_version is None and not version_required:
@@ -166,6 +252,8 @@ def runtime_probe(
         issues.append("version_mismatch")
         if install_source == "cache":
             issues.append("stale_cache_version")
+    if target_exists and not content_matches_source:
+        issues.append("content_fingerprint_mismatch")
     status = "NOT_INSTALLED"
     if target_exists:
         status = "PASS" if not issues else "PARTIAL"
@@ -180,12 +268,21 @@ def runtime_probe(
         "installed_version": installed_version,
         "version_matches_source": version_matches_source,
         "version_check": version_check,
+        "source_content_fingerprint": source_fingerprint,
+        "target_content_fingerprint": target_fingerprint,
+        "content_matches_source": content_matches_source,
         "issues": issues,
         "read_only": True,
     }
 
 
-def provider_status(home: Path, explicit_home: bool, source_skill_count: int, source_version: str | None) -> dict:
+def provider_status(
+    home: Path,
+    explicit_home: bool,
+    source_skill_count: int,
+    source_version: str | None,
+    source_fingerprint: str,
+) -> dict:
     providers: dict[str, dict] = {}
     for name, config in PROVIDERS.items():
         manifest_path = ROOT / config["manifest"]
@@ -197,6 +294,7 @@ def provider_status(home: Path, explicit_home: bool, source_skill_count: int, so
             source_version,
             config["version_required"],
             install_source,
+            source_fingerprint,
         )
         providers[name] = {
             "manifest": config["manifest"],
@@ -214,7 +312,13 @@ def provider_status(home: Path, explicit_home: bool, source_skill_count: int, so
 
 def build_result(home: Path, explicit_home: bool) -> dict:
     source_package = source_package_status(ROOT)
-    providers = provider_status(home, explicit_home, source_package["skill_count"], source_package["version"])
+    providers = provider_status(
+        home,
+        explicit_home,
+        source_package["skill_count"],
+        source_package["version"],
+        source_package["content_fingerprint"],
+    )
     missing = [name for name, item in providers.items() if not item["manifest_present"]]
     drift = [
         {"provider": name, "issues": item["runtime_probe"]["issues"]}

@@ -65,6 +65,12 @@ class GroundLineScriptContractTests(unittest.TestCase):
         (home / ".gemini/config/plugins").mkdir(parents=True)
         return home
 
+    def copy_provider_payload(self, source_root: Path, target: Path) -> None:
+        payload_root = source_root / "plugins/groundline"
+        self.assertTrue(payload_root.is_dir(), f"missing provider payload: {payload_root}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(payload_root, target)
+
     def write_fake_executable(self, bin_dir: Path, name: str, output: str, exit_code: int = 0) -> Path:
         path = bin_dir / name
         path.write_text(
@@ -771,9 +777,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="groundline-provider-installed-") as temp:
             home = self.make_fake_home(Path(temp))
             target = home / ".codex/plugins/groundline"
-            target.mkdir(parents=True)
-            shutil.copytree(PACK_ROOT / ".codex-plugin", target / ".codex-plugin")
-            shutil.copytree(PACK_ROOT / "skills", target / "skills")
+            self.copy_provider_payload(PACK_ROOT, target)
 
             result = self.run_script_json(
                 "groundline_provider_smoke.py",
@@ -788,15 +792,15 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertTrue(probe["target_skills_present"])
         self.assertEqual(probe["target_skill_count"], result["source_package"]["skill_count"])
         self.assertTrue(probe["target_skill_count_matches_source"])
+        self.assertTrue(probe["content_matches_source"])
+        self.assertEqual(probe["target_content_fingerprint"], result["source_package"]["content_fingerprint"])
 
     def test_provider_smoke_reports_installed_versions_and_drift(self) -> None:
         with tempfile.TemporaryDirectory(prefix="groundline-provider-drift-") as temp:
             root = Path(temp)
             home = self.make_fake_home(root)
             target = home / ".codex/plugins/groundline"
-            target.mkdir(parents=True)
-            shutil.copytree(PACK_ROOT / ".codex-plugin", target / ".codex-plugin")
-            shutil.copytree(PACK_ROOT / "skills", target / "skills")
+            self.copy_provider_payload(PACK_ROOT, target)
             target_manifest = target / ".codex-plugin/plugin.json"
             data = json.loads(target_manifest.read_text(encoding="utf-8"))
             data["version"] = "0.0.1"
@@ -819,6 +823,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertEqual(probe["installed_version"], "0.0.1")
         self.assertFalse(probe["version_matches_source"])
         self.assertIn("version_mismatch", probe["issues"])
+        self.assertNotIn("content_fingerprint_mismatch", probe["issues"])
 
     def test_provider_smoke_detects_codex_and_claude_cache_installs(self) -> None:
         with tempfile.TemporaryDirectory(prefix="groundline-provider-cache-") as temp:
@@ -826,12 +831,8 @@ class GroundLineScriptContractTests(unittest.TestCase):
             version = json.loads((PACK_ROOT / "plugin.json").read_text(encoding="utf-8"))["version"]
             codex_target = home / ".codex/plugins/cache/groundline/groundline" / version
             claude_target = home / ".claude/plugins/cache/groundline/groundline" / version
-            codex_target.mkdir(parents=True)
-            claude_target.mkdir(parents=True)
-            shutil.copytree(PACK_ROOT / ".codex-plugin", codex_target / ".codex-plugin")
-            shutil.copytree(PACK_ROOT / ".claude-plugin", claude_target / ".claude-plugin")
-            shutil.copytree(PACK_ROOT / "skills", codex_target / "skills")
-            shutil.copytree(PACK_ROOT / "skills", claude_target / "skills")
+            self.copy_provider_payload(PACK_ROOT, codex_target)
+            self.copy_provider_payload(PACK_ROOT, claude_target)
 
             result = self.run_script_json(
                 "groundline_provider_smoke.py",
@@ -849,7 +850,32 @@ class GroundLineScriptContractTests(unittest.TestCase):
                 self.assertTrue(probe["target_exists"])
                 self.assertEqual(probe["installed_version"], result["source_package"]["version"])
                 self.assertEqual(probe["version_check"], "match")
+                self.assertTrue(probe["content_matches_source"])
                 self.assertEqual(probe["issues"], [])
+
+    def test_provider_smoke_detects_same_version_content_drift(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-provider-content-drift-") as temp:
+            home = self.make_fake_home(Path(temp))
+            version = json.loads((PACK_ROOT / "plugin.json").read_text(encoding="utf-8"))["version"]
+            codex_target = home / ".codex/plugins/cache/groundline/groundline" / version
+            self.copy_provider_payload(PACK_ROOT, codex_target)
+            skill_doc = codex_target / "skills/package-agent-task/SKILL.md"
+            skill_doc.write_text(skill_doc.read_text(encoding="utf-8") + "\nstale local cache edit\n", encoding="utf-8")
+
+            completed = self.run_script(
+                "groundline_provider_smoke.py",
+                "--home",
+                str(home),
+                "--json",
+            )
+            result = json.loads(completed.stdout)
+
+        self.assertEqual(completed.returncode, 2)
+        probe = result["providers"]["codex"]["runtime_probe"]
+        self.assertEqual(result["install_doctor_status"], "PARTIAL")
+        self.assertEqual(probe["version_check"], "match")
+        self.assertFalse(probe["content_matches_source"])
+        self.assertIn("content_fingerprint_mismatch", probe["issues"])
 
     def test_version_bump_sync_validates_and_smoke_reports_stale_cache(self) -> None:
         with tempfile.TemporaryDirectory(prefix="groundline-version-bump-") as temp:
@@ -880,12 +906,8 @@ class GroundLineScriptContractTests(unittest.TestCase):
             home = self.make_fake_home(root)
             codex_target = home / ".codex/plugins/cache/groundline/groundline" / stale_version
             claude_target = home / ".claude/plugins/cache/groundline/groundline" / stale_version
-            codex_target.mkdir(parents=True)
-            claude_target.mkdir(parents=True)
-            shutil.copytree(pack_root / ".codex-plugin", codex_target / ".codex-plugin")
-            shutil.copytree(pack_root / ".claude-plugin", claude_target / ".claude-plugin")
-            shutil.copytree(pack_root / "skills", codex_target / "skills")
-            shutil.copytree(pack_root / "skills", claude_target / "skills")
+            self.copy_provider_payload(pack_root, codex_target)
+            self.copy_provider_payload(pack_root, claude_target)
             for manifest in [codex_target / ".codex-plugin/plugin.json", claude_target / ".claude-plugin/plugin.json"]:
                 data = json.loads(manifest.read_text(encoding="utf-8"))
                 data["version"] = stale_version
@@ -919,9 +941,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
             shutil.copytree(PACK_ROOT / ".codex-plugin", codex_target / ".codex-plugin")
 
             antigravity_target = home / ".gemini/config/plugins/groundline"
-            antigravity_target.mkdir(parents=True)
-            shutil.copy2(PACK_ROOT / "plugin.json", antigravity_target / "plugin.json")
-            shutil.copytree(PACK_ROOT / "skills", antigravity_target / "skills")
+            self.copy_provider_payload(PACK_ROOT, antigravity_target)
 
             completed = self.run_script(
                 "groundline_provider_smoke.py",
@@ -940,6 +960,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertTrue(antigravity_probe["target_exists"])
         self.assertTrue(antigravity_probe["target_manifest_present"])
         self.assertTrue(antigravity_probe["version_matches_source"])
+        self.assertTrue(antigravity_probe["content_matches_source"])
 
     def test_provider_smoke_missing_source_manifest_is_fail_exit_one(self) -> None:
         with tempfile.TemporaryDirectory(prefix="groundline-provider-missing-manifest-") as temp:
@@ -964,11 +985,10 @@ class GroundLineScriptContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="groundline-antigravity-shape-") as temp:
             home = self.make_fake_home(Path(temp))
             target = home / ".gemini/config/plugins/groundline"
-            target.mkdir(parents=True)
+            self.copy_provider_payload(PACK_ROOT, target)
             target_manifest = json.loads((PACK_ROOT / "plugin.json").read_text(encoding="utf-8"))
             target_manifest.pop("version", None)
             (target / "plugin.json").write_text(json.dumps(target_manifest), encoding="utf-8")
-            shutil.copytree(PACK_ROOT / "skills", target / "skills")
 
             result = self.run_script_json(
                 "groundline_provider_smoke.py",
@@ -982,6 +1002,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertEqual(probe["status"], "PASS")
         self.assertIsNone(probe["installed_version"])
         self.assertEqual(probe["version_check"], "unavailable")
+        self.assertTrue(probe["content_matches_source"])
         self.assertEqual(probe["issues"], [])
         self.assertEqual(result["providers"]["antigravity"]["candidate_versions"], [])
 

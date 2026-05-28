@@ -35,17 +35,18 @@ Expected result:
 
 The provider smoke command is read-only. It reports manifest presence, local
 target paths, installed package version, source package version, payload
-presence, skill count, and provider cache candidates for Codex, Claude Code,
-and Antigravity without writing to the home directory. Default home paths are
-displayed with `~`.
+presence, skill count, same-version content drift, and provider cache
+candidates for Codex, Claude Code, and Antigravity without writing to the home
+directory. Default home paths are displayed with `~`.
 
 Read `install_doctor_status`:
 
 - `PASS`: source manifests are present and any existing provider target matches
   the source package.
 - `PARTIAL`: an installed provider target exists but has stale version,
-  stale provider cache, missing payload, or skill count drift. The command
-  exits 2 while still printing JSON.
+  stale provider cache, missing payload, skill count drift, or
+  `content_fingerprint_mismatch`. The command exits 2 while still printing
+  JSON.
 - `FAIL`: source manifests needed for provider install are missing.
 
 ## 2. Check Local Runtime Posture

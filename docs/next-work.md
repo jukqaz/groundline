@@ -65,13 +65,15 @@ more workflows. This is the highest-value next step from
 Current patch draft status:
 
 - Version-aware provider smoke now reports source version, installed version,
-  payload presence, skill count drift, and `install_doctor_status`.
+  payload presence, skill count drift, same-version content drift, and
+  `install_doctor_status`.
 - Validation now compares provider manifest versions against canonical
   `plugin.json` instead of a hard-coded patch version.
 - Package sync, source validation, packaged validation, lint, unit tests,
-  safety eval, offline doctor, offline radar, provider smoke, staged dogfood,
-  macOS local scenario, Linux Docker dry-run, and Linux Docker execution pass in
-  the current patch draft.
+  safety eval, offline doctor, offline radar, staged dogfood, macOS local
+  scenario, Linux Docker dry-run, and Linux Docker execution pass in the current
+  patch draft. Real provider smoke is PARTIAL until local provider targets are
+  refreshed from the published ref.
 - A release gate runner now prints or executes the same local gate sequence
   without including approval-required publish commands.
 - Remaining before release: decide whether to publish with existing sanitized
@@ -83,7 +85,8 @@ Acceptance:
 
 - Add a version-aware install doctor for Codex, Claude Code, and Antigravity.
 - Detect installed GroundLine version, source ref drift, stale cache versions,
-  missing package payload, and skill count mismatch.
+  missing package payload, skill count mismatch, and same-version content
+  drift.
 - Report `PASS`, `PARTIAL`, or `FAIL` without printing provider auth, sessions,
   logs, or raw home dumps.
 - Add fake-home unit tests for all three providers.
@@ -109,8 +112,9 @@ Out of scope:
 
 Goal: make the real installed package version visible after a GitHub install.
 
-Status: implemented in the current patch draft; local release gates pass. Keep
-as P0 until post-publish install confirmation passes.
+Status: implemented in the current patch draft; source/package, staged dogfood,
+and scenario gates pass. Keep as P0 until provider smoke passes after
+post-publish install confirmation.
 
 Acceptance:
 
@@ -118,8 +122,8 @@ Acceptance:
   provider exposes semantic versions.
 - The check reports Antigravity package shape and skill count even when list
   output only shows import metadata.
-- The check detects stale marketplace ref or cache state when the repository
-  version is newer than the installed plugin.
+- The check detects stale marketplace ref, cache state, or same-version content
+  drift when the repository payload is newer than the installed plugin.
 - The check uses fake provider homes in tests.
 - The check reports `mutation_performed=false` and `secret_value_printed=false`.
 
