@@ -64,6 +64,8 @@ class GroundLineStaticContractTests(unittest.TestCase):
             "docs/update.md",
             "docs/provider-smoke.md",
             "docs/provider-dogfood.md",
+            "docs/provider-guardrails.md",
+            "docs/mcp-recipes.md",
             "docs/next-work.md",
             "docs/next-version.md",
             "docs/privacy.md",
@@ -84,6 +86,8 @@ class GroundLineStaticContractTests(unittest.TestCase):
             "docs/ko/privacy.md",
             "docs/ko/terms.md",
             "docs/ko/provider-packaging.md",
+            "docs/ko/provider-guardrails.md",
+            "docs/ko/mcp-recipes.md",
             "docs/ko/release-checklist.md",
             "docs/ko/next-version.md",
             "references/capability-blueprint.md",
@@ -100,6 +104,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
             "references/skill-index.json",
             "references/skill-lifecycle.md",
             "references/source-registry.json",
+            "references/optional-mcp-profiles.md",
             "references/superpowers-interop.md",
             "references/tool-profiles.md",
             "references/workflow-modes.md",
@@ -139,6 +144,8 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn("README.ko.md", readme)
         self.assertIn("docs/ko/index.md", readme)
         self.assertIn("docs/ko/provider-packaging.md", readme)
+        self.assertIn("docs/provider-guardrails.md", readme)
+        self.assertIn("docs/mcp-recipes.md", readme)
         self.assertIn("English is the default and canonical language", language_policy)
         self.assertIn("LLM-readable references", language_policy)
         self.assertIn("영어 문서가 기본", korean_index)
@@ -211,6 +218,8 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn('"docs/update.md"', validator)
         self.assertIn('"docs/provider-smoke.md"', validator)
         self.assertIn('"docs/provider-dogfood.md"', validator)
+        self.assertIn('"docs/provider-guardrails.md"', validator)
+        self.assertIn('"docs/mcp-recipes.md"', validator)
         self.assertIn('"docs/next-work.md"', validator)
         self.assertIn('"docs/next-version.md"', validator)
         self.assertIn('"docs/privacy.md"', validator)
@@ -228,9 +237,12 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn('"docs/ko/privacy.md"', validator)
         self.assertIn('"docs/ko/terms.md"', validator)
         self.assertIn('"docs/ko/provider-packaging.md"', validator)
+        self.assertIn('"docs/ko/provider-guardrails.md"', validator)
+        self.assertIn('"docs/ko/mcp-recipes.md"', validator)
         self.assertIn('"docs/ko/release-checklist.md"', validator)
         self.assertIn('"docs/ko/next-version.md"', validator)
         self.assertIn('"references/skill-index.json"', validator)
+        self.assertIn('"references/optional-mcp-profiles.md"', validator)
         self.assertIn('"references/skill-lifecycle.md"', validator)
         self.assertIn('"CONTRIBUTING.md"', validator)
         self.assertIn('"SECURITY.md"', validator)

@@ -33,6 +33,10 @@ Current status:
 - Antigravity print-mode proof remains partial: `agy --print` still enters tool
   exploration and hits CLI app-data write constraints before returning a
   sanitized proof.
+- GroundLine remains skills-only by default. Hooks, rules, MCP servers,
+  commands, and provider-level agents stay opt-in.
+- Optional private MCP guidance is now the preferred extension path when skills
+  need live or private tool access.
 
 Scope:
 
@@ -40,6 +44,7 @@ Scope:
 - final package sync and provider validation
 - release notes and checklist cleanup
 - only the smallest workflow examples needed to explain the evidence
+- optional MCP and provider guardrail docs
 
 Out of scope:
 
@@ -64,6 +69,8 @@ Acceptance:
   default home paths, or provider runtime state dumps.
 - Add no new skill unless repeated provider proof shows an existing skill cannot
   express the flow.
+- Keep hooks, rules, MCP servers, commands, and provider-level agents out of the
+  default package unless a specific reviewed use case requires opt-in setup.
 
 Immediate tasks:
 
@@ -74,6 +81,8 @@ Immediate tasks:
 - If either remains partial, keep the release decision explicit instead of
   masking it as PASS.
 - Re-run validation and provider package sync after any document change.
+- Keep `docs/provider-guardrails.md`, `docs/mcp-recipes.md`, and
+  `references/optional-mcp-profiles.md` aligned as the opt-in extension path.
 
 ## P1: Safety And Eval Harness Follow-up
 

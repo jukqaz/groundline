@@ -77,6 +77,8 @@ stay in English unless a release explicitly changes that policy.
 - Korean update: `docs/ko/update.md`
 - Provider smoke: `docs/provider-smoke.md`
 - Provider dogfood: `docs/provider-dogfood.md`
+- Provider guardrails: `docs/provider-guardrails.md`
+- Optional MCP recipes: `docs/mcp-recipes.md`
 - Public release: `docs/public-release.md`
 - Privacy: `docs/privacy.md`
 - Korean privacy: `docs/ko/privacy.md`
@@ -90,6 +92,7 @@ stay in English unless a release explicitly changes that policy.
 - Korean skill portfolio: `docs/ko/skill-portfolio.md`
 - Skill lifecycle: `references/skill-lifecycle.md`
 - LLM-readable skill index: `references/skill-index.json`
+- Optional MCP profiles: `references/optional-mcp-profiles.md`
 
 ## Operating Loop
 

@@ -20,6 +20,8 @@ canonical입니다.
 | `update.md` | 업데이트와 재검증 |
 | `examples.md` | 대표 workflow 예시 |
 | `skill-portfolio.md` | skill 선택 요약 |
+| `provider-guardrails.md` | hooks, rules, MCP 기본 제외와 opt-in 기준 |
+| `mcp-recipes.md` | private MCP와 optional tool profile 판단 기준 |
 | `privacy.md` | privacy와 secret 경계 |
 | `release-checklist.md` | release 전 확인 |
 | `next-version.md` | 다음 버전 작업 방향 |

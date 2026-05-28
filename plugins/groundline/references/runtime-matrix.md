@@ -33,6 +33,6 @@ GroundLine should treat provider-native features as a capability boundary:
 | Plugins | Provide small manifests and package boundaries. | Install, share, update, and enforce plugin policy. |
 | Subagents | Define task packets and handoff contracts. | Spawn, isolate, route, and summarize subagent work. |
 | Hooks | Document reviewed hook policy and safe candidates. | Trigger hook engines and enforce provider permissions. |
-| MCP | Recommend optional tool profiles. | Connect, authorize, scope, and run MCP servers. |
+| MCP | Recommend optional tool profiles from `references/optional-mcp-profiles.md`. | Connect, authorize, scope, and run MCP servers. |
 | Goal or long-running mode | Define goal, success criteria, and verification. | Continue execution across turns, hosts, or sessions. |
 | Browser or desktop control | Define evidence needed and safety boundary. | Operate UI, annotate, screenshot, and enforce approvals. |

@@ -68,4 +68,6 @@ Use GroundLine skills. Reconcile current state before acting, and separate read-
 - Keep skill bodies portable Markdown.
 - Keep runtime-specific manifests small.
 - Keep MCP, hooks, agents, and tool setup optional unless reviewed.
+- Use `docs/provider-guardrails.md` for opt-in guardrail policy.
+- Use `docs/mcp-recipes.md` for optional private MCP decisions.
 - Keep source configuration separate from runtime state.

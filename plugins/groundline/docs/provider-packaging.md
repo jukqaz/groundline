@@ -85,6 +85,10 @@ Use `agy plugin list` after install to confirm the package is imported.
 - Keep plugin paths relative to the plugin root.
 - Keep all runtime references inside the packaged plugin directory.
 - Do not add hooks or MCP servers by default; document them as opt-in work.
+- Use `docs/provider-guardrails.md` before adding hooks, rules, MCP servers,
+  commands, or provider-level agents.
+- Use `docs/mcp-recipes.md` and `references/optional-mcp-profiles.md` when a
+  task needs private or live tool access beyond skills.
 - Run the provider checks before release:
 
 ```bash
