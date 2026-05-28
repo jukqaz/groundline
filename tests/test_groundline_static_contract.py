@@ -184,6 +184,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn("README.ko.md", readme)
         self.assertIn("docs/ko/index.md", readme)
         self.assertIn("docs/ko/provider-packaging.md", readme)
+        self.assertIn("docs/ko/public-release.md", readme)
         self.assertIn("docs/provider-guardrails.md", readme)
         self.assertIn("docs/mcp-recipes.md", readme)
         self.assertIn("Choose The Right Request", human_guide)
@@ -191,6 +192,15 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn("Install has two phases", install)
         self.assertIn("English is the default and canonical language", language_policy)
         self.assertIn("LLM-readable references", language_policy)
+        self.assertIn("docs/ko/public-release.md", language_policy)
+        self.assertIn("docs/ko/provider-packaging.md", language_policy)
+        self.assertIn("docs/ko/mcp-recipes.md", language_policy)
+        korean_doc_paths = sorted(
+            str(path.relative_to(PACK_ROOT)) for path in (PACK_ROOT / "docs/ko").glob("*.md")
+        )
+        for path in korean_doc_paths:
+            with self.subTest(korean_doc=path):
+                self.assertIn(f"`{path}`", language_policy)
         self.assertIn("영어 문서가 기본", korean_index)
         self.assertIn("한국어 companion", korean_readme)
         self.assertIn("첫 요청 예시", korean_readme)

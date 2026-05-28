@@ -161,6 +161,7 @@ stay in English unless a release explicitly changes that policy.
 - Workflow cookbook: `docs/workflow-cookbook.md`
 - Artifact lifecycle: `docs/artifact-lifecycle.md`
 - Public release: `docs/public-release.md`
+- Korean public release: `docs/ko/public-release.md`
 - Privacy: `docs/privacy.md`
 - Korean privacy: `docs/ko/privacy.md`
 - Terms: `docs/terms.md`

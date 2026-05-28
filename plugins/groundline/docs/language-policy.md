@@ -27,10 +27,20 @@ Korean docs are provided for human-facing reading and onboarding:
 - `docs/ko/install.md`
 - `docs/ko/update.md`
 - `docs/ko/examples.md`
+- `docs/ko/workflow-cookbook.md`
+- `docs/ko/artifact-lifecycle.md`
 - `docs/ko/skill-portfolio.md`
+- `docs/ko/skill-graduation-plan.md`
+- `docs/ko/maturity-assessment.md`
+- `docs/ko/provider-packaging.md`
+- `docs/ko/provider-activation-matrix.md`
+- `docs/ko/provider-guardrails.md`
+- `docs/ko/mcp-recipes.md`
 - `docs/ko/privacy.md`
+- `docs/ko/public-release.md`
 - `docs/ko/release-checklist.md`
 - `docs/ko/next-version.md`
+- `docs/ko/terms.md`
 
 Korean companion docs should explain the same operational intent as the English
 docs, but they do not need to duplicate every line. Prefer concise guidance that
