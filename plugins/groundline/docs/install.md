@@ -28,10 +28,16 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
 
 Expected result:
 
-- `status=PASS`
+- package validation returns `status=PASS`
+- staged dogfood returns `status=PASS`
+- provider smoke returns `status=PASS` for a matching install, or `PARTIAL`
+  when an existing provider target is stale relative to the checked-out package
 - `mutation_performed=false`
 - `real_home_touched=false` for staged dogfood
 - provider target paths are printed with `~`, not full home dumps
+
+Treat provider smoke `FAIL` as an install blocker. Treat provider smoke
+`PARTIAL` as actionable only after reading top-level `next_actions`.
 
 The provider smoke command is read-only. It reports manifest presence, local
 target paths, installed package version, source package version, payload

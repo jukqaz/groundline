@@ -29,9 +29,11 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
 ```
 
-Those commands should report `status=PASS`, `mutation_performed=false`, and no
-real provider home writes. They validate the package before you install it into
-Codex, Claude Code, or Antigravity.
+`validate_pack.py` should report `status=PASS`. The provider smoke command is
+read-only: it should report `mutation_performed=false` and no real provider
+home writes, but it may return `PARTIAL` when an existing provider install is
+stale relative to the checked-out package. Read top-level `next_actions` before
+installing or refreshing Codex, Claude Code, or Antigravity.
 
 If you want to install from the public repository:
 

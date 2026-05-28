@@ -29,12 +29,18 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
 
 확인할 출력:
 
-- `status=PASS`
+- package validation은 `status=PASS`
+- staged dogfood는 `status=PASS`
+- provider smoke는 설치본이 source와 일치하면 `status=PASS`, 기존 provider
+  target이 checkout package보다 stale이면 `status=PARTIAL`
 - `mutation_performed=false`
 - `secret_value_printed=false`
 - `install_doctor_status=PASS | PARTIAL | FAIL`
 - `real_home_touched=false`
 - provider target path는 기본적으로 `~`로 표시
+
+provider smoke `FAIL`은 설치 blocker입니다. provider smoke `PARTIAL`이면
+먼저 top-level `next_actions`를 보고 조치 범위를 판단합니다.
 
 ## 주의
 
