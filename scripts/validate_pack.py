@@ -55,6 +55,7 @@ REQUIRED_FILES = [
     "docs/update.md",
     "docs/provider-smoke.md",
     "docs/provider-dogfood.md",
+    "docs/next-work.md",
     "docs/privacy.md",
     "docs/public-release.md",
     "docs/runtime-support.md",

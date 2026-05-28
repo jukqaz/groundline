@@ -50,6 +50,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
             "docs/update.md",
             "docs/provider-smoke.md",
             "docs/provider-dogfood.md",
+            "docs/next-work.md",
             "docs/privacy.md",
             "docs/public-release.md",
             "docs/runtime-support.md",
@@ -151,6 +152,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn('"docs/update.md"', validator)
         self.assertIn('"docs/provider-smoke.md"', validator)
         self.assertIn('"docs/provider-dogfood.md"', validator)
+        self.assertIn('"docs/next-work.md"', validator)
         self.assertIn('"docs/privacy.md"', validator)
         self.assertIn('"docs/public-release.md"', validator)
         self.assertIn('"docs/dogfood.md"', validator)
