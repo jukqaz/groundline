@@ -54,8 +54,13 @@ creation commands.
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --plan --json
-PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --json --include-docker-execution
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --json --keep-going --include-docker-execution
 ```
+
+Use `--keep-going` during release closeout so an expected provider smoke
+`PARTIAL`, such as stale installed cache after a version bump, does not prevent
+later dogfood and scenario gates from producing evidence. The wrapper still
+returns `PARTIAL` when any gate is partial.
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json

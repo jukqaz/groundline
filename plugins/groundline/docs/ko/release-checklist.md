@@ -42,8 +42,13 @@ TAG="v$RELEASE_VERSION"
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --plan --json
-PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --json --include-docker-execution
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --json --keep-going --include-docker-execution
 ```
+
+release closeout에서는 `--keep-going`을 사용합니다. version bump 뒤 설치된
+provider cache가 이전 버전이라 provider smoke가 정상적으로 `PARTIAL`을 내더라도
+뒤의 dogfood와 scenario gate 증거를 계속 수집하기 위해서입니다. 단 하나라도
+partial gate가 있으면 wrapper 결과도 계속 `PARTIAL`입니다.
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json

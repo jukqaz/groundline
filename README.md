@@ -234,7 +234,7 @@ Before a release, also run the full release checklist in
 scenario:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --json --include-docker-execution
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --json --keep-going --include-docker-execution
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/run_scenarios.py --platform linux --sandbox docker --json
 ```

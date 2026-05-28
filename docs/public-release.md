@@ -29,7 +29,7 @@ release.
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --plan --json
-PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --json --include-docker-execution
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --json --keep-going --include-docker-execution
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
 (cd plugins/groundline && PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json)
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/lint.py --json --require-actionlint
