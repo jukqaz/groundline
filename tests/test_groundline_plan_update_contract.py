@@ -128,6 +128,25 @@ class GroundLinePlanUpdateContractTests(unittest.TestCase):
         self.assertEqual(payload["status"], "FAIL")
         self.assertEqual(payload["error"], "secret-like input rejected")
 
+    def test_plan_update_allows_normal_task_paths(self) -> None:
+        payload = {
+            "kind": "doctor",
+            "capability_gaps": [
+                {
+                    "id": "reference-update",
+                    "capability": "refresh task packet docs",
+                    "recommended_source": "references/agent-task-packet.md",
+                }
+            ],
+            "mutation_performed": False,
+            "network": "disabled",
+        }
+
+        result = self.run_plan_update(payload)
+
+        self.assertEqual(result["kind"], "upgrade_packet")
+        self.assertIn("references/agent-task-packet.md", result["affected_groundline_files"])
+
     def test_plan_update_rejects_unknown_input_kind(self) -> None:
         payload = {
             "kind": "unknown",

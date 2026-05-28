@@ -235,6 +235,40 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertEqual([item["status"] for item in result["validations"]], ["PASS", "PASS", "PASS"])
         self.assertEqual(result["validations"][0]["command"], ["claude", "plugin", "validate", "plugins/groundline", "--strict"])
 
+    def test_provider_native_validate_redacts_secret_like_output(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-provider-native-secret-") as temp:
+            bin_dir = Path(temp) / "bin"
+            bin_dir.mkdir()
+            self.write_fake_executable(bin_dir, "claude", "sk-test-secret-value")
+            self.write_fake_executable(bin_dir, "agy", "agy validation ok")
+            env = os.environ.copy()
+            env["PATH"] = str(bin_dir)
+
+            completed = self.run_script("groundline_provider_validate.py", "--json", env=env)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertNotIn("sk-test-secret-value", completed.stdout)
+        result = json.loads(completed.stdout)
+        self.assertFalse(result["secret_value_printed"])
+        self.assertTrue(result["validations"][0]["redacted"])
+        self.assertEqual(result["validations"][0]["stdout_tail"], "[redacted]")
+
+    def test_provider_native_validate_allows_normal_task_paths(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-provider-native-path-") as temp:
+            bin_dir = Path(temp) / "bin"
+            bin_dir.mkdir()
+            self.write_fake_executable(bin_dir, "claude", "references/agent-task-packet.md")
+            self.write_fake_executable(bin_dir, "agy", "agy validation ok")
+            env = os.environ.copy()
+            env["PATH"] = str(bin_dir)
+
+            completed = self.run_script("groundline_provider_validate.py", "--json", env=env)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result = json.loads(completed.stdout)
+        self.assertFalse(result["validations"][0]["redacted"])
+        self.assertEqual(result["validations"][0]["stdout_tail"], "references/agent-task-packet.md")
+
     def test_provider_native_validate_reports_missing_cli_as_partial(self) -> None:
         with tempfile.TemporaryDirectory(prefix="groundline-provider-native-missing-") as temp:
             env = os.environ.copy()

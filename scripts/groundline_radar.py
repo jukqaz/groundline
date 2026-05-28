@@ -11,7 +11,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SECRET_PATTERN = re.compile(r"(sk-[A-Za-z0-9_-]+|xox[baprs]-[A-Za-z0-9_-]+|(?i:api[_-]?key|token|secret|password))")
+SECRET_PATTERN = re.compile(
+    r"((?<![A-Za-z0-9])sk-[A-Za-z0-9_-]+|(?<![A-Za-z0-9])xox[baprs]-[A-Za-z0-9_-]+|(?i:api[_-]?key|token|secret|password))"
+)
 
 
 def first_line(text: str) -> str:

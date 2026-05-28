@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -12,6 +13,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SECRET_PATTERN = re.compile(
+    r"((?<![A-Za-z0-9])sk-[A-Za-z0-9_-]+|(?<![A-Za-z0-9])xox[baprs]-[A-Za-z0-9_-]+|(?i:api[_-]?key|token|secret|password))"
+)
 
 
 @dataclass(frozen=True)
@@ -29,21 +33,24 @@ def relative_path(path: Path) -> str:
         return str(path)
 
 
-def sanitize_text(value: str | None) -> str:
+def sanitize_text(value: str | None) -> tuple[str, bool]:
     if not value:
-        return ""
+        return "", False
     home = str(Path.home())
     text = value
     if home:
         text = text.replace(home + "/", "~/")
         if text == home:
             text = "~"
-    return text
+    redacted = SECRET_PATTERN.search(text) is not None
+    if redacted:
+        text = SECRET_PATTERN.sub("[redacted]", text)
+    return text, redacted
 
 
-def output_tail(value: str | bytes | None, line_limit: int = 20) -> str:
+def output_tail(value: str | bytes | None, line_limit: int = 20) -> tuple[str, bool]:
     if not value:
-        return ""
+        return "", False
     if isinstance(value, bytes):
         value = value.decode("utf-8", errors="replace")
     return sanitize_text("\n".join(value.splitlines()[-line_limit:]))
@@ -112,14 +119,17 @@ def run_validator(validator: Validator, timeout: int) -> dict:
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
+        stdout_tail, stdout_redacted = output_tail(exc.stdout)
+        stderr_tail, stderr_redacted = output_tail(exc.stderr)
         result.update(
             {
                 "status": "PARTIAL",
                 "available": True,
                 "exit_code": None,
                 "error": "validator timed out",
-                "stdout_tail": output_tail(exc.stdout),
-                "stderr_tail": output_tail(exc.stderr),
+                "stdout_tail": stdout_tail,
+                "stderr_tail": stderr_tail,
+                "redacted": stdout_redacted or stderr_redacted,
                 "next_action": f"rerun {validator.label} with a longer timeout",
             }
         )
@@ -137,13 +147,16 @@ def run_validator(validator: Validator, timeout: int) -> dict:
         return result
 
     status = "PASS" if completed.returncode == 0 else "FAIL"
+    stdout_tail, stdout_redacted = output_tail(completed.stdout)
+    stderr_tail, stderr_redacted = output_tail(completed.stderr)
     result.update(
         {
             "status": status,
             "available": True,
             "exit_code": completed.returncode,
-            "stdout_tail": output_tail(completed.stdout),
-            "stderr_tail": output_tail(completed.stderr),
+            "stdout_tail": stdout_tail,
+            "stderr_tail": stderr_tail,
+            "redacted": stdout_redacted or stderr_redacted,
         }
     )
     if status != "PASS":
