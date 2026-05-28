@@ -113,6 +113,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
             "docs/ko/skill-portfolio.md",
             "docs/ko/skill-graduation-plan.md",
             "docs/ko/privacy.md",
+            "docs/ko/public-release.md",
             "docs/ko/terms.md",
             "docs/ko/provider-packaging.md",
             "docs/ko/provider-activation-matrix.md",
@@ -158,6 +159,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
             "plugins/groundline/docs/provider-packaging.md",
             "plugins/groundline/docs/terms.md",
             "plugins/groundline/docs/ko/provider-packaging.md",
+            "plugins/groundline/docs/ko/public-release.md",
             "plugins/groundline/docs/ko/terms.md",
             "scenarios/fixtures/fresh-install.json",
             "scenarios/expected/standalone-groundline.json",
@@ -296,6 +298,8 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn('TAG="v$RELEASE_VERSION"', korean_checklist)
         self.assertIn("승인 필요 배포 명령", korean_checklist)
         self.assertIn("명시 승인을 받기 전에는 실행하지 않습니다", korean_checklist)
+        self.assertIn("published ref에서 provider install confirmation 실행", korean_checklist)
+        self.assertIn("groundline_provider_smoke.py --json", korean_checklist)
         self.assertIn("safety eval", next_version)
         self.assertIn("macOS local scenario", next_version)
         self.assertIn("Linux Docker dry-run", next_version)
@@ -390,6 +394,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn('"docs/ko/skill-portfolio.md"', validator)
         self.assertIn('"docs/ko/skill-graduation-plan.md"', validator)
         self.assertIn('"docs/ko/privacy.md"', validator)
+        self.assertIn('"docs/ko/public-release.md"', validator)
         self.assertIn('"docs/ko/terms.md"', validator)
         self.assertIn('"docs/ko/provider-packaging.md"', validator)
         self.assertIn('"docs/ko/provider-guardrails.md"', validator)
@@ -417,6 +422,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
         activation = (PACK_ROOT / "docs/provider-activation-matrix.md").read_text(encoding="utf-8")
         provider_packaging = (PACK_ROOT / "docs/provider-packaging.md").read_text(encoding="utf-8")
         korean_provider_packaging = (PACK_ROOT / "docs/ko/provider-packaging.md").read_text(encoding="utf-8")
+        korean_public_release = (PACK_ROOT / "docs/ko/public-release.md").read_text(encoding="utf-8")
 
         self.assertIn("gh repo clone jukqaz/groundline", install)
         self.assertIn("git clone https://github.com/jukqaz/groundline.git", install)
@@ -439,6 +445,11 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn("intentionally", provider_packaging)
         self.assertIn("docs/superpowers/", korean_provider_packaging)
         self.assertIn("의도적으로 제외", korean_provider_packaging)
+        self.assertIn("python3 scripts/groundline_provider_validate.py --json", korean_provider_packaging)
+        self.assertIn("docs/provider-guardrails.md", korean_provider_packaging)
+        self.assertIn("references/optional-mcp-profiles.md", korean_provider_packaging)
+        self.assertIn("repository를 공개로 돌리지 않습니다", korean_public_release)
+        self.assertIn("sanitized history", korean_public_release)
         self.assertIn("Provider Activation Matrix", activation)
         for family in [
             "handoff",

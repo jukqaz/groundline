@@ -11,7 +11,7 @@ canonical입니다.
 4. 어떤 skill을 골라야 할지 헷갈리면 `skill-portfolio.md`를 봅니다.
 5. experimental skill의 졸업/유지/병합/보류 기준은 `skill-graduation-plan.md`를 봅니다.
 6. 완성도와 다음 작업이 궁금하면 `maturity-assessment.md`를 봅니다.
-7. release 전에는 `release-checklist.md`와 영어 `docs/release-checklist.md`를 함께 봅니다.
+7. release 전에는 `release-checklist.md`, `public-release.md`, 영어 `docs/release-checklist.md`를 함께 봅니다.
 
 ## 가장 흔한 경로
 
@@ -38,6 +38,7 @@ provider에 설치하기 전에는 먼저 read-only 검증을 통과시키세요
 | `provider-guardrails.md` | hooks, rules, MCP 기본 제외와 opt-in 기준 |
 | `mcp-recipes.md` | private MCP와 optional tool profile 판단 기준 |
 | `privacy.md` | privacy와 secret 경계 |
+| `public-release.md` | 공개 전 privacy, identity, release evidence 확인 |
 | `release-checklist.md` | release 전 확인 |
 | `next-version.md` | 다음 버전 작업 방향 |
 | `provider-packaging.md` | 세 provider 설치 패키징 |

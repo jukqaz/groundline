@@ -84,6 +84,7 @@ release 직전에는 `docs/ko/release-checklist.md`에 있는 전체 gate를 실
 - workflow cookbook: `docs/ko/workflow-cookbook.md`
 - artifact lifecycle: `docs/ko/artifact-lifecycle.md`
 - privacy: `docs/ko/privacy.md`
+- 공개 전 확인: `docs/ko/public-release.md`
 - release checklist: `docs/ko/release-checklist.md`
 - 다음 버전 계획: `docs/ko/next-version.md`
 - provider 패키징: `docs/ko/provider-packaging.md`

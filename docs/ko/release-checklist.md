@@ -79,6 +79,9 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/run_scenarios.py --platform linux --sa
 - `docs/maturity-assessment.md`가 `ship`, `hold`, `continue` 중 하나를 기록하는지 확인합니다.
 - ship decision이 `hold`이면 사용자가 부족한 증거를 이번 release에서 수용한다고 명시하기 전에는 여기서 멈춥니다.
 - live provider activation proof가 없으면 accepted partial인지 release blocker인지 기록합니다.
+- provider-native validation이 `claude` 또는 `agy` 부재로 `PARTIAL`이면 이번
+  release에서 수용 가능한 local validator gap인지 기록합니다. validator 실패는
+  release blocker로 봅니다.
 
 ## 승인 필요 배포 명령
 
@@ -97,5 +100,7 @@ gh release create "$TAG" --repo jukqaz/groundline --title "$TAG" --notes-file CH
 - tag와 main의 target commit
 - CI run success
 - release page HTTP 200
+- published ref에서 provider install confirmation 실행
+- `groundline_provider_smoke.py --json`으로 설치된 provider target이 published ref와 맞는지 확인
 - previous version 대비 delta
 - rollback note

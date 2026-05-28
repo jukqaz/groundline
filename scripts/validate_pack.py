@@ -82,6 +82,7 @@ BASE_REQUIRED_FILES = [
     "docs/ko/skill-portfolio.md",
     "docs/ko/skill-graduation-plan.md",
     "docs/ko/privacy.md",
+    "docs/ko/public-release.md",
     "docs/ko/terms.md",
     "docs/ko/provider-packaging.md",
     "docs/ko/provider-activation-matrix.md",

@@ -35,7 +35,7 @@ next package sync and release gates.
 - Offline doctor and radar checks: `groundline_doctor.py --json --offline
   --probe-tools` and `groundline_radar.py --json --offline --command-sources`
   returned `status=PASS`.
-- Package surface: 19 skills, 18 references, 44 packaged docs after this
+- Package surface: 19 skills, 18 references, 45 packaged docs after this
   assessment.
 - Skill lifecycle: 7 active skills and 12 experimental skills.
 - Graduation decisions: 2 graduate candidates, 1 merge candidate, 1 defer, and
