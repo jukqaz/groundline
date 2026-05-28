@@ -41,16 +41,26 @@ def copy_file(src_rel: str, dest_rel: str) -> None:
     src = ROOT / src_rel
     dest = PACKAGE_ROOT / dest_rel
     dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src, dest)
+    if dest.exists():
+        dest.unlink()
+    dest.write_bytes(src.read_bytes())
 
 
 def copy_dir(rel: str) -> None:
     src = ROOT / rel
     dest = PACKAGE_ROOT / rel
-    ignored = shutil.ignore_patterns("__pycache__", "*.pyc")
-    if rel == "docs":
-        ignored = shutil.ignore_patterns("__pycache__", "*.pyc", "superpowers")
-    shutil.copytree(src, dest, dirs_exist_ok=True, ignore=ignored)
+    for path in sorted(src.rglob("*")):
+        if path.is_dir():
+            continue
+        if "__pycache__" in path.parts or path.suffix == ".pyc":
+            continue
+        if rel == "docs" and "superpowers" in path.relative_to(src).parts:
+            continue
+        target = dest / path.relative_to(src)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            target.unlink()
+        target.write_bytes(path.read_bytes())
 
 
 def clean_package_root() -> None:

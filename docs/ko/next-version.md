@@ -5,7 +5,31 @@
 Target: v0.3.0
 
 다음 버전은 skill 수를 먼저 늘리는 것보다, 다른 사용자가 믿고 설치하고 사용할 수
-있는 증거를 강화하는 데 집중합니다.
+있는 증거를 강화하는 데 집중합니다. Codex, Claude Code, Antigravity용
+provider marketplace packaging은 완료됐으므로, 이제는 실제 provider session에서
+GroundLine이 자연스럽게 쓰이는지 증명하는 쪽으로 이동합니다.
+
+## 완료된 기반
+
+- Codex marketplace metadata가 `plugins/groundline`을 가리킴
+- Claude Code marketplace metadata가 `plugins/groundline`을 가리킴
+- Antigravity validation/import 가능
+- `plugins/groundline` installable payload 존재
+- 영어/한국어 provider packaging 문서 존재
+- local validation, provider validation, CI 통과
+
+## 지금 할 일
+
+v0.3.0의 첫 조각은 adoption proof입니다. 실제 provider session에서 skill이
+선택되는 증거를 남기되, raw transcript나 provider home dump는 저장하지 않습니다.
+
+완료 기준:
+
+- sanitized invocation proof format
+- Codex, Claude Code, Antigravity 각각 1개 이상 proof
+- handoff, release closeout, expansion control prompt family 확인
+- `docs/dogfood.md`에 PASS/PARTIAL/FAIL 증거 기록
+- 현재 skill set으로 표현이 안 되는 경우가 아니면 새 skill 추가 금지
 
 ## 1. Provider Invocation Dogfood
 
@@ -60,4 +84,5 @@ post-release review 사이의 artifact 흐름을 명확히 합니다.
 ## 먼저 할 일
 
 Provider invocation dogfood부터 시작합니다. 이 증거 형식이 안정되기 전에는 safety
-harness를 크게 키우지 않습니다.
+harness를 크게 키우지 않습니다. 공식 catalog 제출, screenshot, optional MCP/hook
+recipe는 지금 작업이 아니라 이후 작업으로 둡니다.
