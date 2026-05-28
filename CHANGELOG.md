@@ -2,12 +2,24 @@
 
 ## Unreleased
 
+- No unreleased changes.
+
+## v0.3.0 - 2026-05-28
+
 - Add provider marketplace packaging for Codex and Claude Code, plus an
   Antigravity install surface and provider packaging guide.
 - Add Korean companion docs for human-facing setup, workflow selection, skill
   overview, privacy, release, and next-version planning while keeping English
   as the default and canonical documentation language.
 - Add a language policy and validation coverage for bilingual human docs.
+- Add sanitized provider invocation proof schema and dogfood evidence for Codex,
+  Claude Code, and Antigravity.
+- Add an offline safety evaluation harness with synthetic cases for secret-like
+  output, destructive command pressure, false completion claims, and unsafe
+  provider-home writes.
+- Keep Claude Code contract naming and Antigravity constrained print mode as
+  explicit accepted partials for the next patch instead of masking them as
+  passing.
 
 ## v0.2.2 - 2026-05-28
 

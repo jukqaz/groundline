@@ -1,11 +1,11 @@
 # Next Version Plan
 
-Target: v0.3.0
+Target: v0.3.1
 
-The next version should improve adoption confidence, not expand the skill count
-first. GroundLine now has provider marketplace packaging for Codex, Claude Code,
-and Antigravity. The v0.3.0 slice proves provider invocation with sanitized
-evidence, adds an offline safety check, and keeps provider-specific partials
+The next version should reduce accepted partials from v0.3.0, not expand the
+skill count first. GroundLine now has provider marketplace packaging for Codex,
+Claude Code, and Antigravity. v0.3.0 proved provider invocation with sanitized
+evidence, added an offline safety check, and kept provider-specific partials
 visible instead of hiding them.
 
 ## Completed Foundation
@@ -19,11 +19,10 @@ These are already done and should not be re-opened unless validation fails:
 - English and Korean provider packaging docs exist.
 - Local validation, provider validation, and CI pass on `main`.
 
-## Current Status: Adoption Proof Implemented
+## Current Status: v0.3.0 Adoption Proof Implemented
 
-The narrow v0.3.0 slice is implemented as a release candidate. It proves the
-sanitized evidence path and records provider invocation results without raw
-transcript collection or provider-home dumps.
+The narrow v0.3.0 slice proves the sanitized evidence path and records provider
+invocation results without raw transcript collection or provider-home dumps.
 
 Completed:
 
@@ -117,7 +116,7 @@ Ship gate:
 - optional MCP setup recipes
 - optional hooks after a specific reviewed use case exists
 
-## Non-goals For v0.3.0
+## Non-goals For v0.3.1
 
 - new provider runtimes
 - automatic real provider-home installation
@@ -125,9 +124,9 @@ Ship gate:
 - broad hook enablement
 - raw transcript analytics
 
-## Release Candidate Closeout
+## v0.3.1 Closeout
 
-Before tagging v0.3.0, run package sync, source validation, packaged validation,
+Before tagging v0.3.1, run package sync, source validation, packaged validation,
 lint, unit tests, staged dogfood, and provider package validation. If the Claude
-Code and Antigravity partials remain, record them as accepted defers and keep
-the next patch focused on reducing them.
+Code and Antigravity partials remain, record whether they are still accepted
+defers or have been reduced.

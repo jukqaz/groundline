@@ -1,8 +1,8 @@
 # Next Work
 
 This backlog captures work intentionally left outside the v0.2.x release line.
-Provider marketplace packaging and the first adoption proof slice are now in
-place. The next work should reduce accepted partials and improve first-use
+Provider marketplace packaging and the first adoption proof slice shipped in
+v0.3.0. The next work should reduce accepted partials and improve first-use
 clarity before adding more install surfaces. Pick one item, define evidence,
 implement, and close it before adding more.
 
@@ -21,10 +21,10 @@ implement, and close it before adding more.
   offline.
 - `tests/test_groundline_script_contract.py` covers the safety eval contract.
 
-## Now: v0.3.0 Release Candidate Closeout
+## Now: v0.3.1 Partial Reduction
 
-Goal: decide whether the accepted partials are good enough for v0.3.0 or must
-be reduced before tagging.
+Goal: reduce or intentionally keep the accepted partials from v0.3.0 before
+adding new workflows.
 
 Scope:
 
@@ -95,7 +95,7 @@ Acceptance:
   verification evidence, and stop condition.
 - Keep examples short enough to be scanned during an active agent session.
 
-For v0.3.0, include only examples that support the invocation dogfood evidence.
+For v0.3.1, include only examples that support the invocation dogfood evidence.
 Move the full cookbook to a later patch if it starts growing.
 
 ## P2: Artifact Lifecycle
@@ -143,6 +143,6 @@ install through Codex, Claude Code, or Antigravity from the documented commands.
 
 ## Release Boundary
 
-These items are not required to keep v0.2.2 valid. The current release line
+These items are not required to keep v0.3.0 valid. The current release line
 remains complete if the release URL, tag, CI run, package validation, provider
 smoke, provider package validation, and staged dogfood remain PASS.
