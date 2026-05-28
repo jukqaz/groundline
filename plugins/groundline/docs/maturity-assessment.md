@@ -27,7 +27,9 @@ next package sync and release gates.
 - Packaged validation: `plugins/groundline` validation returned `status=PASS`.
 - Lint validation: `lint.py --json --require-actionlint` returned
   `status=PASS`.
-- Unit tests: `python3 -m unittest discover -s tests -v` returned 110 tests OK.
+- Provider-native validation: `groundline_provider_validate.py --json`
+  returned `status=PASS` for local Claude Code and Antigravity validators.
+- Unit tests: `python3 -m unittest discover -s tests -v` returned 112 tests OK.
 - Safety eval: `groundline_safety_eval.py --json` returned `status=PASS` with
   4 synthetic cases and `mutation_performed=false`.
 - Offline doctor and radar checks: `groundline_doctor.py --json --offline
@@ -213,8 +215,9 @@ v0.3.2 remains the current public release. The current v0.3.3 patch draft has
 closed the P0 install posture and version drift diagnostics, added staged
 provider activation coverage, recorded skill graduation decisions, added a
 compact workflow cookbook, and mapped the artifact lifecycle. Source, packaged,
-staged dogfood, and scenario gates pass; the full release gate remains PARTIAL
-when real provider targets still contain same-version stale content.
+provider-native validation, staged dogfood, and scenario gates pass; the full
+release gate remains PARTIAL when real provider targets still contain
+same-version stale content.
 
 Ship decision for the draft: `hold` until either the user approves publishing
 with the current sanitized proof set or live provider activation proof is

@@ -126,6 +126,7 @@ from the cloned repository:
 ```bash
 claude plugin validate ./plugins/groundline --strict
 agy plugin validate ./plugins/groundline
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_validate.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
 ```
 

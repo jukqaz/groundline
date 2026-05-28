@@ -73,6 +73,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
 (cd plugins/groundline && PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json)
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/lint.py --json --require-actionlint
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_runtime_layout.py --json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_validate.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_doctor.py --json --offline --probe-tools
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_radar.py --json --offline --command-sources
@@ -94,6 +95,9 @@ Report any unavailable Docker or network proof as partial, not passing.
   unless the user explicitly accepts the missing proof for this release.
 - If live provider activation proof is missing, record whether that is an
   accepted partial or a release blocker.
+- If provider-native validation is `PARTIAL` because `claude` or `agy` is not
+  installed, record whether that missing local validator is accepted for this
+  release. Treat validator failures as release blockers.
 
 ## Approval-required Publishing Commands
 

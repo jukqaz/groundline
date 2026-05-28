@@ -50,6 +50,7 @@ def build_gates(include_docker_execution: bool, actionlint_bin: str | None) -> l
         Gate("packaged-validation", "Validate packaged plugin", python_command("scripts/validate_pack.py", "--json"), ROOT / "plugins/groundline"),
         Gate("lint", "Run lint and actionlint", lint_command, ROOT),
         Gate("runtime-layout", "Check provider runtime layout", python_command("scripts/check_runtime_layout.py", "--json"), ROOT),
+        Gate("provider-native-validation", "Run provider-native validators", python_command("scripts/groundline_provider_validate.py", "--json"), ROOT),
         Gate("unit-tests", "Run unit tests", python_command("-m", "unittest", "discover", "-s", "tests", "-v"), ROOT),
         Gate("offline-doctor", "Run offline doctor", python_command("scripts/groundline_doctor.py", "--json", "--offline", "--probe-tools"), ROOT),
         Gate("offline-radar", "Run offline radar", python_command("scripts/groundline_radar.py", "--json", "--offline", "--command-sources"), ROOT),

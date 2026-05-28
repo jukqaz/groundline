@@ -33,7 +33,7 @@ session, log, provider home dump는 출력하지 않습니다.
 | --- | --- |
 | 일반 사용자처럼 공개 package 설치 | GitHub marketplace/source 추가 후 `groundline@groundline` 설치 |
 | release 전 local edit 테스트 | `./plugins/groundline` 또는 local checkout marketplace 사용 |
-| package shape만 확인 | `validate_pack.py`, `claude plugin validate`, `agy plugin validate` |
+| package shape만 확인 | `validate_pack.py`, `groundline_provider_validate.py`, `claude plugin validate`, `agy plugin validate` |
 | provider catalog 제출 | validation 뒤 provider review 절차 진행 |
 
 ## Codex
@@ -108,6 +108,7 @@ Antigravity list가 semantic version 대신 import metadata만 보여줄 수 있
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_validate.py --json
 claude plugin validate ./plugins/groundline --strict
 agy plugin validate ./plugins/groundline
 ```

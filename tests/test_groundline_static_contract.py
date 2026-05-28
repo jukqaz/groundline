@@ -247,6 +247,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
             "workflow cookbook",
             "empty conflict-copy directories",
             "No lifecycle values are promoted",
+            "provider-native validation gate",
         ]:
             with self.subTest(term=term):
                 self.assertIn(term, changelog)
@@ -273,6 +274,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn("scripts/groundline_safety_eval.py --json", readme)
         self.assertIn("scripts/groundline_provider_smoke.py --json", readme)
         self.assertIn("scripts/groundline_release_gate.py --plan --json", checklist)
+        self.assertIn("scripts/groundline_provider_validate.py --json", checklist)
         self.assertIn("scripts/groundline_safety_eval.py --json", checklist)
         self.assertIn("scripts/groundline_dogfood.py --stage-package --probe-runtimes --json", checklist)
         self.assertIn("stale installed cache after a version bump", checklist)
@@ -401,6 +403,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn('"SECURITY.md"', validator)
         self.assertIn('"scripts/groundline_dogfood.py"', validator)
         self.assertIn('"scripts/groundline_provider_smoke.py"', validator)
+        self.assertIn('"scripts/groundline_provider_validate.py"', validator)
         self.assertIn('"scripts/groundline_release_gate.py"', validator)
         self.assertIn('"scripts/lint.py"', validator)
         self.assertIn('"scripts/sync_provider_package.py"', validator)
@@ -419,6 +422,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn("git clone https://github.com/jukqaz/groundline.git", install)
         self.assertIn("public plugin package", install)
         self.assertIn("python3 scripts/groundline_provider_smoke.py --json", install)
+        self.assertIn("python3 scripts/groundline_provider_validate.py --json", install)
         self.assertIn("package validation returns `status=PASS`", install)
         self.assertIn("provider smoke returns `status=PASS` for a matching install, or `PARTIAL`", install)
         self.assertIn("Treat provider smoke `FAIL` as an install blocker", install)

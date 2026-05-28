@@ -87,6 +87,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
             "groundline_dogfood.py",
             "groundline_plan_update.py",
             "groundline_provider_smoke.py",
+            "groundline_provider_validate.py",
             "groundline_radar.py",
             "groundline_release_gate.py",
             "groundline_safety_eval.py",
@@ -138,6 +139,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
             "groundline_dogfood.py",
             "groundline_plan_update.py",
             "groundline_provider_smoke.py",
+            "groundline_provider_validate.py",
             "groundline_radar.py",
             "groundline_release_gate.py",
             "groundline_safety_eval.py",
@@ -171,6 +173,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
                 "packaged-validation",
                 "lint",
                 "runtime-layout",
+                "provider-native-validation",
                 "unit-tests",
                 "offline-doctor",
                 "offline-radar",
@@ -201,12 +204,51 @@ class GroundLineScriptContractTests(unittest.TestCase):
 
         gate_ids = [gate["id"] for gate in result["gates"]]
         self.assertIn("linux-docker-execution", gate_ids)
+        self.assertIn("provider-native-validation", gate_ids)
         self.assertIn('git tag "$TAG"', result["approval_required_commands_excluded"])
         self.assertIn('git push origin "$TAG"', result["approval_required_commands_excluded"])
         self.assertIn('gh release create "$TAG"', result["approval_required_commands_excluded"])
         lint_gate = next(gate for gate in result["gates"] if gate["id"] == "lint")
         self.assertIn("--actionlint-bin", lint_gate["command"])
         self.assertIn("/tmp/actionlint", lint_gate["command"])
+
+    def test_provider_native_validate_runs_fake_validators(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-provider-native-") as temp:
+            bin_dir = Path(temp) / "bin"
+            bin_dir.mkdir()
+            self.write_fake_executable(bin_dir, "claude", "claude validation ok")
+            self.write_fake_executable(bin_dir, "agy", "agy validation ok")
+            env = os.environ.copy()
+            env["PATH"] = str(bin_dir)
+
+            completed = self.run_script("groundline_provider_validate.py", "--json", env=env)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result = json.loads(completed.stdout)
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["package_mode"], "source")
+        self.assertFalse(result["mutation_performed"])
+        self.assertFalse(result["real_home_touched"])
+        self.assertFalse(result["secret_value_printed"])
+        self.assertEqual(result["next_actions"], [])
+        self.assertNotIn(str(Path.home()), completed.stdout)
+        self.assertEqual([item["status"] for item in result["validations"]], ["PASS", "PASS", "PASS"])
+        self.assertEqual(result["validations"][0]["command"], ["claude", "plugin", "validate", "plugins/groundline", "--strict"])
+
+    def test_provider_native_validate_reports_missing_cli_as_partial(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-provider-native-missing-") as temp:
+            env = os.environ.copy()
+            env["PATH"] = temp
+
+            completed = self.run_script("groundline_provider_validate.py", "--json", env=env)
+
+        self.assertEqual(completed.returncode, 2)
+        result = json.loads(completed.stdout)
+        self.assertEqual(result["status"], "PARTIAL")
+        self.assertFalse(result["mutation_performed"])
+        self.assertTrue(result["next_actions"])
+        self.assertTrue(any("install or expose claude" in action for action in result["next_actions"]))
+        self.assertTrue(any("install or expose agy" in action for action in result["next_actions"]))
 
     def test_release_gate_treats_exit_two_as_partial(self) -> None:
         script_path = SCRIPTS_DIR / "groundline_release_gate.py"

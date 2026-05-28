@@ -192,10 +192,10 @@ Ship gate:
 ## Next Patch Closeout
 
 Before tagging the next patch, run package sync, source validation, packaged
-validation, lint, unit tests, offline doctor, offline radar, safety eval,
-provider smoke, staged dogfood, macOS local scenario, Linux Docker dry-run,
-Linux Docker execution, and at least one remote install proof when the package
-is meant to be installed from GitHub. If provider smoke reports
+validation, lint, provider-native validation, unit tests, offline doctor,
+offline radar, safety eval, provider smoke, staged dogfood, macOS local scenario,
+Linux Docker dry-run, Linux Docker execution, and at least one remote install
+proof when the package is meant to be installed from GitHub. If provider smoke reports
 `content_fingerprint_mismatch` against same-version local targets, treat the
 full closeout as PARTIAL until those targets are refreshed from the published
 ref.

@@ -21,6 +21,7 @@ Run local validation first:
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_validate.py --json
 ```
 
 The validation phase is read-only. Provider install commands are not read-only:
@@ -37,7 +38,7 @@ without printing auth, sessions, logs, or provider home dumps.
 | --- | --- |
 | Try the public package as a normal user | Add the GitHub marketplace/source and install `groundline@groundline`. |
 | Test local edits before release | Install from `./plugins/groundline` or add the local checkout as a marketplace. |
-| Validate package shape only | Run `validate_pack.py`, `claude plugin validate`, and `agy plugin validate`. |
+| Validate package shape only | Run `validate_pack.py`, `groundline_provider_validate.py`, `claude plugin validate`, and `agy plugin validate`. |
 | Submit to a provider catalog | Validate first, then follow that provider's review process. |
 
 ## Codex
@@ -145,6 +146,7 @@ against a clone to confirm the package shape, and use
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_validate.py --json
 claude plugin validate ./plugins/groundline --strict
 agy plugin validate ./plugins/groundline
 ```

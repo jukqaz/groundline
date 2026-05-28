@@ -69,11 +69,11 @@ Current patch draft status:
   `install_doctor_status`.
 - Validation now compares provider manifest versions against canonical
   `plugin.json` instead of a hard-coded patch version.
-- Package sync, source validation, packaged validation, lint, unit tests,
-  safety eval, offline doctor, offline radar, staged dogfood, macOS local
-  scenario, Linux Docker dry-run, and Linux Docker execution pass in the current
-  patch draft. Real provider smoke is PARTIAL until local provider targets are
-  refreshed from the published ref.
+- Package sync, source validation, packaged validation, lint,
+  provider-native validation, unit tests, safety eval, offline doctor, offline
+  radar, staged dogfood, macOS local scenario, Linux Docker dry-run, and Linux
+  Docker execution pass in the current patch draft. Real provider smoke is
+  PARTIAL until local provider targets are refreshed from the published ref.
 - A release gate runner now prints or executes the same local gate sequence
   without including approval-required publish commands.
 - Remaining before release: decide whether to publish with existing sanitized
@@ -323,8 +323,8 @@ install through Codex, Claude Code, or Antigravity from the documented commands.
 
 These backlog items are not required to keep the current v0.3.3 patch draft
 bounded. The release candidate remains shippable only when the release decision
-is explicit, source validation, package validation, lint, unit tests, staged
-dogfood, macOS scenario, Linux Docker scenario, and diff checks pass. Treat
-real provider smoke as a release blocker when it reports missing source
-manifests or unsafe output, and as an accepted `PARTIAL` only when
-`next_actions` clearly point to post-publish provider install refresh.
+is explicit, source validation, package validation, lint, provider-native
+validation, unit tests, staged dogfood, macOS scenario, Linux Docker scenario,
+and diff checks pass. Treat real provider smoke as a release blocker when it
+reports missing source manifests or unsafe output, and as an accepted `PARTIAL`
+only when `next_actions` clearly point to post-publish provider install refresh.

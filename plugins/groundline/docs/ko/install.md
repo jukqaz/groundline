@@ -117,6 +117,7 @@ provider list가 version을 명확히 보여주지 않으면 clone에서 read-on
 doctor를 다시 실행합니다.
 
 ```bash
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_validate.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
 ```
 

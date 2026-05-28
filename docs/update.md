@@ -20,6 +20,7 @@ For a release gate, use `docs/release-checklist.md`. At minimum, also run:
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --plan --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/lint.py --json --require-actionlint
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_runtime_layout.py --json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_validate.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_doctor.py --json --offline --probe-tools
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_radar.py --json --offline --command-sources
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/run_scenarios.py --platform macos --sandbox local --json

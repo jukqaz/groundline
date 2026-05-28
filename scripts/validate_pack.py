@@ -111,6 +111,7 @@ BASE_REQUIRED_FILES = [
     "scenarios/fixtures/safety-eval.json",
     "scripts/groundline_dogfood.py",
     "scripts/groundline_provider_smoke.py",
+    "scripts/groundline_provider_validate.py",
     "scripts/groundline_release_gate.py",
     "scripts/groundline_safety_eval.py",
     "scripts/lint.py",
