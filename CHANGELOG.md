@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.2.0 - 2026-05-28
 
 - Add public release, privacy, contribution, and security documentation.
 - Add separate human and LLM guides plus GitHub issue and pull request templates.

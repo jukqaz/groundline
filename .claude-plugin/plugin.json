@@ -1,7 +1,7 @@
 {
   "name": "groundline",
   "description": "Lightweight control plane skills for current agent state, radar, and evidence.",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "author": {
     "name": "GroundLine contributors"
   },

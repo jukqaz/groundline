@@ -21,7 +21,10 @@ class GroundLineStaticContractTests(unittest.TestCase):
                 self.assertEqual(data.get("name"), "groundline")
 
         codex = json.loads((PACK_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        claude = json.loads((PACK_ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
         interface = codex.get("interface", {})
+        self.assertEqual(codex.get("version"), "0.2.0")
+        self.assertEqual(claude.get("version"), "0.2.0")
         self.assertEqual(interface.get("displayName"), "GroundLine")
         self.assertIn("control plane", interface.get("longDescription", "").lower())
 
