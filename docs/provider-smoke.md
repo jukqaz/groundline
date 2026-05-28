@@ -53,7 +53,7 @@ presence and skill count still match the source package.
 Exit code behavior:
 
 - `PASS` exits 0.
-- `PARTIAL` exits 1 and still prints JSON. This is the expected signal for an
+- `PARTIAL` exits 2 and still prints JSON. This is the expected signal for an
   installed target with stale version, missing payload, or skill count drift.
 - `FAIL` exits 1 when source manifests needed for provider install are missing.
 

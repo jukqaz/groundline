@@ -703,7 +703,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
             )
             result = json.loads(completed.stdout)
 
-        self.assertEqual(completed.returncode, 1)
+        self.assertEqual(completed.returncode, 2)
         probe = result["providers"]["codex"]["runtime_probe"]
         self.assertEqual(result["install_doctor_status"], "PARTIAL")
         self.assertEqual(result["status"], "PARTIAL")
@@ -764,7 +764,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
             )
             result = json.loads(completed.stdout)
 
-        self.assertEqual(completed.returncode, 1)
+        self.assertEqual(completed.returncode, 2)
         codex_probe = result["providers"]["codex"]["runtime_probe"]
         antigravity_probe = result["providers"]["antigravity"]["runtime_probe"]
         self.assertEqual(result["install_doctor_status"], "PARTIAL")
@@ -773,6 +773,25 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertTrue(antigravity_probe["target_exists"])
         self.assertTrue(antigravity_probe["target_manifest_present"])
         self.assertTrue(antigravity_probe["version_matches_source"])
+
+    def test_provider_smoke_missing_source_manifest_is_fail_exit_one(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-provider-missing-manifest-") as temp:
+            pack_root = self.copy_pack(Path(temp))
+            (pack_root / ".codex-plugin/plugin.json").unlink()
+            home = self.make_fake_home(Path(temp))
+
+            completed = self.run_script(
+                "groundline_provider_smoke.py",
+                "--home",
+                str(home),
+                "--json",
+                pack_root=pack_root,
+            )
+            result = json.loads(completed.stdout)
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertEqual(result["status"], "FAIL")
+        self.assertIn("codex", result["missing_manifests"])
 
     def test_provider_smoke_allows_antigravity_shape_without_installed_version(self) -> None:
         with tempfile.TemporaryDirectory(prefix="groundline-antigravity-shape-") as temp:

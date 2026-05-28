@@ -251,7 +251,11 @@ def main() -> int:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
         print(f"GroundLine provider smoke: {result['status']}")
-    return 0 if result["status"] == "PASS" else 1
+    if result["status"] == "PASS":
+        return 0
+    if result["status"] == "PARTIAL":
+        return 2
+    return 1
 
 
 if __name__ == "__main__":

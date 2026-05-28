@@ -45,7 +45,7 @@ Read `install_doctor_status`:
   the source package.
 - `PARTIAL`: an installed provider target exists but has stale version,
   stale provider cache, missing payload, or skill count drift. The command
-  exits 1 while still printing JSON.
+  exits 2 while still printing JSON.
 - `FAIL`: source manifests needed for provider install are missing.
 
 ## 2. Check Local Runtime Posture
