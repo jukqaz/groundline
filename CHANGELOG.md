@@ -5,7 +5,8 @@
 - Version-aware provider smoke now reports installed version, source version,
   install source, cache candidates, payload presence, skill count drift,
   same-version content drift, `install_doctor_status`, and
-  `secret_value_printed=false` for Codex, Claude Code, and Antigravity.
+  `secret_value_printed=false` for Codex, Claude Code, and Antigravity, with
+  provider-level `recommended_actions` and top-level `next_actions`.
 - Add single-source version control so validation compares provider manifests
   against canonical `plugin.json` instead of a hard-coded patch version.
 - Add a provider activation matrix and expand staged dogfood to six prompt

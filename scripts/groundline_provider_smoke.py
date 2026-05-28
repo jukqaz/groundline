@@ -34,6 +34,12 @@ PROVIDERS = {
     },
 }
 
+PROVIDER_LABELS = {
+    "codex": "Codex",
+    "claude_code": "Claude Code",
+    "antigravity": "Antigravity",
+}
+
 PAYLOAD_FILES = [
     "README.md",
     "README.ko.md",
@@ -276,6 +282,28 @@ def runtime_probe(
     }
 
 
+def recommended_actions(provider: str, manifest_present: bool, probe: dict) -> list[str]:
+    label = PROVIDER_LABELS.get(provider, provider)
+    actions: list[str] = []
+    issues = set(probe["issues"])
+
+    if not manifest_present:
+        actions.append(f"restore the source manifest for {label} before publishing or installing")
+    if probe["status"] == "NOT_INSTALLED":
+        actions.append(f"install GroundLine for {label} from the documented command if this runtime should use it")
+    if "missing_manifest_payload" in issues or "missing_skills_payload" in issues:
+        actions.append(f"reinstall the {label} provider payload from the packaged plugin")
+    if "skill_count_mismatch" in issues:
+        actions.append(f"refresh the {label} provider payload so installed skills match the source package")
+    if "version_mismatch" in issues or "stale_cache_version" in issues:
+        actions.append(f"refresh the {label} provider install from the intended published ref")
+    if "content_fingerprint_mismatch" in issues:
+        actions.append(f"refresh the {label} provider install; version matches but installed content differs from source")
+    if not actions and probe["status"] == "PASS":
+        actions.append("no action required")
+    return actions
+
+
 def provider_status(
     home: Path,
     explicit_home: bool,
@@ -306,6 +334,7 @@ def provider_status(
             "ready_for_manual_install": manifest_path.is_file(),
             "install_state": probe["status"],
             "runtime_probe": probe,
+            "recommended_actions": recommended_actions(name, manifest_path.is_file(), probe),
         }
     return providers
 
@@ -325,6 +354,14 @@ def build_result(home: Path, explicit_home: bool) -> dict:
         for name, item in providers.items()
         if item["runtime_probe"]["status"] == "PARTIAL"
     ]
+    next_actions = sorted(
+        {
+            action
+            for item in providers.values()
+            if item["runtime_probe"]["status"] == "PARTIAL" or not item["manifest_present"]
+            for action in item["recommended_actions"]
+        }
+    )
     install_doctor_status = "FAIL" if missing else "PARTIAL" if drift else "PASS"
     return {
         "status": install_doctor_status,
@@ -338,6 +375,7 @@ def build_result(home: Path, explicit_home: bool) -> dict:
         "providers": providers,
         "missing_manifests": missing,
         "install_issues": drift,
+        "next_actions": next_actions,
         "update_command": "git pull --ff-only && PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json",
     }
 

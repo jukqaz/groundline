@@ -46,6 +46,10 @@ cache, payload 누락, skill count mismatch, `content_fingerprint_mismatch`를
 의미하며 JSON을 출력한 뒤 exit 2로 끝납니다. 실제 provider home에 쓰는
 작업은 사용자가 명시적으로 요청한 경우에만 진행합니다.
 
+결과가 `PARTIAL` 또는 `FAIL`이면 먼저 top-level `next_actions`를 봅니다.
+각 provider 항목의 `recommended_actions`에는 해당 target을 위한 조치가
+따로 들어갑니다.
+
 Context7, Exa, GitHub 같은 외부 도구는 optional입니다. 없으면 doctor가 setup
 recommendation만 출력해야 합니다.
 

@@ -761,6 +761,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertFalse(result["mutation_performed"])
         self.assertFalse(result["secret_value_printed"])
         self.assertTrue(result["fake_home_used"])
+        self.assertEqual(result["next_actions"], [])
         self.assertIn("source_package", result)
         self.assertGreaterEqual(result["source_package"]["skill_count"], 12)
         self.assertTrue(result["source_package"]["skill_index_present"])
@@ -794,6 +795,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertTrue(probe["target_skill_count_matches_source"])
         self.assertTrue(probe["content_matches_source"])
         self.assertEqual(probe["target_content_fingerprint"], result["source_package"]["content_fingerprint"])
+        self.assertEqual(result["providers"]["codex"]["recommended_actions"], ["no action required"])
 
     def test_provider_smoke_reports_installed_versions_and_drift(self) -> None:
         with tempfile.TemporaryDirectory(prefix="groundline-provider-drift-") as temp:
@@ -876,6 +878,14 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertEqual(probe["version_check"], "match")
         self.assertFalse(probe["content_matches_source"])
         self.assertIn("content_fingerprint_mismatch", probe["issues"])
+        self.assertIn(
+            "refresh the Codex provider install; version matches but installed content differs from source",
+            result["providers"]["codex"]["recommended_actions"],
+        )
+        self.assertIn(
+            "refresh the Codex provider install; version matches but installed content differs from source",
+            result["next_actions"],
+        )
 
     def test_version_bump_sync_validates_and_smoke_reports_stale_cache(self) -> None:
         with tempfile.TemporaryDirectory(prefix="groundline-version-bump-") as temp:
@@ -957,6 +967,10 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertEqual(result["install_doctor_status"], "PARTIAL")
         self.assertFalse(result["secret_value_printed"])
         self.assertIn("missing_skills_payload", codex_probe["issues"])
+        self.assertIn(
+            "reinstall the Codex provider payload from the packaged plugin",
+            result["providers"]["codex"]["recommended_actions"],
+        )
         self.assertTrue(antigravity_probe["target_exists"])
         self.assertTrue(antigravity_probe["target_manifest_present"])
         self.assertTrue(antigravity_probe["version_matches_source"])
@@ -980,6 +994,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 1)
         self.assertEqual(result["status"], "FAIL")
         self.assertIn("codex", result["missing_manifests"])
+        self.assertIn("restore the source manifest for Codex before publishing or installing", result["next_actions"])
 
     def test_provider_smoke_allows_antigravity_shape_without_installed_version(self) -> None:
         with tempfile.TemporaryDirectory(prefix="groundline-antigravity-shape-") as temp:

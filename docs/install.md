@@ -49,6 +49,9 @@ Read `install_doctor_status`:
   JSON.
 - `FAIL`: source manifests needed for provider install are missing.
 
+When the result is `PARTIAL` or `FAIL`, read top-level `next_actions` first.
+Each provider also includes `recommended_actions` for the specific target.
+
 ## 2. Check Local Runtime Posture
 
 Run the doctor before wiring the package into any runtime:

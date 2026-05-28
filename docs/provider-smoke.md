@@ -19,6 +19,9 @@ Expected safety fields:
   while ignoring manifest version fields
 - each provider reports `manifest_present=true`
 - each provider includes a read-only `runtime_probe`
+- each provider includes `recommended_actions`
+- top-level `next_actions` lists only actions needed for `PARTIAL` or `FAIL`
+  provider states
 - default home paths are displayed with `~`
 
 Use `--home` with a temporary directory when testing install plans:
@@ -51,6 +54,12 @@ Important runtime probe fields:
 - `issues`: `version_mismatch`, `stale_cache_version`,
   `missing_manifest_payload`, `missing_skills_payload`, or
   `skill_count_mismatch`, `content_fingerprint_mismatch`
+- `recommended_actions`: provider-specific read-only remediation guidance, such
+  as refreshing a stale install or reinstalling a missing payload
+
+`next_actions` is the deduplicated top-level list for release closeout. It is
+empty when provider smoke is `PASS`; when provider smoke is `PARTIAL` or `FAIL`,
+use it as the first human/LLM handoff summary.
 
 Antigravity may expose package shape and skills without an installed semantic
 version. In that case `version_check=unavailable` is acceptable when manifest
