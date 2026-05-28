@@ -308,6 +308,18 @@ class GroundLineStaticContractTests(unittest.TestCase):
             with self.subTest(term=term):
                 self.assertIn(term, text)
 
+    def test_provider_dogfood_defines_sanitized_invocation_proof(self) -> None:
+        provider_dogfood = (PACK_ROOT / "docs/provider-dogfood.md").read_text(encoding="utf-8")
+
+        for term in [
+            "Sanitized Invocation Proof",
+            "raw_transcript_stored: false",
+            "provider_home_dumped: false",
+            "prompt_family",
+        ]:
+            with self.subTest(term=term):
+                self.assertIn(term, provider_dogfood)
+
     def test_public_docs_cover_security_privacy_license_and_identity(self) -> None:
         readme = (PACK_ROOT / "README.md").read_text(encoding="utf-8")
         security = (PACK_ROOT / "SECURITY.md").read_text(encoding="utf-8")

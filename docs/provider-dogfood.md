@@ -33,6 +33,28 @@ The harness may create staged package files inside the explicit or temporary
 home used for the test. It rejects staged package writes to the real home
 directory.
 
+## Sanitized Invocation Proof
+
+Use this proof shape when recording real provider session evidence. Store only
+the fields below; do not commit raw transcripts, full home paths, auth material,
+provider cache dumps, or provider runtime state.
+
+```text
+provider: Codex | Claude Code | Antigravity
+prompt_family: handoff | release-closeout | expansion-control
+selected_skill: <groundline skill name>
+output_contract: <contract name>
+evidence: short sanitized summary
+mutation_performed: true | false
+raw_transcript_stored: false
+provider_home_dumped: false
+result: PASS | PARTIAL | FAIL
+```
+
+Evidence should be short enough to audit during release review. Prefer selected
+skill, selected output contract, verification command, and stop condition over
+conversation excerpts.
+
 ## Scenario Suite
 
 | Scenario | Expected skill | Expected contract |
