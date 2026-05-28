@@ -5,11 +5,19 @@ canonical입니다.
 
 ## 시작하기
 
-1. `README.ko.md`로 전체 개념을 확인합니다.
-2. `install.md`로 clone과 검증을 실행합니다.
-3. `human-guide.md`에서 자주 쓰는 workflow를 고릅니다.
-4. `skill-portfolio.md`에서 어떤 skill을 언제 쓸지 확인합니다.
+1. 처음 5분이면 `README.ko.md`와 `install.md`만 봅니다.
+2. 실제 agent session에서 어떻게 요청할지 막히면 `human-guide.md`를 봅니다.
+3. prompt 예시가 필요하면 `examples.md`를 봅니다.
+4. 어떤 skill을 골라야 할지 헷갈리면 `skill-portfolio.md`를 봅니다.
 5. release 전에는 `release-checklist.md`와 영어 `docs/release-checklist.md`를 함께 봅니다.
+
+## 가장 흔한 경로
+
+```text
+install.md -> human-guide.md -> examples.md -> skill-portfolio.md
+```
+
+provider에 설치하기 전에는 먼저 read-only 검증을 통과시키세요.
 
 ## 문서 목록
 

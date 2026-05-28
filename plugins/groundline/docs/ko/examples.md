@@ -3,6 +3,21 @@
 영어 `docs/examples.md`가 canonical입니다. 이 문서는 대표 workflow를 짧게 고르는
 한국어 companion입니다.
 
+실제 session에서는 상황에 맞는 prompt를 그대로 복사해도 됩니다. skill 이름은
+agent가 잘못 고를 때만 직접 지정하세요.
+
+## 빠른 선택
+
+| 상황 | 먼저 볼 예시 |
+| --- | --- |
+| 이전 agent나 stale handoff | 이전 agent 작업 이어받기 |
+| 위험한 변경이나 provider home write | 위험한 작업 경계 잡기 |
+| CI는 통과했지만 runtime 증거가 없음 | live work 닫기 |
+| 긴 대화 handoff | task packet 만들기 |
+| 아이디어가 계속 늘어남 | release scope 잠그기 |
+| release 직전 | release scope 잠그기 |
+| release 뒤 비교 | release 뒤 비교 |
+
 ## 1. 이전 agent 작업 이어받기
 
 Prompt:
@@ -44,6 +59,26 @@ hold-the-line -> polish-release-candidate -> stabilize-release-cut
 - validation gate
 - dogfood evidence
 - ship decision
+
+## 2-1. live work 닫기
+
+Prompt:
+
+```text
+CI는 통과했는데 실제 runtime이나 endpoint에 반영됐는지 확인해줘.
+```
+
+Flow:
+
+```text
+close-live-work
+```
+
+확인할 증거:
+
+- runtime, endpoint, release, queue, browser, user-flow 중 무엇을 봤는지
+- `PASS`, `PARTIAL`, `FAIL`
+- 남은 gap
 
 ## 3. 외부 agent workflow 조사
 
@@ -106,3 +141,26 @@ Boundary:
 - execution allowed:
 - secret value printed: false
 ```
+
+## 6. release 뒤 비교
+
+Prompt:
+
+```text
+방금 배포된 버전과 이전 버전을 비교해서 checklist와 regression risk를 정리해줘.
+```
+
+Skill:
+
+```text
+compare-release-delta
+```
+
+확인할 증거:
+
+- previous version
+- deployed version
+- expected changes
+- unexpected changes
+- install/runtime/regression evidence
+- rollback note

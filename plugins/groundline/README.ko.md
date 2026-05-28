@@ -2,6 +2,10 @@
 
 한국어 companion 문서입니다. 영어 `README.md`가 기본이자 canonical 문서입니다.
 
+GroundLine은 AI coding agent가 자주 실수하는 지점에서 속도를 줄이게 하는
+스킬 패키지입니다. 이전 작업을 이어받을 때, 위험한 변경을 할 때, 검증 없이
+완료를 말하려 할 때, release scope가 계속 커질 때 사용합니다.
+
 GroundLine은 Codex, Claude Code, Antigravity에서 쓰는 가벼운 control plane
 스킬 패키지입니다. 설정 전체를 동기화하거나 provider 기능을 다시 만드는 도구가
 아니라, agent 작업을 이어받고, 현재 상태를 증명하고, 위험한 변경을 구분하고,
@@ -28,6 +32,13 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_dogfood.py --stage-package 
 기본 검증은 실제 provider home을 수정하지 않습니다. 출력에서
 `mutation_performed=false`와 `real_home_touched=false`를 확인하세요.
 
+## 무엇이 바뀌나
+
+- skill, reference, docs, validation script를 제공합니다.
+- hooks, rules, MCP server, command, provider-level agent는 기본으로 설치하지 않습니다.
+- raw transcript, credential, provider runtime state를 repository에 넣지 않습니다.
+- live GitHub, 최신 문서, private docs, private code search가 필요할 때만 optional MCP를 권합니다.
+
 ## 언제 쓰나
 
 - 이전 agent 작업을 이어받기 전에 branch, runtime, CI, endpoint 상태를 다시 확인할 때
@@ -35,6 +46,25 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_dogfood.py --stage-package 
 - 테스트 통과 뒤에도 실제 runtime, release, endpoint 증거가 필요할 때
 - 긴 대화나 큰 작업을 다음 LLM이 이어받을 수 있게 task packet으로 압축할 때
 - release 직전에 privacy, docs, gate, dogfood evidence를 정리할 때
+
+## 첫 요청 예시
+
+| 상황 | 이렇게 요청 |
+| --- | --- |
+| 이전 작업 이어받기 | `현재 branch와 diff부터 확인하고 이어서 마무리해줘.` |
+| 긴 대화 넘기기 | `다음 agent가 이어받을 수 있게 task packet으로 정리해줘.` |
+| scope가 커짐 | `지금 release에 넣을 것과 미룰 것을 분류해줘.` |
+| 완료 검증 | `테스트 말고 실제 runtime 증거까지 확인해줘.` |
+| 위험한 변경 | `side effect와 승인 필요성을 먼저 분류해줘.` |
+| release 직전 | `release candidate를 polish하고 ship 여부를 판단해줘.` |
+
+## 어디를 읽나
+
+- 처음 쓰는 사람: `docs/ko/human-guide.md`
+- 설치: `docs/ko/install.md`
+- workflow 예시: `docs/ko/examples.md`
+- skill 선택: `docs/ko/skill-portfolio.md`
+- provider 설치: `docs/ko/provider-packaging.md`
 
 ## 한국어 문서
 

@@ -1,5 +1,9 @@
 # GroundLine
 
+GroundLine helps an AI coding agent slow down at the moments that usually go
+wrong: resuming someone else's work, touching risky systems, claiming work is
+complete too early, or letting a release grow without a stop point.
+
 GroundLine is a lightweight control plane for Codex, Claude Code, and
 Antigravity. It keeps capability blueprints, detects runtime and ecosystem
 drift, prepares research and upgrade packets, and guides agents through
@@ -13,6 +17,63 @@ modes, subagents, hook engines, plugin installers, MCP launchers, browser
 controls, and app context features stay owned by Codex, Claude Code, or
 Antigravity. GroundLine provides the provider-neutral task contracts, safety
 boundaries, and verification language around them.
+
+## Start Here
+
+If you only want to try GroundLine, do this:
+
+```bash
+git clone https://github.com/jukqaz/groundline.git
+cd groundline
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
+```
+
+Those commands should report `status=PASS`, `mutation_performed=false`, and no
+real provider home writes. They validate the package before you install it into
+Codex, Claude Code, or Antigravity.
+
+If you want to install from the public repository:
+
+```bash
+codex plugin marketplace add jukqaz/groundline --ref main
+codex plugin add groundline@groundline
+```
+
+```bash
+claude plugin marketplace add jukqaz/groundline
+claude plugin install groundline@groundline
+```
+
+```bash
+agy plugin install https://github.com/jukqaz/groundline
+```
+
+## When To Use It
+
+Use GroundLine when the next step needs evidence or a boundary:
+
+| Situation | Ask the agent |
+| --- | --- |
+| A previous agent worked on this | "Recheck the current state before continuing." |
+| A thread is too long | "Package this task so another agent can continue." |
+| The task keeps expanding | "Hold the line and decide what ships now." |
+| Tests passed but the runtime may still be wrong | "Close this with live evidence." |
+| The action may change files, remotes, production, access, or secrets | "Classify side effects before doing anything." |
+| You are near release | "Polish the release candidate and lock the release cut." |
+| You are comparing agent tools or skills | "Evaluate this capability before adopting it." |
+
+## What Changes And What Does Not
+
+By default, GroundLine is skills-first:
+
+- It adds skill instructions, references, docs, and validation scripts.
+- It does not install hooks, rules, MCP servers, slash commands, provider-level
+  agents, or background jobs.
+- It does not read raw transcripts or copy provider runtime state into the
+  repository.
+- It can recommend optional MCP use when a task needs live GitHub, current docs,
+  private docs, or private code search.
 
 ## Languages
 
@@ -33,6 +94,16 @@ stay in English unless a release explicitly changes that policy.
 - Antigravity
 - macOS on Apple Silicon
 - Linux
+
+## Read Next
+
+- New users: `docs/human-guide.md`
+- Korean overview: `README.ko.md`
+- Install and update: `docs/install.md`, `docs/update.md`
+- Provider install details: `docs/provider-packaging.md`
+- Workflow examples: `docs/examples.md`
+- Skill overview: `docs/skill-portfolio.md`
+- LLM-facing contract guide: `docs/llm-guide.md`
 
 ## Skills
 

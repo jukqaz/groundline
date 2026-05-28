@@ -1,8 +1,14 @@
 # Install
 
-GroundLine is a public plugin package. Clone it with either GitHub CLI or git.
+GroundLine is a public plugin package. Install has two phases:
 
-## Clone
+1. Clone and validate the package without touching provider homes.
+2. Install it through the provider you actually use.
+
+Do phase 1 first. It gives you a clean PASS/FAIL signal before any provider
+state changes.
+
+## 1. Clone And Validate
 
 ```bash
 gh repo clone jukqaz/groundline
@@ -12,7 +18,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_dogfood.py --stage-package --probe-runtimes --json
 ```
 
-Alternative:
+If you do not use GitHub CLI:
 
 ```bash
 git clone https://github.com/jukqaz/groundline.git
@@ -20,11 +26,18 @@ cd groundline
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
 ```
 
+Expected result:
+
+- `status=PASS`
+- `mutation_performed=false`
+- `real_home_touched=false` for staged dogfood
+- provider target paths are printed with `~`, not full home dumps
+
 The provider smoke command is read-only. It reports manifest presence and local
 target paths for Codex, Claude Code, and Antigravity without writing to the
 home directory. Default home paths are displayed with `~`.
 
-## Use
+## 2. Check Local Runtime Posture
 
 Run the doctor before wiring the package into any runtime:
 
@@ -39,10 +52,10 @@ local control plane.
 Read `docs/provider-dogfood.md` when you need staged provider proof before a
 release or manual provider setup.
 
-## Marketplace Install
+## 3. Install Into A Provider
 
 GroundLine can be installed through provider-native plugin surfaces after the
-public repository is reachable.
+public repository is reachable. These commands write to provider plugin state.
 
 Codex:
 
@@ -63,6 +76,48 @@ Antigravity:
 
 ```bash
 agy plugin install https://github.com/jukqaz/groundline
+```
+
+## 4. Confirm Install
+
+Codex:
+
+```bash
+codex plugin list --marketplace groundline
+```
+
+Claude Code:
+
+```bash
+claude plugin list
+```
+
+Antigravity:
+
+```bash
+agy plugin list
+```
+
+Look for `groundline` and the expected version. If the provider only shows an
+import record, also run provider validation from the cloned repository:
+
+```bash
+claude plugin validate ./plugins/groundline --strict
+agy plugin validate ./plugins/groundline
+```
+
+## What To Do First After Install
+
+In a new agent session, ask:
+
+```text
+Use GroundLine to recheck current state before continuing this task.
+```
+
+For release work, ask:
+
+```text
+Use GroundLine to polish this release candidate, then lock the release cut.
 ```
 
 For local provider packaging checks, see `docs/provider-packaging.md`.

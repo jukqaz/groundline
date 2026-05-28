@@ -3,6 +3,28 @@
 These examples show how GroundLine should activate and what kind of answer it
 should produce.
 
+For a real session, copy the prompt that matches your situation and let the
+agent choose the skill. You do not need to name the skill unless the agent keeps
+choosing the wrong path.
+
+Each example has three parts:
+
+- prompt: what a person can ask
+- expected skill or flow: what should activate
+- answer shape: what evidence should come back
+
+## Quick Choice
+
+| Situation | Start with |
+| --- | --- |
+| Previous agent or stale handoff | Resume Prior Agent Work |
+| Dangerous action or provider-home write | Guard A Risky Operation |
+| CI passed but runtime is unproven | Close Live Work |
+| Long conversation handoff | Package A Task For Another Agent |
+| More ideas keep appearing | Hold Scope Before Expanding |
+| Release is nearly ready | Polish A Release Candidate |
+| Release is already published | Compare A Deployed Release |
+
 ## Resume Prior Agent Work
 
 Prompt:
@@ -84,6 +106,12 @@ Expected skill:
 ```text
 close-live-work
 ```
+
+Expected evidence:
+
+- checked runtime, endpoint, release, queue, browser, or user-facing path
+- result is `PASS`, `PARTIAL`, or `FAIL`
+- unverified gaps are named instead of implied away
 
 ## Align Agent Home
 
