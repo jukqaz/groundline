@@ -60,7 +60,8 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --json --ke
 Omit `--release-version` while the ship decision is still `hold` and source
 manifests intentionally remain on the current public version. Add it only when
 the release is actually being cut; the gate fails if source or packaged
-manifests do not match `RELEASE_VERSION`.
+manifests do not match `RELEASE_VERSION` or if `RELEASE_VERSION` is not plain
+`X.Y.Z` semver.
 
 Use `--keep-going` during release closeout so an expected provider smoke
 `PARTIAL`, such as stale installed cache after a version bump, does not prevent

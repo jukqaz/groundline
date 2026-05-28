@@ -59,7 +59,8 @@ GitHub 가이드 설치 과정에서 드러난 provider별 설치 상태와 cach
 - `scripts/groundline_release_gate.py`가 local release gate 순서를 출력하거나
   실행하고 승인 필요한 publish 명령은 제외
 - release gate는 `--release-version`을 받아 실제 release cut에서 source 또는
-  packaged manifest가 이전 public version에 남아 있으면 실패
+  packaged manifest가 이전 public version에 남아 있거나 요청 version이 plain
+  `X.Y.Z` semver가 아니면 실패
 - 새 skill 추가 없음
 
 ## 1. Install posture와 version drift

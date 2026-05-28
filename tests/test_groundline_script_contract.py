@@ -248,6 +248,25 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertTrue(result["preflight_checks"][0]["mismatches"])
         self.assertIn("set source manifests to 9.9.9", result["next_actions"][0])
 
+    def test_release_gate_rejects_non_plain_semver_release_version(self) -> None:
+        completed = self.run_script(
+            "groundline_release_gate.py",
+            "--plan",
+            "--json",
+            "--release-version",
+            "v0.3.2",
+        )
+        result = json.loads(completed.stdout)
+        preflight = result["preflight_checks"][0]
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertEqual(result["status"], "FAIL")
+        self.assertEqual(preflight["status"], "FAIL")
+        self.assertFalse(preflight["release_version_valid"])
+        self.assertIn("invalid_release_version", preflight["issues"])
+        self.assertIn("use plain semver like 0.3.3 without a v prefix", result["next_actions"])
+        self.assertNotIn("set source manifests to v0.3.2", " ".join(result["next_actions"]))
+
     def test_provider_native_validate_runs_fake_validators(self) -> None:
         with tempfile.TemporaryDirectory(prefix="groundline-provider-native-") as temp:
             bin_dir = Path(temp) / "bin"

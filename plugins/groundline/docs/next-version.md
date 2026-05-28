@@ -65,7 +65,8 @@ Completed:
 - `scripts/groundline_release_gate.py` prints or executes the local release gate
   sequence and excludes approval-required publishing commands
 - release gate accepts `--release-version` so the actual release cut fails when
-  source or packaged manifests still point at the previous public version
+  source or packaged manifests still point at the previous public version or the
+  requested version is not plain `X.Y.Z` semver
 - no new skills added
 
 ## 1. Install Posture And Version Drift

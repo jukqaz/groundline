@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import time
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ VERSION_MANIFESTS = [
     "plugins/groundline/.codex-plugin/plugin.json",
     "plugins/groundline/.claude-plugin/plugin.json",
 ]
+PLAIN_SEMVER_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
 
 @dataclass(frozen=True)
@@ -148,20 +150,30 @@ def manifest_version(path: Path) -> str | None:
 
 
 def release_version_check(expected_version: str) -> dict:
+    issues = []
+    if not PLAIN_SEMVER_RE.fullmatch(expected_version):
+        issues.append("invalid_release_version")
     versions = {rel: manifest_version(ROOT / rel) for rel in VERSION_MANIFESTS}
     mismatches = [
         {"path": rel, "version": version}
         for rel, version in versions.items()
         if version != expected_version
     ]
+    next_actions = []
+    if "invalid_release_version" in issues:
+        next_actions.append("use plain semver like 0.3.3 without a v prefix")
+    if mismatches and not issues:
+        next_actions.append(f"set source manifests to {expected_version} and run sync_provider_package.py")
     return {
         "id": "release-version",
         "label": "Check release manifest versions",
-        "status": "PASS" if not mismatches else "FAIL",
+        "status": "PASS" if not issues and not mismatches else "FAIL",
         "expected_version": expected_version,
+        "release_version_valid": not issues,
+        "issues": issues,
         "manifest_versions": versions,
         "mismatches": mismatches,
-        "next_actions": [] if not mismatches else [f"set source manifests to {expected_version} and run sync_provider_package.py"],
+        "next_actions": next_actions,
     }
 
 
