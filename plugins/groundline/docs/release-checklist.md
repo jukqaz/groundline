@@ -53,9 +53,14 @@ missed steps during local release closeout and never runs tag, push, or release
 creation commands.
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --plan --json
-PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --json --keep-going --include-docker-execution
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --plan --json --release-version "$RELEASE_VERSION"
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --json --keep-going --include-docker-execution --release-version "$RELEASE_VERSION"
 ```
+
+Omit `--release-version` while the ship decision is still `hold` and source
+manifests intentionally remain on the current public version. Add it only when
+the release is actually being cut; the gate fails if source or packaged
+manifests do not match `RELEASE_VERSION`.
 
 Use `--keep-going` during release closeout so an expected provider smoke
 `PARTIAL`, such as stale installed cache after a version bump, does not prevent

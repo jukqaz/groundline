@@ -245,6 +245,13 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json --
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/run_scenarios.py --platform linux --sandbox docker --json
 ```
 
+When the release is actually being cut, pass the intended manifest version to
+the wrapper:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --json --keep-going --include-docker-execution --release-version "$RELEASE_VERSION"
+```
+
 `.github/workflows/radar.yml` runs a scheduled radar packet and uploads the JSON
 artifact for review.
 

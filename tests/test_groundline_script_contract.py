@@ -218,6 +218,36 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertIn("--actionlint-bin", lint_gate["command"])
         self.assertIn("/tmp/actionlint", lint_gate["command"])
 
+    def test_release_gate_checks_expected_release_version(self) -> None:
+        version = json.loads((PACK_ROOT / "plugin.json").read_text(encoding="utf-8"))["version"]
+        result = self.run_script_json(
+            "groundline_release_gate.py",
+            "--plan",
+            "--json",
+            "--release-version",
+            version,
+        )
+
+        self.assertEqual(result["release_version"], version)
+        self.assertEqual(result["preflight_checks"][0]["status"], "PASS")
+        self.assertEqual(result["preflight_checks"][0]["expected_version"], version)
+
+    def test_release_gate_rejects_mismatched_release_version_before_running_gates(self) -> None:
+        completed = self.run_script(
+            "groundline_release_gate.py",
+            "--json",
+            "--release-version",
+            "9.9.9",
+        )
+        result = json.loads(completed.stdout)
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertEqual(result["status"], "FAIL")
+        self.assertEqual(result["gates"], [])
+        self.assertEqual(result["preflight_checks"][0]["status"], "FAIL")
+        self.assertTrue(result["preflight_checks"][0]["mismatches"])
+        self.assertIn("set source manifests to 9.9.9", result["next_actions"][0])
+
     def test_provider_native_validate_runs_fake_validators(self) -> None:
         with tempfile.TemporaryDirectory(prefix="groundline-provider-native-") as temp:
             bin_dir = Path(temp) / "bin"

@@ -58,6 +58,8 @@ GitHub 가이드 설치 과정에서 드러난 provider별 설치 상태와 cach
   implementation, dogfood, release, post-release review artifact 흐름 추가
 - `scripts/groundline_release_gate.py`가 local release gate 순서를 출력하거나
   실행하고 승인 필요한 publish 명령은 제외
+- release gate는 `--release-version`을 받아 실제 release cut에서 source 또는
+  packaged manifest가 이전 public version에 남아 있으면 실패
 - 새 skill 추가 없음
 
 ## 1. Install posture와 version drift
@@ -73,6 +75,8 @@ GitHub 가이드 설치 과정에서 드러난 provider별 설치 상태와 cach
 - provider auth, session, log, raw home dump 출력 금지
 - hard-coded patch version 대신 canonical manifest 비교:
   `scripts/validate_pack.py`에 구현
+- 실제 release cut에서는 `--release-version`으로 source와 packaged manifest가
+  모두 의도한 version인지 tag 생성 전에 확인
 
 ## 2. Provider Invocation Dogfood
 

@@ -64,6 +64,8 @@ Completed:
   existing skills and output contracts
 - `scripts/groundline_release_gate.py` prints or executes the local release gate
   sequence and excludes approval-required publishing commands
+- release gate accepts `--release-version` so the actual release cut fails when
+  source or packaged manifests still point at the previous public version
 - no new skills added
 
 ## 1. Install Posture And Version Drift
@@ -88,6 +90,8 @@ Ship gate:
 - no provider auth, session, log, or raw home dump is printed
 - provider package sync and validation still pass
 - local provider install can be confirmed after a GitHub install
+- release cut can pass an explicit `--release-version` and prove all source and
+  packaged manifests match it before tag creation
 
 ## 2. Provider Invocation Dogfood
 

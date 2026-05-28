@@ -41,9 +41,13 @@ TAG="v$RELEASE_VERSION"
 위한 도구이며 tag, push, GitHub Release 생성 명령은 실행하지 않습니다.
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --plan --json
-PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --json --keep-going --include-docker-execution
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --plan --json --release-version "$RELEASE_VERSION"
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --json --keep-going --include-docker-execution --release-version "$RELEASE_VERSION"
 ```
+
+ship decision이 아직 `hold`이고 source manifest가 현재 public version에 머무는
+상태라면 `--release-version`은 생략합니다. 실제 release를 자를 때만 붙이며,
+source 또는 packaged manifest가 `RELEASE_VERSION`과 다르면 gate는 실패합니다.
 
 release closeout에서는 `--keep-going`을 사용합니다. version bump 뒤 설치된
 provider cache가 이전 버전이라 provider smoke가 정상적으로 `PARTIAL`을 내더라도

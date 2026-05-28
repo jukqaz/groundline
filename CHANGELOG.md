@@ -28,6 +28,8 @@
   sequence while excluding approval-required tag, push, and GitHub Release
   commands, and preserves compact JSON summaries plus top-level next actions
   for partial gates.
+- Add an optional `--release-version` release gate preflight so actual release
+  cuts fail when source or packaged manifests still point at the wrong version.
 - Add a provider-native validation gate for read-only Claude Code and
   Antigravity package validation during local release closeout.
 - Redact local home paths from release gate and Docker scenario evidence

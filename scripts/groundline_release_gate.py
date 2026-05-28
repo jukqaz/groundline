@@ -12,6 +12,14 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+VERSION_MANIFESTS = [
+    "plugin.json",
+    ".codex-plugin/plugin.json",
+    ".claude-plugin/plugin.json",
+    "plugins/groundline/plugin.json",
+    "plugins/groundline/.codex-plugin/plugin.json",
+    "plugins/groundline/.claude-plugin/plugin.json",
+]
 
 
 @dataclass(frozen=True)
@@ -128,6 +136,33 @@ def sanitized_json_value(value):
     if isinstance(value, dict):
         return {key: sanitized_json_value(item) for key, item in value.items()}
     return value
+
+
+def manifest_version(path: Path) -> str | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    version = data.get("version") if isinstance(data, dict) else None
+    return version if isinstance(version, str) else None
+
+
+def release_version_check(expected_version: str) -> dict:
+    versions = {rel: manifest_version(ROOT / rel) for rel in VERSION_MANIFESTS}
+    mismatches = [
+        {"path": rel, "version": version}
+        for rel, version in versions.items()
+        if version != expected_version
+    ]
+    return {
+        "id": "release-version",
+        "label": "Check release manifest versions",
+        "status": "PASS" if not mismatches else "FAIL",
+        "expected_version": expected_version,
+        "manifest_versions": versions,
+        "mismatches": mismatches,
+        "next_actions": [] if not mismatches else [f"set source manifests to {expected_version} and run sync_provider_package.py"],
+    }
 
 
 def json_summary(stdout: str | None) -> dict | None:
@@ -252,13 +287,24 @@ def collect_next_actions(gates: list[dict]) -> list[str]:
     return sorted(actions)
 
 
+def collect_preflight_actions(checks: list[dict]) -> list[str]:
+    actions: set[str] = set()
+    for check in checks:
+        if check.get("status") == "PASS":
+            continue
+        actions.update(action for action in check.get("next_actions", []) if isinstance(action, str))
+    return sorted(actions)
+
+
 def build_result(args: argparse.Namespace) -> tuple[dict, int]:
     gates = build_gates(args.include_docker_execution, args.actionlint_bin)
+    preflight_checks = [release_version_check(args.release_version)] if args.release_version else []
     result = {
         "name": "groundline",
         "suite": "release-gate",
         "mode": "plan" if args.plan else "run",
         "status": "PASS",
+        "release_version": args.release_version,
         "mutation_performed": False,
         "publishing_performed": False,
         "real_home_touched": False,
@@ -270,23 +316,38 @@ def build_result(args: argparse.Namespace) -> tuple[dict, int]:
         ],
         "non_passing_gates": [],
         "next_actions": [],
+        "preflight_checks": preflight_checks,
         "gates": [],
     }
 
     if args.plan:
         result["gates"] = [gate_to_result(gate, executed=False) for gate in gates]
+        failed_checks = [check for check in preflight_checks if check["status"] != "PASS"]
+        if failed_checks:
+            result["status"] = "FAIL"
+            result["non_passing_gates"] = failed_checks
+            result["next_actions"] = collect_preflight_actions(failed_checks)
+            return result, 1
         return result, 0
 
     gate_results: list[dict] = []
+    failed_checks = [check for check in preflight_checks if check["status"] != "PASS"]
+    if failed_checks and not args.keep_going:
+        result["status"] = "FAIL"
+        result["non_passing_gates"] = failed_checks
+        result["next_actions"] = collect_preflight_actions(failed_checks)
+        return result, 1
+
     for gate in gates:
         gate_result = run_gate(gate, args.timeout)
         gate_results.append(gate_result)
         if gate_result["status"] != "PASS" and not args.keep_going:
             break
     result["gates"] = gate_results
-    result["status"] = aggregate_status(gate_results)
-    result["non_passing_gates"] = summarize_non_passing_gates(gate_results)
-    result["next_actions"] = collect_next_actions(gate_results)
+    gate_status = aggregate_status(gate_results)
+    result["status"] = "FAIL" if failed_checks else gate_status
+    result["non_passing_gates"] = failed_checks + summarize_non_passing_gates(gate_results)
+    result["next_actions"] = sorted(set(collect_preflight_actions(failed_checks) + collect_next_actions(gate_results)))
 
     if result["status"] == "PASS":
         return result, 0
@@ -303,6 +364,7 @@ def main() -> int:
     parser.add_argument("--include-docker-execution", action="store_true", help="include the real Linux Docker execution gate")
     parser.add_argument("--actionlint-bin", help="path to actionlint binary for the lint gate")
     parser.add_argument("--timeout", type=int, default=600, help="per-gate timeout in seconds")
+    parser.add_argument("--release-version", help="expected semver for source and packaged manifests")
     args = parser.parse_args()
 
     result, code = build_result(args)

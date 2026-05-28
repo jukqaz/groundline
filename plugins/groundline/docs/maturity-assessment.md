@@ -35,7 +35,7 @@ next package sync and release gates.
   `status=PASS`.
 - Provider-native validation: `groundline_provider_validate.py --json`
   returned `status=PASS` for local Claude Code and Antigravity validators.
-- Unit tests: `python3 -m unittest discover -s tests -v` returned 119 tests OK.
+- Unit tests: `python3 -m unittest discover -s tests -v` returned 121 tests OK.
 - Safety eval: `groundline_safety_eval.py --json` returned `status=PASS` with
   4 synthetic cases and `mutation_performed=false`.
 - Privacy scan: `groundline_privacy_scan.py --json` returned `status=PASS`
