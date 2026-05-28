@@ -4,9 +4,9 @@ Target: v0.3.0
 
 The next version should improve adoption confidence, not expand the skill count
 first. GroundLine now has provider marketplace packaging for Codex, Claude Code,
-and Antigravity. The remaining v0.3.0 work should prove that installed provider
-sessions select useful skills, reject unsafe behavior, and give new users clear
-workflows.
+and Antigravity. The v0.3.0 slice proves provider invocation with sanitized
+evidence, adds an offline safety check, and keeps provider-specific partials
+visible instead of hiding them.
 
 ## Completed Foundation
 
@@ -19,31 +19,35 @@ These are already done and should not be re-opened unless validation fails:
 - English and Korean provider packaging docs exist.
 - Local validation, provider validation, and CI pass on `main`.
 
-## Current Work: Adoption Proof
+## Current Status: Adoption Proof Implemented
 
-Start with a narrow v0.3.0 slice: prove that installed provider sessions can use
-GroundLine naturally without raw transcript collection or provider-home dumps.
+The narrow v0.3.0 slice is implemented as a release candidate. It proves the
+sanitized evidence path and records provider invocation results without raw
+transcript collection or provider-home dumps.
 
-Deliverables:
+Completed:
 
-- sanitized invocation proof format
-- one sanitized proof each for Codex, Claude Code, and Antigravity
-- one proof for each core prompt family: handoff, release closeout, expansion
-  control
-- `docs/dogfood.md` updated with PASS/PARTIAL/FAIL evidence
-- no new skills unless the current skill set cannot express the observed flow
+- sanitized invocation proof format in `docs/provider-dogfood.md`
+- one sanitized proof row each for Codex, Claude Code, and Antigravity
+- one proof row for each core prompt family: handoff, release closeout, and
+  expansion control
+- `docs/dogfood.md` updated with PASS/PARTIAL evidence
+- offline safety fixture and `scripts/groundline_safety_eval.py`
+- no new skills added
 
 ## 1. Provider Invocation Dogfood
 
-Build a repeatable evidence path that proves real provider sessions can discover
-and use GroundLine skills.
+The first repeatable evidence path is in place. It should be improved by
+reducing accepted partials, not by adding more skills.
 
-Deliverables:
+Status:
 
-- sanitized provider invocation notes for Codex, Claude Code, and Antigravity
-- one prompt per provider for handoff, release closeout, and expansion control
-- PASS/PARTIAL/FAIL evidence in `docs/dogfood.md`
-- no raw transcript archives or auth material in the repository
+- Codex: PASS for the handoff family.
+- Claude Code: PARTIAL for release closeout because the selected skill was
+  installed, but the returned contract name was not canonical.
+- Antigravity: PARTIAL for expansion control because constrained print mode
+  timed out before returning a proof.
+- No raw transcript archives or auth material were added to the repository.
 
 Ship gate:
 
@@ -51,23 +55,26 @@ Ship gate:
 - each provider has at least one sanitized invocation proof or an accepted defer
 - `docs/provider-dogfood.md` explains how to repeat the proof without writing
   raw transcripts into the repository
+- accepted partials are named in release notes or reduced before tagging
 
 ## 2. Safety Evaluation Harness
 
-Add a small offline harness for unsafe agent behavior patterns.
+Add a small offline harness for unsafe agent behavior patterns. The first
+version is implemented with four synthetic cases.
 
-Deliverables:
+Current coverage:
 
-- synthetic fixtures for secret leakage, destructive command pressure, prompt
-  injection, false completion claims, and unsafe provider-home writes
-- JSON report with PASS/PARTIAL/FAIL
-- deterministic CI gate after local soak
+- secret-like output pressure
+- destructive command pressure
+- false completion claims
+- unsafe provider-home writes
+- JSON report with PASS/FAIL and `mutation_performed=false`
 
-Ship gate:
+Remaining:
 
-- no fixture contains real secrets or user data
-- failure output explains which boundary failed and how to fix it
-- the harness remains offline and deterministic before it becomes a CI gate
+- add a prompt-injection fixture only if it tests a distinct boundary
+- keep all fixtures synthetic and deterministic
+- keep failure output focused on which boundary failed and how to fix it
 
 ## 3. Workflow Cookbook
 
@@ -118,9 +125,9 @@ Ship gate:
 - broad hook enablement
 - raw transcript analytics
 
-## First Implementation Slice
+## Release Candidate Closeout
 
-Start with provider invocation dogfood because it directly reduces the biggest
-confidence gap from v0.2.x. Do not start the safety harness until the invocation
-proof format is stable enough to preserve privacy boundaries. Keep the initial
-slice small enough to release as v0.3.0 without adding new skills.
+Before tagging v0.3.0, run package sync, source validation, packaged validation,
+lint, unit tests, staged dogfood, and provider package validation. If the Claude
+Code and Antigravity partials remain, record them as accepted defers and keep
+the next patch focused on reducing them.

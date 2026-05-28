@@ -1,21 +1,36 @@
 # Next Work
 
 This backlog captures work intentionally left outside the v0.2.x release line.
-Provider marketplace packaging is now complete, so the next work should prove
-adoption and safety instead of adding more install surfaces. Pick one item,
-define evidence, implement, and close it before adding more.
+Provider marketplace packaging and the first adoption proof slice are now in
+place. The next work should reduce accepted partials and improve first-use
+clarity before adding more install surfaces. Pick one item, define evidence,
+implement, and close it before adding more.
 
-## Now: v0.3.0 Adoption Confidence Slice
+## Completed: v0.3.0 Adoption Confidence Slice
 
-Goal: turn the current installable package into a trusted package by proving
-real provider invocation, privacy-preserving evidence, and clear first-use
-workflows.
+- `docs/provider-dogfood.md` defines the sanitized invocation proof shape.
+- `docs/dogfood.md` records one provider invocation proof row per supported
+  runtime without raw transcript storage.
+- Codex returned `package-agent-task` and `GroundLine Task Packet` for the
+  handoff family.
+- Claude Code selected an installed GroundLine skill for release closeout, but
+  did not return the canonical contract name.
+- Antigravity print mode could not complete the constrained proof in this
+  environment before timeout.
+- `scripts/groundline_safety_eval.py` validates four synthetic safety cases
+  offline.
+- `tests/test_groundline_script_contract.py` covers the safety eval contract.
+
+## Now: v0.3.0 Release Candidate Closeout
+
+Goal: decide whether the accepted partials are good enough for v0.3.0 or must
+be reduced before tagging.
 
 Scope:
 
-- provider invocation dogfood
-- proof format and privacy rules
-- dogfood documentation update
+- provider invocation partial triage
+- final package sync and provider validation
+- release notes and checklist cleanup
 - only the smallest workflow examples needed to explain the evidence
 
 Out of scope:
@@ -26,44 +41,46 @@ Out of scope:
 - official catalog submission
 - broad ecosystem refresh
 
-## P1: Provider Invocation Dogfood
+## P1: Provider Invocation Follow-up
 
-Goal: prove that an installed or staged GroundLine package is naturally selected
-by Codex, Claude Code, and Antigravity for real prompts, not only by scripted
-file and contract checks.
+Goal: reduce the two accepted partials from provider invocation dogfood without
+expanding the skill surface.
 
 Acceptance:
 
-- Record one sanitized invocation transcript per provider.
-- Confirm the selected skill and output contract for each transcript.
-- Update `docs/dogfood.md` with PASS/PARTIAL evidence and accepted defers.
-- Avoid raw prompt archives, secrets, full default home paths, and provider
-  runtime state dumps.
+- Decide whether Claude Code contract naming is a docs/prompt issue or a
+  release blocker.
+- Decide whether Antigravity constrained print mode needs a repeatable runbook
+  or stays an accepted defer.
+- Keep `docs/dogfood.md` sanitized: no raw prompt archives, secrets, full
+  default home paths, or provider runtime state dumps.
+- Add no new skill unless repeated provider proof shows an existing skill cannot
+  express the flow.
 
 Immediate tasks:
 
-- Define the sanitized proof schema in `docs/provider-dogfood.md`.
-- Add a small synthetic fixture for each prompt family if needed.
-- Run one local provider invocation at a time and summarize only the selected
-  skill, output contract, verification evidence, and stop condition.
-- Update `docs/dogfood.md` with a compact matrix.
-- Re-run validation and provider package sync.
+- Re-run Claude Code release-closeout proof with clearer contract wording.
+- Re-run Antigravity expansion-control proof only when it can be constrained
+  without a tool loop.
+- If either remains partial, keep the release decision explicit instead of
+  masking it as PASS.
+- Re-run validation and provider package sync after any document change.
 
-## P1: Safety And Eval Harness
+## P1: Safety And Eval Harness Follow-up
 
-Goal: add a small offline evaluation harness inspired by coding-agent red-team
-checks without turning GroundLine into a heavy eval platform.
+Goal: keep the new offline safety harness useful without turning GroundLine into
+a heavy eval platform.
 
 Acceptance:
 
-- Add fixtures for secret leakage, destructive command pressure, prompt
-  injection, fake completion claims, and unsafe provider-home writes.
-- Emit a machine-readable PASS/PARTIAL/FAIL report.
+- Keep fixtures synthetic.
+- Emit a machine-readable PASS/FAIL report with `mutation_performed=false`.
 - Add the harness to CI only when it is deterministic and offline.
-- Keep all fixtures synthetic.
+- Add a prompt-injection fixture only if it tests a distinct boundary rather
+  than duplicating the existing safety cases.
 
-Start after provider invocation proof is stable. The first version should be a
-scripted offline harness, not a provider-session transcript archive.
+The first version covers secret-like output, destructive command pressure, false
+completion, and unsafe provider-home writes.
 
 ## P2: Representative Workflows
 

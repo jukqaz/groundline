@@ -15,6 +15,20 @@ Real home mutation: false
 | Claude Code | Staged package plus shared scenario suite. | `package-agent-task`, `close-live-work`, `stabilize-release-cut` | `claude --version` returned `2.1.152 (Claude Code)`; `groundline_dogfood.py` reported runtime and all scenario contracts present. | PASS |
 | Antigravity | Staged package plus shared scenario suite. | `package-agent-task`, `close-live-work`, `stabilize-release-cut` | `agy --version` returned `1.0.2`; `groundline_dogfood.py` reported runtime and all scenario contracts present. | PASS |
 
+## Provider Invocation Evidence
+
+Date: 2026-05-28
+
+Raw transcript stored: false
+
+Provider home dumped: false
+
+| Provider | Prompt family | Selected skill | Output contract | Result | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| Codex | handoff | `package-agent-task` | `GroundLine Task Packet` | PASS | Read-only `codex exec --ephemeral` loaded the GroundLine skill and returned the canonical contract with `mutation_performed=false`. |
+| Claude Code | release-closeout | `groundline:polish-release-candidate` | `release_polish_report` | PARTIAL | `claude -p` selected an installed GroundLine skill, but did not return the canonical `GroundLine Release Polish` contract name. |
+| Antigravity | expansion-control | not captured | not captured | PARTIAL | `agy --print` could not complete a constrained no-tool proof in this environment and timed out after tool-driven exploration; no repository mutation was observed. |
+
 ## Scripted Evidence
 
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json`

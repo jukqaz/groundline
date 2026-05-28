@@ -93,8 +93,10 @@ BASE_REQUIRED_FILES = [
     "references/superpowers-interop.md",
     "references/tool-profiles.md",
     "references/workflow-modes.md",
+    "scenarios/fixtures/safety-eval.json",
     "scripts/groundline_dogfood.py",
     "scripts/groundline_provider_smoke.py",
+    "scripts/groundline_safety_eval.py",
     "scripts/lint.py",
     "scripts/sync_provider_package.py",
 ]
