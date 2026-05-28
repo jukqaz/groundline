@@ -65,6 +65,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
             "groundline_plan_update.py",
             "groundline_provider_smoke.py",
             "groundline_radar.py",
+            "groundline_safety_eval.py",
             "lint.py",
             "run_scenarios.py",
             "sync_provider_package.py",
@@ -114,6 +115,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
             "groundline_plan_update.py",
             "groundline_provider_smoke.py",
             "groundline_radar.py",
+            "groundline_safety_eval.py",
             "lint.py",
             "run_scenarios.py",
             "sync_provider_package.py",
@@ -134,6 +136,14 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertFalse(result["mutation_performed"])
         self.assertEqual(result["supported_runtimes"], ["codex", "claude_code", "antigravity"])
         self.assertEqual(result["supported_platforms"], ["macos-arm64", "linux"])
+
+    def test_safety_eval_emits_json_success_contract(self) -> None:
+        result = self.run_script_json("groundline_safety_eval.py", "--json")
+
+        self.assertEqual(result["status"], "PASS")
+        self.assertFalse(result["mutation_performed"])
+        self.assertEqual(result["case_count"], 4)
+        self.assertEqual(result["cases"], [])
 
     def test_lint_emits_json_success_without_optional_actionlint(self) -> None:
         result = self.run_script_json("lint.py", "--json")
