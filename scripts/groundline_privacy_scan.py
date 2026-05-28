@@ -6,9 +6,13 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
+import unittest
 from dataclasses import dataclass
 from pathlib import Path
 
+
+sys.dont_write_bytecode = True
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWED_SECRET_FIXTURES = {"sk-test-secret-value"}
@@ -41,7 +45,6 @@ SECRET_PATTERNS = [
     re.compile(r"-----BEGIN (?:OPENSSH|RSA|EC|DSA) PRIVATE KEY-----"),
 ]
 STALE_CLAIM_PATTERNS = [
-    (re.compile(r"\b(?:105|106|107|108|109|110|111|112|113|114) tests OK\b"), "stale_test_count"),
     (re.compile(r"\b44 packaged docs\b"), "stale_packaged_doc_count"),
     (re.compile("local release gates " + "pass", re.IGNORECASE), "overstated_release_gate"),
     (re.compile("passes the local closeout " + "gates", re.IGNORECASE), "overstated_release_gate"),
@@ -52,6 +55,7 @@ STALE_CLAIM_PATTERNS = [
     ),
     (re.compile(r"GitHub run `\d{6,}`"), "stale_remote_ci_run_id"),
 ]
+TEST_COUNT_RE = re.compile(r"\b(\d+) tests OK\b")
 
 
 @dataclass(frozen=True)
@@ -102,7 +106,22 @@ def detectable_home_name(name: str) -> str:
     return name
 
 
-def scan_line(path: Path, line_number: int, line: str, home: str, home_name: str) -> list[Finding]:
+def current_unit_test_count() -> int | None:
+    tests_dir = ROOT / "tests"
+    if not tests_dir.is_dir():
+        return None
+    suite = unittest.defaultTestLoader.discover(str(tests_dir))
+    return suite.countTestCases()
+
+
+def scan_line(
+    path: Path,
+    line_number: int,
+    line: str,
+    home: str,
+    home_name: str,
+    expected_test_count: int | None,
+) -> list[Finding]:
     findings: list[Finding] = []
     rel = relative_path(path)
     if home and home in line:
@@ -114,12 +133,17 @@ def scan_line(path: Path, line_number: int, line: str, home: str, home_name: str
     for pattern, code in STALE_CLAIM_PATTERNS:
         if pattern.search(line):
             findings.append(Finding(rel, line_number, code))
+    if expected_test_count is not None:
+        for match in TEST_COUNT_RE.finditer(line):
+            if int(match.group(1)) != expected_test_count:
+                findings.append(Finding(rel, line_number, "stale_test_count"))
     return findings
 
 
 def build_result() -> dict:
     home = str(Path.home())
     home_name = detectable_home_name(Path.home().name)
+    expected_test_count = current_unit_test_count()
     findings: list[Finding] = []
     scanned_files = 0
     skipped_binary_files = 0
@@ -132,7 +156,7 @@ def build_result() -> dict:
             continue
         scanned_files += 1
         for line_number, line in enumerate(text.splitlines(), start=1):
-            findings.extend(scan_line(path, line_number, line, home, home_name))
+            findings.extend(scan_line(path, line_number, line, home, home_name, expected_test_count))
 
     return {
         "status": "PASS" if not findings else "FAIL",
@@ -142,6 +166,7 @@ def build_result() -> dict:
         "secret_value_printed": False,
         "scanned_file_count": scanned_files,
         "skipped_binary_file_count": skipped_binary_files,
+        "expected_unit_test_count": expected_test_count,
         "finding_count": len(findings),
         "findings": [finding.as_dict() for finding in findings],
     }

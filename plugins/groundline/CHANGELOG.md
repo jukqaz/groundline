@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.3.3 - 2026-05-28
+
 - Version-aware provider smoke now reports installed version, source version,
   install source, cache candidates, payload presence, skill count drift,
   same-version content drift, `install_doctor_status`, and
@@ -18,7 +20,7 @@
 - Align the AI usage maturity activation matrix row with the canonical
   `GroundLine AI Usage Maturity` output contract.
 - Add a skill graduation plan with machine-readable decisions for all 12
-  experimental skills. No lifecycle values are promoted in this patch draft.
+  experimental skills. No lifecycle values are promoted in this patch.
 - Add a workflow cookbook that maps five common prompts to selected skills,
   output contracts, verification evidence, and stop conditions.
 - Add an artifact lifecycle map for research packet, comparison report,
@@ -46,7 +48,8 @@
 - Add the deterministic offline safety eval harness to the default CI release
   gate and manual release evidence checklist.
 - Add a deterministic privacy scan gate for local home paths, generic
-  secret-like values, stale proof counts, and overstated release claims.
+  secret-like values, dynamically checked stale test proof counts, stale remote
+  CI run claims, and overstated release claims.
 - Align README and update validation docs with source, packaged, safety,
   privacy, smoke, dogfood, and scenario release gates.
 - Keep package validation strict for conflict-copy payloads while ignoring

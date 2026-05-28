@@ -1,11 +1,11 @@
 # Next Version Plan
 
-Target: v0.3.3
+Target: v0.3.4
 
-v0.3.2 tightens first-use skill routing, separates staged dogfood checks from
-real provider invocation proof, and links provider-history inventory to AI usage
-maturity assessment. The next version focuses on install posture, version drift
-control, and compact proof workflows instead of expanding the skill surface.
+v0.3.3 closes install posture, version drift control, compact proof workflows,
+and release-candidate gates without expanding the skill surface. The next
+version should focus on post-publish provider confirmation and activation proof
+quality instead of adding more skills.
 
 ## Completed Foundation
 
@@ -16,16 +16,16 @@ These are already done and should not be re-opened unless validation fails:
 - Antigravity can validate and import the package.
 - `plugins/groundline` contains the installable payload.
 - English and Korean provider packaging docs exist.
-- The v0.3.2 baseline passed local validation, provider validation, and CI on
-  `main`; the current patch draft has passing local validation, provider-native
-  validation, staged dogfood, staged provider smoke, and scenario evidence.
-  Real provider smoke remains PARTIAL until Codex and Claude Code provider
-  targets are refreshed. Tagging still waits for an explicit ship decision and
-  the `0.3.3` manifest bump.
+- The v0.3.3 release candidate has source/package validation,
+  provider-native validation, staged dogfood, staged provider smoke, scenario
+  evidence, and explicit release-version preflight coverage. Real provider
+  smoke may remain PARTIAL until Codex and Claude Code provider targets are
+  refreshed from the pushed package. Tagging still waits for remote CI,
+  provider refresh proof, and explicit approval.
 
-## Current Status: v0.3.3 Patch Draft
+## Current Status: v0.3.3 Release Candidate
 
-The narrow v0.3.3 patch draft keeps the sanitized evidence path and prompt
+The narrow v0.3.3 release candidate keeps the sanitized evidence path and prompt
 routing clarity from v0.3.2 while closing the exposed install posture and
 version drift gap. Local installation through the GitHub guide succeeded for
 Codex, Claude Code, and Antigravity.
@@ -71,9 +71,10 @@ Completed:
   source or packaged manifests still point at the previous public version or the
   requested version is not plain `X.Y.Z` semver
 - staged provider smoke passes, while real provider smoke remains PARTIAL until
-  stale same-version Codex and Claude Code targets are refreshed
-- the explicit `--release-version 0.3.3` preflight still fails until manifests
-  are bumped
+  stale same-version Codex and Claude Code targets are refreshed from the
+  pushed package
+- the explicit `--release-version 0.3.3` preflight is the release-candidate
+  manifest and package-sync guard
 - no new skills added
 
 ## 1. Install Posture And Version Drift
@@ -156,7 +157,7 @@ Status:
 Make GroundLine easier to understand during first use after install posture is
 solid.
 
-Status: implemented as a compact cookbook in the current patch draft. Expand
+Status: implemented as a compact cookbook in the v0.3.3 release candidate. Expand
 only if real provider proof shows a workflow remains unclear.
 
 Deliverables:
@@ -176,7 +177,7 @@ Ship gate:
 
 Clarify how GroundLine outputs move between skills.
 
-Status: implemented as a compact lifecycle map in the current patch draft.
+Status: implemented as a compact lifecycle map in the v0.3.3 release candidate.
 
 Deliverables:
 
@@ -215,6 +216,6 @@ macOS local scenario, Linux Docker dry-run, Linux Docker execution, and at least
 one remote install proof when the package is meant to be installed from GitHub.
 If provider smoke reports `content_fingerprint_mismatch` against same-version
 local targets, treat the full closeout as PARTIAL until those targets are
-refreshed from the pushed package. Once provider smoke is green, the next
-release blocker is the explicit `--release-version 0.3.3` preflight until the
-manifest bump and changelog move are performed.
+refreshed from the pushed package. After v0.3.3 is tagged, the next blocker is
+post-publish provider install confirmation from the published ref, followed by
+at least five real activation proof rows before considering 1.0 language.

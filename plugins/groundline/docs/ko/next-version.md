@@ -2,12 +2,11 @@
 
 영어 `docs/next-version.md`가 canonical입니다. 이 문서는 한국어 companion입니다.
 
-Target: v0.3.3
+Target: v0.3.4
 
-v0.3.2는 first-use skill routing을 명확히 하고, staged dogfood check와 실제
-provider invocation proof를 분리하며, provider history inventory를 AI 활용도
-평가 흐름에 연결합니다. 다음 버전은 skill surface를 넓히기보다 install posture,
-version drift control, compact proof workflow에 집중합니다.
+v0.3.3은 install posture, version drift control, compact proof workflow,
+release-candidate gate를 닫습니다. 다음 버전은 skill을 더 늘리기보다 publish 뒤
+provider 확인과 activation proof 품질을 높이는 데 집중합니다.
 
 ## 완료된 기반
 
@@ -16,16 +15,16 @@ version drift control, compact proof workflow에 집중합니다.
 - Antigravity validation/import 가능
 - `plugins/groundline` installable payload 존재
 - 영어/한국어 provider packaging 문서 존재
-- v0.3.2 baseline은 `main`에서 local validation, provider validation, CI를
-  통과했고, 현재 patch draft는 local validation, provider-native validation,
-  staged dogfood, staged provider smoke, scenario evidence가 통과합니다.
-  real provider smoke는 Codex와 Claude Code의 stale same-version target이
-  refresh되기 전까지 PARTIAL입니다. tag는 명시적인 ship decision과 `0.3.3`
-  manifest bump 뒤에만 진행합니다.
+- v0.3.3 release candidate는 source/package validation, provider-native
+  validation, staged dogfood, staged provider smoke, scenario evidence,
+  release-version preflight를 갖췄습니다. real provider smoke는 Codex와 Claude
+  Code의 stale same-version target이 pushed package로 refresh되기 전까지
+  PARTIAL일 수 있습니다. tag는 remote CI, provider refresh proof, 명시 승인
+  뒤에만 진행합니다.
 
 ## 현재 상태
 
-v0.3.2는 release와 로컬 설치가 완료됐습니다. 현재 v0.3.3 patch draft는 실제
+v0.3.2는 release와 로컬 설치가 완료됐습니다. 현재 v0.3.3 release candidate는 실제
 GitHub 가이드 설치 과정에서 드러난 provider별 설치 상태와 cache/version drift
 문제를 먼저 닫는 방향입니다.
 
@@ -65,8 +64,9 @@ GitHub 가이드 설치 과정에서 드러난 provider별 설치 상태와 cach
   packaged manifest가 이전 public version에 남아 있거나 요청 version이 plain
   `X.Y.Z` semver가 아니면 실패
 - staged provider smoke는 통과하지만, real provider smoke는 stale same-version
-  Codex/Claude Code target이 refresh되기 전까지 PARTIAL
-- 명시적인 `--release-version 0.3.3` preflight는 manifest bump 전까지 실패
+  Codex/Claude Code target이 pushed package로 refresh되기 전까지 PARTIAL
+- 명시적인 `--release-version 0.3.3` preflight는 release-candidate manifest와
+  package sync guard 역할
 - 새 skill 추가 없음
 
 ## 1. Install posture와 version drift
@@ -127,7 +127,7 @@ GitHub 가이드 설치 과정에서 드러난 provider별 설치 상태와 cach
 목표: 처음 쓰는 사람이 skill index 전체를 읽지 않아도 대표 workflow를 고를 수 있게
 합니다.
 
-상태: 현재 patch draft에 compact cookbook으로 구현했습니다. 실제 provider proof에서
+상태: v0.3.3 release candidate에 compact cookbook으로 구현했습니다. 실제 provider proof에서
 헷갈리는 workflow가 확인될 때만 확장합니다.
 
 완료 기준:
@@ -145,7 +145,7 @@ GitHub 가이드 설치 과정에서 드러난 provider별 설치 상태와 cach
 목표: research, comparison, recommendation, implementation, dogfood, release,
 post-release review 사이의 artifact 흐름을 명확히 합니다.
 
-상태: 현재 patch draft에 compact lifecycle map으로 구현했습니다.
+상태: v0.3.3 release candidate에 compact lifecycle map으로 구현했습니다.
 
 완료 기준:
 
@@ -163,6 +163,6 @@ scenario, Linux Docker dry-run, Linux Docker execution을 실행합니다.
 GitHub에서 설치하는 배포라면 remote install proof도 최소 1개 남깁니다.
 provider smoke가 같은 version의 local target에서
 `content_fingerprint_mismatch`를 보고하면, pushed package로 target을 새로
-설치하기 전까지 full closeout은 PARTIAL로 봅니다. provider smoke가 통과하면
-다음 release blocker는 manifest bump와 changelog 이동 전까지 명시적인
-`--release-version 0.3.3` preflight입니다.
+설치하기 전까지 full closeout은 PARTIAL로 봅니다. v0.3.3 tag 뒤의 다음 blocker는
+published ref에서 provider install confirmation을 남기고, 1.0 표현 전 최소 5개
+real activation proof row를 확보하는 것입니다.

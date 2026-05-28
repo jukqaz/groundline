@@ -2,7 +2,7 @@
 
 This backlog captures work intentionally kept out of the current release cut.
 Provider marketplace packaging shipped in v0.3.0, routing clarity shipped in
-v0.3.2, and the current v0.3.3 patch draft is focused on install posture,
+v0.3.2, and the current v0.3.3 release candidate focuses on install posture,
 version drift, and proof quality. Pick one item, define evidence, implement,
 and close it before adding more.
 
@@ -56,13 +56,13 @@ Current status:
 - Dogfood docs now separate staged contract harness checks from real provider
   invocation proof.
 
-## Now: v0.3.3 Install Posture And Drift Control
+## Release Candidate: v0.3.3 Install Posture And Drift Control
 
 Goal: make local provider install state and version drift obvious before adding
 more workflows. This is the highest-value next step from
 `docs/maturity-assessment.md`.
 
-Current patch draft status:
+Release candidate status:
 
 - Version-aware provider smoke now reports source version, installed version,
   payload presence, skill count drift, same-version content drift, and
@@ -74,7 +74,7 @@ Current patch draft status:
 - Package sync, source validation, packaged validation, lint,
   provider-native validation, unit tests, safety eval, privacy scan, offline
   doctor, offline radar, staged dogfood, macOS local scenario, Linux Docker
-  dry-run, and Linux Docker execution pass in the current patch draft. Real
+  dry-run, and Linux Docker execution pass in the v0.3.3 release candidate. Real
   provider smoke is PARTIAL until local provider targets are refreshed from the
   published ref.
 - A release gate runner now prints or executes the same local gate sequence
@@ -116,7 +116,7 @@ Out of scope:
 
 Goal: make the real installed package version visible after a GitHub install.
 
-Status: implemented in the current patch draft; source/package, staged dogfood,
+Status: implemented in the v0.3.3 release candidate; source/package, staged dogfood,
 and scenario gates pass. Keep as P0 until provider smoke passes after
 post-publish install confirmation.
 
@@ -136,7 +136,7 @@ Acceptance:
 Goal: prevent future patch releases from drifting between manifests, packaged
 payload, tests, and validation scripts.
 
-Status: implemented in the current patch draft; package sync and validation
+Status: implemented in the v0.3.3 release candidate; package sync and validation
 prove source and packaged manifests stay aligned. Keep as P0 until the next
 published ref proves the same install path.
 
@@ -154,7 +154,7 @@ Goal: prove live provider sessions select the intended GroundLine skill and
 output contract for representative prompts.
 
 Status: matrix document and six-scenario staged contract coverage are
-implemented in the current patch draft. The live proof collection runbook and
+implemented in the v0.3.3 release candidate. The live proof collection runbook and
 row update checklist are also documented. Live provider proof rows still need
 to be collected for side-effect guard, ecosystem evaluation, and AI usage
 maturity before this item is complete.
@@ -175,7 +175,7 @@ Acceptance:
 
 Goal: reduce the experimental surface before calling GroundLine stable.
 
-Status: implemented as a lifecycle decision plan in the current patch draft.
+Status: implemented as a lifecycle decision plan in the v0.3.3 release candidate.
 No lifecycle values are promoted yet; promotion waits for v0.3.3 post-install
 proof and the remaining provider activation rows.
 
@@ -241,7 +241,7 @@ Goal: keep the new offline safety harness useful without turning GroundLine into
 a heavy eval platform.
 
 Status: implemented for the current synthetic fixture set and added to the
-default CI release gate in the current patch draft.
+default CI release gate in the v0.3.3 release candidate.
 
 Acceptance:
 
@@ -261,7 +261,7 @@ completion, and unsafe provider-home writes.
 Goal: make the package easier for humans and LLM agents to understand by
 showing complete before/after workflows.
 
-Status: implemented as a compact workflow cookbook in the current patch draft.
+Status: implemented as a compact workflow cookbook in the v0.3.3 release candidate.
 Keep it compact unless live provider proof shows a workflow remains confusing.
 
 Acceptance:
@@ -325,7 +325,7 @@ install through Codex, Claude Code, or Antigravity from the documented commands.
 
 ## Release Boundary
 
-These backlog items are not required to keep the current v0.3.3 patch draft
+These backlog items are not required to keep the current v0.3.3 release candidate
 bounded. The release candidate remains shippable only when the release decision
 is explicit, source validation, package validation, lint, provider-native
 validation, unit tests, staged dogfood, macOS scenario, Linux Docker scenario,

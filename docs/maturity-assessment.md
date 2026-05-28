@@ -2,8 +2,8 @@
 
 Date: 2026-05-28
 
-Scope: GroundLine v0.3.2 source tree plus the current v0.3.3 patch draft,
-packaged plugin, local provider install state, CI, and public release surface.
+Scope: GroundLine v0.3.3 release candidate, packaged plugin, local provider
+install state, CI, and public release surface.
 
 ## Current Conclusion
 
@@ -15,23 +15,24 @@ control plane for state proof, side-effect boundaries, handoff, release
 discipline, and evidence. The 1.0 gap is now narrower: Real provider activation proof
 and post-install confirmation need to be stronger before calling the package
 stable. Version drift control, skill graduation decisions, and compact first-use
-workflow examples are implemented in the patch draft and covered by the current
-local and remote validation evidence. Post-install provider confirmation still
+workflow examples are implemented in the v0.3.3 release candidate and covered by
+the current local validation evidence. Post-install provider confirmation still
 needs to be stronger before calling the package stable.
 
 ## Evidence Used
 
-- Baseline repository state before this assessment: `main` at `v0.3.2`, clean
-  against `origin/main`.
+- Release-candidate source version: `0.3.3`. Public tag creation still requires
+  the release gate, provider refresh proof, remote CI proof, and explicit
+  publishing approval.
 - Remote CI evidence is intentionally not frozen into this static assessment.
   Before a release decision, check the latest GroundLine workflow for the
   release-candidate HEAD and record the result in the release notes or handoff.
-- Current local patch evidence: `groundline_release_gate.py --json
-  --keep-going --include-docker-execution` returned `status=PARTIAL` only
-  because real provider smoke reported same-version
-  `content_fingerprint_mismatch` for installed Codex and Claude Code targets.
+- Current local release-candidate evidence: `groundline_release_gate.py --json
+  --keep-going --include-docker-execution --release-version 0.3.3` is the
+  release gate for this candidate. Real provider smoke may remain `PARTIAL`
+  until Codex and Claude Code targets are refreshed from the pushed package.
   Staged provider smoke proves a fake refreshed install for Codex, Claude Code,
-  and Antigravity. All other local gates returned `PASS`.
+  and Antigravity.
 - Source validation: `validate_pack.py --json` returned `status=PASS`.
 - Packaged validation: `plugins/groundline` validation returned `status=PASS`.
 - Lint validation: `lint.py --json --require-actionlint` returned
@@ -59,7 +60,7 @@ needs to be stronger before calling the package stable.
 - Provider install evidence: the read-only install doctor reports PARTIAL for
   Codex and Claude Code on this machine because those installed provider
   targets still point at same-version content that differs from the current
-  v0.3.3 patch draft. Antigravity install shape is `PASS`.
+  v0.3.3 release candidate. Antigravity install shape is `PASS`.
 - Staged provider smoke evidence: `groundline_provider_smoke.py --json
   --stage-package --require-installed` returns `status=PASS`,
   `fake_home_used=true`, and `real_home_touched=false`.
@@ -131,7 +132,7 @@ expansion.
 
 Goal: make local provider install state obvious after GitHub install.
 
-Status: implemented in the v0.3.3 patch draft; keep as release gate until the
+Status: implemented in the v0.3.3 release candidate; keep as release gate until the
 patch is published and installed back from GitHub.
 
 Acceptance:
@@ -151,7 +152,7 @@ Goal: prove that provider sessions select the intended skill and output
 contract for representative prompts.
 
 Status: matrix document and staged six-scenario contract coverage are
-implemented in the v0.3.3 patch draft. Live provider proof rows are still
+implemented in the v0.3.3 release candidate. Live provider proof rows are still
 needed for side-effect guard, ecosystem evaluation, and AI usage maturity.
 
 Acceptance:
@@ -201,7 +202,7 @@ Acceptance:
 
 Goal: reduce release drift when the package version changes.
 
-Status: implemented in the v0.3.3 patch draft; keep as release gate until the
+Status: implemented in the v0.3.3 release candidate; keep as release gate until the
 next version bump proves the canonical manifest path.
 
 Acceptance:
@@ -227,17 +228,14 @@ GroundLine should not call itself 1.0 until all of these are true:
 
 ## Release Decision
 
-v0.3.2 remains the current public release. The current v0.3.3 patch draft has
-closed the P0 install posture and version drift diagnostics, added staged
-provider activation coverage, recorded skill graduation decisions, added a
-compact workflow cookbook, and mapped the artifact lifecycle. Source, packaged,
-provider-native validation, staged dogfood, and scenario gates pass; real
-provider smoke remains PARTIAL while Codex and Claude Code contain same-version
-stale content. The explicit `--release-version 0.3.3` preflight still
-correctly fails until the manifests are bumped and the changelog is moved from
-`Unreleased`.
+v0.3.3 is the current release candidate. It closes the P0 install posture and
+version drift diagnostics, adds staged provider activation coverage, records
+skill graduation decisions, adds a compact workflow cookbook, and maps the
+artifact lifecycle. Source and packaged manifests are expected to match
+`0.3.3` after package sync. Real provider smoke remains the main live gate while
+Codex and Claude Code are refreshed from the pushed package.
 
-Ship decision for the draft: `hold` until either the user approves publishing
-with the current sanitized proof set or live provider activation proof is
-collected for the remaining pending rows. Do not add a new skill unless the
-activation matrix proves a repeated failure that existing skills cannot express.
+Ship decision for the candidate: `continue` through local release gate, remote
+CI, provider refresh proof, and explicit tag/release approval. Do not add a new
+skill unless the activation matrix proves a repeated failure that existing
+skills cannot express.
