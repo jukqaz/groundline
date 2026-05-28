@@ -22,7 +22,7 @@ next package sync and release gates.
 
 - Baseline repository state before this assessment: `main` at `v0.3.2`, clean
   against `origin/main`.
-- Release evidence: GitHub run `26563682592` passed for commit `6c75911`.
+- Release evidence: GitHub run `26576603287` passed for commit `21553ee`.
 - Current local patch evidence: the release privacy scan and provider smoke
   `--require-installed` gate are present; `groundline_release_gate.py --json
   --keep-going --include-docker-execution` returned `status=PARTIAL` only
