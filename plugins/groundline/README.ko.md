@@ -27,6 +27,7 @@ cd groundline
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_release_gate.py --plan --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_remote_install_probe.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_dogfood.py --stage-package --probe-runtimes --json
 ```
 

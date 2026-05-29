@@ -8,21 +8,20 @@
 현재 성숙도는 85/100입니다.
 
 GroundLine은 실사용 가능한 public beta입니다. Codex, Claude Code,
-Antigravity에 설치 target이 있고 19개 skill이 보입니다. 현재 real provider
-smoke는 Codex와 Claude Code의 same-version content drift를 잡아 `PARTIAL`을
-보고하고, Antigravity install shape는 `PASS`입니다. staged provider smoke,
-validation, lint, provider-native validation, unit test, safety eval,
-privacy scan, offline doctor/radar, staged dogfood, macOS local scenario,
-Linux Docker dry-run/execution gate는 통과합니다.
-v0.3.3 release candidate에서 설치 상태, version drift 진단, skill
-graduation decision, compact workflow cookbook, artifact lifecycle, release
-gate runner는 크게 보강됐고 현재 HEAD의 원격 CI도 통과했지만, 1.0 안정판이라고
-부르기에는 아직 부족합니다.
+Antigravity에 설치 target이 있고 19개 skill이 보입니다. 현재 로컬 `0.3.5`
+candidate는 provider target refresh를 마쳤고, fake-home remote install/update
+proof로 fresh install, stale update detection, post-update refresh를
+증명합니다. staged provider smoke, validation, lint, provider-native
+validation, unit test, safety eval, privacy scan, offline doctor/radar, staged
+dogfood, macOS local scenario, Linux Docker gate는 release 전 다시 확인해야
+합니다.
+다만 1.0 안정판이라고 부르기에는 live provider activation proof와 published-ref
+install confirmation이 아직 부족합니다.
 
 핵심 부족분은 기능 수가 아니라 운영 증거입니다.
 
-- provider별 설치 상태 진단과 fake refreshed install proof는 구현됐고, GitHub
-  배포 뒤 Codex/Claude Code real provider refresh 확인이 필요함
+- provider별 설치 상태 진단, fake refreshed install proof, remote install/update
+  proof는 구현됐고, 현재 로컬 real provider target도 v0.3.5 기준 PASS
 - activation matrix와 staged 6-scenario contract coverage는 구현됐지만, 실제
   provider session에서 어떤 skill이 선택되는지 sanitized proof가 더 필요함
 - 12개 experimental skill은 graduate, keep experimental, merge, defer로 정리됐지만 실제 active promotion은 아직 보류됨
@@ -50,21 +49,21 @@ gate runner는 크게 보강됐고 현재 HEAD의 원격 CI도 통과했지만, 
    provider별 설치된 GroundLine version, source ref, cache 상태, skill count,
    same-version content drift를 확인합니다. provider auth, session, log, raw
    home dump는 출력하지 않습니다.
-   v0.3.3 release candidate에 구현됐고, release 뒤 GitHub install로 재확인해야 합니다.
+   v0.3.3에 구현됐고, published ref install/update로 반복 확인해야 합니다.
 
 2. P1: Real provider activation matrix
 
    handoff, side-effect guard, release cut, ecosystem evaluation, AI usage
    maturity prompt에서 실제 provider가 어떤 skill과 output contract를 선택하는지
-   sanitized proof로 기록합니다. Matrix 문서와 staged coverage는 v0.3.3 release
-   candidate에 들어갔고, side-effect guard, ecosystem evaluation, AI usage maturity의
+   sanitized proof로 기록합니다. Matrix 문서와 staged coverage는 v0.3.3에
+   들어갔고, side-effect guard, ecosystem evaluation, AI usage maturity의
    live proof row가 남았습니다.
 
 3. P1: Skill graduation plan
 
    experimental skill 12개를 graduate, keep experimental, merge, defer로
    분류했습니다. `package-agent-task`와 `stabilize-release-cut`은 promotion
-   후보이고, 실제 active 변경은 v0.3.3 설치 확인과 provider proof 뒤에 합니다.
+   후보이고, 실제 active 변경은 반복 설치 확인과 provider proof 뒤에 합니다.
 
 4. P2: Workflow proof cookbook
 
@@ -76,8 +75,8 @@ gate runner는 크게 보강됐고 현재 HEAD의 원격 CI도 통과했지만, 
 5. P2: Single-source version control
 
    patch version을 여러 파일에 하드코딩하지 않도록 canonical manifest 기준으로
-   version 일치 여부를 검증합니다. v0.3.3 release candidate에 구현됐고, 다음 version
-   bump 때 release gate로 다시 증명해야 합니다.
+   version 일치 여부를 검증합니다. v0.3.3에 구현됐고, 다음 version bump 때 release
+   gate로 다시 증명해야 합니다.
 
 ## 1.0 기준
 
@@ -91,11 +90,13 @@ gate runner는 크게 보강됐고 현재 HEAD의 원격 CI도 통과했지만, 
 
 ## Release decision
 
-v0.3.3은 현재 release candidate입니다. install posture, version drift control,
-staged provider activation coverage, skill graduation decision, compact workflow
-cookbook, artifact lifecycle을 닫았습니다. source와 packaged manifest는 package
-sync 뒤 `0.3.3`으로 일치해야 합니다. 실제 Codex/Claude Code provider target은
-pushed package로 refresh되기 전까지 real provider smoke가 PARTIAL일 수 있습니다.
+v0.3.5는 현재 local release candidate입니다. install posture, version drift
+control, staged provider activation coverage, skill graduation decision, compact
+workflow cookbook, artifact lifecycle을 유지하면서 fake-home remote
+install/update proof를 추가했습니다. source와 packaged manifest는 `0.3.5`이고,
+real provider target refresh도 로컬에서 확인했습니다. full local release gate는
+PASS이며, published-ref proof는 public release 전 추가로 필요합니다.
 
-현재 ship decision은 `continue`입니다. local release gate, remote CI, provider
-refresh proof를 확인한 뒤 tag/GitHub Release는 명시 승인을 받고 진행합니다.
+현재 decision은 `continue`입니다. 다음 작업은 live activation proof를 수집하거나
+explicit accepted partial로 분류하는 것이며, 새 skill은 activation matrix가 기존
+skill로 표현할 수 없는 반복 실패를 증명할 때만 추가합니다.

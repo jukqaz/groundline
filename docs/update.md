@@ -10,6 +10,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
 (cd plugins/groundline && PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json)
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_safety_eval.py --json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_remote_install_probe.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_dogfood.py --stage-package --probe-runtimes --json
 ```
@@ -36,3 +37,9 @@ If `groundline_provider_smoke.py` returns `PARTIAL`, read
 Common causes are stale installed version, missing provider payload, or skill
 count drift. Use `--require-installed` when the update is meant to prove an
 installed provider target, not only package and target-path readiness.
+
+Use `groundline_remote_install_probe.py --json` before a release or after a
+public update when you need a fake-home proof of the full update shape:
+fresh install passes, a previous installed version is detected as `PARTIAL`,
+and a refreshed install returns to `PASS`. The probe does not mutate the real
+provider home.

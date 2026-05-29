@@ -1,10 +1,68 @@
 # Next Work
 
-This backlog captures work intentionally kept out of the current release cut.
-Provider marketplace packaging shipped in v0.3.0, routing clarity shipped in
-v0.3.2, and the current v0.3.3 release candidate focuses on install posture,
-version drift, and proof quality. Pick one item, define evidence, implement,
-and close it before adding more.
+This backlog captures work intentionally kept out of each release cut. Provider
+marketplace packaging shipped in v0.3.0, routing clarity shipped in v0.3.2, and
+v0.3.3 shipped install posture, version drift, and proof quality improvements.
+Pick one item, define evidence, implement, and close it before adding more.
+
+## Current Release Cut: v0.3.5 Remote Install And Update Proof
+
+Goal: prove that a public package can be freshly installed, stale installed
+targets can be detected after a version bump, and a refreshed install returns
+to `PASS` without expanding the skill surface or mutating real provider homes by
+default.
+
+Must fix:
+
+- Keep the v0.3.4 local proof-quality work inside the cut: provider target
+  refresh evidence, release delta docs, and full local gate coverage.
+- Add a fake-home remote install/update proof that covers fresh install,
+  previous-version detection, and post-update refresh for Codex, Claude Code,
+  and Antigravity.
+- Add the new proof to release gate, install docs, update docs, and release
+  checklist so update confidence is checked before a public release claim.
+- Record sanitized live activation rows for the three still-pending prompt
+  families: `side-effect-guard`, `ecosystem-evaluation`, and
+  `ai-usage-maturity`.
+- Keep `handoff` and `release-cut` proof rows from regressing after provider
+  refresh.
+- Run a release delta review against the published v0.3.3 baseline and the
+  local v0.3.5 candidate.
+- Bump manifests to `0.3.5`, sync `plugins/groundline`, and run the release gate
+  with `--release-version 0.3.5` before tagging.
+
+Defer:
+
+- Lifecycle promotion for graduate candidates.
+- Official catalog submission polish and richer marketplace media.
+- Broad ecosystem comparison refresh.
+- Optional hooks, MCP setup, provider-level agents, or automatic provider-home
+  installation.
+
+Reject:
+
+- New skills, new provider runtimes, default provider-home writes, raw transcript
+  storage, provider cache dumps, and full home-path evidence.
+
+Ship boundary: v0.3.5 can ship when source/package validation, fake-home remote
+install/update proof, provider smoke, staged dogfood, privacy scan, scenario
+checks, and release delta evidence are explicit. Live provider activation rows
+may remain accepted partials only if the missing proof is documented.
+
+Current harness status:
+
+- `groundline_remote_install_probe.py --json`: added for fake-home fresh
+  install, stale update detection, and post-update refresh; current local run
+  reports `PASS`.
+- `groundline_provider_smoke.py --json --require-installed`: `PASS` after local
+  Codex, Claude Code, and Antigravity provider targets were refreshed to the
+  v0.3.5 package.
+- `groundline_release_gate.py --json --keep-going --include-docker-execution
+  --release-version 0.3.5`: `PASS` with source/package validation, 129 tests,
+  privacy scan, remote install/update proof, provider smoke, staged dogfood,
+  macOS scenario, and Linux Docker execution.
+- Live provider CLI proof rows still require explicit approval because they send
+  the current worktree context to external provider runtimes.
 
 ## Completed: v0.3.0 Adoption Confidence Slice
 
@@ -56,13 +114,13 @@ Current status:
 - Dogfood docs now separate staged contract harness checks from real provider
   invocation proof.
 
-## Release Candidate: v0.3.3 Install Posture And Drift Control
+## Released: v0.3.3 Install Posture And Drift Control
 
 Goal: make local provider install state and version drift obvious before adding
 more workflows. This is the highest-value next step from
 `docs/maturity-assessment.md`.
 
-Release candidate status:
+Post-release status:
 
 - Version-aware provider smoke now reports source version, installed version,
   payload presence, skill count drift, same-version content drift, and
@@ -71,18 +129,20 @@ Release candidate status:
   touching real provider homes.
 - Validation now compares provider manifest versions against canonical
   `plugin.json` instead of a hard-coded patch version.
-- Package sync, source validation, packaged validation, lint,
-  provider-native validation, unit tests, safety eval, privacy scan, offline
-  doctor, offline radar, staged dogfood, macOS local scenario, Linux Docker
-  dry-run, and Linux Docker execution pass in the v0.3.3 release candidate. Real
-  provider smoke is PARTIAL until local provider targets are refreshed from the
-  published ref.
+- Package sync, source validation, packaged validation, lint, provider-native
+  validation, unit tests, safety eval, privacy scan, offline doctor, offline
+  radar, staged dogfood, macOS local scenario, Linux Docker dry-run, and Linux
+  Docker execution passed for the v0.3.3 release cut.
+- Staged provider smoke proves that a refreshed package would pass. Real
+  provider smoke reports `PARTIAL` when installed provider targets still contain
+  the previous same-version payload after post-release source changes; use its
+  `next_actions` to refresh Codex and Claude Code before claiming installed
+  targets match the current source.
 - A release gate runner now prints or executes the same local gate sequence
   without including approval-required publish commands.
-- Remaining before release: decide whether to publish with existing sanitized
-  proof rows or collect more live provider activation rows first.
-- Remaining after release: provider install confirmation from the published
-  GitHub ref.
+- The remaining work is v0.3.4 planning: keep provider install confirmation
+  green, collect more live activation proof rows, and run a release delta review
+  before changing lifecycle values.
 
 Acceptance:
 
@@ -116,9 +176,9 @@ Out of scope:
 
 Goal: make the real installed package version visible after a GitHub install.
 
-Status: implemented in the v0.3.3 release candidate; source/package, staged dogfood,
-and scenario gates pass. Keep as P0 until provider smoke passes after
-post-publish install confirmation.
+Status: implemented and released in v0.3.3; source/package, staged dogfood, and
+scenario gates pass. Keep as P0 while real provider smoke can become `PARTIAL`
+after source content changes until installed provider targets are refreshed.
 
 Acceptance:
 
@@ -136,9 +196,9 @@ Acceptance:
 Goal: prevent future patch releases from drifting between manifests, packaged
 payload, tests, and validation scripts.
 
-Status: implemented in the v0.3.3 release candidate; package sync and validation
-prove source and packaged manifests stay aligned. Keep as P0 until the next
-published ref proves the same install path.
+Status: implemented and released in v0.3.3; package sync and validation prove
+source and packaged manifests stay aligned. Keep as P0 until the next version
+bump proves the same canonical manifest path.
 
 Acceptance:
 
@@ -153,11 +213,10 @@ Acceptance:
 Goal: prove live provider sessions select the intended GroundLine skill and
 output contract for representative prompts.
 
-Status: matrix document and six-scenario staged contract coverage are
-implemented in the v0.3.3 release candidate. The live proof collection runbook and
-row update checklist are also documented. Live provider proof rows still need
-to be collected for side-effect guard, ecosystem evaluation, and AI usage
-maturity before this item is complete.
+Status: matrix document and six-scenario staged contract coverage shipped in
+v0.3.3. The live proof collection runbook and row update checklist are also
+documented. Live provider proof rows still need to be collected for side-effect
+guard, ecosystem evaluation, and AI usage maturity before this item is complete.
 
 Acceptance:
 
@@ -175,9 +234,9 @@ Acceptance:
 
 Goal: reduce the experimental surface before calling GroundLine stable.
 
-Status: implemented as a lifecycle decision plan in the v0.3.3 release candidate.
-No lifecycle values are promoted yet; promotion waits for v0.3.3 post-install
-proof and the remaining provider activation rows.
+Status: implemented as a lifecycle decision plan in v0.3.3. No lifecycle values
+are promoted yet; promotion waits for repeated install confirmation and the
+remaining provider activation rows.
 
 Acceptance:
 
@@ -241,7 +300,7 @@ Goal: keep the new offline safety harness useful without turning GroundLine into
 a heavy eval platform.
 
 Status: implemented for the current synthetic fixture set and added to the
-default CI release gate in the v0.3.3 release candidate.
+default CI release gate in v0.3.3.
 
 Acceptance:
 
@@ -261,8 +320,8 @@ completion, and unsafe provider-home writes.
 Goal: make the package easier for humans and LLM agents to understand by
 showing complete before/after workflows.
 
-Status: implemented as a compact workflow cookbook in the v0.3.3 release candidate.
-Keep it compact unless live provider proof shows a workflow remains confusing.
+Status: implemented as a compact workflow cookbook in v0.3.3. Keep it compact
+unless live provider proof shows a workflow remains confusing.
 
 Acceptance:
 
@@ -325,10 +384,9 @@ install through Codex, Claude Code, or Antigravity from the documented commands.
 
 ## Release Boundary
 
-These backlog items are not required to keep the current v0.3.3 release candidate
-bounded. The release candidate remains shippable only when the release decision
-is explicit, source validation, package validation, lint, provider-native
-validation, unit tests, staged dogfood, macOS scenario, Linux Docker scenario,
-and diff checks pass. Treat real provider smoke as a release blocker when it
-reports missing source manifests or unsafe output, and as an accepted `PARTIAL`
-only when `next_actions` clearly point to post-publish provider install refresh.
+These backlog items are not required to keep the already-published v0.3.3 patch
+bounded. The next release remains shippable only when the release decision is
+explicit and the current validation gates and diff checks pass. Treat real
+provider smoke as a release blocker when it reports missing source manifests or
+unsafe output, and as an accepted `PARTIAL` only when `next_actions` clearly
+point to post-publish provider install refresh.

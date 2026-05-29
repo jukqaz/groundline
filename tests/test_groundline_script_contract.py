@@ -90,6 +90,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
             "groundline_provider_validate.py",
             "groundline_privacy_scan.py",
             "groundline_radar.py",
+            "groundline_remote_install_probe.py",
             "groundline_release_gate.py",
             "groundline_safety_eval.py",
             "lint.py",
@@ -144,6 +145,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
             "groundline_provider_validate.py",
             "groundline_privacy_scan.py",
             "groundline_radar.py",
+            "groundline_remote_install_probe.py",
             "groundline_release_gate.py",
             "groundline_safety_eval.py",
             "lint.py",
@@ -183,6 +185,7 @@ class GroundLineScriptContractTests(unittest.TestCase):
                 "safety-eval",
                 "privacy-scan",
                 "staged-provider-smoke",
+                "remote-install-update-proof",
                 "provider-smoke",
                 "staged-dogfood",
                 "macos-local-scenario",
@@ -201,6 +204,8 @@ class GroundLineScriptContractTests(unittest.TestCase):
         staged_smoke_gate = next(gate for gate in result["gates"] if gate["id"] == "staged-provider-smoke")
         self.assertIn("--stage-package", staged_smoke_gate["command"])
         self.assertIn("--require-installed", staged_smoke_gate["command"])
+        remote_probe_gate = next(gate for gate in result["gates"] if gate["id"] == "remote-install-update-proof")
+        self.assertIn("scripts/groundline_remote_install_probe.py", remote_probe_gate["command"])
 
     def test_release_gate_can_plan_full_local_release_gate(self) -> None:
         result = self.run_script_json(
@@ -1330,6 +1335,39 @@ class GroundLineScriptContractTests(unittest.TestCase):
                 self.assertEqual(probe["source_version"], next_version)
                 self.assertIn("stale_cache_version", probe["issues"])
 
+    def test_provider_smoke_prefers_newest_stale_target_when_current_version_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="groundline-stale-selection-") as temp:
+            root = Path(temp)
+            pack_root = self.copy_pack(root)
+            next_version = "9.9.9"
+            for relative in ["plugin.json", ".codex-plugin/plugin.json", ".claude-plugin/plugin.json"]:
+                manifest = pack_root / relative
+                data = json.loads(manifest.read_text(encoding="utf-8"))
+                data["version"] = next_version
+                manifest.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+            self.run_script("sync_provider_package.py", "--json", pack_root=pack_root)
+
+            home = self.make_fake_home(root)
+            direct_target = home / ".codex/plugins/groundline"
+            cache_target = home / ".codex/plugins/cache/groundline/groundline/0.3.3"
+            self.copy_provider_payload(pack_root, direct_target)
+            self.copy_provider_payload(pack_root, cache_target)
+            for target, version in [(direct_target, "0.3.4"), (cache_target, "0.3.3")]:
+                manifest = target / ".codex-plugin/plugin.json"
+                data = json.loads(manifest.read_text(encoding="utf-8"))
+                data["version"] = version
+                manifest.write_text(json.dumps(data), encoding="utf-8")
+
+            smoke = self.run_script("groundline_provider_smoke.py", "--home", str(home), "--json", pack_root=pack_root)
+            smoke_result = json.loads(smoke.stdout)
+
+        provider = smoke_result["providers"]["codex"]
+        probe = provider["runtime_probe"]
+        self.assertEqual(provider["install_source"], "direct")
+        self.assertEqual(probe["installed_version"], "0.3.4")
+        self.assertIn("version_mismatch", probe["issues"])
+        self.assertNotIn("stale_cache_version", probe["issues"])
+
     def test_provider_smoke_reports_missing_payload_and_antigravity_target(self) -> None:
         with tempfile.TemporaryDirectory(prefix="groundline-provider-payload-") as temp:
             home = self.make_fake_home(Path(temp))
@@ -1432,6 +1470,63 @@ class GroundLineScriptContractTests(unittest.TestCase):
         self.assertEqual(probe["version_check"], "unavailable")
         self.assertTrue(probe["content_matches_source"])
         self.assertEqual(probe["issues"], [])
+
+    def test_remote_install_probe_proves_fresh_install_update_detection_and_refresh(self) -> None:
+        result = self.run_script_json(
+            "groundline_remote_install_probe.py",
+            "--json",
+            "--previous-version",
+            "0.3.4",
+        )
+
+        self.assertEqual(result["suite"], "remote-install-update-proof")
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["previous_version"], "0.3.4")
+        self.assertTrue(result["fake_home_used"])
+        self.assertFalse(result["mutation_performed"])
+        self.assertFalse(result["real_home_touched"])
+        self.assertFalse(result["secret_value_printed"])
+        self.assertEqual(result["next_actions"], [])
+        self.assertIn("codex plugin marketplace add jukqaz/groundline --ref main", result["remote_install_commands"]["codex"])
+        self.assertIn("git pull --ff-only", result["update_commands"]["repository"])
+        self.assertEqual(set(result["scenarios"].keys()), {"fresh_install", "stale_update_detection", "post_update_refresh"})
+
+        fresh = result["scenarios"]["fresh_install"]
+        stale = result["scenarios"]["stale_update_detection"]
+        refreshed = result["scenarios"]["post_update_refresh"]
+        self.assertEqual(fresh["status"], "PASS")
+        self.assertEqual(fresh["install_doctor_status"], "PASS")
+        self.assertEqual(stale["status"], "PASS")
+        self.assertEqual(stale["observed_install_doctor_status"], "PARTIAL")
+        self.assertEqual(refreshed["status"], "PASS")
+        self.assertEqual(refreshed["install_doctor_status"], "PASS")
+
+        for provider_name in ["codex", "claude_code"]:
+            with self.subTest(provider=provider_name):
+                provider = stale["providers"][provider_name]
+                self.assertEqual(provider["install_state"], "PARTIAL")
+                self.assertEqual(provider["installed_version"], "0.3.4")
+                self.assertIn("version_mismatch", provider["issues"])
+
+        antigravity = stale["providers"]["antigravity"]
+        self.assertEqual(antigravity["install_state"], "PARTIAL")
+        self.assertIn("content_fingerprint_mismatch", antigravity["issues"])
+
+    def test_remote_install_probe_refuses_real_home_staging(self) -> None:
+        completed = self.run_script(
+            "groundline_remote_install_probe.py",
+            "--home",
+            str(Path.home()),
+            "--json",
+        )
+        result = json.loads(completed.stdout)
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertEqual(result["status"], "FAIL")
+        self.assertEqual(result["suite"], "remote-install-update-proof")
+        self.assertFalse(result["real_home_touched"])
+        self.assertFalse(result["mutation_performed"])
+        self.assertIn("refusing to stage remote install proof into the real home directory", result["error"])
 
     def test_dogfood_harness_runs_staged_provider_suite(self) -> None:
         with tempfile.TemporaryDirectory(prefix="groundline-dogfood-") as temp:

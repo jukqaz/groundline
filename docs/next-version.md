@@ -1,11 +1,11 @@
 # Next Version Plan
 
-Target: v0.3.4
+Target: v0.3.5
 
-v0.3.3 closes install posture, version drift control, compact proof workflows,
-and release-candidate gates without expanding the skill surface. The next
-version should focus on post-publish provider confirmation and activation proof
-quality instead of adding more skills.
+v0.3.3 closed install posture, version drift control, compact proof workflows,
+and release gates without expanding the skill surface. The current local
+candidate carries the v0.3.4 proof-quality work forward and adds remote install
+and update proof as the next release boundary.
 
 ## Completed Foundation
 
@@ -16,19 +16,21 @@ These are already done and should not be re-opened unless validation fails:
 - Antigravity can validate and import the package.
 - `plugins/groundline` contains the installable payload.
 - English and Korean provider packaging docs exist.
-- The v0.3.3 release candidate has source/package validation,
+- v0.3.3 is tagged and published from `main` with source/package validation,
   provider-native validation, staged dogfood, staged provider smoke, scenario
-  evidence, and explicit release-version preflight coverage. Real provider
-  smoke may remain PARTIAL until Codex and Claude Code provider targets are
-  refreshed from the pushed package. Tagging still waits for remote CI,
-  provider refresh proof, and explicit approval.
+  evidence, explicit release-version preflight coverage, and remote CI proof.
+- Real provider smoke is the install confirmation check for this phase. It
+  reports `PASS` only when installed provider targets match the current source
+  payload, and `PARTIAL` with refresh actions when post-release source changes
+  make same-version installed targets stale. The v0.3.3 tag and GitHub Release
+  are no longer pending.
 
-## Current Status: v0.3.3 Release Candidate
+## Current Status: v0.3.3 Published Baseline
 
-The narrow v0.3.3 release candidate keeps the sanitized evidence path and prompt
-routing clarity from v0.3.2 while closing the exposed install posture and
-version drift gap. Local installation through the GitHub guide succeeded for
-Codex, Claude Code, and Antigravity.
+The narrow v0.3.3 release keeps the sanitized evidence path and prompt routing
+clarity from v0.3.2 while closing the exposed install posture and version drift
+gap. Local installation through the GitHub guide succeeded for Codex, Claude
+Code, and Antigravity.
 
 Completed:
 
@@ -70,12 +72,149 @@ Completed:
 - release gate accepts `--release-version` so the actual release cut fails when
   source or packaged manifests still point at the previous public version or the
   requested version is not plain `X.Y.Z` semver
-- staged provider smoke passes, while real provider smoke remains PARTIAL until
-  stale same-version Codex and Claude Code targets are refreshed from the
-  pushed package
-- the explicit `--release-version 0.3.3` preflight is the release-candidate
-  manifest and package-sync guard
+- staged provider smoke passes; real provider smoke is the refresh gate for
+  installed targets after same-version source content changes
+- the explicit `--release-version 0.3.3` preflight is the manifest and
+  package-sync guard for this released patch
 - no new skills added
+
+## v0.3.5 Release Cut
+
+Current conclusion: v0.3.5 is a remote install and update proof patch. It
+should prove the public installable package can be freshly installed, stale
+installed targets can be detected after a version bump, and a refreshed install
+returns to `PASS` without mutating real provider homes by default.
+
+Scope lock:
+
+- Keep v0.3.4 local proof-quality evidence: provider target refresh, release
+  delta docs, and local release gate coverage.
+- Add `groundline_remote_install_probe.py` for fake-home fresh install,
+  previous-version detection, and post-update refresh across Codex, Claude
+  Code, and Antigravity.
+- Add the remote install/update proof to release gate, install docs, update
+  docs, release checklist, and package sync.
+- Keep live provider CLI activation proof separate because it can send current
+  worktree context to external provider runtimes and still needs explicit
+  approval.
+
+Change budget:
+
+- Script, tests, release gate wiring, docs, changelog, and package sync.
+- Validation-only fixes when an existing gate cannot express install/update
+  confidence.
+- No new skills, provider runtimes, hooks, MCP setup, provider-level agents, or
+  default real provider-home mutation.
+
+Must fix before ship:
+
+- `groundline_remote_install_probe.py --json` returns `status=PASS` and proves
+  `fresh_install`, `stale_update_detection`, and `post_update_refresh`.
+- `groundline_release_gate.py --release-version 0.3.5` includes the new
+  remote install/update proof gate.
+- Source and packaged manifests are `0.3.5` after package sync.
+- Provider smoke still reports no unexpected `FAIL`; any real provider target
+  drift is either refreshed or recorded as an accepted partial.
+- Install and update docs name the remote install/update proof before claiming
+  public update confidence.
+
+Current harness result:
+
+- Source and packaged manifests are `0.3.5`.
+- `groundline_remote_install_probe.py --json` returns `status=PASS` and proves
+  fresh install, stale update detection, and post-update refresh in a fake home.
+- Local Codex, Claude Code, and Antigravity provider targets were refreshed to
+  the `0.3.5` package and provider smoke returns `PASS`.
+- `groundline_release_gate.py --json --keep-going --include-docker-execution
+  --release-version 0.3.5` returns `status=PASS`.
+
+Ship decision: `continue` until live provider activation proof and
+published-ref proof are collected or explicitly accepted as partial.
+
+## v0.3.4 Local Proof-Quality Work
+
+Current conclusion: v0.3.4 is a proof-quality patch, not a capability
+expansion. It should prove that the published v0.3.3 package can be refreshed,
+selected by real provider sessions, and compared against the previous release
+without changing the skill surface.
+
+Scope lock:
+
+- Provider install refresh and confirmation for Codex and Claude Code after
+  same-version content drift is detected. Current local direct targets now match
+  `0.3.4` and provider smoke reports `PASS`.
+- Live provider activation proof for all five prompt families in
+  `docs/provider-activation-matrix.md`.
+- A release delta review for the published v0.3.3 baseline before tagging
+  v0.3.4.
+- Release gate, privacy scan, staged provider smoke, staged dogfood, provider
+  smoke, scenario checks, remote CI, and GitHub Release proof for v0.3.4.
+
+Change budget:
+
+- Documentation, sanitized evidence rows, changelog, package sync, and
+  validation-only fixes.
+- Script or test changes only when an existing gate is wrong, stale, or unable
+  to express the proof above.
+- No default provider-home mutation inside repository scripts.
+
+Must fix before ship:
+
+- `groundline_provider_smoke.py --json --require-installed` has no unexpected
+  `FAIL` state. Same-version `content_fingerprint_mismatch` must be resolved by
+  refreshing the installed provider target or recorded as an explicit accepted
+  partial with `next_actions`.
+- The activation matrix has no `PENDING` rows for `side-effect-guard`,
+  `ecosystem-evaluation`, or `ai-usage-maturity`; each row is `PASS` or an
+  explicit `PARTIAL` with sanitized evidence.
+- `docs/dogfood.md` records only sanitized invocation proof fields; no raw
+  transcripts, auth material, provider cache dumps, or full home paths.
+- `compare-release-delta` is used to produce a short release delta judgment for
+  v0.3.3 as the previous published baseline, or the absence of comparable
+  install evidence is named as a partial.
+- Source and packaged manifests are bumped together to `0.3.4`, package sync
+  runs, and the release gate uses `--release-version 0.3.4`.
+
+Defer:
+
+- Promoting `package-agent-task`, `stabilize-release-cut`, or
+  `evaluate-agent-capability` from experimental to active.
+- Official catalog submission polish, screenshots, richer marketplace media,
+  broader ecosystem comparison refresh, optional MCP setup, optional hooks,
+  provider-level agents, and automatic provider-home installation.
+
+Reject:
+
+- New skills, new provider runtimes, default hooks or MCP servers, raw
+  transcript analytics, and lifecycle promotion without fresh activation proof.
+
+Current harness result:
+
+- Source and packaged manifests are `0.3.4`.
+- Local Codex and Claude Code direct provider targets were refreshed from the
+  current packaged payload.
+- `groundline_provider_smoke.py --json --require-installed` reports
+  `status=PASS`, `install_doctor_status=PASS`, and `next_actions=[]`.
+- `groundline_release_gate.py --json --keep-going --include-docker-execution
+  --release-version 0.3.4` reports `status=PASS`.
+
+Release delta judgment:
+
+- previous version: `v0.3.3`
+- candidate version: local `0.3.4`
+- expected changes: manifest bump, post-release planning refresh, local provider
+  target refresh evidence, and proof-quality release cut docs
+- unexpected changes: none found in the source diff; package copy changes mirror
+  the source payload
+- runtime evidence: full local release gate including Linux Docker execution
+  reports `PASS`
+- install evidence: provider smoke with `--require-installed` reports `PASS`
+- decision: monitor until live provider activation proof rows are collected or
+  explicitly accepted as partial
+
+Ship decision: `continue` until activation matrix rows are complete or explicitly
+accepted as partial. After that, cut v0.3.4 as a narrow release and keep
+stable-core promotion for a later patch.
 
 ## 1. Install Posture And Version Drift
 
@@ -157,8 +296,8 @@ Status:
 Make GroundLine easier to understand during first use after install posture is
 solid.
 
-Status: implemented as a compact cookbook in the v0.3.3 release candidate. Expand
-only if real provider proof shows a workflow remains unclear.
+Status: implemented as a compact cookbook in v0.3.3. Expand only if real
+provider proof shows a workflow remains unclear.
 
 Deliverables:
 
@@ -177,7 +316,7 @@ Ship gate:
 
 Clarify how GroundLine outputs move between skills.
 
-Status: implemented as a compact lifecycle map in the v0.3.3 release candidate.
+Status: implemented as a compact lifecycle map in v0.3.3.
 
 Deliverables:
 
@@ -216,6 +355,6 @@ macOS local scenario, Linux Docker dry-run, Linux Docker execution, and at least
 one remote install proof when the package is meant to be installed from GitHub.
 If provider smoke reports `content_fingerprint_mismatch` against same-version
 local targets, treat the full closeout as PARTIAL until those targets are
-refreshed from the pushed package. After v0.3.3 is tagged, the next blocker is
-post-publish provider install confirmation from the published ref, followed by
-at least five real activation proof rows before considering 1.0 language.
+refreshed from the pushed package. Since v0.3.3 is already tagged and published,
+the next blocker is repeated published-ref install confirmation, followed by at
+least five real activation proof rows before considering 1.0 language.

@@ -43,6 +43,62 @@ Provider home dumped: false
 | Claude Code | release-cut | `stabilize-release-cut` | `GroundLine Release Cut` | PASS | `claude -p` returned the canonical skill and contract after the proof prompt allowed read-only skill doc inspection with `mutation_performed=false`. |
 | Antigravity | release-cut | not captured | not captured | PARTIAL | `agy --print` still entered tool exploration and hit Antigravity CLI app-data write constraints before returning a sanitized proof; package validation and install remain PASS. |
 
+## Local Provider Install Refresh
+
+Date: 2026-05-29
+
+Raw transcript stored: false
+
+Provider home dumped: false
+
+Provider target mutation: true, local-only direct plugin target refresh for
+Codex and Claude Code.
+
+| Provider | Installed target | Version | Content match | Result | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| Codex | direct provider target | `0.3.4` | yes | PASS | `groundline_provider_smoke.py --json --require-installed` selected the direct target and reported matching version, skill count, and content fingerprint. |
+| Claude Code | direct provider target | `0.3.4` | yes | PASS | `groundline_provider_smoke.py --json --require-installed` selected the direct target and reported matching version, skill count, and content fingerprint. |
+| Antigravity | direct provider target | unavailable semantic version | yes | PASS | Skill-import payload matched source and reported 19 skills. |
+
+Live provider activation proof was not run in this pass. Running provider CLI
+proof commands would send current worktree context to external provider
+runtimes and needs separate explicit approval.
+
+## v0.3.4 Release Delta Evidence
+
+Date: 2026-05-29
+
+Previous version: `v0.3.3`
+
+Candidate version: local `0.3.4`
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Expected changes | PASS | Manifest bump, post-release planning refresh, local provider target refresh evidence, and proof-quality release cut docs are present. |
+| Unexpected changes | PASS | Source diff is limited to manifests, release planning docs, maturity evidence, dogfood evidence, and mirrored package payload. |
+| Runtime evidence | PASS | `groundline_release_gate.py --json --keep-going --include-docker-execution --release-version 0.3.4` returned `status=PASS`. |
+| Install evidence | PASS | `groundline_provider_smoke.py --json --require-installed` returned `status=PASS`, `install_doctor_status=PASS`, and `next_actions=[]`. |
+| Regression evidence | PASS | Unit tests returned 129 tests OK; Linux Docker execution returned `status=PASS`. |
+| Release decision | PARTIAL | Candidate remains untagged and unpublished; live provider activation proof rows still need explicit approval or accepted-partial classification. |
+
+## v0.3.5 Remote Install And Update Proof
+
+Date: 2026-05-29
+
+Raw transcript stored: false
+
+Provider home dumped: false
+
+Real provider target mutation: false
+
+| Scenario | Result | Evidence |
+| --- | --- | --- |
+| Fresh install | PASS | `groundline_remote_install_probe.py --json` stages the current package into a fake provider home and provider smoke reports `PASS`. |
+| Stale update detection | PASS | The same probe stages a previous-version install, expects provider smoke `PARTIAL`, and records provider issues such as `version_mismatch` or `content_fingerprint_mismatch`. |
+| Post-update refresh | PASS | The probe refreshes the fake provider payload and provider smoke returns `PASS` again. |
+| Local provider refresh | PASS | Codex, Claude Code, and Antigravity direct provider targets were refreshed from the local `0.3.5` package and `groundline_provider_smoke.py --json --require-installed` returned `status=PASS`, `install_doctor_status=PASS`, and `next_actions=[]`. |
+| Release decision | CONTINUE | The proof is local and fake-home only; published-ref install/update and live activation proof still need fresh release evidence or accepted-partial classification. |
+
 ## Superpowers Companion Dogfood
 
 Date: 2026-05-28

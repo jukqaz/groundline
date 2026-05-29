@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## v0.3.5 - 2026-05-29
+
+- Define v0.3.5 as the remote install and update proof patch, carrying forward
+  the local v0.3.4 proof-quality work while adding a fake-home update harness
+  before any public tag or provider-home mutation.
+- Add `groundline_remote_install_probe.py` to prove fresh install, stale
+  previous-version detection, and post-update refresh across Codex, Claude Code,
+  and Antigravity without touching the real provider home.
+- Add the remote install/update proof to the local release gate and install,
+  update, and release checklist docs so update confidence is checked before
+  claiming a public package is current.
+- Refresh post-release planning and maturity docs so v0.3.4 starts from the
+  published v0.3.3 baseline and names provider install refresh as the expected
+  follow-up when source content changes after release.
+- Define the v0.3.4 release cut as a proof-quality patch: provider install
+  refresh, live activation proof rows, release delta evidence, and validation
+  closeout without new skills, runtimes, hooks, MCP setup, or lifecycle
+  promotion.
+- Record local v0.3.4 provider refresh and release delta evidence: Codex and
+  Claude Code direct provider targets match the packaged payload, provider smoke
+  passes, and the full local release gate passes including Linux Docker
+  execution.
+
 ## v0.3.3 - 2026-05-28
 
 - Version-aware provider smoke now reports installed version, source version,

@@ -73,6 +73,12 @@ def build_gates(include_docker_execution: bool, actionlint_bin: str | None) -> l
             ROOT,
         ),
         Gate(
+            "remote-install-update-proof",
+            "Run remote install and update proof",
+            python_command("scripts/groundline_remote_install_probe.py", "--json"),
+            ROOT,
+        ),
+        Gate(
             "provider-smoke",
             "Run provider smoke",
             python_command("scripts/groundline_provider_smoke.py", "--json", "--require-installed"),

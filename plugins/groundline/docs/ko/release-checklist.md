@@ -74,6 +74,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_radar.py --json --offline -
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_safety_eval.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_privacy_scan.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json --stage-package --require-installed
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_remote_install_probe.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json --require-installed
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_dogfood.py --stage-package --probe-runtimes --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/run_scenarios.py --platform macos --sandbox local --json
@@ -109,6 +110,7 @@ gh release create "$TAG" --repo jukqaz/groundline --title "$TAG" --notes-file CH
 - CI run success
 - release page HTTP 200
 - published ref에서 provider install confirmation 실행
+- published ref 기준 remote install/update proof 실행
 - `groundline_provider_smoke.py --json --require-installed`로 설치된 provider target이 published ref와 맞는지 확인
 - previous version 대비 delta
 - rollback note

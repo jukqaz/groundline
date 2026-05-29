@@ -2,11 +2,11 @@
 
 영어 `docs/next-version.md`가 canonical입니다. 이 문서는 한국어 companion입니다.
 
-Target: v0.3.4
+Target: v0.3.5
 
 v0.3.3은 install posture, version drift control, compact proof workflow,
-release-candidate gate를 닫습니다. 다음 버전은 skill을 더 늘리기보다 publish 뒤
-provider 확인과 activation proof 품질을 높이는 데 집중합니다.
+release gate를 닫았습니다. 현재 후보는 v0.3.4의 local proof-quality 작업을
+포함하면서, 원격 설치와 업데이트 proof를 v0.3.5의 핵심 경계로 추가합니다.
 
 ## 완료된 기반
 
@@ -15,18 +15,19 @@ provider 확인과 activation proof 품질을 높이는 데 집중합니다.
 - Antigravity validation/import 가능
 - `plugins/groundline` installable payload 존재
 - 영어/한국어 provider packaging 문서 존재
-- v0.3.3 release candidate는 source/package validation, provider-native
-  validation, staged dogfood, staged provider smoke, scenario evidence,
-  release-version preflight를 갖췄습니다. real provider smoke는 Codex와 Claude
-  Code의 stale same-version target이 pushed package로 refresh되기 전까지
-  PARTIAL일 수 있습니다. tag는 remote CI, provider refresh proof, 명시 승인
-  뒤에만 진행합니다.
+- v0.3.3은 `main`에서 tag와 GitHub Release까지 완료됐고 source/package
+  validation, provider-native validation, staged dogfood, staged provider smoke,
+  scenario evidence, release-version preflight, remote CI proof를 갖췄습니다.
+- real provider smoke는 이 단계의 install confirmation check입니다. 설치된
+  provider target이 현재 source payload와 같을 때만 PASS이고, release 뒤 source
+  content가 바뀌어 same-version install target이 stale이면 refresh action과 함께
+  PARTIAL을 냅니다. v0.3.3 tag/release는 더 이상 pending이 아닙니다.
 
 ## 현재 상태
 
-v0.3.2는 release와 로컬 설치가 완료됐습니다. 현재 v0.3.3 release candidate는 실제
-GitHub 가이드 설치 과정에서 드러난 provider별 설치 상태와 cache/version drift
-문제를 먼저 닫는 방향입니다.
+v0.3.3은 release와 로컬 설치 확인이 완료된 현재 baseline입니다. 다음 작업은 실제
+GitHub 가이드 설치 과정에서 드러날 수 있는 provider별 설치 상태와 cache/version
+drift를 반복 확인하고, live activation proof를 늘리는 방향입니다.
 
 완료된 것:
 
@@ -63,11 +64,115 @@ GitHub 가이드 설치 과정에서 드러난 provider별 설치 상태와 cach
 - release gate는 `--release-version`을 받아 실제 release cut에서 source 또는
   packaged manifest가 이전 public version에 남아 있거나 요청 version이 plain
   `X.Y.Z` semver가 아니면 실패
-- staged provider smoke는 통과하지만, real provider smoke는 stale same-version
-  Codex/Claude Code target이 pushed package로 refresh되기 전까지 PARTIAL
-- 명시적인 `--release-version 0.3.3` preflight는 release-candidate manifest와
-  package sync guard 역할
+- staged provider smoke는 PASS이고, real provider smoke는 same-version source
+  content 변경 뒤 설치 target refresh 여부를 보는 gate
+- 명시적인 `--release-version 0.3.3` preflight는 released manifest와 package sync
+  guard 역할
 - 새 skill 추가 없음
+
+## v0.3.5 release cut
+
+결론: v0.3.5는 remote install/update proof patch입니다. public package를 fresh
+install했을 때 정상인지, version bump 뒤 이전 설치본이 stale로 감지되는지, refresh
+후 다시 PASS로 돌아오는지를 실제 provider home 없이 fake-home에서 증명합니다.
+
+범위:
+
+- v0.3.4의 local proof-quality evidence를 포함합니다.
+- `groundline_remote_install_probe.py`로 Codex, Claude Code, Antigravity의 fresh
+  install, previous-version detection, post-update refresh를 증명합니다.
+- release gate, install/update docs, release checklist에 이 proof를 포함합니다.
+- live provider CLI activation proof는 외부 provider runtime에 current worktree
+  context를 보낼 수 있으므로 별도 명시 승인 대상으로 둡니다.
+
+must fix:
+
+- `groundline_remote_install_probe.py --json`이 `status=PASS`를 반환하고
+  `fresh_install`, `stale_update_detection`, `post_update_refresh`를 모두 증명
+- release gate가 `--release-version 0.3.5`에서 remote install/update proof를 포함
+- source와 packaged manifest가 package sync 뒤 `0.3.5`로 일치
+- provider smoke의 예상 밖 `FAIL` 없음
+- public update confidence를 주장하기 전에 install/update 문서가 새 proof를 안내
+
+현재 상태:
+
+- source와 packaged manifest는 `0.3.5`
+- `groundline_remote_install_probe.py --json`은 fake home에서 fresh install,
+  stale update detection, post-update refresh를 증명하며 `PASS`
+- Codex, Claude Code, Antigravity local provider target은 `0.3.5` package로 refresh
+  되었고 provider smoke는 `PASS`
+- `groundline_release_gate.py --json --keep-going --include-docker-execution
+  --release-version 0.3.5`는 `PASS`
+
+Ship decision: live provider activation proof와 published-ref proof를 수집하거나
+explicit accepted partial로 분류할 때까지 `continue`입니다.
+
+## v0.3.4 local proof-quality work
+
+결론: v0.3.4는 capability 확장이 아니라 proof-quality patch입니다. published
+v0.3.3 package를 refresh할 수 있고, 실제 provider session이 의도한 GroundLine
+skill을 고르며, 이전 release와 비교 가능한지를 증명하는 데 집중합니다.
+
+범위:
+
+- Codex/Claude Code provider install refresh와 확인. 현재 로컬 direct target은
+  `0.3.4` package와 일치하고 provider smoke는 PASS입니다.
+- `docs/provider-activation-matrix.md`의 5개 prompt family live proof 정리
+- published v0.3.3 baseline에 대한 release delta review
+- v0.3.4 release gate, privacy scan, staged provider smoke, staged dogfood,
+  provider smoke, scenario check, remote CI, GitHub Release proof
+
+must fix:
+
+- `groundline_provider_smoke.py --json --require-installed`에서 예상 밖 `FAIL`이
+  없어야 합니다. same-version `content_fingerprint_mismatch`는 provider target
+  refresh로 닫거나 explicit accepted partial과 `next_actions`로 남깁니다.
+- `side-effect-guard`, `ecosystem-evaluation`, `ai-usage-maturity` matrix row는
+  더 이상 `PENDING`이면 안 됩니다. `PASS` 또는 sanitized evidence가 있는 explicit
+  `PARTIAL`이어야 합니다.
+- `docs/dogfood.md`에는 sanitized invocation proof만 남기고 raw transcript,
+  auth material, provider cache dump, full home path는 넣지 않습니다.
+- `compare-release-delta`로 v0.3.3 baseline 대비 짧은 release delta judgment를
+  남기거나, 비교 가능한 install evidence 부재를 partial로 명시합니다.
+- manifest를 `0.3.4`로 함께 올리고 package sync 뒤
+  `--release-version 0.3.4` gate를 통과해야 합니다.
+
+defer:
+
+- `package-agent-task`, `stabilize-release-cut`, `evaluate-agent-capability`의
+  active promotion
+- official catalog polish, screenshot/marketplace media, broad ecosystem refresh,
+  optional MCP/hooks, provider-level agents, automatic provider-home install
+
+reject:
+
+- 새 skill, 새 provider runtime, default hook/MCP, raw transcript analytics,
+  fresh activation proof 없는 lifecycle promotion
+
+ship decision: provider refresh evidence와 activation matrix row가 닫힐 때까지
+`continue`입니다. 그 뒤 v0.3.4는 좁은 patch로 release하고 stable-core promotion은
+다음 patch로 넘깁니다.
+
+현재 harness 결과:
+
+- source와 packaged manifest는 `0.3.4`
+- Codex/Claude Code direct provider target은 현재 packaged payload로 refresh됨
+- `groundline_provider_smoke.py --json --require-installed`: `status=PASS`,
+  `install_doctor_status=PASS`, `next_actions=[]`
+- `groundline_release_gate.py --json --keep-going --include-docker-execution
+  --release-version 0.3.4`: `status=PASS`
+
+release delta 판단:
+
+- previous version: `v0.3.3`
+- candidate version: local `0.3.4`
+- expected changes: manifest bump, post-release planning refresh, local provider
+  target refresh evidence, proof-quality release cut docs
+- unexpected changes: source diff에서 발견되지 않음. package copy 변경은 source
+  payload mirror입니다.
+- runtime/install evidence: full local release gate와 provider smoke가 PASS
+- decision: live provider activation proof row를 수집하거나 explicit accepted
+  partial로 분류할 때까지 monitor/continue
 
 ## 1. Install posture와 version drift
 
@@ -127,8 +232,8 @@ GitHub 가이드 설치 과정에서 드러난 provider별 설치 상태와 cach
 목표: 처음 쓰는 사람이 skill index 전체를 읽지 않아도 대표 workflow를 고를 수 있게
 합니다.
 
-상태: v0.3.3 release candidate에 compact cookbook으로 구현했습니다. 실제 provider proof에서
-헷갈리는 workflow가 확인될 때만 확장합니다.
+상태: v0.3.3에 compact cookbook으로 구현했습니다. 실제 provider proof에서 헷갈리는
+workflow가 확인될 때만 확장합니다.
 
 완료 기준:
 
@@ -145,7 +250,7 @@ GitHub 가이드 설치 과정에서 드러난 provider별 설치 상태와 cach
 목표: research, comparison, recommendation, implementation, dogfood, release,
 post-release review 사이의 artifact 흐름을 명확히 합니다.
 
-상태: v0.3.3 release candidate에 compact lifecycle map으로 구현했습니다.
+상태: v0.3.3에 compact lifecycle map으로 구현했습니다.
 
 완료 기준:
 
@@ -163,6 +268,6 @@ scenario, Linux Docker dry-run, Linux Docker execution을 실행합니다.
 GitHub에서 설치하는 배포라면 remote install proof도 최소 1개 남깁니다.
 provider smoke가 같은 version의 local target에서
 `content_fingerprint_mismatch`를 보고하면, pushed package로 target을 새로
-설치하기 전까지 full closeout은 PARTIAL로 봅니다. v0.3.3 tag 뒤의 다음 blocker는
-published ref에서 provider install confirmation을 남기고, 1.0 표현 전 최소 5개
-real activation proof row를 확보하는 것입니다.
+설치하기 전까지 full closeout은 PARTIAL로 봅니다. v0.3.3은 이미 tag/release됐으므로
+다음 blocker는 published ref install confirmation을 반복하고, 1.0 표현 전 최소
+5개 real activation proof row를 확보하는 것입니다.

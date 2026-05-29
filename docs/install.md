@@ -16,6 +16,7 @@ cd groundline
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json --stage-package --require-installed
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_remote_install_probe.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_dogfood.py --stage-package --probe-runtimes --json
 ```
 
@@ -32,6 +33,8 @@ Expected result:
 - package validation returns `status=PASS`
 - staged provider smoke returns `status=PASS`, `fake_home_used=true`, and
   `real_home_touched=false`
+- remote install/update proof returns `status=PASS` by proving fresh install,
+  stale update detection, and post-update refresh in a fake provider home
 - staged dogfood returns `status=PASS`
 - provider smoke returns `status=PASS` for a matching install, or `PARTIAL`
   when an existing provider target is stale relative to the checked-out package
@@ -138,6 +141,7 @@ from the cloned repository:
 claude plugin validate ./plugins/groundline --strict
 agy plugin validate ./plugins/groundline
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_validate.py --json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_remote_install_probe.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json --require-installed
 ```
 

@@ -145,6 +145,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
             "scripts/groundline_dogfood.py",
             "scripts/groundline_plan_update.py",
             "scripts/groundline_provider_smoke.py",
+            "scripts/groundline_remote_install_probe.py",
             "scripts/groundline_radar.py",
             "scripts/groundline_release_gate.py",
             "scripts/lint.py",
@@ -431,6 +432,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn('"scripts/groundline_provider_smoke.py"', validator)
         self.assertIn('"scripts/groundline_provider_validate.py"', validator)
         self.assertIn('"scripts/groundline_privacy_scan.py"', validator)
+        self.assertIn('"scripts/groundline_remote_install_probe.py"', validator)
         self.assertIn('"scripts/groundline_release_gate.py"', validator)
         self.assertIn('"scripts/lint.py"', validator)
         self.assertIn('"scripts/sync_provider_package.py"', validator)
@@ -453,6 +455,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn("python3 scripts/groundline_provider_smoke.py --json --stage-package --require-installed", install)
         self.assertIn("python3 scripts/groundline_provider_smoke.py --json --require-installed", install)
         self.assertIn("python3 scripts/groundline_provider_validate.py --json", install)
+        self.assertIn("python3 scripts/groundline_remote_install_probe.py --json", install)
         self.assertIn("package validation returns `status=PASS`", install)
         self.assertIn("provider smoke returns `status=PASS` for a matching install, or `PARTIAL`", install)
         self.assertIn("Treat provider smoke `FAIL` as an install blocker", install)
@@ -464,6 +467,7 @@ class GroundLineStaticContractTests(unittest.TestCase):
         self.assertIn("python3 scripts/validate_pack.py --json", update)
         self.assertIn("(cd plugins/groundline && PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json)", update)
         self.assertIn("python3 scripts/groundline_safety_eval.py --json", update)
+        self.assertIn("python3 scripts/groundline_remote_install_probe.py --json", update)
         self.assertIn("python3 scripts/groundline_doctor.py --json --offline --probe-tools", update)
         self.assertIn("python3 scripts/groundline_radar.py --json --offline --command-sources", update)
         self.assertIn("python3 scripts/groundline_provider_smoke.py --json", smoke)

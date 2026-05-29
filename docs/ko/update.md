@@ -11,6 +11,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json
 (cd plugins/groundline && PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_pack.py --json)
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_safety_eval.py --json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_remote_install_probe.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_dogfood.py --stage-package --probe-runtimes --json
 ```
@@ -40,3 +41,6 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/run_scenarios.py --platform linux --sa
 - `groundline_provider_smoke.py`가 `PARTIAL`이면 `install_doctor_status`와 provider별
   `runtime_probe.issues`를 먼저 읽습니다. 흔한 원인은 stale installed version,
   provider payload 누락, skill count drift입니다.
+- `groundline_remote_install_probe.py --json`은 fake provider home에서 fresh
+  install, 이전 버전 감지, refresh 후 PASS까지 확인합니다. 실제 provider home은
+  바꾸지 않습니다.

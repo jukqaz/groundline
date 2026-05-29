@@ -236,6 +236,13 @@ def installed_version_at(path: Path, manifest: str) -> str | None:
     return version if isinstance(version, str) else None
 
 
+def candidate_version(path: Path, source: str, manifest: str) -> str:
+    installed_version = installed_version_at(path, manifest)
+    if installed_version:
+        return installed_version
+    return path.name if source == "cache" else ""
+
+
 def select_install_target(home: Path, config: dict, source_version: str | None) -> tuple[Path, str, list[str]]:
     direct_target = home.joinpath(*config["target_parts"])
     candidates: list[tuple[Path, str]] = []
@@ -262,7 +269,14 @@ def select_install_target(home: Path, config: dict, source_version: str | None) 
             if path.name == source_version or installed_version_at(path, config["manifest"]) == source_version:
                 return path, source, candidate_versions
     if candidates:
-        return candidates[-1][0], candidates[-1][1], candidate_versions
+        selected = max(
+            candidates,
+            key=lambda item: (
+                version_sort_key(candidate_version(item[0], item[1], config["manifest"])),
+                1 if item[1] == "direct" else 0,
+            ),
+        )
+        return selected[0], selected[1], candidate_versions
     return direct_target, "direct", candidate_versions
 
 

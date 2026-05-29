@@ -1,9 +1,9 @@
 # GroundLine Maturity Assessment
 
-Date: 2026-05-28
+Date: 2026-05-29
 
-Scope: GroundLine v0.3.3 release candidate, packaged plugin, local provider
-install state, CI, and public release surface.
+Scope: GroundLine v0.3.5 local release candidate, packaged plugin, local
+provider install/update proof, CI, and public release surface.
 
 ## Current Conclusion
 
@@ -14,32 +14,36 @@ agent sessions, but not yet a 1.0 package. The core idea is mature: a small
 control plane for state proof, side-effect boundaries, handoff, release
 discipline, and evidence. The 1.0 gap is now narrower: Real provider activation proof
 and post-install confirmation need to be stronger before calling the package
-stable. Version drift control, skill graduation decisions, and compact first-use
-workflow examples are implemented in the v0.3.3 release candidate and covered by
-the current local validation evidence. Post-install provider confirmation still
-needs to be stronger before calling the package stable.
+stable. Version drift control, skill graduation decisions, compact first-use
+workflow examples, and fake-home remote install/update proof are implemented
+or in the current local candidate. Repeated published-ref confirmation and live
+activation proof still need to be stronger before calling the package stable.
 
 ## Evidence Used
 
-- Release-candidate source version: `0.3.3`. Public tag creation still requires
-  the release gate, provider refresh proof, remote CI proof, and explicit
-  publishing approval.
-- Remote CI evidence is intentionally not frozen into this static assessment.
-  Before a release decision, check the latest GroundLine workflow for the
-  release-candidate HEAD and record the result in the release notes or handoff.
-- Current local release-candidate evidence: `groundline_release_gate.py --json
-  --keep-going --include-docker-execution --release-version 0.3.3` is the
-  release gate for this candidate. Real provider smoke may remain `PARTIAL`
-  until Codex and Claude Code targets are refreshed from the pushed package.
-  Staged provider smoke proves a fake refreshed install for Codex, Claude Code,
-  and Antigravity.
+- Published source version: `0.3.3`. The local `v0.3.3` tag, remote `main`, and
+  remote `v0.3.3` tag point at the same commit for the published patch.
+- Remote CI evidence: the GroundLine push workflow for the v0.3.3 release commit
+  completed successfully; the scheduled radar workflow after release also
+  completed successfully.
+- Current local evidence: `groundline_release_gate.py --json --keep-going
+  --include-docker-execution --release-version 0.3.5` returns `status=PASS`
+  after source/package validation, unit tests, privacy scan, fake-home remote
+  install/update proof, real provider smoke, staged dogfood, and Linux Docker
+  execution. Tag, push, and GitHub Release creation remain excluded and require
+  explicit approval.
+- Current provider install evidence: `groundline_provider_smoke.py --json
+  --require-installed` returns `status=PASS`, `install_doctor_status=PASS`,
+  `next_actions=[]`, `real_home_touched=false`, and `secret_value_printed=false`
+  after local Codex, Claude Code, and Antigravity direct provider targets were
+  refreshed from the current `0.3.5` packaged payload.
 - Source validation: `validate_pack.py --json` returned `status=PASS`.
 - Packaged validation: `plugins/groundline` validation returned `status=PASS`.
 - Lint validation: `lint.py --json --require-actionlint` returned
   `status=PASS`.
 - Provider-native validation: `groundline_provider_validate.py --json`
   returned `status=PASS` for local Claude Code and Antigravity validators.
-- Unit tests: `python3 -m unittest discover -s tests -v` returned 126 tests OK.
+- Unit tests: `python3 -m unittest discover -s tests -v` returned 129 tests OK.
 - Safety eval: `groundline_safety_eval.py --json` returned `status=PASS` with
   4 synthetic cases and `mutation_performed=false`.
 - Privacy scan: `groundline_privacy_scan.py --json` returned `status=PASS`
@@ -57,10 +61,9 @@ needs to be stronger before calling the package stable.
 - Artifact lifecycle: research, comparison, recommendation, implementation,
   dogfood, release, and post-release review artifacts map to existing skills
   and output contracts.
-- Provider install evidence: the read-only install doctor reports PARTIAL for
-  Codex and Claude Code on this machine because those installed provider
-  targets still point at same-version content that differs from the current
-  v0.3.3 release candidate. Antigravity install shape is `PASS`.
+- Provider install evidence: current local Codex, Claude Code, and Antigravity
+  direct targets match the `0.3.5` package version, skill count, and content
+  fingerprint. Published-ref confirmation is still needed before 1.0.
 - Staged provider smoke evidence: `groundline_provider_smoke.py --json
   --stage-package --require-installed` returns `status=PASS`,
   `fake_home_used=true`, and `real_home_touched=false`.
@@ -86,9 +89,9 @@ needs to be stronger before calling the package stable.
 | Trigger clarity | 84 | PASS | v0.3.2 clarified ecosystem, maturity, and release routing; more provider activation evidence is still needed. |
 | Context weight | 86 | PASS | Long guidance mostly lives in docs and references; skills stay short enough to load on demand. |
 | Workflow coverage | 82 | PARTIAL | Core loops and compact workflow examples are covered; representative real-provider workflows are still sparse. |
-| Verification strength | 86 | PARTIAL | Source, package, lint, unit, staged dogfood, and scenario gates pass; real provider smoke is PARTIAL until installed payloads match the draft. |
+| Verification strength | 88 | PARTIAL | Source, package, lint, unit, staged dogfood, provider smoke, fake-home remote install/update proof, and macOS/Linux Docker scenario gates are covered locally; live provider activation proof is still incomplete. |
 | Security posture | 90 | PASS | Default behavior is read-only/offline, staged smoke refuses real-home writes, secret-sensitive docs exist, and provider state is kept out of source. |
-| Provider install posture | 84 | PARTIAL | The install doctor now detects provider cache, installed version, payload, skill count drift, and same-version content drift; the current installed provider targets are stale relative to the draft. |
+| Provider install posture | 88 | PARTIAL | The install doctor now detects provider cache, installed version, payload, skill count drift, same-version content drift, and fake-home update transitions; published-ref confirmation is still needed before 1.0. |
 | Maintenance discipline | 84 | PASS | Manifest version checks now use canonical `plugin.json`, and package validation catches conflict-copy artifacts. |
 
 ## Main Findings
@@ -96,8 +99,9 @@ needs to be stronger before calling the package stable.
 1. The package is already good enough for staged local use.
    Evidence: source/package validation, staged provider smoke, staged dogfood,
    and macOS/Linux scenarios pass. Real provider targets exist with 19 skills,
-   but the new content fingerprint check correctly marks stale Codex and Claude
-   Code targets PARTIAL until refreshed.
+   and the current local content fingerprint checks pass after Codex, Claude
+   Code, and Antigravity direct provider targets were refreshed to the `0.3.5`
+   package. v0.3.5 also adds fake-home update proof.
 
 2. The remaining risk is not feature absence. It is proof quality.
    The staged dogfood harness now covers six scenario contracts, including all
@@ -132,8 +136,10 @@ expansion.
 
 Goal: make local provider install state obvious after GitHub install.
 
-Status: implemented in the v0.3.3 release candidate; keep as release gate until the
-patch is published and installed back from GitHub.
+Status: implemented in v0.3.3, exercised in the local v0.3.4 candidate, and
+extended in v0.3.5 with fake-home remote install/update proof. Keep it as a
+release gate until published-ref install or update confirmation is repeated
+outside the current local targets.
 
 Acceptance:
 
@@ -152,8 +158,8 @@ Goal: prove that provider sessions select the intended skill and output
 contract for representative prompts.
 
 Status: matrix document and staged six-scenario contract coverage are
-implemented in the v0.3.3 release candidate. Live provider proof rows are still
-needed for side-effect guard, ecosystem evaluation, and AI usage maturity.
+implemented in v0.3.3. Live provider proof rows are still needed for side-effect
+guard, ecosystem evaluation, and AI usage maturity.
 
 Acceptance:
 
@@ -202,8 +208,8 @@ Acceptance:
 
 Goal: reduce release drift when the package version changes.
 
-Status: implemented in the v0.3.3 release candidate; keep as release gate until the
-next version bump proves the canonical manifest path.
+Status: implemented in v0.3.3; keep as release gate until the next version bump
+proves the canonical manifest path.
 
 Acceptance:
 
@@ -228,14 +234,12 @@ GroundLine should not call itself 1.0 until all of these are true:
 
 ## Release Decision
 
-v0.3.3 is the current release candidate. It closes the P0 install posture and
-version drift diagnostics, adds staged provider activation coverage, records
-skill graduation decisions, adds a compact workflow cookbook, and maps the
-artifact lifecycle. Source and packaged manifests are expected to match
-`0.3.3` after package sync. Real provider smoke remains the main live gate while
-Codex and Claude Code are refreshed from the pushed package.
+v0.3.5 is the current local release candidate. It carries forward the v0.3.4
+local proof-quality work and adds fake-home remote install/update proof. Source
+and packaged manifests are `0.3.5`; real provider targets were refreshed
+locally; the full local release gate passes. Published-ref proof must still be
+collected before public release.
 
-Ship decision for the candidate: `continue` through local release gate, remote
-CI, provider refresh proof, and explicit tag/release approval. Do not add a new
-skill unless the activation matrix proves a repeated failure that existing
-skills cannot express.
+Current decision: continue until live activation proof rows are collected or
+explicitly accepted as partial. Do not add a new skill unless the activation
+matrix proves a repeated failure that existing skills cannot express.

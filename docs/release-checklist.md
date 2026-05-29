@@ -87,6 +87,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_radar.py --json --offline -
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_safety_eval.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_privacy_scan.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json --stage-package --require-installed
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_remote_install_probe.py --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_provider_smoke.py --json --require-installed
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/groundline_dogfood.py --stage-package --probe-runtimes --json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/run_scenarios.py --platform macos --sandbox local --json
@@ -125,4 +126,6 @@ gh release create "$TAG" --repo jukqaz/groundline --title "$TAG" --notes-file CH
 - Confirm CI passed for the published commit.
 - Confirm the GitHub Release page is reachable.
 - Run provider install confirmation from the published ref.
+- Run remote install/update proof from the published ref before claiming update
+  confidence.
 - Record any accepted partial proof in the release notes or next-work document.
