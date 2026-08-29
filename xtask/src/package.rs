@@ -227,6 +227,13 @@ fn packaged_guidance_source(root: &Path, path: &Path) -> bool {
         || path.starts_with(root.join("skills"))
 }
 
+fn source_scan_path(root: &Path, path: &Path) -> bool {
+    !matches!(
+        path.file_name().and_then(|value| value.to_str()),
+        Some(".git" | "target" | "dist")
+    ) && !path.starts_with(root.join("plugins/groundline/bin"))
+}
+
 pub fn verify_source(root: &Path) -> Result<Value, XtaskError> {
     let root = root.canonicalize().map_err(|_| XtaskError::InvalidSource)?;
     package_root(&root)?;
@@ -234,9 +241,7 @@ pub fn verify_source(root: &Path) -> Result<Value, XtaskError> {
     for entry in WalkDir::new(&root)
         .follow_links(false)
         .into_iter()
-        .filter_entry(|entry| {
-            !matches!(entry.file_name().to_str(), Some(".git" | "target" | "dist"))
-        })
+        .filter_entry(|entry| source_scan_path(&root, entry.path()))
     {
         let entry = entry.map_err(|_| XtaskError::InvalidSource)?;
         if entry.file_type().is_file()
@@ -264,9 +269,7 @@ pub fn verify_source(root: &Path) -> Result<Value, XtaskError> {
     for entry in WalkDir::new(&root)
         .follow_links(false)
         .into_iter()
-        .filter_entry(|entry| {
-            !matches!(entry.file_name().to_str(), Some(".git" | "target" | "dist"))
-        })
+        .filter_entry(|entry| source_scan_path(&root, entry.path()))
     {
         let entry = entry.map_err(|_| XtaskError::InvalidSource)?;
         if entry.file_type().is_file()
@@ -332,7 +335,7 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use super::regular_bytes;
+    use super::{regular_bytes, source_scan_path};
 
     #[test]
     fn package_reads_reject_symlinks_and_oversized_files() {
@@ -345,5 +348,22 @@ mod tests {
             std::os::unix::fs::symlink(&file, root.path().join("link")).unwrap();
             assert!(regular_bytes(&root.path().join("link")).is_err());
         }
+    }
+
+    #[test]
+    fn source_scan_excludes_generated_binary_tree() {
+        let root = tempdir().expect("temporary directory");
+        assert!(!source_scan_path(
+            root.path(),
+            &root.path().join("plugins/groundline/bin/target/groundline")
+        ));
+        assert!(source_scan_path(
+            root.path(),
+            &root.path().join("plugins/groundline/README.md")
+        ));
+        assert!(!source_scan_path(
+            root.path(),
+            &root.path().join("crates/groundline/target")
+        ));
     }
 }
