@@ -1,0 +1,38 @@
+[package]
+name = "groundline-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["audit-store"]
+audit-store = [
+  "dep:chrono",
+  "dep:dirs",
+  "groundline-contracts/audit",
+  "dep:rusqlite",
+  "dep:serde",
+  "dep:serde_json",
+  "dep:thiserror",
+  "dep:walkdir",
+]
+
+[dependencies]
+chrono = { workspace = true, optional = true }
+dirs = { workspace = true, optional = true }
+groundline-contracts = { version = "0.19.0", path = "../groundline-contracts", default-features = false }
+rusqlite = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
+walkdir = { workspace = true, optional = true }
+
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

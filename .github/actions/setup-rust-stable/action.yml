@@ -1,0 +1,31 @@
+name: Set up moving Rust stable
+description: Install the current stable toolchain with optional components and target
+
+inputs:
+  components:
+    description: Comma-separated rustup components
+    required: false
+    default: ""
+  target:
+    description: Optional Rust compilation target
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        COMPONENTS: ${{ inputs.components }}
+        TARGET: ${{ inputs.target }}
+      run: |
+        arguments=(stable --profile minimal --no-self-update)
+        if [ -n "$COMPONENTS" ]; then
+          arguments+=(--component "$COMPONENTS")
+        fi
+        if [ -n "$TARGET" ]; then
+          arguments+=(--target "$TARGET")
+        fi
+        rustup toolchain install "${arguments[@]}"
+        rustc +stable -Vv
+        cargo +stable --version

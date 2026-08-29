@@ -1,0 +1,20 @@
+{
+  "name": "groundline",
+  "interface": {
+    "displayName": "GroundLine"
+  },
+  "plugins": [
+    {
+      "name": "groundline",
+      "source": {
+        "source": "local",
+        "path": "./plugins/groundline"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Coding"
+    }
+  ]
+}

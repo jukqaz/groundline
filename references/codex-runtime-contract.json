@@ -1,0 +1,22 @@
+{
+  "kind": "groundline-codex-runtime-contract",
+  "schema": 1,
+  "owner": "codex",
+  "groundline_role": "local_evidence_layer",
+  "groundline_does_not_own": [
+    "execution",
+    "permissions",
+    "models",
+    "agents",
+    "worktrees",
+    "review",
+    "compaction",
+    "plugin_upgrade"
+  ],
+  "public_invariants": {
+    "lifecycle_hooks": 0,
+    "network_clients": 0,
+    "background_workers": 0,
+    "collector_identities": 0
+  }
+}

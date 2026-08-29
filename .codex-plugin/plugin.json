@@ -1,0 +1,52 @@
+{
+  "name": "groundline",
+  "version": "0.19.0",
+  "description": "Local-first Codex guidance, project audits, and evidence contracts.",
+  "author": {
+    "name": "GroundLine contributors",
+    "email": "6260165+jukqaz@users.noreply.github.com",
+    "url": "https://github.com/jukqaz"
+  },
+  "homepage": "https://github.com/jukqaz/groundline",
+  "repository": "https://github.com/jukqaz/groundline",
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "skills",
+    "codex-app",
+    "gpt-5.6",
+    "usage-efficiency",
+    "goals",
+    "chronicle",
+    "agent-history",
+    "verification",
+    "context",
+    "local-first",
+    "privacy"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "GroundLine",
+    "shortDescription": "Local-first Codex evidence and project audits.",
+    "longDescription": "GroundLine is a compact, local-first operating layer for Codex. Six focused skills coordinate native Goals, frozen implementation batches, task boundaries, live proof, redacted evidence, model and effort guidance, and App-first surface alignment. The optional Rust CLI reads bounded local files for diagnostics and aggregate audits. The public plugin installs no lifecycle hooks, performs no network requests, creates no background process, and stores no collector identity. Codex continues to own execution, worktrees, review, permissions, agents, compaction, settings, and upgrades.",
+    "developerName": "GroundLine",
+    "category": "Coding",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Use $groundline:reconcile-current-state to prove state and choose the light or full pre-implementation gate.",
+      "Use $groundline:close-live-work to close source, package, installed App runtime, and live evidence.",
+      "Use $groundline:audit-agent-history to simulate efficiency from Codex counters and redacted Chronicle signals."
+    ],
+    "websiteURL": "https://github.com/jukqaz/groundline",
+    "privacyPolicyURL": "https://github.com/jukqaz/groundline/blob/main/docs/privacy.md",
+    "termsOfServiceURL": "https://github.com/jukqaz/groundline/blob/main/docs/terms.md",
+    "brandColor": "#2563EB",
+    "composerIcon": "./assets/groundline-icon.svg",
+    "logo": "./assets/groundline-logo.svg",
+    "screenshots": []
+  }
+}

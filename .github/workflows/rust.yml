@@ -1,0 +1,247 @@
+name: GroundLine Rust
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_release_artifacts:
+        description: Build and retain all six release targets from main
+        required: true
+        default: false
+        type: boolean
+  pull_request:
+    paths:
+      - ".codex-plugin/**"
+      - ".github/actions/**"
+      - ".github/workflows/**"
+      - ".cargo/**"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "CHANGELOG.md"
+      - "LICENSE"
+      - "README.md"
+      - "README.ko.md"
+      - "SECURITY.md"
+      - "assets/**"
+      - "crates/**"
+      - "deny.toml"
+      - "docs/**"
+      - "plugins/groundline/**"
+      - "references/**"
+      - "rust-toolchain.toml"
+      - "skills/**"
+      - "xtask/**"
+  push:
+    tags:
+      - "v*.*.*"
+permissions:
+  contents: read
+
+env:
+  GIT_CONFIG_COUNT: "1"
+  GIT_CONFIG_KEY_0: init.defaultBranch
+  GIT_CONFIG_VALUE_0: main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fast:
+    name: fast source checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Select the moving Rust stable channel
+        uses: ./.github/actions/setup-rust-stable
+        with:
+          components: rustfmt
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Run workflow and CLI contract tests
+        run: |
+          cargo test --locked -p xtask --all-targets
+          cargo test --locked -p groundline-cli --test cli_contract
+      - name: Install and run actionlint
+        env:
+          ACTIONLINT_VERSION: "1.7.12"
+          ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+        run: |
+          mkdir -p .tools
+          curl -sSfL "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" -o /tmp/actionlint.tar.gz
+          echo "${ACTIONLINT_SHA256}  /tmp/actionlint.tar.gz" | shasum -a 256 -c -
+          tar -xzf /tmp/actionlint.tar.gz -C .tools actionlint
+          .tools/actionlint
+
+  qualification:
+    name: full source qualification
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    needs: fast
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Select the moving Rust stable channel
+        uses: ./.github/actions/setup-rust-stable
+        with:
+          components: clippy
+      - name: Deny vulnerable, unlicensed, or untrusted crates
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
+        env:
+          # Match the toolchain baked into the pinned action image. Without this
+          # override, the repository's moving stable channel triggers a download.
+          RUSTUP_TOOLCHAIN: "1.85.0"
+        with:
+          rust-version: "1.85.0"
+          command: check
+          command-arguments: "--show-stats"
+      - name: Check capability feature partitions
+        run: |
+          cargo check --locked -p groundline-contracts --no-default-features
+          for feature in audit batch efficiency version; do
+            cargo check --locked -p groundline-contracts --no-default-features --features "$feature"
+          done
+          cargo check --locked -p groundline-runtime --no-default-features
+      - name: Run the remaining portable Rust suite once
+        run: cargo test --workspace --all-features --locked
+      - name: Deny Rust warnings once
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - name: Synchronize and verify the installable package
+        run: |
+          cargo run --locked -p xtask -- sync-package --root . --json
+          git diff --exit-code -- plugins/groundline
+          cargo run --locked -p xtask -- verify-source --root . --json
+      - name: Exercise read-only operational commands
+        run: |
+          cargo run --locked --bin groundline -- doctor --plugin-root . --codex-home /tmp/groundline-empty-codex-home --json
+          cargo run --locked --bin groundline -- project-audit --repo . --json
+
+  artifacts:
+    name: package ${{ matrix.target }}
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' &&
+       inputs.build_release_artifacts &&
+       github.ref == 'refs/heads/main')
+    needs: qualification
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            runtime-tests: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Select the moving Rust stable channel
+        uses: ./.github/actions/setup-rust-stable
+        with:
+          target: ${{ matrix.target }}
+      - name: Install the musl linker
+        if: contains(matrix.target, 'unknown-linux-musl')
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes musl-tools
+          cc_key="CC_${TARGET//-/_}"
+          linker_key="CARGO_TARGET_${TARGET^^}_LINKER"
+          linker_key="${linker_key//-/_}"
+          echo "${cc_key}=musl-gcc" >> "$GITHUB_ENV"
+          echo "${linker_key}=musl-gcc" >> "$GITHUB_ENV"
+      - name: Run Windows file-security contracts once
+        if: matrix.runtime-tests
+        run: cargo test --locked -p groundline-runtime local_file
+      - name: Build the host packaging tool
+        run: cargo build --locked -p xtask
+      - name: Build the release binary
+        run: cargo build --release --locked --bin groundline --target "${{ matrix.target }}"
+      - name: Package and smoke the target artifact
+        shell: bash
+        run: |
+          binary="target/${{ matrix.target }}/release/groundline"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            binary="${binary}.exe"
+          fi
+          xtask="target/debug/xtask"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            xtask="${xtask}.exe"
+          fi
+          "$xtask" package-binary \
+            --target "${{ matrix.target }}" \
+            --binary "$binary" \
+            --output "dist/${{ matrix.target }}"
+          "dist/${{ matrix.target }}/$(basename "$binary")" platform --json
+      - name: Upload the immutable target artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: groundline-${{ matrix.target }}
+          path: dist
+          if-no-files-found: error
+          retention-days: 14
+
+  promote-stable:
+    name: promote binary stable channel
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Assemble the exact six-target package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: groundline-*
+          path: plugins/groundline/bin
+          merge-multiple: true
+      - name: Restore Unix executable modes
+        shell: bash
+        run: >-
+          chmod 0755
+          plugins/groundline/bin/aarch64-apple-darwin/groundline
+          plugins/groundline/bin/x86_64-apple-darwin/groundline
+          plugins/groundline/bin/aarch64-unknown-linux-musl/groundline
+          plugins/groundline/bin/x86_64-unknown-linux-musl/groundline
+      - name: Select the moving Rust stable channel
+        uses: ./.github/actions/setup-rust-stable
+      - name: Verify and atomically advance stable
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
+          cargo run --locked -p xtask -- sync-package --root . --json
+          git diff --exit-code -- plugins/groundline ':!plugins/groundline/bin'
+          cargo run --locked -p xtask -- verify-source --root . --json
+          cargo run --locked -p xtask -- verify-package-set --root plugins/groundline/bin --version "${RELEASE_TAG#v}" --json
+          plugins/groundline/bin/x86_64-unknown-linux-musl/groundline provider-smoke --plugin-root plugins/groundline --require-installed --json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f plugins/groundline/bin
+          git commit -m "release: assemble ${RELEASE_TAG} binaries"
+          CANDIDATE_SHA="$(git rev-parse HEAD)"
+          cargo run --locked -p xtask -- promote-stable \
+            --release-tag "$RELEASE_TAG" \
+            --source-sha "$SOURCE_SHA" \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --confirm \
+            --json

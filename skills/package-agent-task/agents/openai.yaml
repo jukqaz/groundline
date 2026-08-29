@@ -1,0 +1,6 @@
+interface:
+  display_name: "Package Agent Task"
+  short_description: "Create a task packet with context and delegation budgets"
+  default_prompt: "Package this into a concise GroundLine Task Packet with context, delegation, verification, and stop boundaries."
+policy:
+  allow_implicit_invocation: false
