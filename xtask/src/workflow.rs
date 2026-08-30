@@ -55,20 +55,29 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
         "push:\n    tags:",
         "concurrency:",
         "cancel-in-progress: true",
+        "Reject an invalid or version-mismatched release tag before expensive work",
+        "release tag must be strict vMAJOR.MINOR.PATCH",
         "name: fast source checks",
         "name: full source qualification",
         "if: github.event_name == 'workflow_dispatch'",
         "needs: fast",
         "cargo test --locked -p xtask --all-targets",
         "cargo test --locked -p groundline-cli --test cli_contract",
+        "cargo test --locked -p groundline-insights-cli --test cli_contract",
         "cargo test --workspace --all-features --locked",
+        "cargo test --locked -p groundline-insights-api --lib clickhouse_",
+        r#"GROUNDLINE_CLICKHOUSE_TEST_ALLOW_MUTATION: "true""#,
         "cargo clippy --workspace --all-targets --all-features --locked -- -D warnings",
         "cargo run --locked -p xtask -- verify-source --root . --json",
         "retention-days: 14",
-        "name: promote binary stable channel",
-        "git merge-base --is-ancestor",
+        "name: promote both plugins to stable",
+        "--product core",
+        "--product insights",
+        "linux/amd64,linux/arm64",
+        "cargo run --locked -p xtask -- render-compose",
         "cargo run --locked -p xtask -- promote-stable",
         "uses: ./.github/actions/setup-rust-stable",
+        "name: publish signed multi-architecture Insights API image\n    if: startsWith(github.ref, 'refs/tags/v')\n    needs: artifacts",
     ] {
         if !rust.contains(required) {
             return Err(XtaskError::InvalidSource);
@@ -76,10 +85,13 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
     }
     if rust.contains("\n  push:\n    branches:")
         || rust.contains("self-hosted")
+        || rust.contains("pull_request_target:")
+        || rust.contains("schedule:")
+        || rust.contains("permissions: write-all")
         || rust.contains("GROUNDLINE_TRUSTED")
-        || rust.contains("infrastructure/")
-        || rust.contains("services/")
-        || rust.contains("hooks/**")
+        || rust.contains("RUSTUP_TOOLCHAIN: \"1.")
+        || rust.contains("rust-version: \"1.")
+        || rust.contains("sync-package")
         || rust
             .matches("cargo test --workspace --all-features --locked")
             .count()

@@ -1,6 +1,0 @@
-interface:
-  display_name: "Evaluate AI Usage Maturity"
-  short_description: "Choose a Codex model and effort, or assess efficiency"
-  default_prompt: "Use $evaluate-ai-usage-maturity to choose Luna, Terra, or Sol and the lowest sufficient effort for this Codex task without changing settings. Name the task shape and stopping condition."
-policy:
-  allow_implicit_invocation: false

@@ -17,22 +17,53 @@ audit-store = [
   "dep:thiserror",
   "dep:walkdir",
 ]
+insights-client = [
+  "dep:chrono",
+  "dep:dirs",
+  "groundline-contracts/insights",
+  "dep:ipnet",
+  "dep:reqwest",
+  "dep:rustls",
+  "dep:serde",
+  "dep:serde_json",
+  "dep:secrecy",
+  "dep:thiserror",
+  "dep:url",
+  "dep:uuid",
+  "dep:zeroize",
+]
+tailnet-probe = ["dep:chrono", "dep:command-group", "dep:serde_json"]
+insights-state = [
+  "audit-store",
+  "insights-client",
+  "tailnet-probe",
+  "groundline-contracts/audit",
+  "dep:sha2",
+]
 
 [dependencies]
 chrono = { workspace = true, optional = true }
+command-group = { workspace = true, optional = true }
 dirs = { workspace = true, optional = true }
-groundline-contracts = { version = "0.19.0", path = "../groundline-contracts", default-features = false }
+groundline-contracts = { version = "0.20.0", path = "../groundline-contracts", default-features = false }
+ipnet = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
 rusqlite = { workspace = true, optional = true }
+rustls = { workspace = true, optional = true }
+secrecy = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
+tempfile.workspace = true
 thiserror = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
 walkdir = { workspace = true, optional = true }
+zeroize = { workspace = true, optional = true }
 
 [target.'cfg(unix)'.dependencies]
 rustix.workspace = true
 
 [target.'cfg(windows)'.dependencies]
+windows-permissions.workspace = true
 windows-sys.workspace = true
-
-[dev-dependencies]
-tempfile.workspace = true

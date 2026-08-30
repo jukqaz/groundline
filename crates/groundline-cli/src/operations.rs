@@ -15,6 +15,9 @@ const MAX_MANIFEST_BYTES: u64 = 16 * 1024;
 const MAX_BINARY_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_PROJECT_FILES: usize = 100_000;
 
+const INSIGHTS_PROFILE: &str = "groundline/insights/owner-profile.json";
+const INSIGHTS_STATE_ROOT: &str = "groundline/insights";
+
 #[derive(Debug, Deserialize)]
 struct PluginManifest {
     name: String,
@@ -177,6 +180,71 @@ pub fn doctor(plugin_root: Option<&Path>, codex_home: &Path) -> Result<Value, Co
     }))
 }
 
+/// Report only privacy-safe evidence that the optional Insights integration left locally.
+/// Plugin installation and hook trust stay provider-owned and are intentionally not inferred.
+pub fn integration_status(codex_home: &Path, integration: &str) -> Result<Value, ContractError> {
+    if integration != "insights" && integration != "groundline-insights" {
+        return Err(ContractError("unsupported_integration".to_owned()));
+    }
+    let root = codex_home.join(INSIGHTS_STATE_ROOT);
+    let profile_configured = regular_file(&codex_home.join(INSIGHTS_PROFILE));
+    let mut state_directory_count = 0_u64;
+    let mut identity_present = false;
+    let mut consent_present = false;
+    let mut token_present = false;
+    let mut pending_event_count = 0_u64;
+
+    if let Ok(entries) = fs::read_dir(&root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(metadata) = fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                continue;
+            }
+            state_directory_count = state_directory_count.saturating_add(1);
+            identity_present |= regular_file(&path.join("identity.json"));
+            consent_present |= regular_file(&path.join("consent.json"));
+            token_present |= regular_file(&path.join("collector-token"));
+            if let Ok(outbox) = fs::read_dir(path.join("outbox")) {
+                pending_event_count = pending_event_count.saturating_add(
+                    outbox
+                        .flatten()
+                        .filter(|item| regular_file(&item.path()))
+                        .count() as u64,
+                );
+            }
+        }
+    }
+
+    let observed = profile_configured || state_directory_count > 0;
+    Ok(json!({
+        "kind":"groundline-integration-status",
+        "schema":1,
+        "status":"PASS",
+        "integration":"groundline-insights",
+        "integration_contract":1,
+        "local_state":if observed { "observed" } else { "not_observed" },
+        "state_observed":observed,
+        "state_directory_count":state_directory_count,
+        "owner_profile_configured":profile_configured,
+        "collector_identity_present":identity_present,
+        "consent_status":if consent_present { "active" } else { "missing" },
+        "collector_token_present":token_present,
+        "pending_event_count":pending_event_count,
+        "plugin_installation_status":"provider_check_required",
+        "hook_trust_status":"provider_check_required",
+        "endpoint_emitted":false,
+        "collector_id_emitted":false,
+        "timestamps_emitted":false,
+        "network_performed":false,
+        "mutation_performed":false,
+        "private_paths_emitted":false,
+        "secret_value_printed":false,
+    }))
+}
+
 fn ignored(entry: &DirEntry) -> bool {
     entry.depth() > 0
         && entry.file_type().is_dir()
@@ -273,7 +341,7 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use super::project_audit;
+    use super::{integration_status, project_audit};
 
     #[test]
     fn project_audit_counts_surfaces_without_emitting_paths_or_values() {
@@ -288,5 +356,22 @@ mod tests {
         assert_eq!(result["surface_counts"]["worktree_include"], 1);
         assert!(!encoded.contains("private-value"));
         assert!(!encoded.contains(root.path().to_string_lossy().as_ref()));
+    }
+
+    #[test]
+    fn integration_status_reports_presence_without_emitting_private_values() {
+        let home = tempdir().unwrap();
+        let state = home.path().join("groundline/insights/codex_app-desktop");
+        fs::create_dir_all(state.join("outbox")).unwrap();
+        fs::write(state.join("identity.json"), "private-collector-id").unwrap();
+        fs::write(state.join("consent.json"), "private-consent-id").unwrap();
+        fs::write(state.join("collector-token"), "private-token").unwrap();
+        fs::write(state.join("outbox/event.json"), "private-event").unwrap();
+        let result = integration_status(home.path(), "insights").unwrap();
+        let encoded = serde_json::to_string(&result).unwrap();
+        assert_eq!(result["state_observed"], true);
+        assert_eq!(result["pending_event_count"], 1);
+        assert!(!encoded.contains("private-"));
+        assert!(!encoded.contains(home.path().to_string_lossy().as_ref()));
     }
 }

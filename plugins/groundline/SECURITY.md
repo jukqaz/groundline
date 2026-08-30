@@ -12,10 +12,10 @@ and contains no remote endpoint or credential field. Its CLI accepts explicit
 paths, rejects symlinks for bounded inputs, opens the local Codex state store
 read-only, and emits aggregates or reason codes instead of raw records and paths.
 
-The source qualification gate checks that the installable package is synchronized,
-the six native targets remain explicit, external CI actions are pinned, and private
-or personal markers are absent. These checks reduce accidental exposure but do not
-replace review.
+The source qualification gate checks both canonical plugin packages directly,
+the Core zero-hook invariant, the Insights four-hook invariant, all six native
+targets, pinned external CI actions, and the absence of private or personal
+markers. These checks reduce accidental exposure but do not replace review.
 
 ## Reporting
 

@@ -1,0 +1,40 @@
+{
+  "name": "groundline-insights",
+  "version": "0.20.0",
+  "description": "Public-source, opt-in self-hosted Insights companion for GroundLine.",
+  "author": {
+    "name": "GroundLine contributors",
+    "url": "https://github.com/jukqaz/groundline"
+  },
+  "homepage": "https://github.com/jukqaz/groundline/tree/main/plugins/groundline-insights",
+  "repository": "https://github.com/jukqaz/groundline",
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "codex-app",
+    "insights",
+    "telemetry",
+    "clickhouse",
+    "grafana"
+  ],
+  "interface": {
+    "displayName": "GroundLine Insights",
+    "shortDescription": "Opt-in self-hosted Insights for GroundLine.",
+    "longDescription": "GroundLine Insights is the public-source, private-data companion for the GroundLine core. It owns four fail-open Codex lifecycle hooks, local collector state, Tailnet transport, ClickHouse ingestion and reports, Grafana dashboards, and generic self-hosted deployment tooling. It does not ship GroundLine guidance skills, change global Codex configuration, install a daemon, or replace Codex execution and permission behavior.",
+    "developerName": "GroundLine contributors",
+    "category": "Coding",
+    "capabilities": [
+      "Read",
+      "Write",
+      "Private Tailnet Insights"
+    ],
+    "defaultPrompt": "Check the GroundLine Insights collector, upload, ClickHouse, and Grafana evidence lanes without exposing secrets or raw Codex content.",
+    "websiteURL": "https://github.com/jukqaz/groundline/tree/main/plugins/groundline-insights",
+    "privacyPolicyURL": "https://github.com/jukqaz/groundline/blob/main/docs/privacy.md",
+    "termsOfServiceURL": "https://github.com/jukqaz/groundline/blob/main/docs/terms.md",
+    "brandColor": "#2563EB",
+    "composerIcon": "./assets/groundline-icon.svg",
+    "logo": "./assets/groundline-logo.svg",
+    "screenshots": []
+  }
+}

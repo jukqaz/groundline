@@ -1,54 +1,58 @@
 # GroundLine
 
-GroundLine은 Codex 작업 준비, 증거 기반 완료, 프로젝트 설정 감사, 집계 사용량
-분석을 반복 가능하게 만드는 공개 로컬 우선 플러그인입니다. Codex의 실행,
-설정, 권한, 에이전트, worktree, 리뷰, 업그레이드 기능을 대체하지 않습니다.
+GroundLine은 공개 Rust 모노레포 하나에서 서로 독립적으로 설치할 수 있는 Codex
+플러그인 두 개를 제공합니다. Codex의 실행, 설정, 권한, 에이전트, worktree,
+리뷰, compaction, 업그레이드 기능을 대체하지 않습니다.
 
-## 개인정보 경계
+| 플러그인 | 역할 | 기본 네트워크 동작 |
+| --- | --- | --- |
+| `groundline` | 로컬 가이드, 프로젝트 감사, 증거 경계, 집계 사용량 분석 | 오프라인, hook·collector identity 없음 |
+| `groundline-insights` | 선택형 self-hosted 수집, ClickHouse report, Grafana dashboard | owner profile과 enrollment credential 설정 전에는 비활성 |
 
-공개 플러그인은 다음 불변식을 지킵니다.
-
-- lifecycle hook, 백그라운드 프로세스, 스케줄러, 수집 식별자가 없습니다.
-- 네트워크 클라이언트, 업로드 목적지, 인증 토큰, 원격 저장소가 없습니다.
-- prompt, transcript, 경로, 저장소 이름, 설정 값을 출력하지 않습니다.
-- 로컬 감사 명령은 크기가 제한된 일반 파일을 읽기 전용으로 열고 집계 수치와
-  안정적인 reason code만 반환합니다.
-
-`groundline provider-smoke --plugin-root <path> --json`는 owner hook manifest가
-있으면 실패합니다. `cargo xtask verify-source --root . --json`는 비공개 운영
-표식, 개인 경로, Python runtime 의존성, package 동기화 누락, CI 계약 이탈을
-거부합니다.
+설치 package의 canonical source는 `plugins/` 아래 두 디렉터리뿐입니다. 실제
+endpoint, credential, dataset 경로, 배포 receipt, 인프라 inventory는 Git 밖의
+owner-private 상태에 둡니다.
 
 ## 설치와 업그레이드
 
-Codex marketplace에 `https://github.com/jukqaz/groundline.git`을 추가하고
-`groundline` 플러그인을 설치합니다. refresh와 upgrade는 Codex가 담당하며,
-GroundLine은 자체 업데이트나 trust 변경을 수행하지 않습니다.
-
-업그레이드 후 설치 package와 native artifact를 각각 검증합니다.
+moving `stable` branch를 한 번 등록하고 필요한 플러그인을 선택합니다.
 
 ```console
-groundline provider-smoke --plugin-root /path/to/installed/groundline --require-installed --json
-groundline doctor --plugin-root /path/to/installed/groundline --json
+codex plugin marketplace add https://github.com/jukqaz/groundline.git --ref stable --json
+codex plugin add groundline@groundline --json
+codex plugin add groundline-insights@groundline --json
 ```
 
-Apple Silicon/Intel macOS, ARM64/x86_64 Linux, ARM64/x86_64 Windows를
-지원합니다. release artifact는 이동하는 Rust `stable` 채널로 빌드되며 엄격한
-manifest와 SHA-256 checksum을 포함합니다.
-
-## 주요 명령
+새 버전은 하나의 marketplace snapshot을 갱신해 적용합니다.
 
 ```console
-groundline platform --json
-groundline project-audit --repo . --json
-groundline audit weekly --days 7 --json
-groundline efficiency batch --input batch.json --json
-groundline efficiency compare --input comparison.json --json
+codex plugin marketplace upgrade groundline --json
+codex plugin list --json
 ```
 
-`project-audit`는 Codex guidance, config, skill, agent, rule, plugin,
-`.worktreeinclude` 개수만 세고 내용은 읽거나 반환하지 않습니다. audit는 로컬
-Codex state store를 수정하지 않으며, efficiency 입력은 외부로 전송하지 않습니다.
+marketplace 갱신, 설치 package checksum, hook 신뢰, collector upload,
+ClickHouse 반영, Grafana frame, image 게시, 운영 배포, stable 승격은 서로 다른
+증거 lane입니다.
 
-개발 검증 명령은 영문 README와 [release checklist](docs/release-checklist.md)를
+## 개인정보와 보안
+
+Core는 lifecycle hook을 설치하거나 네트워크 요청을 하지 않습니다. Insights만
+fail-open Codex lifecycle hook 4개를 소유합니다. Codex SQLite를 읽기 전용으로
+열어 제한된 집계 counter만 만들며 raw prompt, response, transcript, command,
+patch, path, 저장소명, task/rollout/account/hostname/IP 식별자를 wire contract에서
+거부합니다.
+
+Tailnet 연결은 권한이 아닙니다. 첫 enrollment에는 플러그인 밖의 비공개 파일에
+저장한 owner-issued credential이 추가로 필요하고, 이후 collector마다 별도
+token을 사용합니다. 공개 저장소에는 placeholder와 범용 template만 둡니다.
+
+## 개발 검증
+
+개발 중에는 변경 범위에 맞는 fast lane만 실행하고, 변경이 고정된 뒤 전체
+workspace test·Clippy·source verification을 한 번 실행합니다. GitHub Actions의
+전체 qualification과 6개 플랫폼·2개 제품 artifact matrix는 수동 실행 또는
+release tag에서만 동작합니다. public CI는 self-hosted runner와 production
+credential을 요구하지 않습니다.
+
+자세한 명령은 영문 README와 [release checklist](docs/release-checklist.md)를
 참조하세요.

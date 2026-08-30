@@ -6,15 +6,20 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use groundline_runtime::local_file::open_bounded_regular_file;
-use groundline_runtime::platform::{SUPPORTED_TARGETS, packaged_binary_path};
+use groundline_runtime::platform::{
+    SUPPORTED_TARGETS, packaged_binary_path, packaged_insights_binary_path,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 use thiserror::Error;
 
+mod arm64_verify;
+mod compose;
+mod local_verify;
 mod package;
 mod release;
 mod workflow;
@@ -34,6 +39,8 @@ struct Cli {
 enum Command {
     /// Package one already-built target with a checksum and strict manifest.
     PackageBinary {
+        #[arg(long, value_enum)]
+        product: Product,
         #[arg(long)]
         target: String,
         #[arg(long)]
@@ -43,6 +50,8 @@ enum Command {
     },
     /// Verify the exact six-target package set before release promotion.
     VerifyPackageSet {
+        #[arg(long, value_enum)]
+        product: Product,
         #[arg(long)]
         root: PathBuf,
         #[arg(long)]
@@ -50,17 +59,58 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Synchronize the canonical source surfaces into the installable plugin package.
-    SyncPackage {
+    /// Enforce the Rust-only source, split-plugin, privacy, and workflow contract.
+    VerifySource {
         #[arg(long, default_value = ".")]
         root: PathBuf,
         #[arg(long)]
         json: bool,
     },
-    /// Enforce the Rust-only source, zero-hook, and package contract.
-    VerifySource {
+    /// Render a private self-hosted Insights compose file and a separate secret store.
+    RenderCompose {
+        #[arg(long, default_value = "infrastructure/truenas/compose.template.yaml")]
+        template: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        secrets_file: PathBuf,
+        #[arg(long)]
+        dataset_root: String,
+        #[arg(long)]
+        tailscale_bind_ip: String,
+        #[arg(long, default_value_t = 13000)]
+        dashboard_port: u16,
+        #[arg(long, default_value_t = 18080)]
+        ingest_port: u16,
+        #[arg(long)]
+        image: String,
+        #[arg(long)]
+        access_url: String,
+        #[arg(long)]
+        overwrite: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Run the bounded, clean-commit local CI fallback and write a redacted receipt.
+    VerifyLocal {
         #[arg(long, default_value = ".")]
         root: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Verify the ARM64 Linux deployment controller with reusable bounded Docker caches.
+    VerifyArm64 {
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inspect or remove only stale ARM64 verification cache volumes.
+    PruneArm64Cache {
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        #[arg(long)]
+        confirm: bool,
         #[arg(long)]
         json: bool,
     },
@@ -95,12 +145,33 @@ enum XtaskError {
     InvalidPackageSet,
     #[error("invalid_source")]
     InvalidSource,
+    #[error("invalid_compose")]
+    InvalidCompose,
+    #[error("local_verification_failed")]
+    LocalVerificationFailed,
+    #[error("arm64_verification_failed")]
+    Arm64VerificationFailed,
     #[error("invalid_release_channel")]
     InvalidReleaseChannel,
     #[error("io_failed")]
     Io(#[from] io::Error),
     #[error("manifest_failed")]
     Manifest(#[from] serde_json::Error),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum Product {
+    Core,
+    Insights,
+}
+
+impl Product {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Core => "groundline",
+            Self::Insights => "groundline-insights",
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -115,13 +186,16 @@ struct ArtifactManifest {
     sha256: String,
 }
 
-fn executable_name(target: &str) -> Result<&'static str, XtaskError> {
-    let path = packaged_binary_path(target).map_err(|_| XtaskError::UnsupportedTarget)?;
-    match path.file_name().and_then(|value| value.to_str()) {
-        Some("groundline") => Ok("groundline"),
-        Some("groundline.exe") => Ok("groundline.exe"),
-        _ => Err(XtaskError::UnsupportedTarget),
+fn executable_name(product: Product, target: &str) -> Result<String, XtaskError> {
+    let path = match product {
+        Product::Core => packaged_binary_path(target),
+        Product::Insights => packaged_insights_binary_path(target),
     }
+    .map_err(|_| XtaskError::UnsupportedTarget)?;
+    path.file_name()
+        .and_then(|value| value.to_str())
+        .map(str::to_owned)
+        .ok_or(XtaskError::UnsupportedTarget)
 }
 
 fn copy_and_sha256(source: &Path, destination: &Path) -> Result<(String, u64), XtaskError> {
@@ -225,7 +299,7 @@ fn executable_contract(_path: &Path, _target: &str) -> bool {
     true
 }
 
-fn verify_package_set(root: &Path, version: &str) -> Result<(), XtaskError> {
+fn verify_package_set(root: &Path, version: &str, product: Product) -> Result<(), XtaskError> {
     if version != env!("CARGO_PKG_VERSION") {
         return Err(XtaskError::InvalidPackageSet);
     }
@@ -238,9 +312,9 @@ fn verify_package_set(root: &Path, version: &str) -> Result<(), XtaskError> {
     }
 
     for target in SUPPORTED_TARGETS {
-        let executable = executable_name(target)?;
+        let executable = executable_name(product, target)?;
         let target_root = root.join(target);
-        let expected_files = [executable, "manifest.json"]
+        let expected_files = [executable.as_str(), "manifest.json"]
             .into_iter()
             .chain([format!("{executable}.sha256")].iter().map(String::as_str))
             .map(str::to_owned)
@@ -263,7 +337,7 @@ fn verify_package_set(root: &Path, version: &str) -> Result<(), XtaskError> {
             return Err(XtaskError::InvalidPackageSet);
         }
 
-        let binary = target_root.join(executable);
+        let binary = target_root.join(&executable);
         if !executable_contract(&binary, target) {
             return Err(XtaskError::InvalidPackageSet);
         }
@@ -307,20 +381,25 @@ fn sync_parent_directory(_path: &Path) -> Result<(), XtaskError> {
     Ok(())
 }
 
-fn package_binary(target: &str, binary: &Path, output: &Path) -> Result<(), XtaskError> {
+fn package_binary(
+    product: Product,
+    target: &str,
+    binary: &Path,
+    output: &Path,
+) -> Result<(), XtaskError> {
     if !SUPPORTED_TARGETS.contains(&target) {
         return Err(XtaskError::UnsupportedTarget);
     }
     if output.exists() {
         return Err(XtaskError::OutputAlreadyExists);
     }
-    let executable = executable_name(target)?;
+    let executable = executable_name(product, target)?;
     let parent = output.parent().ok_or(XtaskError::InvalidBinary)?;
     fs::create_dir_all(parent)?;
     let staging = TempDir::new_in(parent)?;
     let staged_output = staging.path().join(target);
     fs::create_dir(&staged_output)?;
-    let staged_binary = staged_output.join(executable);
+    let staged_binary = staged_output.join(&executable);
     let (checksum, size_bytes) = copy_and_sha256(binary, &staged_binary)?;
     mark_executable(&staged_binary)?;
 
@@ -334,7 +413,7 @@ fn package_binary(target: &str, binary: &Path, output: &Path) -> Result<(), Xtas
         kind: "groundline-binary-artifact".to_owned(),
         groundline_version: env!("CARGO_PKG_VERSION").to_owned(),
         target: target.to_owned(),
-        executable: executable.to_owned(),
+        executable,
         size_bytes,
         sha256: checksum,
     };
@@ -353,16 +432,18 @@ fn package_binary(target: &str, binary: &Path, output: &Path) -> Result<(), Xtas
 fn run(cli: Cli) -> Result<(), XtaskError> {
     match cli.command {
         Command::PackageBinary {
+            product,
             target,
             binary,
             output,
-        } => package_binary(&target, &binary, &output),
+        } => package_binary(product, &target, &binary, &output),
         Command::VerifyPackageSet {
+            product,
             root,
             version,
             json: json_output,
         } => {
-            verify_package_set(&root, &version)?;
+            verify_package_set(&root, &version, product)?;
             if json_output {
                 println!(
                     "{}",
@@ -371,22 +452,13 @@ fn run(cli: Cli) -> Result<(), XtaskError> {
                         "schema": 1,
                         "status": "PASS",
                         "groundline_version": version,
+                        "product": product.name(),
                         "target_count": SUPPORTED_TARGETS.len(),
                         "artifact_file_count": SUPPORTED_TARGETS.len() * 3,
                         "mutation_performed": false,
                         "private_paths_emitted": false,
                     }))?
                 );
-            }
-            Ok(())
-        }
-        Command::SyncPackage {
-            root,
-            json: json_output,
-        } => {
-            let result = package::sync_package(&root)?;
-            if json_output {
-                println!("{}", serde_json::to_string_pretty(&result)?);
             }
             Ok(())
         }
@@ -399,6 +471,75 @@ fn run(cli: Cli) -> Result<(), XtaskError> {
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
             Ok(())
+        }
+        Command::RenderCompose {
+            template,
+            output,
+            secrets_file,
+            dataset_root,
+            tailscale_bind_ip,
+            dashboard_port,
+            ingest_port,
+            image,
+            access_url,
+            overwrite,
+            json: json_output,
+        } => {
+            let result = compose::render(compose::RenderOptions {
+                template: &template,
+                output: &output,
+                secrets_file: &secrets_file,
+                dataset_root: &dataset_root,
+                tailscale_bind_ip: &tailscale_bind_ip,
+                dashboard_port,
+                ingest_port,
+                image: &image,
+                access_url: &access_url,
+                overwrite,
+            })?;
+            if json_output {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+            Ok(())
+        }
+        Command::VerifyLocal {
+            root,
+            json: json_output,
+        } => {
+            let result = local_verify::verify(&root)?;
+            if json_output {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+            Ok(())
+        }
+        Command::VerifyArm64 {
+            root,
+            json: json_output,
+        } => {
+            let outcome = arm64_verify::verify(&root);
+            if json_output {
+                println!("{}", serde_json::to_string_pretty(&outcome.receipt)?);
+            }
+            if outcome.success {
+                Ok(())
+            } else {
+                Err(XtaskError::Arm64VerificationFailed)
+            }
+        }
+        Command::PruneArm64Cache {
+            root,
+            confirm,
+            json: json_output,
+        } => {
+            let outcome = arm64_verify::prune(&root, confirm);
+            if json_output {
+                println!("{}", serde_json::to_string_pretty(&outcome.receipt)?);
+            }
+            if outcome.success {
+                Ok(())
+            } else {
+                Err(XtaskError::Arm64VerificationFailed)
+            }
         }
         Command::PromoteStable {
             repo,
@@ -443,7 +584,7 @@ mod tests {
     use sha2::{Digest, Sha256};
     use tempfile::tempdir;
 
-    use super::{SUPPORTED_TARGETS, XtaskError, package_binary, verify_package_set};
+    use super::{Product, SUPPORTED_TARGETS, XtaskError, package_binary, verify_package_set};
 
     #[test]
     fn every_target_gets_one_bounded_reproducible_artifact() {
@@ -452,11 +593,11 @@ mod tests {
         fs::write(&binary, b"bounded-test-binary").expect("test binary");
         for target in SUPPORTED_TARGETS {
             let output = root.path().join("dist").join(target);
-            package_binary(target, &binary, &output).expect("packaged target");
+            package_binary(Product::Insights, target, &binary, &output).expect("packaged target");
             let executable = if target.ends_with("windows-msvc") {
-                "groundline.exe"
+                "groundline-insights.exe"
             } else {
-                "groundline"
+                "groundline-insights"
             };
             assert_eq!(
                 fs::read(output.join(executable)).unwrap(),
@@ -483,9 +624,10 @@ mod tests {
         let binary = root.path().join("input-binary");
         fs::write(&binary, b"binary").expect("test binary");
         let output = root.path().join("dist").join(SUPPORTED_TARGETS[0]);
-        package_binary(SUPPORTED_TARGETS[0], &binary, &output).expect("first package");
+        package_binary(Product::Core, SUPPORTED_TARGETS[0], &binary, &output)
+            .expect("first package");
         assert!(matches!(
-            package_binary(SUPPORTED_TARGETS[0], &binary, &output),
+            package_binary(Product::Core, SUPPORTED_TARGETS[0], &binary, &output),
             Err(XtaskError::OutputAlreadyExists)
         ));
 
@@ -497,6 +639,7 @@ mod tests {
             symlink(&binary, &link).expect("test symlink");
             assert!(matches!(
                 package_binary(
+                    Product::Core,
                     SUPPORTED_TARGETS[1],
                     &link,
                     &root.path().join("dist").join(SUPPORTED_TARGETS[1]),
@@ -513,12 +656,14 @@ mod tests {
         let dist = root.path().join("dist");
         fs::write(&binary, b"bounded-test-binary").expect("test binary");
         for target in SUPPORTED_TARGETS {
-            package_binary(target, &binary, &dist.join(target)).expect("packaged target");
+            package_binary(Product::Core, target, &binary, &dist.join(target))
+                .expect("packaged target");
         }
 
-        verify_package_set(&dist, env!("CARGO_PKG_VERSION")).expect("valid package set");
+        verify_package_set(&dist, env!("CARGO_PKG_VERSION"), Product::Core)
+            .expect("valid package set");
         assert!(matches!(
-            verify_package_set(&dist, "9.9.9"),
+            verify_package_set(&dist, "9.9.9", Product::Core),
             Err(XtaskError::InvalidPackageSet)
         ));
 
@@ -528,7 +673,7 @@ mod tests {
         )
         .expect("tamper checksum");
         assert!(matches!(
-            verify_package_set(&dist, env!("CARGO_PKG_VERSION")),
+            verify_package_set(&dist, env!("CARGO_PKG_VERSION"), Product::Core),
             Err(XtaskError::InvalidPackageSet)
         ));
     }

@@ -16,9 +16,8 @@ The public plugin has a deliberately small capability surface:
   counters or stable reason codes.
 
 `groundline provider-smoke --plugin-root <path> --json` fails if an owner hook
-manifest is present. `cargo xtask verify-source --root . --json` rejects private
-infrastructure markers, personal paths, Python runtime dependencies, unsynchronized
-package files, and CI contract drift.
+manifest is present. Repository qualification rejects personal or secret markers,
+Python runtime dependencies, duplicate package roots, and CI contract drift.
 
 ## Install and upgrade
 
@@ -58,7 +57,6 @@ explicit JSON files and never transmit them.
 cargo fmt --all -- --check
 cargo test --workspace --all-features --locked
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-cargo run --locked -p xtask -- sync-package --root . --json
 cargo run --locked -p xtask -- verify-source --root . --json
 ```
 
@@ -66,5 +64,5 @@ Pull requests run only the fast lane. Full qualification and six-platform releas
 artifacts are explicit manual workflows, with concurrency cancellation, timeouts,
 and short artifact retention.
 
-See [Privacy](docs/privacy.md), [Security](SECURITY.md), and
-[Release checklist](docs/release-checklist.md).
+See the repository [Privacy](../../docs/privacy.md), [Security](../../SECURITY.md),
+and [release checklist](../../docs/release-checklist.md).

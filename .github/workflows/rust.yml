@@ -4,35 +4,31 @@ on:
   workflow_dispatch:
     inputs:
       build_release_artifacts:
-        description: Build and retain all six release targets from main
+        description: Build both products for all six supported targets
         required: true
         default: false
         type: boolean
   pull_request:
     paths:
-      - ".codex-plugin/**"
+      - ".agents/plugins/**"
       - ".github/actions/**"
       - ".github/workflows/**"
       - ".cargo/**"
       - "Cargo.lock"
       - "Cargo.toml"
-      - "CHANGELOG.md"
-      - "LICENSE"
-      - "README.md"
-      - "README.ko.md"
-      - "SECURITY.md"
-      - "assets/**"
       - "crates/**"
       - "deny.toml"
       - "docs/**"
-      - "plugins/groundline/**"
-      - "references/**"
+      - "infrastructure/**"
+      - "plugins/**"
       - "rust-toolchain.toml"
-      - "skills/**"
+      - "services/**"
       - "xtask/**"
+      - "*.md"
   push:
     tags:
       - "v*.*.*"
+
 permissions:
   contents: read
 
@@ -52,16 +48,32 @@ jobs:
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Reject an invalid or version-mismatched release tag before expensive work
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "release tag must be strict vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          test "$(jq -r .version plugins/groundline/.codex-plugin/plugin.json)" = "$version"
+          test "$(jq -r .version plugins/groundline-insights/.codex-plugin/plugin.json)" = "$version"
       - name: Select the moving Rust stable channel
         uses: ./.github/actions/setup-rust-stable
         with:
           components: rustfmt
+      - name: Reuse bounded source-check build cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: source-checks
       - name: Check formatting
         run: cargo fmt --all -- --check
-      - name: Run workflow and CLI contract tests
+      - name: Run focused tooling and CLI contracts
         run: |
           cargo test --locked -p xtask --all-targets
           cargo test --locked -p groundline-cli --test cli_contract
+          cargo test --locked -p groundline-insights-cli --test cli_contract
       - name: Install and run actionlint
         env:
           ACTIONLINT_VERSION: "1.7.12"
@@ -78,46 +90,85 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     needs: fast
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.8.28.1-alpine@sha256:f40cd6034fb8c54dce6a85338750fbad79f387e2705e1991a85f2e7086b5b9ea
+        env:
+          CLICKHOUSE_USER: groundline_test
+          CLICKHOUSE_PASSWORD: groundline_test_password
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+        ports:
+          - 8123:8123
+        options: >-
+          --health-cmd "clickhouse-client --user groundline_test --password groundline_test_password --query 'SELECT 1'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Select the moving Rust stable channel
         uses: ./.github/actions/setup-rust-stable
         with:
           components: clippy
+      - name: Reuse bounded source-check build cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: source-checks
       - name: Deny vulnerable, unlicensed, or untrusted crates
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
-        env:
-          # Match the toolchain baked into the pinned action image. Without this
-          # override, the repository's moving stable channel triggers a download.
-          RUSTUP_TOOLCHAIN: "1.85.0"
         with:
-          rust-version: "1.85.0"
           command: check
           command-arguments: "--show-stats"
-      - name: Check capability feature partitions
+      - name: Check capability partitions
         run: |
           cargo check --locked -p groundline-contracts --no-default-features
-          for feature in audit batch efficiency version; do
+          for feature in audit batch efficiency insights integrity version; do
             cargo check --locked -p groundline-contracts --no-default-features --features "$feature"
           done
           cargo check --locked -p groundline-runtime --no-default-features
-      - name: Run the remaining portable Rust suite once
+          for feature in insights-client insights-state tailnet-probe; do
+            cargo check --locked -p groundline-runtime --no-default-features --features "$feature"
+          done
+      - name: Run the portable Rust suite once
         run: cargo test --workspace --all-features --locked
+      - name: Exercise the isolated ClickHouse and Grafana integration lane
+        env:
+          GROUNDLINE_CLICKHOUSE_TEST_URL: http://127.0.0.1:8123
+          GROUNDLINE_CLICKHOUSE_TEST_USER: groundline_test
+          GROUNDLINE_CLICKHOUSE_TEST_PASSWORD: groundline_test_password
+          GROUNDLINE_CLICKHOUSE_TEST_ALLOW_MUTATION: "true"
+        run: >-
+          cargo test --locked -p groundline-insights-api --lib clickhouse_
+          -- --ignored --nocapture
       - name: Deny Rust warnings once
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-      - name: Synchronize and verify the installable package
+      - name: Verify canonical packages and public source
+        run: cargo run --locked -p xtask -- verify-source --root . --json
+      - name: Validate the generic compose template
         run: |
-          cargo run --locked -p xtask -- sync-package --root . --json
-          git diff --exit-code -- plugins/groundline
-          cargo run --locked -p xtask -- verify-source --root . --json
-      - name: Exercise read-only operational commands
+          compose_path="$RUNNER_TEMP/groundline-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.yaml"
+          secrets_path="$RUNNER_TEMP/groundline-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-secrets.json"
+          cleanup() { rm -f -- "$compose_path" "$secrets_path"; }
+          trap cleanup EXIT
+          cargo run --locked -p xtask -- render-compose \
+            --output "$compose_path" \
+            --secrets-file "$secrets_path" \
+            --dataset-root /mnt/tank/apps/groundline-insights \
+            --tailscale-bind-ip 100.64.0.1 \
+            --image ghcr.io/jukqaz/groundline-insights-api:ci \
+            --access-url https://insights.example.invalid \
+            --json
+          docker compose -f "$compose_path" config --quiet
+      - name: Exercise offline operational commands
         run: |
-          cargo run --locked --bin groundline -- doctor --plugin-root . --codex-home /tmp/groundline-empty-codex-home --json
+          mkdir -p /tmp/groundline-empty-codex-home
+          cargo run --locked --bin groundline -- doctor --plugin-root plugins/groundline --codex-home /tmp/groundline-empty-codex-home --json
           cargo run --locked --bin groundline -- project-audit --repo . --json
+          cargo run --locked --bin groundline-insights -- doctor --plugin-root plugins/groundline-insights --codex-home /tmp/groundline-empty-codex-home --json
 
   artifacts:
-    name: package ${{ matrix.target }}
+    name: package both products for ${{ matrix.target }}
     if: >-
       startsWith(github.ref, 'refs/tags/v') ||
       (github.event_name == 'workflow_dispatch' &&
@@ -125,7 +176,7 @@ jobs:
        github.ref == 'refs/heads/main')
     needs: qualification
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -165,27 +216,33 @@ jobs:
       - name: Run Windows file-security contracts once
         if: matrix.runtime-tests
         run: cargo test --locked -p groundline-runtime local_file
-      - name: Build the host packaging tool
-        run: cargo build --locked -p xtask
-      - name: Build the release binary
-        run: cargo build --release --locked --bin groundline --target "${{ matrix.target }}"
-      - name: Package and smoke the target artifact
+      - name: Build both release binaries and the host packager
+        run: |
+          cargo build --locked -p xtask
+          cargo build --release --locked --bin groundline --bin groundline-insights --target "${{ matrix.target }}"
+      - name: Package and smoke both artifacts
         shell: bash
         run: |
-          binary="target/${{ matrix.target }}/release/groundline"
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            binary="${binary}.exe"
-          fi
+          suffix=""
           xtask="target/debug/xtask"
           if [ "${{ runner.os }}" = "Windows" ]; then
+            suffix=".exe"
             xtask="${xtask}.exe"
           fi
-          "$xtask" package-binary \
-            --target "${{ matrix.target }}" \
-            --binary "$binary" \
-            --output "dist/${{ matrix.target }}"
-          "dist/${{ matrix.target }}/$(basename "$binary")" platform --json
-      - name: Upload the immutable target artifact
+          for product in core insights; do
+            if [ "$product" = core ]; then
+              executable="groundline${suffix}"
+            else
+              executable="groundline-insights${suffix}"
+            fi
+            "$xtask" package-binary \
+              --product "$product" \
+              --target "${{ matrix.target }}" \
+              --binary "target/${{ matrix.target }}/release/${executable}" \
+              --output "dist/${product}/${{ matrix.target }}"
+            "dist/${product}/${{ matrix.target }}/${executable}" platform --json
+          done
+      - name: Upload one bounded target artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: groundline-${{ matrix.target }}
@@ -193,55 +250,154 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  promote-stable:
-    name: promote binary stable channel
+  publish-release:
+    name: publish immutable two-product release
     if: startsWith(github.ref, 'refs/tags/v')
     needs: artifacts
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Select the moving Rust stable channel
+        uses: ./.github/actions/setup-rust-stable
+      - name: Download the exact target packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: groundline-*
+          path: packages
+          merge-multiple: true
+      - name: Verify and archive both package sets
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: |
+          chmod 0755 packages/core/{aarch64-apple-darwin,x86_64-apple-darwin,aarch64-unknown-linux-musl,x86_64-unknown-linux-musl}/groundline
+          chmod 0755 packages/insights/{aarch64-apple-darwin,x86_64-apple-darwin,aarch64-unknown-linux-musl,x86_64-unknown-linux-musl}/groundline-insights
+          cargo run --locked -p xtask -- verify-package-set --product core --root packages/core --version "${RELEASE_VERSION#v}" --json
+          cargo run --locked -p xtask -- verify-package-set --product insights --root packages/insights --version "${RELEASE_VERSION#v}" --json
+          mkdir release-assets
+          for target in aarch64-apple-darwin aarch64-pc-windows-msvc aarch64-unknown-linux-musl x86_64-apple-darwin x86_64-pc-windows-msvc x86_64-unknown-linux-musl; do
+            tar -czf "release-assets/groundline-${target}.tar.gz" -C packages/core "$target"
+            tar -czf "release-assets/groundline-insights-${target}.tar.gz" -C packages/insights "$target"
+          done
+          cd release-assets
+          sha256sum groundline-*.tar.gz | LC_ALL=C sort > SHA256SUMS
+      - name: Create the immutable release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "release already exists; immutable releases are not replaced" >&2
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" release-assets/* \
+            --verify-tag \
+            --title "GroundLine ${RELEASE_TAG}" \
+            --notes "GroundLine Core and Insights artifacts built on their target-native GitHub-hosted runners and verified against the tagged public source."
+
+  publish-image:
+    name: publish signed multi-architecture Insights API image
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}-insights-api
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Normalize the strict release version
+        id: release
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        id: meta
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=${{ steps.release.outputs.version }}
+            type=raw,value=${{ github.ref_name }}
+            type=raw,value=sha-${{ github.sha }}
+            type=raw,value=latest
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        id: build
+        with:
+          context: .
+          file: services/insights-api/Dockerfile
+          build-args: GROUNDLINE_VERSION=${{ steps.release.outputs.version }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+      - uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  promote-stable:
+    name: promote both plugins to stable
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - artifacts
+      - publish-release
+      - publish-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Assemble the exact six-target package
+      - name: Select the moving Rust stable channel
+        uses: ./.github/actions/setup-rust-stable
+      - name: Assemble both exact six-target packages
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: groundline-*
-          path: plugins/groundline/bin
+          path: distribution
           merge-multiple: true
-      - name: Restore Unix executable modes
-        shell: bash
-        run: >-
-          chmod 0755
-          plugins/groundline/bin/aarch64-apple-darwin/groundline
-          plugins/groundline/bin/x86_64-apple-darwin/groundline
-          plugins/groundline/bin/aarch64-unknown-linux-musl/groundline
-          plugins/groundline/bin/x86_64-unknown-linux-musl/groundline
-      - name: Select the moving Rust stable channel
-        uses: ./.github/actions/setup-rust-stable
       - name: Verify and atomically advance stable
-        shell: bash
         env:
           RELEASE_TAG: ${{ github.ref_name }}
           SOURCE_SHA: ${{ github.sha }}
         run: |
-          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
-          git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
-          cargo run --locked -p xtask -- sync-package --root . --json
-          git diff --exit-code -- plugins/groundline ':!plugins/groundline/bin'
+          mkdir -p plugins/groundline/bin plugins/groundline-insights/bin
+          mv distribution/core/* plugins/groundline/bin/
+          mv distribution/insights/* plugins/groundline-insights/bin/
+          chmod 0755 plugins/groundline/bin/{aarch64-apple-darwin,x86_64-apple-darwin,aarch64-unknown-linux-musl,x86_64-unknown-linux-musl}/groundline
+          chmod 0755 plugins/groundline-insights/bin/{aarch64-apple-darwin,x86_64-apple-darwin,aarch64-unknown-linux-musl,x86_64-unknown-linux-musl}/groundline-insights
           cargo run --locked -p xtask -- verify-source --root . --json
-          cargo run --locked -p xtask -- verify-package-set --root plugins/groundline/bin --version "${RELEASE_TAG#v}" --json
+          cargo run --locked -p xtask -- verify-package-set --product core --root plugins/groundline/bin --version "${RELEASE_TAG#v}" --json
+          cargo run --locked -p xtask -- verify-package-set --product insights --root plugins/groundline-insights/bin --version "${RELEASE_TAG#v}" --json
           plugins/groundline/bin/x86_64-unknown-linux-musl/groundline provider-smoke --plugin-root plugins/groundline --require-installed --json
+          plugins/groundline-insights/bin/x86_64-unknown-linux-musl/groundline-insights provider-smoke --plugin-root plugins/groundline-insights --require-installed --json
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f plugins/groundline/bin
+          git add -f plugins/groundline/bin plugins/groundline-insights/bin
           git commit -m "release: assemble ${RELEASE_TAG} binaries"
-          CANDIDATE_SHA="$(git rev-parse HEAD)"
+          candidate_sha="$(git rev-parse HEAD)"
           cargo run --locked -p xtask -- promote-stable \
             --release-tag "$RELEASE_TAG" \
             --source-sha "$SOURCE_SHA" \
-            --candidate-sha "$CANDIDATE_SHA" \
+            --candidate-sha "$candidate_sha" \
             --confirm \
             --json

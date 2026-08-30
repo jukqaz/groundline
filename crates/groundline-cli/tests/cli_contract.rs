@@ -129,6 +129,36 @@ fn project_audit_reports_worktree_include_without_configuration_content() {
 }
 
 #[test]
+fn integrations_status_is_privacy_bounded_and_provider_honest() {
+    let home = tempdir().expect("temporary directory");
+    let state = home.path().join("groundline/insights/codex_app-desktop");
+    fs::create_dir_all(state.join("outbox")).unwrap();
+    fs::write(state.join("identity.json"), "private-collector-id").unwrap();
+    fs::write(state.join("outbox/event.json"), "private-event").unwrap();
+
+    let output = run(&[
+        "integrations",
+        "status",
+        "insights",
+        "--codex-home",
+        path_argument(home.path()),
+        "--json",
+    ]);
+    assert!(output.status.success());
+    let result = parse_stdout(&output);
+    let encoded = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(result["state_observed"], true);
+    assert_eq!(result["pending_event_count"], 1);
+    assert_eq!(
+        result["plugin_installation_status"],
+        "provider_check_required"
+    );
+    assert_eq!(result["hook_trust_status"], "provider_check_required");
+    assert!(!encoded.contains("private-"));
+    assert!(!encoded.contains(path_argument(home.path())));
+}
+
+#[test]
 fn provider_smoke_verifies_one_native_binary_package() {
     let root = tempdir().expect("temporary directory");
     let platform = run(&["platform", "--json"]);

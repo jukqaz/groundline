@@ -4,22 +4,31 @@
 
 Security fixes target the latest stable GroundLine release.
 
-## Public security boundary
+## Product boundaries
 
-GroundLine is local-first. The public plugin installs no lifecycle hook, starts
-no background process, performs no network request, keeps no collector identity,
-and contains no remote endpoint or credential field. Its CLI accepts explicit
-paths, rejects symlinks for bounded inputs, opens the local Codex state store
-read-only, and emits aggregates or reason codes instead of raw records and paths.
+GroundLine Core is offline and hook-free. It rejects symlinked or oversized
+bounded inputs, opens Codex SQLite read-only, and emits aggregates or reason codes.
 
-The source qualification gate checks that the installable package is synchronized,
-the six native targets remain explicit, external CI actions are pinned, and private
-or personal markers are absent. These checks reduce accidental exposure but do not
-replace review.
+GroundLine Insights is a separate opt-in plugin. It owns exactly four fail-open
+Codex lifecycle hooks, owner-private local state, a no-proxy/no-redirect Tailnet
+client, an authenticated Axum API, ClickHouse, and Grafana. Tailnet reachability
+alone never authorizes enrollment: first contact also requires an owner-issued
+enrollment credential, then every collector uses a distinct token. Administrative
+and trusted-proxy tokens remain separate.
+
+All secret files are outside the plugin, opened as bounded regular files, and
+required to be private to the current user where the platform exposes permission
+checks. Public templates contain placeholders only. Logs and error receipts must
+not echo endpoints, headers, tokens, collector IDs, payloads, private paths, or
+exception text.
+
+Source qualification checks both canonical plugin manifests, the Core zero-hook
+invariant, the Insights four-hook invariant, personal/secret markers, pinned CI
+actions, bounded jobs, and the moving Rust stable channel. These controls reduce
+accidental exposure but do not replace review or live deployment validation.
 
 ## Reporting
 
-Please use GitHub's private vulnerability reporting for security issues. Do not
-include credentials, private paths, raw prompts, transcripts, or personal data in
-an issue. Include the GroundLine version, platform target, minimal reproduction,
-and redacted output when possible.
+Use GitHub private vulnerability reporting. Never include credentials, private
+hostnames, private paths, raw prompts, transcripts, or personal data in a public
+issue. Include the version, platform, minimal reproduction, and redacted output.

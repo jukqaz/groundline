@@ -1,6 +1,0 @@
-interface:
-  display_name: "Audit Agent History"
-  short_description: "Build redacted usage evidence and one weekly candidate"
-  default_prompt: "Build redacted usage evidence and propose one workflow candidate for our weekly review without applying changes."
-policy:
-  allow_implicit_invocation: false

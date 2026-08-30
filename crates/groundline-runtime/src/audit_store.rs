@@ -265,7 +265,7 @@ pub fn collect_audit(
     let mut seen = BTreeSet::new();
     let mut unreadable = 0_u64;
     let mut unclassified = 0_u64;
-    let mut legacy = 0_u64;
+    let mut source_fallback = 0_u64;
     let mut duplicates = 0_u64;
     let mut total_bytes = 0_u64;
     for row in rows {
@@ -298,7 +298,9 @@ pub fn collect_audit(
         }
         match runtime_family(&contents, &row.source) {
             Some(value) if runtime_filter.is_some_and(|expected| expected != value) => continue,
-            Some(_) if originator(&contents).is_none() => legacy = legacy.saturating_add(1),
+            Some(_) if originator(&contents).is_none() => {
+                source_fallback = source_fallback.saturating_add(1)
+            }
             None => {
                 unclassified = unclassified.saturating_add(1);
                 continue;
@@ -365,12 +367,21 @@ pub fn collect_audit(
             "minimum_root_sample_count":MINIMUM_ROOTS,"sample_sufficient":sample>=MINIMUM_ROOTS,"delegated_rollout_count":delegated.len(),
             "guardian_rollout_count":guardian.len(),"guardian_incomplete_excluded_count":0,"duplicate_rollout_reference_excluded_count":duplicates,
             "unreadable_completed_root_count":unreadable,"originator_unclassified_excluded_root_count":unclassified,
-            "originator_legacy_fallback_root_count":legacy,"delegated_truncated_count":0,"guardian_truncated_count":0,
+            "originator_source_fallback_root_count":source_fallback,"delegated_truncated_count":0,"guardian_truncated_count":0,
         },
         "root":root_audit,"delegated":delegated_audit,"guardian":guardian_audit,
         "usage_source_contract":{"cumulative_total_preferred_per_rollout":true,"last_usage_sum_is_fallback_only":true,"window_delta_prevents_double_counting":true,"billing_inference_performed":false},
         "mutation_performed":false,"raw_content_emitted":false,"private_paths_emitted":false,"thread_ids_emitted":false,"rollout_paths_emitted":false,"secret_value_printed":false,
     }))
+}
+
+pub fn earliest_recency(codex_home: &Path) -> Result<Option<DateTime<Utc>>, AuditStoreError> {
+    let minimum = thread_rows(&state_database(codex_home)?)?
+        .into_iter()
+        .filter(|row| row.visible && row.recency_ms > 0)
+        .map(|row| row.recency_ms)
+        .min();
+    Ok(minimum.and_then(DateTime::<Utc>::from_timestamp_millis))
 }
 
 pub fn contract_error(error: AuditStoreError) -> ContractError {

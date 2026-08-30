@@ -1,0 +1,642 @@
+name: groundline-insights
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8.28.1-alpine@sha256:f40cd6034fb8c54dce6a85338750fbad79f387e2705e1991a85f2e7086b5b9ea
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: groundline
+      CLICKHOUSE_USER: groundline_ingest
+      CLICKHOUSE_PASSWORD: "__CLICKHOUSE_PASSWORD__"
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+      GROUNDLINE_GRAFANA_READER_PASSWORD: "__GRAFANA_READER_PASSWORD__"
+    volumes:
+      - type: bind
+        source: __DATASET_ROOT__/clickhouse
+        target: /var/lib/clickhouse
+    configs:
+      - source: clickhouse_limits
+        target: /etc/clickhouse-server/config.d/groundline-limits.xml
+      - source: clickhouse_grafana_user
+        target: /etc/clickhouse-server/users.d/groundline-grafana.xml
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          clickhouse-client
+          --user "$$CLICKHOUSE_USER"
+          --password "$$CLICKHOUSE_PASSWORD"
+          --query "SELECT 1"
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    mem_limit: 4g
+    cpus: 2
+    networks:
+      - data
+
+  api:
+    image: __INSIGHTS_API_IMAGE__
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    environment:
+      GROUNDLINE_LISTEN_HOST: 0.0.0.0
+      GROUNDLINE_LISTEN_PORT: "8080"
+      GROUNDLINE_CLICKHOUSE_URL: http://clickhouse:8123
+      GROUNDLINE_CLICKHOUSE_DATABASE: groundline
+      GROUNDLINE_CLICKHOUSE_USER: groundline_ingest
+      GROUNDLINE_CLICKHOUSE_PASSWORD: "__CLICKHOUSE_PASSWORD__"
+      GROUNDLINE_ADMIN_TOKEN: "__ADMIN_TOKEN__"
+      GROUNDLINE_ENROLLMENT_TOKEN: "__ENROLLMENT_TOKEN__"
+      GROUNDLINE_PROXY_TOKEN: "__PROXY_TOKEN__"
+      GROUNDLINE_OWNER_ENROLLMENT_ENABLED: "true"
+      GROUNDLINE_MINIMUM_SUPPORTED_VERSION: "0.20.0"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    mem_limit: 384m
+    cpus: 1
+    networks:
+      - data
+
+  api-ingress:
+    image: nginx:1.30.4-alpine@sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46
+    restart: unless-stopped
+    user: "101:101"
+    read_only: true
+    entrypoint:
+      - /bin/sh
+      - -ec
+    command:
+      - |
+        gateway="$$(ip route show default | awk 'NR == 1 {print $$3}')"
+        case "$$gateway" in
+          *[!0-9.]*|'') exit 1 ;;
+        esac
+        cat > /tmp/nginx.conf <<'EOF'
+        worker_processes 1;
+        pid /tmp/nginx.pid;
+        error_log /dev/stderr warn;
+
+        events {
+          worker_connections 256;
+        }
+
+        http {
+          access_log off;
+          server_tokens off;
+          resolver 127.0.0.11 ipv6=off valid=10s;
+          client_body_temp_path /tmp/client_body;
+          proxy_temp_path /tmp/proxy;
+          fastcgi_temp_path /tmp/fastcgi;
+          uwsgi_temp_path /tmp/uwsgi;
+          scgi_temp_path /tmp/scgi;
+          client_max_body_size 256k;
+
+          server {
+            listen 8080;
+
+            location / {
+              allow 127.0.0.1;
+              allow 100.64.0.0/10;
+              allow DOCKER_GATEWAY_MARKER;
+              deny all;
+              set $$api_upstream api;
+              proxy_pass http://$$api_upstream:8080;
+              proxy_http_version 1.1;
+              proxy_connect_timeout 3s;
+              proxy_read_timeout 30s;
+              proxy_set_header Connection "";
+              proxy_set_header Host $$host;
+              proxy_set_header X-Forwarded-For __TAILSCALE_BIND_IP__;
+              proxy_set_header X-Forwarded-Proto http;
+              proxy_set_header X-GroundLine-Proxy-Token "__PROXY_TOKEN__";
+            }
+          }
+        }
+        EOF
+        sed -i "s/DOCKER_GATEWAY_MARKER/$$gateway/g" /tmp/nginx.conf
+        exec nginx -c /tmp/nginx.conf -g 'daemon off;'
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    ports:
+      - "__TAILSCALE_BIND_IP__:__INGEST_PORT__:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q -O /dev/null http://127.0.0.1:8080/healthz
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    mem_limit: 64m
+    cpus: 0.25
+    networks:
+      - data
+      - egress
+
+  grafana:
+    image: grafana/grafana:13.1.1-ubuntu@sha256:5a9df011defa8384ee01fc9b393854daecc6afb98132c66e2e658b3f564830e8
+    restart: unless-stopped
+    environment:
+      GF_SERVER_ROOT_URL: "__INSIGHTS_ACCESS_URL__/"
+      GF_SERVER_DOMAIN: "__INSIGHTS_ACCESS_HOST__"
+      GF_SERVER_ENFORCE_DOMAIN: "true"
+      GF_SECURITY_ADMIN_USER: groundline-admin
+      GF_SECURITY_ADMIN_PASSWORD: "__GRAFANA_ADMIN_PASSWORD__"
+      GF_SECURITY_COOKIE_SECURE: "true"
+      GF_SECURITY_COOKIE_SAMESITE: strict
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_USERS_ALLOW_ORG_CREATE: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_NAME: Main Org.
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_BASIC_ENABLED: "true"
+      GF_PLUGINS_PREINSTALL_SYNC: grafana-clickhouse-datasource@4.20.0
+      GROUNDLINE_GRAFANA_READER_PASSWORD: "__GRAFANA_READER_PASSWORD__"
+    volumes:
+      - type: bind
+        source: __DATASET_ROOT__/grafana
+        target: /var/lib/grafana
+    configs:
+      - source: grafana_datasource
+        target: /etc/grafana/provisioning/datasources/groundline.yaml
+      - source: grafana_dashboard_provider
+        target: /etc/grafana/provisioning/dashboards/groundline.yaml
+      - source: grafana_dashboard
+        target: /var/lib/grafana/dashboards/groundline-insights.json
+    ports:
+      - "__TAILSCALE_BIND_IP__:__DASHBOARD_PORT__:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    mem_limit: 1536m
+    cpus: 1.5
+    networks:
+      - data
+      - egress
+
+networks:
+  data:
+    internal: true
+  egress: {}
+
+configs:
+  clickhouse_limits:
+    content: |
+      <clickhouse>
+        <access_control_improvements>
+          <settings_constraints_replace_previous>true</settings_constraints_replace_previous>
+        </access_control_improvements>
+        <max_server_memory_usage_to_ram_ratio>0.25</max_server_memory_usage_to_ram_ratio>
+        <mark_cache_size>268435456</mark_cache_size>
+        <uncompressed_cache_size>67108864</uncompressed_cache_size>
+        <query_log remove="remove"/>
+        <metric_log remove="remove"/>
+        <asynchronous_metric_log remove="remove"/>
+      </clickhouse>
+
+  clickhouse_grafana_user:
+    content: |
+      <clickhouse>
+        <profiles>
+          <groundline_grafana>
+            <readonly>1</readonly>
+            <max_execution_time>30</max_execution_time>
+            <constraints>
+              <max_execution_time>
+                <min>1</min>
+                <max>60</max>
+                <changeable_in_readonly/>
+              </max_execution_time>
+            </constraints>
+            <max_result_rows>10000</max_result_rows>
+            <result_overflow_mode>break</result_overflow_mode>
+          </groundline_grafana>
+        </profiles>
+        <users>
+          <grafana_reader>
+            <password from_env="GROUNDLINE_GRAFANA_READER_PASSWORD"/>
+            <networks>
+              <ip>0.0.0.0/0</ip>
+              <ip>::/0</ip>
+            </networks>
+            <profile>groundline_grafana</profile>
+            <quota>default</quota>
+            <allow_databases>
+              <database>groundline</database>
+            </allow_databases>
+          </grafana_reader>
+        </users>
+      </clickhouse>
+
+  grafana_datasource:
+    content: |
+      apiVersion: 1
+      prune: true
+      deleteDatasources:
+        - name: GroundLine ClickHouse
+          orgId: 1
+      datasources:
+        - name: GroundLine ClickHouse
+          uid: groundline-clickhouse
+          type: grafana-clickhouse-datasource
+          access: proxy
+          orgId: 1
+          version: 1
+          isDefault: true
+          editable: false
+          jsonData:
+            host: clickhouse
+            port: 9000
+            protocol: native
+            username: grafana_reader
+            defaultDatabase: groundline
+            defaultTable: basic_weekly
+            dialTimeout: 5
+            queryTimeout: 30
+            validateSql: true
+            enableRowLimit: false
+          secureJsonData:
+            password: "$$GROUNDLINE_GRAFANA_READER_PASSWORD"
+
+  grafana_dashboard_provider:
+    content: |
+      apiVersion: 1
+      providers:
+        - name: GroundLine
+          orgId: 1
+          folder: GroundLine
+          folderUid: groundline
+          type: file
+          disableDeletion: true
+          allowUiUpdates: false
+          updateIntervalSeconds: 30
+          options:
+            path: /var/lib/grafana/dashboards
+            foldersFromFilesStructure: false
+
+  grafana_dashboard:
+    content: |
+      {
+        "annotations": {"list": []},
+        "description": "Private GroundLine Basic weekly aggregates. Observational signals only; no causal or billing inference.",
+        "editable": false,
+        "fiscalYearStartMonth": 0,
+        "graphTooltip": 1,
+        "id": null,
+        "links": [],
+        "liveNow": false,
+        "panels": [
+          {
+            "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+            "description": "Provider-reported token fields where available. Components are separate signals and are not billing; reasoning may be included in provider output totals.",
+            "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+            "gridPos": {"h": 8, "w": 16, "x": 0, "y": 24},
+            "id": 1,
+            "options": {"legend": {"calcs": [], "displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "desc"}},
+            "targets": [
+              {
+                "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+                "editorType": "sql",
+                "format": 0,
+                "queryType": "table",
+                "rawSql": "SELECT toStartOfWeek(ifNull(period_end, generated_at), 1, 'UTC') AS time, sum(total_tokens) AS root_total, sum(cached_input_tokens) AS cached_input, sum(non_cached_input_tokens) AS non_cached_input, sum(output_tokens) AS output, sum(reasoning_output_tokens) AS reasoning, sum(delegated_total_tokens) AS delegated, sum(guardian_total_tokens) AS guardian FROM groundline.basic_active WHERE $$__timeFilter(ifNull(period_end, generated_at)) GROUP BY time ORDER BY time",
+                "refId": "A"
+              }
+            ],
+            "title": "Provider token 구성 (관측값)",
+            "type": "timeseries"
+          },
+          {
+            "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+            "description": "All observed root windows in the selected dashboard period. Sufficiency is evaluated after period aggregation, not per checkpoint.",
+            "fieldConfig": {"defaults": {"decimals": 0}, "overrides": []},
+            "gridPos": {"h": 4, "w": 8, "x": 16, "y": 24},
+            "id": 2,
+            "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+            "targets": [
+              {
+                "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+                "editorType": "sql",
+                "format": 1,
+                "queryType": "table",
+                "rawSql": "SELECT sum(observed_root_count) AS value FROM groundline.basic_active WHERE $$__timeFilter(ifNull(period_end, generated_at))",
+                "refId": "A"
+              }
+            ],
+            "title": "관측된 root window",
+            "type": "stat"
+          },
+          {
+            "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+            "description": "Cached input divided by input tokens. Missing provider usage remains missing.",
+            "fieldConfig": {"defaults": {"decimals": 1, "max": 1, "min": 0, "unit": "percentunit"}, "overrides": []},
+            "gridPos": {"h": 4, "w": 8, "x": 16, "y": 28},
+            "id": 3,
+            "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+            "targets": [
+              {
+                "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+                "editorType": "sql",
+                "format": 1,
+                "queryType": "table",
+                "rawSql": "SELECT sum(cached_input_tokens) / nullIf(sum(input_tokens), 0) AS value FROM groundline.basic_active WHERE $$__timeFilter(ifNull(period_end, generated_at))",
+                "refId": "A"
+              }
+            ],
+            "title": "입력 cache 비율",
+            "type": "stat"
+          },
+          {
+            "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+            "description": "Normalized workflow signals. Ratios are observational proxies, not defect or causal proof.",
+            "fieldConfig": {"defaults": {"decimals": 3}, "overrides": []},
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 32},
+            "id": 4,
+            "options": {"legend": {"calcs": [], "displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "desc"}},
+            "targets": [
+              {
+                "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+                "editorType": "sql",
+                "format": 0,
+                "queryType": "table",
+                "rawSql": "SELECT toStartOfWeek(ifNull(period_end, generated_at), 1, 'UTC') AS time, round(sum(compactions) / nullIf(sum(observed_root_count), 0), 4) AS compactions_per_observed_root, round(sum(compactions) / nullIf(sum(task_completed), 0), 4) AS compactions_per_completed_turn, round(sumIf(long_turn_count, capability_latency_completed_count = 1) / nullIf(sumIf(latency_completed_count, capability_latency_completed_count = 1), 0), 4) AS long_turn_ratio, round(sum(calls_in_exact_repeated_groups) / nullIf(sum(tool_call_count), 0), 4) AS repeated_call_ratio, round(sum(nonzero_exit_count + timeout_count + rejected_count) / nullIf(sum(tool_call_count), 0), 4) AS failed_call_ratio, round(sum(verification_tool_calls) / nullIf(sum(tool_call_count), 0), 4) AS verification_call_ratio, round(sum(short_message_count) / nullIf(sum(user_messages_with_text), 0), 4) AS short_message_ratio, round(sum(broad_scope_message_count) / nullIf(sum(user_messages_with_text), 0), 4) AS broad_scope_ratio FROM groundline.basic_active WHERE $$__timeFilter(ifNull(period_end, generated_at)) GROUP BY time ORDER BY time",
+                "refId": "A"
+              }
+            ],
+            "title": "Workflow 비율 추세",
+            "type": "timeseries"
+          },
+          {
+            "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+            "description": "Event-weighted descriptive period aggregates by schema, OS, runtime, execution mode, and GroundLine version. mean_window_p90_ms is the mean of per-window wall-turn p90 values; it is not a merged percentile or model inference latency. This is not install-weighted fleet coverage.",
+            "fieldConfig": {"defaults": {}, "overrides": [{"matcher": {"id": "byName", "options": "mean_window_p90_ms"}, "properties": [{"id": "unit", "value": "ms"}]}]},
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 51},
+            "id": 5,
+            "options": {"cellHeight": "sm", "showHeader": true},
+            "targets": [
+              {
+                "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+                "editorType": "sql",
+                "format": 1,
+                "queryType": "table",
+                "rawSql": "SELECT schema_version, os_family, runtime_family, execution_mode, groundline_version, uniqExact(collector_id) AS collectors, sum(observed_root_count) AS observed_roots, round(sum(total_tokens) / nullIf(sum(task_completed), 0), 0) AS tokens_per_completed_task, round(avgIf(latency_p90_ms, latency_p90_ms IS NOT NULL AND capability_latency_completed_count = 1), 0) AS mean_window_p90_ms, round(sum(cached_input_tokens) / nullIf(sum(input_tokens), 0), 3) AS cache_ratio, round(sum(compactions) / nullIf(sum(observed_root_count), 0), 3) AS compactions_per_observed_root, round(sumIf(long_turn_count, capability_latency_completed_count = 1) / nullIf(sumIf(latency_completed_count, capability_latency_completed_count = 1), 0), 3) AS long_turn_ratio, round(sum(calls_in_exact_repeated_groups) / nullIf(sum(tool_call_count), 0), 3) AS repeated_call_ratio, round(sum(nonzero_exit_count + timeout_count + rejected_count) / nullIf(sum(tool_call_count), 0), 3) AS failed_call_ratio, round(sum(verification_success_count) / nullIf(sum(verification_success_count + verification_failure_count), 0), 3) AS verification_success_ratio, sumIf(boundary_review_root_count, capability_root_boundary_counts = 1) AS boundary_review_roots, sumIf(long_lived_root_count, capability_root_boundary_counts = 1) AS long_lived_roots, sum(fallback_rollout_count + delegated_fallback_rollout_count + guardian_fallback_rollout_count) AS fallback_rollouts FROM groundline.basic_active WHERE $$__timeFilter(ifNull(period_end, generated_at)) GROUP BY schema_version, os_family, runtime_family, execution_mode, groundline_version HAVING sum(observed_root_count) >= 10 ORDER BY observed_roots DESC",
+                "refId": "A"
+              }
+            ],
+            "title": "Runtime cohort (최소 10개 root)",
+            "type": "table"
+          },
+          {
+            "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+            "description": "Seconds since the newest accepted Basic event across all collectors. N/A means no Basic event has arrived; red begins after eight days. This cannot distinguish Tailnet loss, an offline device, inactivity, a disabled hook, or a service failure.",
+            "fieldConfig": {"defaults": {"decimals": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 691200}]}, "unit": "s"}, "overrides": []},
+            "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+            "id": 6,
+            "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+            "targets": [
+              {
+                "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+                "editorType": "sql",
+                "format": 1,
+                "queryType": "table",
+                "rawSql": "SELECT dateDiff('second', max(received_at), now()) AS value FROM groundline.basic_active",
+                "refId": "A"
+              }
+            ],
+            "title": "마지막 수집 경과",
+            "type": "stat"
+          },
+          {
+            "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+            "description": "Install-weighted fleet summary. Recent means an accepted event within seven days. Overdue means no accepted event after the 24-hour initial-report grace period. Installation identities are random and are not account, person, or device counts.",
+            "fieldConfig": {"defaults": {"decimals": 0}, "overrides": [{"matcher": {"id": "byName", "options": "recent_installation_count"}, "properties": [{"id": "color", "value": {"fixedColor": "green", "mode": "fixed"}}]}, {"matcher": {"id": "byName", "options": "overdue_never_reported_installation_count"}, "properties": [{"id": "color", "value": {"fixedColor": "red", "mode": "fixed"}}]}]},
+            "gridPos": {"h": 4, "w": 12, "x": 6, "y": 0},
+            "id": 7,
+            "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+            "targets": [
+              {
+                "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+                "editorType": "sql",
+                "format": 1,
+                "queryType": "table",
+                "rawSql": "WITH enrolled AS (SELECT collector_id, created_at FROM groundline.collectors FINAL WHERE revoked = 0), activity AS (SELECT collector_id, toUInt8(1) AS has_report, max(received_at) AS last_seen FROM groundline.basic_active GROUP BY collector_id) SELECT count() AS enrolled_installation_count, countIf(ifNull(activity.has_report, 0) = 1 AND activity.last_seen >= now('UTC') - INTERVAL 7 DAY) AS recent_installation_count, countIf(ifNull(activity.has_report, 0) = 0 AND enrolled.created_at <= now('UTC') - INTERVAL 24 HOUR) AS overdue_never_reported_installation_count FROM enrolled LEFT JOIN activity USING (collector_id)",
+                "refId": "A"
+              }
+            ],
+            "title": "Fleet: 등록 / 최근 보고 / 최초 보고 지연",
+            "type": "stat"
+          },
+          {
+            "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+            "description": "Completed roots excluded because their runtime originator was unclassified, plus roots admitted through the legacy source fallback. This is a coverage signal, not task content.",
+            "fieldConfig": {"defaults": {"decimals": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}]}}, "overrides": []},
+            "gridPos": {"h": 4, "w": 24, "x": 0, "y": 67},
+            "id": 8,
+            "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+            "targets": [
+              {
+                "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+                "editorType": "sql",
+                "format": 1,
+                "queryType": "table",
+                "rawSql": "SELECT sum(originator_unclassified_excluded_root_count + originator_source_fallback_root_count) AS value FROM groundline.basic_active WHERE $$__timeFilter(ifNull(period_end, generated_at))",
+                "refId": "A"
+              }
+            ],
+            "title": "Runtime 분류 누락",
+            "type": "stat"
+          },
+          {
+            "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+            "description": "Active collectors whose newest reported GroundLine version is below the deployed stable release.",
+            "fieldConfig": {"defaults": {"decimals": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}]}}, "overrides": []},
+            "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+            "id": 9,
+            "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+            "targets": [
+              {
+                "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+                "editorType": "sql",
+                "format": 1,
+                "queryType": "table",
+                "rawSql": "WITH latest_by_collector AS (SELECT collector_id, argMax(groundline_version, received_at) AS installed_version FROM groundline.basic_active GROUP BY collector_id), policy AS (SELECT argMax(latest_version, updated_at) AS latest_version FROM groundline.release_policy FINAL WHERE policy_key = 'stable') SELECT countIf(tuple(toUInt32OrZero(splitByChar('.', installed_version)[1]), toUInt32OrZero(splitByChar('.', installed_version)[2]), toUInt32OrZero(splitByChar('.', installed_version)[3])) < tuple(toUInt32OrZero(splitByChar('.', latest_version)[1]), toUInt32OrZero(splitByChar('.', latest_version)[2]), toUInt32OrZero(splitByChar('.', latest_version)[3]))) AS value FROM latest_by_collector CROSS JOIN policy",
+                "refId": "A"
+              }
+            ],
+            "title": "업데이트 필요 설치",
+            "type": "stat"
+          },
+          {
+            "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+            "description": "Install-weighted roster of enrolled installations. It includes metadata for enrolled collectors that have never reported and returns only a four-character random suffix; no hostname, path, secret, or full collector ID is returned. Reporting state is inferred only from the last accepted event: Tailnet loss, an offline device, inactivity, a disabled hook, and a service failure are intentionally not distinguished centrally.",
+            "fieldConfig": {"defaults": {}, "overrides": []},
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 10},
+            "id": 10,
+            "options": {"cellHeight": "sm", "showHeader": true},
+            "targets": [
+              {
+                "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+                "editorType": "sql",
+                "format": 1,
+                "queryType": "table",
+                "rawSql": "WITH enrolled AS (SELECT collector_id, created_at, os_family, runtime_family, execution_mode, groundline_version FROM groundline.collectors FINAL WHERE revoked = 0), latest_by_collector AS (SELECT collector_id, toUInt8(1) AS has_report, argMax(os_family, received_at) AS reported_os, argMax(runtime_family, received_at) AS reported_runtime, argMax(execution_mode, received_at) AS reported_execution, argMax(groundline_version, received_at) AS reported_version, max(received_at) AS reported_last_seen FROM groundline.basic_active GROUP BY collector_id), policy AS (SELECT argMax(latest_version, updated_at) AS latest_version, argMax(minimum_supported_version, updated_at) AS minimum_supported_version FROM groundline.release_policy FINAL WHERE policy_key = 'stable') SELECT right(toString(enrolled.collector_id), 4) AS install_code, if(enrolled.os_family = 'unknown' AND ifNull(latest_by_collector.has_report, 0) = 1, ifNull(reported_os, 'unknown'), enrolled.os_family) AS os, if(enrolled.runtime_family = 'unknown' AND ifNull(latest_by_collector.has_report, 0) = 1, ifNull(reported_runtime, 'unknown'), enrolled.runtime_family) AS runtime, if(enrolled.execution_mode = 'unknown' AND ifNull(latest_by_collector.has_report, 0) = 1, ifNull(reported_execution, 'unknown'), enrolled.execution_mode) AS execution, if(enrolled.groundline_version = 'unknown' AND ifNull(latest_by_collector.has_report, 0) = 1, ifNull(reported_version, 'unknown'), enrolled.groundline_version) AS installed_version, latest_version, if(ifNull(latest_by_collector.has_report, 0) = 1, reported_last_seen, NULL) AS last_seen, multiIf(ifNull(latest_by_collector.has_report, 0) = 0 AND created_at > now('UTC') - INTERVAL 24 HOUR, '초기 보고 대기', ifNull(latest_by_collector.has_report, 0) = 0, '최초 보고 지연', last_seen >= now('UTC') - INTERVAL 1 DAY, '최근 보고', last_seen >= now('UTC') - INTERVAL 8 DAY, '보고 지연', 'Tailnet/수집 확인 필요') AS reporting_status, multiIf(ifNull(latest_by_collector.has_report, 0) = 0 OR installed_version IN ('', 'unknown'), '미확인', tuple(toUInt32OrZero(splitByChar('.', installed_version)[1]), toUInt32OrZero(splitByChar('.', installed_version)[2]), toUInt32OrZero(splitByChar('.', installed_version)[3])) < tuple(toUInt32OrZero(splitByChar('.', minimum_supported_version)[1]), toUInt32OrZero(splitByChar('.', minimum_supported_version)[2]), toUInt32OrZero(splitByChar('.', minimum_supported_version)[3])), '지원 중단', tuple(toUInt32OrZero(splitByChar('.', installed_version)[1]), toUInt32OrZero(splitByChar('.', installed_version)[2]), toUInt32OrZero(splitByChar('.', installed_version)[3])) < tuple(toUInt32OrZero(splitByChar('.', latest_version)[1]), toUInt32OrZero(splitByChar('.', latest_version)[2]), toUInt32OrZero(splitByChar('.', latest_version)[3])), '업데이트 필요', '최신') AS update_status FROM enrolled LEFT JOIN latest_by_collector USING (collector_id) CROSS JOIN policy ORDER BY reporting_status DESC, last_seen DESC",
+                "refId": "A"
+              }
+            ],
+            "title": "설치별 Tailnet·수집 상태",
+            "type": "table"
+          },
+          {
+            "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+            "description": "Conservative latest-seven-days versus previous-seven-days gate. READY requires at least ten observed root windows on both sides and identical schema, version, OS/runtime/execution, model-effort signatures, and internal collector set. Collector IDs are compared but never returned. Use the local compare command for an explicitly changed version or effort.",
+            "fieldConfig": {"defaults": {}, "overrides": []},
+            "gridPos": {"h": 5, "w": 24, "x": 0, "y": 46},
+            "id": 11,
+            "options": {"cellHeight": "sm", "showHeader": true},
+            "targets": [
+              {
+                "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+                "editorType": "sql",
+                "format": 1,
+                "queryType": "table",
+                "rawSql": "WITH current_period AS (SELECT sum(observed_root_count) AS roots, uniqExact(collector_id) AS collectors, arraySort(groupUniqArray(collector_id)) AS collector_scope, sum(unreadable_root_count + root_truncated_count + truncated_count + guardian_incomplete_excluded_count + originator_unclassified_excluded_root_count + originator_source_fallback_root_count + fallback_rollout_count + delegated_fallback_rollout_count + guardian_fallback_rollout_count) AS missing_or_fallback, countIf((observed_root_count > 0 AND usage_source IN ('unavailable', 'unknown')) OR (delegated_count > 0 AND delegated_usage_source IN ('unavailable', 'unknown')) OR (guardian_count > 0 AND guardian_usage_source IN ('unavailable', 'unknown'))) AS usage_missing_events, countIf(capability_latency_completed_count = 0 OR capability_root_boundary_counts = 0 OR (guardian_review_count > 0 AND capability_guardian_workspace_attribution = 0) OR (selection_mode != 'activity_window' AND capability_completed_root_coverage = 0)) AS capability_missing_events, countIf(root_status != 'PASS' OR delegated_status != 'PASS' OR guardian_status != 'PASS') AS component_nonpass_events, arraySort(groupUniqArray(tuple(schema_version, groundline_version, os_family, runtime_family, execution_mode, arrayStringConcat(arrayMap((model, effort) -> concat(model, '|', effort), model_families, efforts), ',')))) AS cohorts FROM groundline.basic_active WHERE ifNull(period_end, generated_at) >= now('UTC') - INTERVAL 7 DAY), previous_period AS (SELECT sum(observed_root_count) AS roots, uniqExact(collector_id) AS collectors, arraySort(groupUniqArray(collector_id)) AS collector_scope, sum(unreadable_root_count + root_truncated_count + truncated_count + guardian_incomplete_excluded_count + originator_unclassified_excluded_root_count + originator_source_fallback_root_count + fallback_rollout_count + delegated_fallback_rollout_count + guardian_fallback_rollout_count) AS missing_or_fallback, countIf((observed_root_count > 0 AND usage_source IN ('unavailable', 'unknown')) OR (delegated_count > 0 AND delegated_usage_source IN ('unavailable', 'unknown')) OR (guardian_count > 0 AND guardian_usage_source IN ('unavailable', 'unknown'))) AS usage_missing_events, countIf(capability_latency_completed_count = 0 OR capability_root_boundary_counts = 0 OR (guardian_review_count > 0 AND capability_guardian_workspace_attribution = 0) OR (selection_mode != 'activity_window' AND capability_completed_root_coverage = 0)) AS capability_missing_events, countIf(root_status != 'PASS' OR delegated_status != 'PASS' OR guardian_status != 'PASS') AS component_nonpass_events, arraySort(groupUniqArray(tuple(schema_version, groundline_version, os_family, runtime_family, execution_mode, arrayStringConcat(arrayMap((model, effort) -> concat(model, '|', effort), model_families, efforts), ',')))) AS cohorts FROM groundline.basic_active WHERE ifNull(period_end, generated_at) >= now('UTC') - INTERVAL 14 DAY AND ifNull(period_end, generated_at) < now('UTC') - INTERVAL 7 DAY) SELECT multiIf(current_period.roots < 10 OR previous_period.roots < 10, 'INSUFFICIENT', current_period.missing_or_fallback > 0 OR previous_period.missing_or_fallback > 0 OR current_period.usage_missing_events > 0 OR previous_period.usage_missing_events > 0 OR current_period.capability_missing_events > 0 OR previous_period.capability_missing_events > 0 OR current_period.component_nonpass_events > 0 OR previous_period.component_nonpass_events > 0, 'INSUFFICIENT', current_period.collector_scope != previous_period.collector_scope OR current_period.cohorts != previous_period.cohorts, 'COHORT_MISMATCH', 'READY') AS comparison_status, previous_period.roots AS baseline_observed_roots, current_period.roots AS candidate_observed_roots, previous_period.collectors AS baseline_collectors, current_period.collectors AS candidate_collectors, previous_period.missing_or_fallback AS baseline_missing_or_fallback, current_period.missing_or_fallback AS candidate_missing_or_fallback, previous_period.usage_missing_events AS baseline_usage_missing_events, current_period.usage_missing_events AS candidate_usage_missing_events, previous_period.capability_missing_events AS baseline_capability_missing_events, current_period.capability_missing_events AS candidate_capability_missing_events, previous_period.component_nonpass_events AS baseline_component_nonpass_events, current_period.component_nonpass_events AS candidate_component_nonpass_events FROM current_period CROSS JOIN previous_period",
+                "refId": "A"
+              }
+            ],
+            "title": "7일 비교 준비도",
+            "type": "table"
+          },
+          {
+            "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+            "description": "Turn-context distribution by runtime and normalized model/effort. Mixed-model events contribute their context counts to each matching row; this is descriptive, not a task outcome comparison.",
+            "fieldConfig": {"defaults": {}, "overrides": []},
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 51},
+            "id": 12,
+            "options": {"cellHeight": "sm", "showHeader": true},
+            "targets": [
+              {
+                "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+                "editorType": "sql",
+                "format": 1,
+                "queryType": "table",
+                "rawSql": "SELECT os_family, runtime_family, execution_mode, groundline_version, tupleElement(model_effort, 1) AS model_family, tupleElement(model_effort, 2) AS effort, sum(tupleElement(model_effort, 3)) AS turn_contexts, uniqExact(collector_id) AS collectors FROM groundline.basic_active ARRAY JOIN arrayZip(model_families, efforts, model_effort_counts) AS model_effort WHERE $$__timeFilter(ifNull(period_end, generated_at)) GROUP BY os_family, runtime_family, execution_mode, groundline_version, model_family, effort ORDER BY turn_contexts DESC",
+                "refId": "A"
+              }
+            ],
+            "title": "Runtime별 model·effort context",
+            "type": "table"
+          },
+          {
+            "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+            "description": "A success means a verification-classified tool returned without a detected terminal failure. It remains a tool-result proxy, not proof that the product outcome is correct.",
+            "fieldConfig": {"defaults": {}, "overrides": []},
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 32},
+            "id": 13,
+            "options": {"cellHeight": "sm", "showHeader": true},
+            "targets": [
+              {
+                "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+                "editorType": "sql",
+                "format": 1,
+                "queryType": "table",
+                "rawSql": "SELECT toStartOfWeek(ifNull(period_end, generated_at), 1, 'UTC') AS week_utc_monday, sum(verification_tool_calls) AS verification_calls, sum(verification_success_count) AS success, sum(verification_failure_count) AS failure, sum(verification_unresolved_count) AS unresolved, round(sum(verification_success_count) / nullIf(sum(verification_success_count + verification_failure_count), 0), 4) AS success_ratio_of_resolved, round(sum(verification_success_count + verification_failure_count) / nullIf(sum(verification_tool_calls), 0), 4) AS outcome_coverage FROM groundline.basic_active WHERE $$__timeFilter(ifNull(period_end, generated_at)) GROUP BY week_utc_monday ORDER BY week_utc_monday",
+                "refId": "A"
+              }
+            ],
+            "title": "검증 결과 proxy",
+            "type": "table"
+          },
+          {
+            "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+            "description": "Coverage and missingness required before strengthening a comparison. Small samples and fallback usage remain visible instead of being silently combined.",
+            "fieldConfig": {"defaults": {}, "overrides": []},
+            "gridPos": {"h": 6, "w": 24, "x": 0, "y": 40},
+            "id": 14,
+            "options": {"cellHeight": "sm", "showHeader": true},
+            "targets": [
+              {
+                "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+                "editorType": "sql",
+                "format": 1,
+                "queryType": "table",
+                "rawSql": "SELECT schema_version, groundline_version, os_family, runtime_family, execution_mode, selection_mode, collection_trigger, count() AS events, uniqExact(collector_id) AS collectors, sum(observed_root_count) AS observed_roots, sumIf(eligible_root_count, capability_completed_root_coverage = 1) AS eligible_completed_roots, sumIf(selected_root_count, capability_completed_root_coverage = 1) AS selected_completed_roots, round(sumIf(selected_root_count, capability_completed_root_coverage = 1) / nullIf(sumIf(eligible_root_count, capability_completed_root_coverage = 1), 0), 4) AS completed_root_selection_coverage, sum(root_truncated_count) AS root_selection_truncated, sum(truncated_count) AS delegated_guardian_truncated, sum(guardian_incomplete_excluded_count) AS guardian_incomplete_excluded, sum(unreadable_root_count) AS unreadable_roots, sum(originator_unclassified_excluded_root_count) AS unclassified_originator_roots, sum(originator_source_fallback_root_count) AS source_fallback_originator_roots, sum(fallback_rollout_count + delegated_fallback_rollout_count + guardian_fallback_rollout_count) AS usage_fallback_rollouts, countIf((observed_root_count > 0 AND usage_source IN ('unavailable', 'unknown')) OR (delegated_count > 0 AND delegated_usage_source IN ('unavailable', 'unknown')) OR (guardian_count > 0 AND guardian_usage_source IN ('unavailable', 'unknown'))) AS usage_missing_events, countIf(root_status != 'PASS' OR delegated_status != 'PASS' OR guardian_status != 'PASS') AS component_nonpass_events, countIf(capability_completed_root_coverage = 1) AS completed_root_coverage_events, countIf(capability_latency_completed_count = 1) AS latency_denominator_events, countIf(capability_root_boundary_counts = 1) AS root_boundary_count_events, countIf(capability_guardian_workspace_attribution = 1) AS guardian_attribution_events, sumIf(boundary_review_root_count, capability_root_boundary_counts = 1) AS boundary_review_roots, sumIf(long_lived_root_count, capability_root_boundary_counts = 1) AS long_lived_roots, sumIf(guardian_workspace_attributed_review_count, capability_guardian_workspace_attribution = 1) AS guardian_workspace_attributed_reviews FROM groundline.basic_active WHERE $$__timeFilter(ifNull(period_end, generated_at)) GROUP BY schema_version, groundline_version, os_family, runtime_family, execution_mode, selection_mode, collection_trigger ORDER BY observed_roots DESC",
+                "refId": "A"
+              }
+            ],
+            "title": "표본 coverage·결측",
+            "type": "table"
+          },
+          {
+            "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+            "description": "Install-weighted fleet coverage. Never-reported installations are split into a 24-hour initial grace window and overdue; observed installations outside the 7-day recent window are stale. current_package_claim is only the registry's latest-package claim; current_observed/reporting/recent require an accepted event at the policy latest version. Unknown and legacy metadata are not zero or a negative claim.",
+            "fieldConfig": {"defaults": {}, "overrides": []},
+            "gridPos": {"h": 6, "w": 24, "x": 0, "y": 4},
+            "id": 15,
+            "options": {"cellHeight": "sm", "showHeader": true},
+            "targets": [{"datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"}, "editorType": "sql", "format": 1, "queryType": "table", "rawSql": "WITH policy AS (SELECT argMax(latest_version, updated_at) AS latest_version FROM groundline.release_policy FINAL WHERE policy_key = 'stable'), enrolled AS (SELECT collector_id, created_at, enrollment_schema_version, os_family, runtime_family, execution_mode, groundline_version FROM groundline.collectors FINAL WHERE revoked = 0), any_events AS (SELECT collector_id, toUInt8(1) AS has_report, max(received_at) AS last_seen FROM groundline.basic_active GROUP BY collector_id), reporting_events AS (SELECT collector_id, toUInt8(1) AS has_report FROM groundline.basic_active WHERE $$__timeFilter(ifNull(period_end, generated_at)) GROUP BY collector_id), current_events AS (SELECT events.collector_id, events.received_at, ifNull(events.period_end, events.generated_at) AS event_time FROM groundline.basic_active AS events CROSS JOIN policy WHERE events.groundline_version = policy.latest_version), current_observed AS (SELECT collector_id, toUInt8(1) AS has_report, max(received_at) AS last_seen FROM current_events GROUP BY collector_id), current_reporting AS (SELECT collector_id, toUInt8(1) AS has_report FROM current_events WHERE $$__timeFilter(event_time) GROUP BY collector_id) SELECT (SELECT latest_version FROM policy) AS policy_latest_version, count() AS enrolled_installation_count, countIf(enrollment_schema_version = 2 AND os_family != 'unknown' AND runtime_family != 'unknown' AND execution_mode != 'unknown' AND groundline_version != 'unknown') AS metadata_known_installation_count, countIf(enrollment_schema_version != 2 OR os_family = 'unknown' OR runtime_family = 'unknown' OR execution_mode = 'unknown' OR groundline_version = 'unknown') AS metadata_unknown_installation_count, countIf(ifNull(any_events.has_report, 0) = 1) AS observed_installation_count, countIf(ifNull(reporting_events.has_report, 0) = 1) AS reporting_installation_count, countIf(ifNull(any_events.has_report, 0) = 1 AND any_events.last_seen >= now('UTC') - INTERVAL 7 DAY) AS recent_installation_count, countIf(ifNull(any_events.has_report, 0) = 0) AS never_reported_installation_count, countIf(ifNull(any_events.has_report, 0) = 0 AND enrolled.created_at > now('UTC') - INTERVAL 24 HOUR) AS pending_initial_report_installation_count, countIf(ifNull(any_events.has_report, 0) = 0 AND enrolled.created_at <= now('UTC') - INTERVAL 24 HOUR) AS overdue_never_reported_installation_count, countIf(ifNull(any_events.has_report, 0) = 1 AND any_events.last_seen < now('UTC') - INTERVAL 7 DAY) AS stale_observed_installation_count, countIf(enrolled.groundline_version = (SELECT latest_version FROM policy)) AS current_package_claim_installation_count, countIf(enrolled.groundline_version = (SELECT latest_version FROM policy) AND ifNull(current_observed.has_report, 0) = 0) AS current_package_claim_unobserved_installation_count, countIf(ifNull(current_observed.has_report, 0) = 1) AS current_observed_installation_count, countIf(ifNull(current_reporting.has_report, 0) = 1) AS current_reporting_installation_count, countIf(ifNull(current_observed.has_report, 0) = 1 AND current_observed.last_seen >= now('UTC') - INTERVAL 7 DAY) AS current_recent_installation_count FROM enrolled LEFT JOIN any_events USING (collector_id) LEFT JOIN reporting_events USING (collector_id) LEFT JOIN current_observed USING (collector_id) LEFT JOIN current_reporting USING (collector_id)", "refId": "A"}],
+            "title": "설치 coverage (등록 설치 기준)",
+            "type": "table"
+          },
+          {
+            "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+            "description": "Enrollment metadata completeness, independent of reporting. Unknown is the v1-compatible default and is not inferred from hostnames, paths, or secrets.",
+            "fieldConfig": {"defaults": {}, "overrides": []},
+            "gridPos": {"h": 6, "w": 12, "x": 12, "y": 18},
+            "id": 16,
+            "options": {"cellHeight": "sm", "showHeader": true},
+            "targets": [{"datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"}, "editorType": "sql", "format": 1, "queryType": "table", "rawSql": "SELECT count() AS enrolled_installation_count, countIf(enrollment_schema_version = 2 AND os_family != 'unknown' AND runtime_family != 'unknown' AND execution_mode != 'unknown' AND groundline_version != 'unknown') AS metadata_known_installation_count, countIf(enrollment_schema_version != 2 OR os_family = 'unknown' OR runtime_family = 'unknown' OR execution_mode = 'unknown' OR groundline_version = 'unknown') AS metadata_unknown_installation_count, countIf(os_family = 'unknown') AS os_metadata_unknown, countIf(runtime_family = 'unknown') AS runtime_metadata_unknown, countIf(execution_mode = 'unknown') AS execution_metadata_unknown, countIf(groundline_version = 'unknown') AS version_metadata_unknown FROM groundline.collectors FINAL WHERE revoked = 0", "refId": "A"}],
+            "title": "등록 metadata 누락 (설치 기준)",
+            "type": "table"
+          },
+          {
+            "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+            "description": "Install-weighted registry distributions only. Legacy or unknown values remain explicit unknown buckets and are never inferred from hostnames, IP addresses, paths, or accepted-event fallbacks.",
+            "fieldConfig": {"defaults": {}, "overrides": []},
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 59},
+            "id": 17,
+            "options": {"cellHeight": "sm", "showHeader": true},
+            "targets": [{"datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"}, "editorType": "sql", "format": 1, "queryType": "table", "rawSql": "SELECT dimension, value, count() AS installation_count FROM (SELECT 'os_family' AS dimension, os_family AS value FROM groundline.collectors FINAL WHERE revoked = 0 UNION ALL SELECT 'runtime_family' AS dimension, runtime_family AS value FROM groundline.collectors FINAL WHERE revoked = 0 UNION ALL SELECT 'execution_mode' AS dimension, execution_mode AS value FROM groundline.collectors FINAL WHERE revoked = 0 UNION ALL SELECT 'groundline_version' AS dimension, groundline_version AS value FROM groundline.collectors FINAL WHERE revoked = 0) GROUP BY dimension, value ORDER BY dimension, installation_count DESC, value", "refId": "A"}],
+            "title": "설치 분포 (registry·설치 기준)",
+            "type": "table"
+          },
+          {
+            "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+            "description": "Storage and delivery quality for logical events in the selected period. ClickHouse FINAL removes physical retry rows from analysis, but the duplicate excess remains visible. Delayed means over 6 hours, overdue over 24 hours, and clock skew means generated_at is more than 5 minutes ahead of received_at. No automatic OPTIMIZE or deletion is performed.",
+            "fieldConfig": {"defaults": {"decimals": 0}, "overrides": []},
+            "gridPos": {"h": 6, "w": 12, "x": 0, "y": 18},
+            "id": 18,
+            "options": {"cellHeight": "sm", "showHeader": true},
+            "targets": [{"datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"}, "editorType": "sql", "format": 1, "queryType": "table", "rawSql": "WITH logical_events AS (SELECT event_id, received_at, generated_at FROM groundline.basic_active WHERE $$__timeFilter(ifNull(period_end, generated_at))), active_collectors AS (SELECT collector_id, current_generation FROM groundline.collectors FINAL WHERE revoked = 0), stored_events AS (SELECT events.event_id FROM groundline.basic_weekly AS events INNER JOIN active_collectors AS active ON events.collector_id = active.collector_id AND events.collection_generation = active.current_generation INNER JOIN (SELECT event_id FROM logical_events) AS selected USING (event_id)) SELECT (SELECT count() FROM stored_events) AS stored_event_row_count, (SELECT count() FROM logical_events) AS deduplicated_event_count, stored_event_row_count - deduplicated_event_count AS duplicate_event_row_count, (SELECT countIf(dateDiff('second', generated_at, received_at) > 21600) FROM logical_events) AS delayed_delivery_event_count, (SELECT countIf(dateDiff('second', generated_at, received_at) > 86400) FROM logical_events) AS overdue_delivery_event_count, (SELECT countIf(generated_at > received_at + INTERVAL 5 MINUTE) FROM logical_events) AS clock_skew_event_count", "refId": "A"}],
+            "title": "ClickHouse 저장·전송 품질",
+            "type": "table"
+          }
+        ],
+        "refresh": "30m",
+        "schemaVersion": 42,
+        "tags": ["groundline", "insights", "private"],
+        "templating": {"list": []},
+        "time": {"from": "now-30d", "to": "now"},
+        "timepicker": {},
+        "timezone": "utc",
+        "title": "GroundLine Insights",
+        "uid": "groundline-insights",
+        "version": 10,
+        "weekStart": "monday"
+      }

@@ -6,6 +6,12 @@ pub mod audit;
 pub mod batch;
 #[cfg(feature = "efficiency")]
 pub mod efficiency;
+#[cfg(feature = "insights")]
+pub mod event;
+#[cfg(feature = "insights")]
+pub mod insights;
+#[cfg(feature = "integrity")]
+pub mod integrity;
 #[cfg(feature = "version")]
 pub mod version;
 

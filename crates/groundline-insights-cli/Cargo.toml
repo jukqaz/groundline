@@ -1,0 +1,23 @@
+[package]
+name = "groundline-insights-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "groundline-insights"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+groundline-contracts = { version = "0.20.0", path = "../groundline-contracts", default-features = false, features = ["insights", "integrity", "version"] }
+groundline-runtime = { version = "0.20.0", path = "../groundline-runtime", default-features = false, features = ["insights-client", "insights-state", "tailnet-probe"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

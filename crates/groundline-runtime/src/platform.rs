@@ -24,28 +24,46 @@ pub fn current_target() -> Result<&'static str, ContractError> {
 }
 
 pub fn packaged_binary_path(target: &str) -> Result<PathBuf, ContractError> {
+    packaged_product_binary_path(target, "groundline")
+}
+
+pub fn packaged_insights_binary_path(target: &str) -> Result<PathBuf, ContractError> {
+    packaged_product_binary_path(target, "groundline-insights")
+}
+
+fn packaged_product_binary_path(
+    target: &str,
+    executable_name: &str,
+) -> Result<PathBuf, ContractError> {
     if !SUPPORTED_TARGETS.contains(&target) {
         return Err(ContractError("unsupported_target".to_owned()));
     }
     let executable = if target.ends_with("windows-msvc") {
-        "groundline.exe"
+        format!("{executable_name}.exe")
     } else {
-        "groundline"
+        executable_name.to_owned()
     };
     Ok(PathBuf::from("bin").join(target).join(executable))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{SUPPORTED_TARGETS, current_target, packaged_binary_path};
+    use super::{
+        SUPPORTED_TARGETS, current_target, packaged_binary_path, packaged_insights_binary_path,
+    };
 
     #[test]
     fn all_supported_targets_have_bounded_package_paths() {
         for target in SUPPORTED_TARGETS {
             let path = packaged_binary_path(target).expect("supported target");
+            let insights = packaged_insights_binary_path(target).expect("supported target");
             assert_eq!(path.components().count(), 3);
+            assert_eq!(insights.components().count(), 3);
             assert!(!path.is_absolute());
+            assert!(!insights.is_absolute());
             assert!(path.starts_with("bin"));
+            assert!(insights.starts_with("bin"));
+            assert_ne!(path, insights);
         }
     }
 

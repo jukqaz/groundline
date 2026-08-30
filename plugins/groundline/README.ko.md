@@ -15,9 +15,8 @@ GroundLine은 Codex 작업 준비, 증거 기반 완료, 프로젝트 설정 감
   안정적인 reason code만 반환합니다.
 
 `groundline provider-smoke --plugin-root <path> --json`는 owner hook manifest가
-있으면 실패합니다. `cargo xtask verify-source --root . --json`는 비공개 운영
-표식, 개인 경로, Python runtime 의존성, package 동기화 누락, CI 계약 이탈을
-거부합니다.
+있으면 실패합니다. 저장소 qualification은 개인·secret 표식, Python runtime
+의존성, 중복 package root, CI 계약 이탈을 거부합니다.
 
 ## 설치와 업그레이드
 
@@ -50,5 +49,5 @@ groundline efficiency compare --input comparison.json --json
 `.worktreeinclude` 개수만 세고 내용은 읽거나 반환하지 않습니다. audit는 로컬
 Codex state store를 수정하지 않으며, efficiency 입력은 외부로 전송하지 않습니다.
 
-개발 검증 명령은 영문 README와 [release checklist](docs/release-checklist.md)를
+개발 검증 명령은 영문 README와 [release checklist](../../docs/release-checklist.md)를
 참조하세요.

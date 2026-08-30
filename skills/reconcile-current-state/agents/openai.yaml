@@ -1,6 +1,0 @@
-interface:
-  display_name: "Reconcile Current State"
-  short_description: "Recheck repo and runtime state before resuming agent work"
-  default_prompt: "Resume prior agent work after proving the current state."
-policy:
-  allow_implicit_invocation: true

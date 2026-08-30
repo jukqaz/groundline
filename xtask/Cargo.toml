@@ -8,14 +8,26 @@ publish = false
 default-run = "xtask"
 
 [dependencies]
+aho-corasick.workspace = true
 chrono.workspace = true
 clap.workspace = true
-groundline-runtime = { version = "0.19.0", path = "../crates/groundline-runtime", default-features = false }
+command-group.workspace = true
+futures-util.workspace = true
+groundline-runtime = { version = "0.20.0", path = "../crates/groundline-runtime", default-features = false }
 regex.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
+secrecy.workspace = true
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+subtle.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+toml.workspace = true
+url.workspace = true
+uuid.workspace = true
 walkdir.workspace = true

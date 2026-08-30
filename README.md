@@ -1,70 +1,80 @@
 # GroundLine
 
-GroundLine is a public, local-first Codex plugin for repeatable task setup,
-evidence-aware completion, project configuration audits, and aggregate usage
-analysis. It complements Codex; it does not replace Codex execution, settings,
-permissions, agents, worktrees, review, or upgrades.
+GroundLine is one public Rust monorepo with two independently installable Codex
+plugins. Codex remains responsible for execution, settings, permissions, agents,
+worktrees, review, compaction, and upgrades.
 
-## Privacy boundary
+| Plugin | Purpose | Default network behavior |
+| --- | --- | --- |
+| `groundline` | Local guidance, project audits, evidence boundaries, and aggregate usage analysis | Offline; no hooks or collector identity |
+| `groundline-insights` | Optional self-hosted aggregate collection, ClickHouse reports, and Grafana dashboards | Disabled until an owner profile and enrollment credential are configured |
 
-The public plugin has a deliberately small capability surface:
-
-- no lifecycle hooks, background process, scheduler, or collector identity;
-- no network client, upload destination, authentication token, or remote storage;
-- no prompt, transcript, path, repository name, or configuration value emission;
-- local audit commands open bounded regular files read-only and return aggregate
-  counters or stable reason codes.
-
-`groundline provider-smoke --plugin-root <path> --json` fails if an owner hook
-manifest is present. `cargo xtask verify-source --root . --json` rejects private
-infrastructure markers, personal paths, Python runtime dependencies, unsynchronized
-package files, and CI contract drift.
+The plugin packages are canonical under `plugins/`. Shared Rust contracts and
+runtime code live under `crates/`; generic self-hosting assets live under
+`infrastructure/` and `services/`. Real endpoints, credentials, dataset paths,
+deployment receipts, and infrastructure inventories must remain outside Git.
 
 ## Install and upgrade
 
-Add `https://github.com/jukqaz/groundline.git` as a Codex marketplace and install
-the `groundline` plugin. Codex owns refresh and upgrade. GroundLine does not
-self-update or change plugin trust.
-
-After an upgrade, verify the installed package and native artifact independently:
+Register this repository once on the moving `stable` branch, then choose either
+or both plugins:
 
 ```console
-groundline provider-smoke --plugin-root /path/to/installed/groundline --require-installed --json
-groundline doctor --plugin-root /path/to/installed/groundline --json
+codex plugin marketplace add https://github.com/jukqaz/groundline.git --ref stable --json
+codex plugin add groundline@groundline --json
+codex plugin add groundline-insights@groundline --json
 ```
 
-The package supports Apple Silicon and Intel macOS, ARM64 and x86_64 Linux, and
-ARM64 and x86_64 Windows. Release artifacts are built from the moving Rust
-`stable` channel and include a strict manifest plus SHA-256 checksum.
-
-## Commands
+Refresh the single marketplace snapshot to adopt a newer release:
 
 ```console
-groundline platform --json
-groundline project-audit --repo . --json
-groundline audit weekly --days 7 --json
-groundline efficiency batch --input batch.json --json
-groundline efficiency compare --input comparison.json --json
+codex plugin marketplace upgrade groundline --json
+codex plugin list --json
 ```
 
-`project-audit` counts Codex guidance, config, skills, agents, rules, plugins,
-and `.worktreeinclude` without reading or returning their values. Audit commands
-read the local Codex state store without modifying it. Efficiency commands accept
-explicit JSON files and never transmit them.
+An immutable release tag can be used instead of `stable` for rollback or a
+frozen installation. Marketplace refresh, installed package checksums, hook
+trust, collector upload, ClickHouse visibility, Grafana frames, image
+publication, deployment, and stable promotion are separate evidence lanes.
+
+## Privacy and security
+
+Core never installs lifecycle hooks or performs network requests. Insights owns
+exactly four fail-open Codex lifecycle hooks. It reads bounded aggregate counters
+from Codex's SQLite state in read-only mode and rejects raw prompts, responses,
+transcripts, commands, patches, paths, repository names, task IDs, rollout IDs,
+account identifiers, hostnames, and IP addresses from its wire contract.
+
+Tailnet reachability is not authorization. First-contact enrollment additionally
+requires an owner-issued credential stored in a private file outside the plugin.
+Each collector then uses a distinct token. The public repository contains only
+placeholders and generic deployment templates.
 
 ## Development
 
+Use the fast lane while editing:
+
 ```console
 cargo fmt --all -- --check
-cargo test --workspace --all-features --locked
-cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-cargo run --locked -p xtask -- sync-package --root . --json
-cargo run --locked -p xtask -- verify-source --root . --json
+cargo test --locked -p xtask --all-targets
+cargo test --locked -p groundline-cli --test cli_contract
+cargo test --locked -p groundline-insights-cli --test cli_contract
+actionlint
 ```
 
-Pull requests run only the fast lane. Full qualification and six-platform release
-artifacts are explicit manual workflows, with concurrency cancellation, timeouts,
-and short artifact retention.
+Run the complete gate once after the change is frozen:
 
-See [Privacy](docs/privacy.md), [Security](SECURITY.md), and
-[Release checklist](docs/release-checklist.md).
+```console
+cargo test --workspace --all-features --locked
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo run --locked -p xtask -- verify-source --root . --json
+git diff --check
+```
+
+The GitHub workflow uses one fast pull-request lane. Full qualification and the
+six-platform two-product artifact matrix run only for a manual request or a
+release tag, with cancellation, timeouts, and bounded retention. No self-hosted
+runner or production credential is required by public CI.
+
+See [Privacy](docs/privacy.md), [Security](SECURITY.md), and the
+[release checklist](docs/release-checklist.md).

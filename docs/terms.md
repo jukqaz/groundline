@@ -5,5 +5,7 @@ Codex workflows and is provided without warranty. Users remain responsible for
 reviewing commands, outputs, repository changes, and release artifacts before
 relying on them.
 
-GroundLine does not provide a hosted service, account, storage allocation, or
-data-processing service. Codex and GitHub are governed by their own terms.
+GroundLine does not provide a hosted account, storage allocation, or managed
+data-processing service. GroundLine Insights is owner-operated self-hosted
+software; operators are responsible for access control, retention, backups, and
+the services they connect. Codex and GitHub are governed by their own terms.

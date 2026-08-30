@@ -10,7 +10,10 @@ use serde_json::{Value, json};
 use super::XtaskError;
 
 const CHANNEL: &str = "stable";
-const MANIFEST_PATH: &str = ".codex-plugin/plugin.json";
+const MANIFEST_PATHS: &[&str] = &[
+    "plugins/groundline/.codex-plugin/plugin.json",
+    "plugins/groundline-insights/.codex-plugin/plugin.json",
+];
 const RUST_TARGETS: &[&str] = &[
     "aarch64-apple-darwin",
     "x86_64-apple-darwin",
@@ -66,35 +69,45 @@ fn commit(repo: &Path, revision: &str) -> Result<String, XtaskError> {
 }
 
 fn version_at(repo: &Path, revision: &str) -> Result<Version, XtaskError> {
-    let spec = format!("{revision}:{MANIFEST_PATH}");
-    let raw = git(repo, &["show", &spec])?;
-    let value: Value = serde_json::from_str(&raw)?;
-    let version = value
-        .get("version")
-        .and_then(Value::as_str)
-        .ok_or(XtaskError::InvalidReleaseChannel)?;
-    let parsed = Version::parse(version).map_err(|_| XtaskError::InvalidReleaseChannel)?;
-    if parsed.to_string() == version && parsed.pre.is_empty() && parsed.build.is_empty() {
-        Ok(parsed)
-    } else {
-        Err(XtaskError::InvalidReleaseChannel)
+    let mut versions = BTreeSet::new();
+    for manifest in MANIFEST_PATHS {
+        let spec = format!("{revision}:{manifest}");
+        let raw = git(repo, &["show", &spec])?;
+        let value: Value = serde_json::from_str(&raw)?;
+        let version = value
+            .get("version")
+            .and_then(Value::as_str)
+            .ok_or(XtaskError::InvalidReleaseChannel)?;
+        let parsed = Version::parse(version).map_err(|_| XtaskError::InvalidReleaseChannel)?;
+        if parsed.to_string() != version || !parsed.pre.is_empty() || !parsed.build.is_empty() {
+            return Err(XtaskError::InvalidReleaseChannel);
+        }
+        versions.insert(parsed);
     }
+    (versions.len() == 1)
+        .then(|| versions.into_iter().next().expect("one version"))
+        .ok_or(XtaskError::InvalidReleaseChannel)
 }
 
 fn expected_artifacts() -> BTreeSet<String> {
     let mut expected = BTreeSet::new();
-    for target in RUST_TARGETS {
-        let executable = if target.contains("windows") {
-            "groundline.exe"
-        } else {
-            "groundline"
-        };
-        for name in [
-            executable.to_owned(),
-            format!("{executable}.sha256"),
-            "manifest.json".to_owned(),
-        ] {
-            expected.insert(format!("plugins/groundline/bin/{target}/{name}"));
+    for (plugin, executable) in [
+        ("groundline", "groundline"),
+        ("groundline-insights", "groundline-insights"),
+    ] {
+        for target in RUST_TARGETS {
+            let executable = if target.contains("windows") {
+                format!("{executable}.exe")
+            } else {
+                executable.to_owned()
+            };
+            for name in [
+                executable.clone(),
+                format!("{executable}.sha256"),
+                "manifest.json".to_owned(),
+            ] {
+                expected.insert(format!("plugins/{plugin}/bin/{target}/{name}"));
+            }
         }
     }
     expected
@@ -233,10 +246,12 @@ mod tests {
     use super::expected_artifacts;
 
     #[test]
-    fn stable_release_requires_exactly_six_immutable_artifact_sets() {
+    fn stable_release_requires_exactly_two_six_target_artifact_sets() {
         let expected = expected_artifacts();
-        assert_eq!(expected.len(), 18);
+        assert_eq!(expected.len(), 36);
         assert!(expected.contains("plugins/groundline/bin/aarch64-pc-windows-msvc/groundline.exe"));
-        assert!(expected.contains("plugins/groundline/bin/x86_64-apple-darwin/groundline.sha256"));
+        assert!(expected.contains(
+            "plugins/groundline-insights/bin/x86_64-apple-darwin/groundline-insights.sha256"
+        ));
     }
 }

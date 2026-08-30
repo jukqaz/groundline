@@ -1,14 +1,25 @@
 # Privacy
 
-GroundLine processes explicit local inputs on the user's machine. The public
-plugin does not transmit data, configure a destination, create a persistent
-device identity, or run automatically in the background.
+GroundLine Core processes explicit local inputs and performs no network request.
+Its audit commands open Codex state read-only and return aggregate counts without
+prompt text, response text, task titles, repository names, filesystem paths,
+configuration values, credentials, or database rows.
 
-The local audit surface reads Codex's state database in read-only mode and
-returns aggregate counts. It does not emit prompt text, response text, task
-titles, repository names, filesystem paths, configuration values, credentials,
-or database rows. `project-audit` counts recognized Codex configuration surfaces
-without reading their contents.
+GroundLine Insights is separately installed and remains inactive until the owner
+configures it. It writes only bounded owner-private state under the Codex home and
+sends strict aggregate events to an owner-selected Tailnet endpoint. Its contracts
+exclude raw prompts, responses, transcripts, commands, patches, paths, hostnames,
+repository names, task IDs, rollout IDs, account identifiers, and IP addresses.
 
-Users control every input path and invocation. Deleting GroundLine removes no
-Codex data because the public plugin does not own a data store.
+The owner profile is stored without credentials. The enrollment credential and
+per-collector token are separate private files and are never returned by status,
+doctor, or receipt commands. The self-hosted service stores collector UUIDs and
+aggregate events needed for fleet status and reports; deleting a collector is an
+explicit authenticated operation.
+
+The public repository and release packages contain no production endpoint,
+credential, dataset path, infrastructure inventory, or deployment receipt.
+Source qualification rejects common private-key, token, credential, environment,
+and local database artifacts before packaging. This is defense in depth and does
+not replace GitHub secret scanning or review.
+Operators are responsible for their self-hosted ClickHouse and Grafana retention.

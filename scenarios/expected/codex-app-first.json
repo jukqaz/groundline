@@ -1,0 +1,7 @@
+{
+  "recommended_mode": "codex-app-first",
+  "workflow_owner": "codex",
+  "groundline_invocation": "on-demand",
+  "mutation_performed": false,
+  "network": "disabled"
+}

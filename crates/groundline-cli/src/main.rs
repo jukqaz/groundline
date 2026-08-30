@@ -61,8 +61,26 @@ enum Command {
         #[command(subcommand)]
         command: EfficiencyCommand,
     },
+    /// Inspect privacy-safe local evidence for optional GroundLine integrations.
+    Integrations {
+        #[command(subcommand)]
+        command: IntegrationCommand,
+    },
     /// Report the binary-distribution target for this host.
     Platform {
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum IntegrationCommand {
+    /// Inspect one integration without reading or emitting endpoint or identity values.
+    Status {
+        #[arg(default_value = "insights")]
+        integration: String,
+        #[arg(long)]
+        codex_home: Option<PathBuf>,
         #[arg(long)]
         json: bool,
     },
@@ -341,6 +359,18 @@ fn run(cli: Cli) -> Result<(), ExitCode> {
             command: EfficiencyCommand::Compare { input, json },
         } => load_object(&input)
             .and_then(|packet| efficiency::compare_aggregate_periods(&packet))
+            .map(|value| (value, json)),
+        Command::Integrations {
+            command:
+                IntegrationCommand::Status {
+                    integration,
+                    codex_home,
+                    json,
+                },
+        } => codex_home
+            .map(Ok)
+            .unwrap_or_else(default_codex_home)
+            .and_then(|home| operations::integration_status(&home, &integration))
             .map(|value| (value, json)),
         Command::Platform { json } => platform::current_target()
             .and_then(|target| platform::packaged_binary_path(target).map(|path| (target, path)))
