@@ -211,6 +211,20 @@ fn runtime_failure(error: &insights_runtime::InsightsRuntimeError) -> Value {
     })
 }
 
+fn state_failure(error: &insights_state::StateError) -> Value {
+    json!({
+        "kind": "groundline-insights-worker-error",
+        "schema": 1,
+        "status": "FAIL",
+        "result_code": error.to_string(),
+        "network_performed": error.network_performed(),
+        "mutation_performed": error.mutation_performed(),
+        "raw_content_emitted": false,
+        "private_paths_emitted": false,
+        "secret_value_printed": false,
+    })
+}
+
 async fn run(cli: Cli) -> Result<(), ExitCode> {
     match cli.command {
         Command::Doctor {
@@ -339,10 +353,7 @@ async fn run(cli: Cli) -> Result<(), ExitCode> {
                     Ok(())
                 }
                 Err(error) => {
-                    emit(
-                        &json!({"status":"FAIL","result_code":error.to_string(),"mutation_performed":false,"private_paths_emitted":false,"secret_value_printed":false}),
-                        true,
-                    );
+                    emit(&state_failure(&error), true);
                     Err(ExitCode::FAILURE)
                 }
             }
@@ -365,10 +376,7 @@ async fn run(cli: Cli) -> Result<(), ExitCode> {
                     Ok(())
                 }
                 Err(error) => {
-                    emit(
-                        &json!({"status":"FAIL","result_code":error.to_string(),"network_performed":error.network_performed(),"raw_content_emitted":false,"private_paths_emitted":false,"secret_value_printed":false}),
-                        true,
-                    );
+                    emit(&state_failure(&error), true);
                     Err(ExitCode::FAILURE)
                 }
             }
@@ -398,10 +406,7 @@ async fn run(cli: Cli) -> Result<(), ExitCode> {
                     Ok(())
                 }
                 Err(error) => {
-                    emit(
-                        &json!({"status":"FAIL","result_code":error.to_string()}),
-                        true,
-                    );
+                    emit(&state_failure(&error), true);
                     Err(ExitCode::FAILURE)
                 }
             }
@@ -421,10 +426,7 @@ async fn run(cli: Cli) -> Result<(), ExitCode> {
                     Ok(())
                 }
                 Err(error) => {
-                    emit(
-                        &json!({"status":"FAIL","result_code":error.to_string()}),
-                        true,
-                    );
+                    emit(&state_failure(&error), true);
                     Err(ExitCode::FAILURE)
                 }
             }
@@ -444,10 +446,7 @@ async fn run(cli: Cli) -> Result<(), ExitCode> {
                     Ok(())
                 }
                 Err(error) => {
-                    emit(
-                        &json!({"status":"FAIL","result_code":error.to_string()}),
-                        true,
-                    );
+                    emit(&state_failure(&error), true);
                     Err(ExitCode::FAILURE)
                 }
             }
@@ -467,10 +466,7 @@ async fn run(cli: Cli) -> Result<(), ExitCode> {
                     Ok(())
                 }
                 Err(error) => {
-                    emit(
-                        &json!({"status":"FAIL","result_code":error.to_string()}),
-                        true,
-                    );
+                    emit(&state_failure(&error), true);
                     Err(ExitCode::FAILURE)
                 }
             }
@@ -479,8 +475,21 @@ async fn run(cli: Cli) -> Result<(), ExitCode> {
             trigger,
             plugin_root,
             codex_home,
-        } => checkpoint::spawn_worker(&trigger, plugin_root.as_deref(), codex_home.as_deref())
-            .map_err(|_| ExitCode::FAILURE),
+        } => {
+            if !checkpoint::valid_trigger(&trigger) {
+                return Err(ExitCode::FAILURE);
+            }
+            let home = codex_home
+                .map(Ok)
+                .unwrap_or_else(insights_runtime::default_codex_home)
+                .map_err(|_| ExitCode::FAILURE)?;
+            match insights_state::checkpoint_enabled(&home) {
+                Ok(false) => Ok(()),
+                Ok(true) => checkpoint::spawn_worker(&trigger, plugin_root.as_deref(), Some(&home))
+                    .map_err(|_| ExitCode::FAILURE),
+                Err(_) => Err(ExitCode::FAILURE),
+            }
+        }
         Command::Platform { json: json_output } => {
             match platform::current_target().and_then(|target| {
                 platform::packaged_insights_binary_path(target).map(|path| (target, path))

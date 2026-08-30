@@ -13,7 +13,9 @@ private state, and user-owned settings.
 ## Workflow
 
 1. Resolve the installed platform binary from this file's plugin root. Never
-   assume the current repository is GroundLine.
+   assume the current repository is GroundLine or that `groundline` is on the
+   user shell's `PATH`. In the examples below, invoke that resolved absolute
+   executable path in place of the bare command name.
 
 2. Start read-only:
 

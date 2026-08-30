@@ -23,6 +23,8 @@ codex plugin marketplace upgrade groundline --json
 
 binary 이름은 macOS/Linux에서 `groundline-insights`, Windows에서
 `groundline-insights.exe`입니다. 세 운영체제의 ARM64·x86-64를 지원합니다.
+실행 파일은 설치된 plugin의 `bin/<target>`에서 찾습니다. Codex plugin 설치가
+사용자 shell의 `PATH` 등록까지 보장하는 것은 아닙니다.
 
 ## Owner 설정
 
@@ -33,8 +35,17 @@ profile과 credential을 `~/.codex/groundline/insights` 아래의 서로 다른 
 
 첫 enrollment에는 Tailnet 연결과 credential이 모두 필요하며, 이후 collector별
 token을 사용합니다. 설정 입력은 운영 비밀이므로 Git에 commit하면 안 됩니다.
+`references/owner-profile.example.json`은 전체 필드를 제공하지만 `REPLACE_ME`를
+의도적으로 짧게 두었으므로 그대로는 활성화되지 않습니다. endpoint와 token을
+owner-private 값으로 바꾼 복사본만 `worker configure --input`에 전달합니다.
 수집 wire contract는 raw prompt, response, transcript, command, patch, path,
 hostname, 저장소명, task/rollout/account/IP 식별자를 거부합니다.
+
+`worker status`는 `collection_state`, `ready_to_collect`, 제한된
+`blocking_reason_codes`로 의도적인 비활성, 설정 누락/오류, Tailnet 미확인/끊김,
+첫 수집 대기, 7일 이상 수집 정체, 시계 오차, 정상 수집 상태를 구분합니다.
+`tailnet_connected: null`은 연결 끊김이 아니라 현재 실행 경계에서 확인하지
+못했다는 뜻입니다.
 
 ClickHouse schema migration의 단일 소유자는 Insights API입니다. 수집 테이블은
 `ReplacingMergeTree`를 사용하고 report와 Grafana는 `FINAL`이 적용된

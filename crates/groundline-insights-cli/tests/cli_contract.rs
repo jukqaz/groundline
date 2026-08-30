@@ -65,6 +65,70 @@ fn tailnet_command_is_privacy_bounded_on_the_native_host() {
 }
 
 #[test]
+fn fresh_install_is_inert_until_owner_configuration_and_enablement() {
+    let home = tempdir().expect("temporary Codex home");
+    let home_arg = path_argument(home.path());
+    let output = run(&["worker", "status", "--codex-home", home_arg]);
+    assert!(output.status.success(), "stderr={:?}", output.stderr);
+    let result = parse_stdout(&output);
+    assert_eq!(result["kind"], "groundline-insights-worker-status");
+    assert_eq!(result["schema"], 2);
+    assert_eq!(result["status"], "PASS");
+    assert_eq!(result["collection_state"], "disabled");
+    assert_eq!(result["collection_enabled"], false);
+    assert_eq!(result["ready_to_collect"], false);
+
+    let checkpoint = run(&["checkpoint", "session_start_hook", "--codex-home", home_arg]);
+    assert!(
+        checkpoint.status.success(),
+        "stderr={:?}",
+        checkpoint.stderr
+    );
+    assert!(!home.path().join("groundline/insights").exists());
+    let invalid_checkpoint = run(&["checkpoint", "invalid_hook", "--codex-home", home_arg]);
+    assert!(!invalid_checkpoint.status.success());
+    assert!(!home.path().join("groundline/insights").exists());
+
+    let enable = run(&["worker", "enable", "--codex-home", home_arg]);
+    assert!(!enable.status.success());
+    let enable = parse_stdout(&enable);
+    assert_eq!(enable["kind"], "groundline-insights-worker-error");
+    assert_eq!(enable["schema"], 1);
+    assert_eq!(enable["network_performed"], false);
+    assert_eq!(enable["mutation_performed"], false);
+    assert_eq!(enable["private_paths_emitted"], false);
+    assert_eq!(enable["secret_value_printed"], false);
+    assert_eq!(enable["result_code"], "invalid_owner_profile");
+
+    let example = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../plugins/groundline-insights/references/owner-profile.example.json");
+    let example = fs::read_to_string(example).expect("read packaged owner profile example");
+    assert!(example.contains("REPLACE_ME"));
+    let configured = example.replace("REPLACE_ME", &"e".repeat(32));
+    let input = home.path().join("owner-profile.input.json");
+    fs::write(&input, configured).expect("write private test input");
+    let configure = run(&[
+        "worker",
+        "configure",
+        "--input",
+        path_argument(&input),
+        "--codex-home",
+        home_arg,
+    ]);
+    assert!(configure.status.success(), "stderr={:?}", configure.stderr);
+    let configure = parse_stdout(&configure);
+    assert_eq!(configure["status"], "PASS");
+    assert_eq!(configure["owner_profile_configured"], true);
+    assert_eq!(configure["enrollment_credential_configured"], true);
+    assert_eq!(configure["endpoint_emitted"], false);
+    assert!(!configure.to_string().contains("100.64"));
+
+    let enable = run(&["worker", "enable", "--codex-home", home_arg]);
+    assert!(enable.status.success(), "stderr={:?}", enable.stderr);
+    assert_eq!(parse_stdout(&enable)["enabled"], true);
+}
+
+#[test]
 fn provider_smoke_verifies_one_native_binary_package() {
     let root = tempdir().expect("temporary directory");
     let platform = run(&["platform", "--json"]);

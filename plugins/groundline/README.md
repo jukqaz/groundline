@@ -35,6 +35,8 @@ groundline doctor --plugin-root /path/to/installed/groundline --json
 The package supports Apple Silicon and Intel macOS, ARM64 and x86_64 Linux, and
 ARM64 and x86_64 Windows. Release artifacts are built from the moving Rust
 `stable` channel and include a strict manifest plus SHA-256 checksum.
+Resolve the executable from the installed plugin's `bin/<target>` directory;
+plugin installation does not by itself promise a user-shell `PATH` entry.
 
 ## Commands
 

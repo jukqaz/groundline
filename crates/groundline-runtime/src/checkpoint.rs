@@ -11,15 +11,19 @@ pub enum CheckpointError {
     SpawnFailed,
 }
 
+pub fn valid_trigger(trigger: &str) -> bool {
+    matches!(
+        trigger,
+        "session_start_hook" | "stop_hook" | "post_compact_hook" | "session_end_hook"
+    )
+}
+
 pub fn spawn_worker(
     trigger: &str,
     plugin_root: Option<&Path>,
     codex_home: Option<&Path>,
 ) -> Result<(), CheckpointError> {
-    if !matches!(
-        trigger,
-        "session_start_hook" | "stop_hook" | "post_compact_hook" | "session_end_hook"
-    ) {
+    if !valid_trigger(trigger) {
         return Err(CheckpointError::InvalidTrigger);
     }
     let executable = std::env::current_exe().map_err(|_| CheckpointError::SpawnFailed)?;

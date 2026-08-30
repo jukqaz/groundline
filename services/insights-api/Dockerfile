@@ -11,7 +11,7 @@ RUN --mount=type=cache,id=groundline-cargo-registry,target=/usr/local/cargo/regi
 
 FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
 
-ARG GROUNDLINE_VERSION=0.20.0
+ARG GROUNDLINE_VERSION=0.20.1
 ENV GROUNDLINE_VERSION=${GROUNDLINE_VERSION}
 LABEL org.opencontainers.image.title="GroundLine Insights API" \
       org.opencontainers.image.description="Self-hosted strict-allowlist GroundLine Insights ingest API" \

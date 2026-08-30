@@ -1,6 +1,26 @@
 # Changelog
 
-## Unreleased
+## v0.20.1 - 2026-08-31
+
+- Make a missing owner policy explicitly disabled so installation and lifecycle
+  hooks remain inert until reviewed configuration and `worker enable` complete.
+- Validate the complete owner-policy contract, require a valid profile and
+  enrollment credential before enablement, and stop silently treating malformed
+  outbox or status state as empty.
+- Add schema-2 worker readiness output with explicit collection state, readiness,
+  freshness and clock-skew checks, and bounded blocker codes instead of reporting
+  every readable state as `PASS`.
+- Skip the detached worker process entirely while collection is disabled and add
+  unit plus native CLI regression coverage for the opt-in boundary.
+- Import only the exact previously shipped private policy-v1 and status-v3
+  records so an upgrade preserves explicit consent and collection watermarks;
+  malformed or unknown state still fails closed.
+- Standardize worker error receipts and report mutation as `null` when a failed
+  local, enrollment, audit, or upload operation may already have persisted
+  private state instead of falsely claiming no mutation occurred.
+- Ship a complete, privacy-safe owner-profile example with an intentionally
+  invalid placeholder token and execute it through configure/enable in the CLI
+  contract harness after test-only substitution.
 
 ## v0.20.0 - 2026-08-30
 

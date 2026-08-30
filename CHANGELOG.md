@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.20.1
+
+- Enforce explicit owner opt-in for Insights, preserve only the exact deployed
+  private-state upgrade contracts, and expose actionable readiness, freshness,
+  clock-skew, Tailnet, and delivery states.
+- Skip detached workers while disabled, fail closed on malformed local state,
+  and make error receipts honest when partial mutation is unknown.
+- Add a tested fail-closed owner-profile example and clarify that native plugin
+  executables must be resolved from the installed target directory rather than
+  assuming a user-shell `PATH` alias.
+
 ## 0.20.0
 
 - Publish one public monorepo with two canonical, independently installable

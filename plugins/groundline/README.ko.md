@@ -34,6 +34,8 @@ groundline doctor --plugin-root /path/to/installed/groundline --json
 Apple Silicon/Intel macOS, ARM64/x86_64 Linux, ARM64/x86_64 Windows를
 지원합니다. release artifact는 이동하는 Rust `stable` 채널로 빌드되며 엄격한
 manifest와 SHA-256 checksum을 포함합니다.
+실행 파일은 설치된 plugin의 `bin/<target>`에서 찾습니다. plugin 설치가 사용자
+shell의 `PATH` 등록까지 보장하는 것은 아닙니다.
 
 ## 주요 명령
 

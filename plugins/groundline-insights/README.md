@@ -24,7 +24,9 @@ codex plugin marketplace upgrade groundline --json
 ```
 
 The packaged executable is `groundline-insights` (`groundline-insights.exe` on
-Windows). macOS, Linux, and Windows are supported on ARM64 and x86-64.
+Windows). macOS, Linux, and Windows are supported on ARM64 and x86-64. Resolve
+the executable from the installed plugin's `bin/<target>` directory; a Codex
+plugin installation does not by itself promise a user-shell `PATH` entry.
 
 ```console
 groundline-insights provider-smoke --require-installed --json
@@ -43,12 +45,23 @@ printed or copied into the plugin. First-contact enrollment requires both
 Tailnet reachability and that credential. Each collector then uses its own token.
 
 ```console
+cp references/owner-profile.example.json owner-profile.json
+# Replace the example endpoint and REPLACE_ME with owner-private values.
 groundline-insights worker configure --input owner-profile.json
 groundline-insights worker enable
 groundline-insights worker run-once
 ```
 
+`worker status` reports the operational lane separately: `collection_state`,
+`ready_to_collect`, and bounded `blocking_reason_codes` distinguish an intentional
+disabled state, missing or invalid configuration, an unverified/disconnected
+Tailnet, a pending first collection, a seven-day stale collector, clock skew, and
+an active collector. A Tailnet probe with `tailnet_connected: null` is unverified,
+not proof of disconnection.
+
 The input file is owner-private operational material and must not be committed.
+The checked-in example deliberately contains an invalid short token and cannot
+activate collection unchanged.
 Collection uses bounded aggregate counters from Codex's read-only state database.
 The wire contract excludes raw prompts, responses, transcripts, commands, patches,
 paths, hostnames, repository names, task IDs, rollout IDs, account identifiers,

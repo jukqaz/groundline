@@ -25,6 +25,16 @@ Installation is inert. An owner explicitly supplies a schema-7
   `native_hook_checkpoints`;
 - an `enrollment_token` between 32 and 4096 bytes.
 
+A missing policy means disabled. The complete policy is validated as a strict
+private file, and enablement is rejected until both the sanitized profile and
+enrollment credential are valid. Disabled lifecycle checkpoints exit without
+spawning a detached worker. Worker status reports readiness and bounded blockers;
+it never converts an unobservable Tailnet probe into a false disconnected state.
+The exact previously shipped private policy-v1 and status-v3 records have one
+bounded import path that preserves explicit enablement and watermarks without
+making historical formats part of the public interface. Unknown state fails
+closed, and the next explicit mutation writes the current compact format.
+
 Configuration writes a sanitized profile without the token and a separate
 private enrollment-credential file. Identity, consent, policy, status,
 collector token, token metadata, checkpoints, and outbox entries are also

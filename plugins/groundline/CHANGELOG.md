@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.20.1
+
+- Clarify that agents must resolve the packaged native executable from the
+  installed plugin root instead of assuming Codex adds it to the user shell's
+  `PATH`.
+
 ## 0.20.0
 
 - Make `plugins/groundline` the only canonical Core package in the monorepo.

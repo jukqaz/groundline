@@ -45,7 +45,7 @@ insights-state = [
 chrono = { workspace = true, optional = true }
 command-group = { workspace = true, optional = true }
 dirs = { workspace = true, optional = true }
-groundline-contracts = { version = "0.20.0", path = "../groundline-contracts", default-features = false }
+groundline-contracts = { version = "0.20.1", path = "../groundline-contracts", default-features = false }
 ipnet = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 rusqlite = { workspace = true, optional = true }

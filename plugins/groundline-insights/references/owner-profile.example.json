@@ -1,0 +1,13 @@
+{
+  "schema_version": 7,
+  "kind": "groundline-insights-owner-profile",
+  "mode": "private_owner",
+  "endpoint": "http://100.64.0.1:18080",
+  "automatic_activity_checkpoints": true,
+  "automatic_initial_history_sync": true,
+  "collection_scope": "all_activity",
+  "checkpoint_min_interval_seconds": 900,
+  "diagnostic_enabled": false,
+  "trigger_mode": "native_hook_checkpoints",
+  "enrollment_token": "REPLACE_ME"
+}

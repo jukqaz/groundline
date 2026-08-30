@@ -13,7 +13,7 @@ chrono.workspace = true
 clap.workspace = true
 command-group.workspace = true
 futures-util.workspace = true
-groundline-runtime = { version = "0.20.0", path = "../crates/groundline-runtime", default-features = false }
+groundline-runtime = { version = "0.20.1", path = "../crates/groundline-runtime", default-features = false }
 regex.workspace = true
 reqwest.workspace = true
 rustls.workspace = true

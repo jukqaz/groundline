@@ -39,6 +39,8 @@ const LOCK_FILE: &str = "owner-auto.lock";
 const MAX_STATE_BYTES: u64 = 64 * 1024;
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+const COLLECTION_STALE_AFTER: chrono::Duration = chrono::Duration::days(7);
+const MAX_CLOCK_SKEW: chrono::Duration = chrono::Duration::minutes(5);
 static CRYPTO_PROVIDER: OnceLock<Result<(), ()>> = OnceLock::new();
 
 #[derive(Debug, Error)]
@@ -64,6 +66,16 @@ pub enum StateError {
 impl StateError {
     pub fn network_performed(&self) -> bool {
         matches!(self, Self::EnrollmentFailed | Self::UploadFailed)
+    }
+
+    pub fn mutation_performed(&self) -> Option<bool> {
+        match self {
+            Self::InvalidProfile | Self::AlreadyRunning | Self::Disabled => Some(false),
+            Self::TailnetDisconnected => Some(true),
+            Self::LocalState | Self::AuditFailed | Self::EnrollmentFailed | Self::UploadFailed => {
+                None
+            }
+        }
     }
 }
 
@@ -110,6 +122,40 @@ struct Consent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct OwnerPolicy {
+    schema_version: u8,
+    kind: String,
+    status: String,
+    automatic_activity_checkpoints: bool,
+    collection_scope: String,
+    diagnostic_enabled: bool,
+    trigger_mode: String,
+    updated_at_utc: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ImportedPrivatePolicyV1 {
+    schema_version: u8,
+    kind: String,
+    status: String,
+    automatic_activity_checkpoints: bool,
+    collection_scope: String,
+    diagnostic_enabled: bool,
+    trigger_mode: String,
+    accepted_at_utc: String,
+    basic_receipt_id: Uuid,
+    chronicle_access_enabled: bool,
+    collection_generation: u64,
+    cron_or_timer_created: bool,
+    global_hook_created: bool,
+    grant_source: String,
+    mcp_lifecycle_enabled: bool,
+    policy_id: Uuid,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Status {
     schema_version: u8,
     kind: String,
@@ -122,6 +168,39 @@ struct Status {
     pending_event_count: u64,
     tailnet_status: String,
     last_trigger: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ImportedPrivateStatusV3 {
+    schema_version: u8,
+    kind: String,
+    cron_or_timer_created: bool,
+    global_hook_created: bool,
+    last_attempt_result_code: String,
+    last_attempt_utc: String,
+    last_check_result_code: String,
+    last_check_utc: String,
+    last_collected_through_utc: String,
+    last_native_lifecycle_receipt: Value,
+    last_network_failure: String,
+    last_staged_through_utc: Option<String>,
+    last_success_utc: String,
+    last_tailnet_check_utc: String,
+    last_tailnet_notification_utc: Option<String>,
+    mcp_lifecycle_enabled: bool,
+    next_attempt_after_utc: Option<String>,
+    private_paths_recorded: bool,
+    raw_content_recorded: bool,
+    retry_reason_code: Option<String>,
+    secret_value_recorded: bool,
+    tailnet_cli_available: bool,
+    tailnet_connected: Option<bool>,
+    tailnet_health: String,
+    tailnet_notification_result: Option<String>,
+    tailnet_status: String,
+    trigger: String,
+    uploaded_count: u64,
 }
 
 struct CycleLock {
@@ -364,13 +443,60 @@ fn initialize(directory: &Path, now: DateTime<Utc>) -> Result<(Identity, Consent
     Ok((identity, consent))
 }
 
+fn read_owner_policy(path: &Path) -> Result<OwnerPolicy, StateError> {
+    let bytes = read_bytes(path, MAX_STATE_BYTES, true)?;
+    if let Ok(policy) = serde_json::from_slice::<OwnerPolicy>(&bytes) {
+        return Ok(policy);
+    }
+    let imported: ImportedPrivatePolicyV1 =
+        serde_json::from_slice(&bytes).map_err(|_| StateError::LocalState)?;
+    if imported.schema_version != 1
+        || imported.kind != "groundline-insights-owner-auto-policy"
+        || parse_timestamp(&imported.accepted_at_utc).is_err()
+        || imported.basic_receipt_id.is_nil()
+        || imported.policy_id.is_nil()
+        || imported.chronicle_access_enabled
+        || imported.collection_generation != 1
+        || imported.cron_or_timer_created
+        || imported.global_hook_created
+        || imported.mcp_lifecycle_enabled
+        || imported.grant_source != "private_plugin_install"
+    {
+        return Err(StateError::LocalState);
+    }
+    Ok(OwnerPolicy {
+        schema_version: imported.schema_version,
+        kind: imported.kind,
+        status: imported.status,
+        automatic_activity_checkpoints: imported.automatic_activity_checkpoints,
+        collection_scope: imported.collection_scope,
+        diagnostic_enabled: imported.diagnostic_enabled,
+        trigger_mode: imported.trigger_mode,
+        updated_at_utc: imported.accepted_at_utc,
+    })
+}
+
 fn policy_enabled(directory: &Path) -> Result<bool, StateError> {
     let path = directory.join(POLICY_FILE);
     if !path.exists() {
-        return Ok(true);
+        return Ok(false);
     }
-    let value: Value = read_json(&path, true)?;
-    Ok(value.get("status").and_then(Value::as_str) == Some("active"))
+    let policy = read_owner_policy(&path)?;
+    let enabled = match policy.status.as_str() {
+        "active" if policy.automatic_activity_checkpoints => true,
+        "revoked" if !policy.automatic_activity_checkpoints => false,
+        _ => return Err(StateError::LocalState),
+    };
+    if policy.schema_version != 1
+        || policy.kind != "groundline-insights-owner-auto-policy"
+        || policy.collection_scope != "all_activity"
+        || policy.diagnostic_enabled
+        || policy.trigger_mode != "native_hook_checkpoints"
+        || parse_timestamp(&policy.updated_at_utc).is_err()
+    {
+        return Err(StateError::LocalState);
+    }
+    Ok(enabled)
 }
 
 fn set_policy(directory: &Path, enabled: bool, now: DateTime<Utc>) -> Result<(), StateError> {
@@ -646,8 +772,150 @@ async fn upload(
     Ok(uploaded)
 }
 
+fn valid_status_trigger(trigger: &str) -> bool {
+    matches!(
+        trigger,
+        "manual"
+            | "history_sync"
+            | "session_start_hook"
+            | "stop_hook"
+            | "post_compact_hook"
+            | "session_end_hook"
+    )
+}
+
+fn valid_tailnet_status(status: &str) -> bool {
+    matches!(
+        status,
+        "connected"
+            | "disconnected"
+            | "login_required"
+            | "machine_approval_required"
+            | "starting"
+            | "unknown"
+            | "cli_unavailable"
+            | "probe_denied"
+            | "local_api_unavailable"
+            | "probe_timeout"
+    )
+}
+
+fn valid_current_status(status: &Status) -> bool {
+    status.schema_version == 4
+        && status.kind == "groundline-insights-owner-auto-status"
+        && !status.last_result_code.is_empty()
+        && parse_timestamp(&status.last_check_utc).is_ok()
+        && status
+            .last_success_utc
+            .as_deref()
+            .is_none_or(|value| parse_timestamp(value).is_ok())
+        && status
+            .last_collected_through_utc
+            .as_deref()
+            .is_none_or(|value| parse_timestamp(value).is_ok())
+        && valid_tailnet_status(&status.tailnet_status)
+        && valid_status_trigger(&status.last_trigger)
+}
+
+fn read_stored_status(path: &Path) -> Result<Status, StateError> {
+    let bytes = read_bytes(path, MAX_STATE_BYTES, true)?;
+    if let Ok(status) = serde_json::from_slice::<Status>(&bytes) {
+        return if valid_current_status(&status) {
+            Ok(status)
+        } else {
+            Err(StateError::LocalState)
+        };
+    }
+    let imported: ImportedPrivateStatusV3 =
+        serde_json::from_slice(&bytes).map_err(|_| StateError::LocalState)?;
+    let ImportedPrivateStatusV3 {
+        schema_version,
+        kind,
+        cron_or_timer_created,
+        global_hook_created,
+        last_attempt_result_code,
+        last_attempt_utc,
+        last_check_result_code,
+        last_check_utc,
+        last_collected_through_utc,
+        last_native_lifecycle_receipt,
+        last_network_failure,
+        last_staged_through_utc,
+        last_success_utc,
+        last_tailnet_check_utc,
+        last_tailnet_notification_utc,
+        mcp_lifecycle_enabled,
+        next_attempt_after_utc,
+        private_paths_recorded,
+        raw_content_recorded,
+        retry_reason_code,
+        secret_value_recorded,
+        tailnet_cli_available,
+        tailnet_connected,
+        tailnet_health,
+        tailnet_notification_result,
+        tailnet_status,
+        trigger,
+        uploaded_count,
+    } = imported;
+    let optional_timestamps_valid = [
+        last_staged_through_utc.as_deref(),
+        last_tailnet_notification_utc.as_deref(),
+        next_attempt_after_utc.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .all(|value| parse_timestamp(value).is_ok());
+    let optional_codes_valid = [
+        retry_reason_code.as_deref(),
+        tailnet_notification_result.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .all(|value| !value.is_empty());
+    if schema_version != 3
+        || kind != "groundline-insights-owner-auto-status"
+        || cron_or_timer_created
+        || global_hook_created
+        || mcp_lifecycle_enabled
+        || private_paths_recorded
+        || raw_content_recorded
+        || secret_value_recorded
+        || last_attempt_result_code.is_empty()
+        || last_check_result_code.is_empty()
+        || last_network_failure.is_empty()
+        || !last_native_lifecycle_receipt.is_object()
+        || parse_timestamp(&last_attempt_utc).is_err()
+        || parse_timestamp(&last_check_utc).is_err()
+        || parse_timestamp(&last_collected_through_utc).is_err()
+        || parse_timestamp(&last_success_utc).is_err()
+        || parse_timestamp(&last_tailnet_check_utc).is_err()
+        || !optional_timestamps_valid
+        || !optional_codes_valid
+        || !matches!(tailnet_health.as_str(), "ok" | "degraded" | "unknown")
+        || !valid_tailnet_status(&tailnet_status)
+        || !valid_status_trigger(&trigger)
+    {
+        return Err(StateError::LocalState);
+    }
+    let _bounded_probe_state = (tailnet_cli_available, tailnet_connected);
+    Ok(Status {
+        schema_version: 4,
+        kind,
+        enabled: true,
+        last_result_code: last_attempt_result_code,
+        last_check_utc,
+        last_success_utc: Some(last_success_utc),
+        last_collected_through_utc: Some(last_collected_through_utc),
+        uploaded_count,
+        pending_event_count: 0,
+        tailnet_status,
+        last_trigger: trigger,
+    })
+}
+
 fn previous_status(directory: &Path) -> Option<Status> {
-    read_json(&directory.join(STATUS_FILE), true).ok()
+    read_stored_status(&directory.join(STATUS_FILE)).ok()
 }
 
 fn write_status(directory: &Path, status: &Status) -> Result<(), StateError> {
@@ -657,6 +925,8 @@ fn write_status(directory: &Path, status: &Status) -> Result<(), StateError> {
 pub fn enable(codex_home: &Path) -> Result<Value, StateError> {
     let directory = state_directory(codex_home);
     let now = Utc::now();
+    load_profile(codex_home)?;
+    enrollment_token(codex_home).map_err(|_| StateError::InvalidProfile)?;
     initialize(&directory, now)?;
     set_policy(&directory, true, now)?;
     Ok(json!({"status":"PASS","enabled":true,"mutation_performed":true}))
@@ -668,22 +938,107 @@ pub fn disable(codex_home: &Path) -> Result<Value, StateError> {
     Ok(json!({"status":"PASS","disabled":true,"mutation_performed":true}))
 }
 
-pub fn status(codex_home: &Path) -> Result<Value, StateError> {
+fn current_status(directory: &Path) -> Result<Option<Status>, StateError> {
+    let path = directory.join(STATUS_FILE);
+    if !path.exists() {
+        return Ok(None);
+    }
+    read_stored_status(&path).map(Some)
+}
+
+fn status_with_tailnet_at(
+    codex_home: &Path,
+    tailnet: Value,
+    now: DateTime<Utc>,
+) -> Result<Value, StateError> {
     let directory = state_directory(codex_home);
+    let policy_configured = tailnet::is_regular_file(&directory.join(POLICY_FILE));
     let enabled = policy_enabled(&directory)?;
-    let pending = pending_events(&directory)
-        .map(|items| items.len() as u64)
-        .unwrap_or(0);
-    let status = previous_status(&directory);
-    let tailnet = tailnet::probe();
+    let pending = pending_events(&directory)?.len() as u64;
+    let previous = current_status(&directory)?;
+    let profile_present = tailnet::is_regular_file(&codex_home.join(PROFILE_PATH));
+    let profile_configured = load_profile(codex_home).is_ok();
+    let credential_present = tailnet::is_regular_file(&codex_home.join(ENROLLMENT_TOKEN_PATH));
+    let credential_valid = enrollment_token(codex_home).is_ok();
+    let tailnet_connected = tailnet.get("tailnet_connected").and_then(Value::as_bool);
+    let last_result_code = previous
+        .as_ref()
+        .map(|value| value.last_result_code.as_str());
+    let last_success_utc = previous
+        .as_ref()
+        .and_then(|value| value.last_success_utc.as_deref());
+    let last_success_at = last_success_utc.and_then(|value| parse_timestamp(value).ok());
+    let collection_stale =
+        last_success_at.is_some_and(|value| now - value > COLLECTION_STALE_AFTER);
+    let collection_clock_skew = last_success_at.is_some_and(|value| value - now > MAX_CLOCK_SKEW);
+    let ready_to_collect =
+        enabled && profile_configured && credential_valid && tailnet_connected == Some(true);
+    let mut blocking_reason_codes = Vec::new();
+    let (overall_status, collection_state) = if !enabled {
+        ("PASS", "disabled")
+    } else if !profile_configured {
+        blocking_reason_codes.push(if profile_present {
+            "invalid_owner_profile"
+        } else {
+            "owner_profile_required"
+        });
+        ("WARN", "configuration_required")
+    } else if !credential_valid {
+        blocking_reason_codes.push(if credential_present {
+            "invalid_enrollment_credential"
+        } else {
+            "enrollment_credential_required"
+        });
+        ("WARN", "configuration_required")
+    } else if tailnet_connected == Some(false) {
+        blocking_reason_codes.push("tailnet_not_connected");
+        ("WARN", "tailnet_disconnected")
+    } else if tailnet_connected.is_none() {
+        blocking_reason_codes.push("tailnet_connection_unverified");
+        ("WARN", "tailnet_unverified")
+    } else if pending > 0 {
+        blocking_reason_codes.push("delivery_pending");
+        ("WARN", "delivery_pending")
+    } else if collection_clock_skew {
+        blocking_reason_codes.push("collection_clock_skew");
+        ("WARN", "clock_skew")
+    } else if collection_stale {
+        blocking_reason_codes.push("collection_stale");
+        ("WARN", "stale")
+    } else if last_success_utc.is_none() {
+        blocking_reason_codes.push("first_collection_pending");
+        ("WARN", "awaiting_first_collection")
+    } else if last_result_code != Some("pass") {
+        blocking_reason_codes.push("retry_required");
+        ("WARN", "retry_required")
+    } else {
+        ("PASS", "active")
+    };
     Ok(json!({
-        "status":"PASS","collection_enabled":enabled,"owner_profile_configured":codex_home.join(PROFILE_PATH).is_file(),"enrollment_credential_present":codex_home.join(ENROLLMENT_TOKEN_PATH).is_file(),"identity_present":directory.join(IDENTITY_FILE).is_file(),
+        "kind":"groundline-insights-worker-status","schema":2,"status":overall_status,
+        "collection_state":collection_state,"ready_to_collect":ready_to_collect,"collection_stale":collection_stale,"blocking_reason_codes":blocking_reason_codes,
+        "policy_configured":policy_configured,"collection_enabled":enabled,
+        "owner_profile_present":profile_present,"owner_profile_configured":profile_configured,
+        "enrollment_credential_present":credential_present,"enrollment_credential_valid":credential_valid,
+        "identity_present":directory.join(IDENTITY_FILE).is_file(),
         "consent_status":if directory.join(CONSENT_FILE).is_file() {"active"} else {"missing"},"collector_token_present":directory.join(TOKEN_FILE).is_file(),
-        "pending_event_count":pending,"last_check_result_code":status.as_ref().map(|value| value.last_result_code.as_str()),
-        "last_check_utc":status.as_ref().map(|value| value.last_check_utc.as_str()),"last_success_utc":status.as_ref().and_then(|value| value.last_success_utc.as_deref()),
-        "last_collected_through_utc":status.as_ref().and_then(|value| value.last_collected_through_utc.as_deref()),
+        "pending_event_count":pending,"last_check_result_code":last_result_code,
+        "last_check_utc":previous.as_ref().map(|value| value.last_check_utc.as_str()),"last_success_utc":last_success_utc,
+        "last_collected_through_utc":previous.as_ref().and_then(|value| value.last_collected_through_utc.as_deref()),
         "tailnet":tailnet,"raw_content_emitted":false,"private_paths_emitted":false,"secret_value_printed":false,
     }))
+}
+
+fn status_with_tailnet(codex_home: &Path, tailnet: Value) -> Result<Value, StateError> {
+    status_with_tailnet_at(codex_home, tailnet, Utc::now())
+}
+
+pub fn status(codex_home: &Path) -> Result<Value, StateError> {
+    status_with_tailnet(codex_home, tailnet::probe())
+}
+
+pub fn checkpoint_enabled(codex_home: &Path) -> Result<bool, StateError> {
+    policy_enabled(&state_directory(codex_home))
 }
 
 pub async fn run_once(
@@ -691,23 +1046,15 @@ pub async fn run_once(
     codex_home: &Path,
     trigger: &str,
 ) -> Result<Value, StateError> {
-    if !matches!(
-        trigger,
-        "manual"
-            | "history_sync"
-            | "session_start_hook"
-            | "stop_hook"
-            | "post_compact_hook"
-            | "session_end_hook"
-    ) {
+    if !valid_status_trigger(trigger) {
         return Err(StateError::LocalState);
     }
-    let profile = load_profile(codex_home)?;
     let directory = state_directory(codex_home);
-    let _lock = CycleLock::acquire(&directory)?;
     if !policy_enabled(&directory)? {
         return Err(StateError::Disabled);
     }
+    let profile = load_profile(codex_home)?;
+    let _lock = CycleLock::acquire(&directory)?;
     let now = Utc::now();
     let (identity, consent) = initialize(&directory, now)?;
     let tailnet_state = tailnet::probe();
@@ -828,11 +1175,17 @@ pub fn resolve_roots(
 
 #[cfg(test)]
 mod tests {
+    use chrono::{DateTime, Utc};
+    use serde_json::json;
     use tempfile::tempdir;
 
     use crate::local_file::{open_bounded_regular_file, private_for_current_user};
 
-    use super::{ENROLLMENT_TOKEN_PATH, PROFILE_PATH, configure_profile};
+    use super::{
+        ENROLLMENT_TOKEN_PATH, OUTBOX_DIR, POLICY_FILE, PROFILE_PATH, STATUS_FILE, StateError,
+        Status, configure_profile, enable, policy_enabled, set_policy, state_directory,
+        status_with_tailnet, status_with_tailnet_at, write_json, write_status,
+    };
 
     fn profile(extra: &str) -> Vec<u8> {
         format!(
@@ -903,5 +1256,230 @@ mod tests {
             .unwrap()
             .replace("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "short");
         assert!(configure_profile(home.path(), short.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn collection_is_disabled_until_owner_explicitly_enables_it() {
+        let home = tempdir().expect("temporary Codex home");
+        let result = status_with_tailnet(
+            home.path(),
+            json!({"tailnet_connected":true,"tailnet_status":"connected"}),
+        )
+        .expect("status");
+        assert_eq!(result["status"], "PASS");
+        assert_eq!(result["collection_state"], "disabled");
+        assert_eq!(result["collection_enabled"], false);
+        assert_eq!(result["policy_configured"], false);
+        assert_eq!(result["ready_to_collect"], false);
+        assert_eq!(
+            enable(home.path()).unwrap_err().to_string(),
+            "invalid_owner_profile"
+        );
+    }
+
+    #[test]
+    fn configured_enablement_reports_first_collection_pending() {
+        let home = tempdir().expect("temporary Codex home");
+        configure_profile(home.path(), &profile("")).expect("configure profile");
+        enable(home.path()).expect("enable collection");
+        let result = status_with_tailnet(
+            home.path(),
+            json!({"tailnet_connected":true,"tailnet_status":"connected"}),
+        )
+        .expect("status");
+        assert_eq!(result["status"], "WARN");
+        assert_eq!(result["collection_state"], "awaiting_first_collection");
+        assert_eq!(result["ready_to_collect"], true);
+        assert_eq!(
+            result["blocking_reason_codes"],
+            json!(["first_collection_pending"])
+        );
+    }
+
+    #[test]
+    fn enabled_but_incomplete_configuration_is_not_reported_as_pass() {
+        let home = tempdir().expect("temporary Codex home");
+        let directory = state_directory(home.path());
+        set_policy(&directory, true, Utc::now()).expect("write policy fixture");
+        let result = status_with_tailnet(
+            home.path(),
+            json!({"tailnet_connected":true,"tailnet_status":"connected"}),
+        )
+        .expect("status");
+        assert_eq!(result["status"], "WARN");
+        assert_eq!(result["collection_state"], "configuration_required");
+        assert_eq!(
+            result["blocking_reason_codes"],
+            json!(["owner_profile_required"])
+        );
+    }
+
+    #[test]
+    fn malformed_policy_and_outbox_state_are_not_silently_ignored() {
+        let home = tempdir().expect("temporary Codex home");
+        let directory = state_directory(home.path());
+        write_json(
+            &directory.join(POLICY_FILE),
+            &json!({
+                "schema_version":1,
+                "kind":"groundline-insights-owner-auto-policy",
+                "status":"active",
+                "automatic_activity_checkpoints":false,
+                "collection_scope":"all_activity",
+                "diagnostic_enabled":false,
+                "trigger_mode":"native_hook_checkpoints",
+                "updated_at_utc":Utc::now().to_rfc3339(),
+            }),
+        )
+        .expect("write malformed policy");
+        assert!(policy_enabled(&directory).is_err());
+
+        set_policy(&directory, false, Utc::now()).expect("replace valid policy");
+        write_json(
+            &directory.join(OUTBOX_DIR).join("unexpected.txt"),
+            &json!({"x":1}),
+        )
+        .expect("write invalid outbox fixture");
+        assert!(
+            status_with_tailnet(
+                home.path(),
+                json!({"tailnet_connected":true,"tailnet_status":"connected"}),
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn imports_only_the_exact_previous_private_policy_and_status_contracts() {
+        let home = tempdir().expect("temporary Codex home");
+        let directory = state_directory(home.path());
+        write_json(
+            &directory.join(POLICY_FILE),
+            &json!({
+                "schema_version":1,
+                "kind":"groundline-insights-owner-auto-policy",
+                "status":"active",
+                "automatic_activity_checkpoints":true,
+                "collection_scope":"all_activity",
+                "diagnostic_enabled":false,
+                "trigger_mode":"native_hook_checkpoints",
+                "accepted_at_utc":"2026-08-28T00:00:00Z",
+                "basic_receipt_id":"10000000-0000-4000-8000-000000000001",
+                "chronicle_access_enabled":false,
+                "collection_generation":1,
+                "cron_or_timer_created":false,
+                "global_hook_created":false,
+                "grant_source":"private_plugin_install",
+                "mcp_lifecycle_enabled":false,
+                "policy_id":"20000000-0000-4000-8000-000000000002",
+            }),
+        )
+        .expect("write imported policy");
+        write_json(
+            &directory.join(STATUS_FILE),
+            &json!({
+                "schema_version":3,
+                "kind":"groundline-insights-owner-auto-status",
+                "cron_or_timer_created":false,
+                "global_hook_created":false,
+                "last_attempt_result_code":"pass",
+                "last_attempt_utc":"2026-08-28T00:00:00Z",
+                "last_check_result_code":"not_due",
+                "last_check_utc":"2026-08-28T00:00:00Z",
+                "last_collected_through_utc":"2026-08-28T00:00:00Z",
+                "last_native_lifecycle_receipt":{},
+                "last_network_failure":"none",
+                "last_staged_through_utc":null,
+                "last_success_utc":"2026-08-28T00:00:00Z",
+                "last_tailnet_check_utc":"2026-08-28T00:00:00Z",
+                "last_tailnet_notification_utc":null,
+                "mcp_lifecycle_enabled":false,
+                "next_attempt_after_utc":null,
+                "private_paths_recorded":false,
+                "raw_content_recorded":false,
+                "retry_reason_code":null,
+                "secret_value_recorded":false,
+                "tailnet_cli_available":true,
+                "tailnet_connected":true,
+                "tailnet_health":"ok",
+                "tailnet_notification_result":null,
+                "tailnet_status":"connected",
+                "trigger":"session_end_hook",
+                "uploaded_count":1,
+            }),
+        )
+        .expect("write imported status");
+        let result = status_with_tailnet(
+            home.path(),
+            json!({"tailnet_connected":true,"tailnet_status":"connected"}),
+        )
+        .expect("imported status");
+        assert_eq!(result["collection_enabled"], true);
+        assert_eq!(result["status"], "WARN");
+        assert_eq!(result["collection_state"], "configuration_required");
+        assert_eq!(result["last_check_result_code"], "pass");
+        assert_eq!(result["last_success_utc"], "2026-08-28T00:00:00Z");
+    }
+
+    #[test]
+    fn status_surfaces_stale_and_future_collection_timestamps() {
+        let home = tempdir().expect("temporary Codex home");
+        configure_profile(home.path(), &profile("")).expect("configure profile");
+        enable(home.path()).expect("enable collection");
+        let directory = state_directory(home.path());
+        let now = DateTime::parse_from_rfc3339("2026-08-31T00:00:00Z")
+            .expect("fixed now")
+            .with_timezone(&Utc);
+        let mut stored = Status {
+            schema_version: 4,
+            kind: "groundline-insights-owner-auto-status".to_owned(),
+            enabled: true,
+            last_result_code: "pass".to_owned(),
+            last_check_utc: "2026-08-20T00:00:00Z".to_owned(),
+            last_success_utc: Some("2026-08-20T00:00:00Z".to_owned()),
+            last_collected_through_utc: Some("2026-08-20T00:00:00Z".to_owned()),
+            uploaded_count: 1,
+            pending_event_count: 0,
+            tailnet_status: "connected".to_owned(),
+            last_trigger: "session_end_hook".to_owned(),
+        };
+        write_status(&directory, &stored).expect("write stale status");
+        let stale = status_with_tailnet_at(
+            home.path(),
+            json!({"tailnet_connected":true,"tailnet_status":"connected"}),
+            now,
+        )
+        .expect("stale status");
+        assert_eq!(stale["status"], "WARN");
+        assert_eq!(stale["collection_state"], "stale");
+        assert_eq!(stale["collection_stale"], true);
+
+        stored.last_check_utc = "2026-08-31T00:10:00Z".to_owned();
+        stored.last_success_utc = Some("2026-08-31T00:10:00Z".to_owned());
+        stored.last_collected_through_utc = Some("2026-08-31T00:10:00Z".to_owned());
+        write_status(&directory, &stored).expect("write future status");
+        let future = status_with_tailnet_at(
+            home.path(),
+            json!({"tailnet_connected":true,"tailnet_status":"connected"}),
+            now,
+        )
+        .expect("future status");
+        assert_eq!(future["status"], "WARN");
+        assert_eq!(future["collection_state"], "clock_skew");
+        assert_eq!(
+            future["blocking_reason_codes"],
+            json!(["collection_clock_skew"])
+        );
+    }
+
+    #[test]
+    fn error_receipts_never_claim_unknown_mutation_state_is_false() {
+        assert_eq!(StateError::InvalidProfile.mutation_performed(), Some(false));
+        assert_eq!(
+            StateError::TailnetDisconnected.mutation_performed(),
+            Some(true)
+        );
+        assert_eq!(StateError::UploadFailed.mutation_performed(), None);
+        assert_eq!(StateError::LocalState.mutation_performed(), None);
     }
 }
