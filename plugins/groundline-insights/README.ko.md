@@ -57,8 +57,9 @@ hostname, 저장소명, task/rollout/account/IP 식별자를 거부합니다.
 IPv4 또는 `*.ts.net`만 허용하며, 각 운영자가 자신의 비공개 서비스와 credential을
 제공합니다. 공식 서비스 경로는 Rust/Axum API, ClickHouse 저장소, 엄격한
 7일·30일·90일 CLI JSON report, provision된 Grafana dashboard입니다. Docker
-Compose는 범용 self-hosting 경로이고 TrueNAS는 지원되는 운영 배포 경로 중
-하나일 뿐 plugin 필수 조건이 아닙니다.
+Compose는 공개 self-hosting preview이고 TrueNAS는 선택형 운영 overlay일 뿐
+plugin 필수 조건이 아닙니다. 운영 배포에는 fresh-host, immutable image, 외부 TLS
+증거가 추가로 필요합니다.
 
 ClickHouse schema migration의 단일 소유자는 Insights API입니다. 수집 테이블은
 `ReplacingMergeTree`를 사용하고 report와 Grafana는 `FINAL`이 적용된
@@ -69,5 +70,8 @@ marketplace refresh, package checksum, hook 4개, lifecycle dispatch, accepted
 upload, ClickHouse 반영, Grafana frame, image 게시, 배포, stable 승격은 각각
 분리해서 검증합니다. 운영 endpoint·credential·dataset path·receipt는 public
 Git과 public CI 밖에 둡니다.
+
+서버 checkout, private Compose render, 실제 ClickHouse·Grafana 검증 순서는
+[셀프호스팅 가이드](../../docs/ko/self-hosting.md)를 참조하세요.
 
 License: MIT.

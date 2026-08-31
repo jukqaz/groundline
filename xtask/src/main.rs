@@ -17,8 +17,11 @@ use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 use thiserror::Error;
 
+use self::package::contains_private_marker;
+
 mod arm64_verify;
 mod compose;
+mod history;
 mod local_verify;
 mod package;
 mod release;
@@ -66,10 +69,29 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Scan every object reachable from local, remote, and tag refs for private material.
+    VerifyHistory {
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Validate a versioned Insights infrastructure compatibility profile.
+    VerifyCompatibilityProfile {
+        #[arg(long, default_value = "infrastructure/compatibility.json")]
+        profile: PathBuf,
+        /// Permit latest tags or an unversioned Grafana plugin for qualification only.
+        #[arg(long)]
+        allow_unpinned_dependencies: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Render a private self-hosted Insights compose file and a separate secret store.
     RenderCompose {
-        #[arg(long, default_value = "infrastructure/truenas/compose.template.yaml")]
+        #[arg(long, default_value = "infrastructure/compose.template.yaml")]
         template: PathBuf,
+        #[arg(long, default_value = "infrastructure/compatibility.json")]
+        compatibility_profile: PathBuf,
         #[arg(long)]
         output: PathBuf,
         #[arg(long)]
@@ -84,6 +106,9 @@ enum Command {
         ingest_port: u16,
         #[arg(long)]
         image: String,
+        /// Permit latest tags or an unversioned Grafana plugin for qualification only.
+        #[arg(long)]
+        allow_unpinned_dependencies: bool,
         #[arg(long)]
         access_url: String,
         #[arg(long)]
@@ -145,6 +170,8 @@ enum XtaskError {
     InvalidPackageSet,
     #[error("invalid_source")]
     InvalidSource,
+    #[error("invalid_history")]
+    InvalidHistory,
     #[error("invalid_compose")]
     InvalidCompose,
     #[error("local_verification_failed")]
@@ -341,6 +368,11 @@ fn verify_package_set(root: &Path, version: &str, product: Product) -> Result<()
         if !executable_contract(&binary, target) {
             return Err(XtaskError::InvalidPackageSet);
         }
+        let binary_bytes = read_bounded(&binary, 1, MAX_BINARY_BYTES)?;
+        if contains_private_marker(&binary_bytes) {
+            return Err(XtaskError::InvalidPackageSet);
+        }
+        drop(binary_bytes);
         let (sha256, size_bytes) = sha256_file(&binary)?;
         if manifest.sha256 != sha256 || manifest.size_bytes != size_bytes {
             return Err(XtaskError::InvalidPackageSet);
@@ -400,6 +432,12 @@ fn package_binary(
     let staged_output = staging.path().join(target);
     fs::create_dir(&staged_output)?;
     let staged_binary = staged_output.join(&executable);
+    let binary_bytes =
+        read_bounded(binary, 1, MAX_BINARY_BYTES).map_err(|_| XtaskError::InvalidBinary)?;
+    if contains_private_marker(&binary_bytes) {
+        return Err(XtaskError::InvalidBinary);
+    }
+    drop(binary_bytes);
     let (checksum, size_bytes) = copy_and_sha256(binary, &staged_binary)?;
     mark_executable(&staged_binary)?;
 
@@ -472,8 +510,31 @@ fn run(cli: Cli) -> Result<(), XtaskError> {
             }
             Ok(())
         }
+        Command::VerifyHistory {
+            root,
+            json: json_output,
+        } => {
+            let result = history::verify(&root)?;
+            if json_output {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+            Ok(())
+        }
+        Command::VerifyCompatibilityProfile {
+            profile,
+            allow_unpinned_dependencies,
+            json: json_output,
+        } => {
+            let result =
+                compose::verify_compatibility_profile(&profile, allow_unpinned_dependencies)?;
+            if json_output {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+            Ok(())
+        }
         Command::RenderCompose {
             template,
+            compatibility_profile,
             output,
             secrets_file,
             dataset_root,
@@ -481,12 +542,14 @@ fn run(cli: Cli) -> Result<(), XtaskError> {
             dashboard_port,
             ingest_port,
             image,
+            allow_unpinned_dependencies,
             access_url,
             overwrite,
             json: json_output,
         } => {
             let result = compose::render(compose::RenderOptions {
                 template: &template,
+                compatibility_profile: &compatibility_profile,
                 output: &output,
                 secrets_file: &secrets_file,
                 dataset_root: &dataset_root,
@@ -494,6 +557,7 @@ fn run(cli: Cli) -> Result<(), XtaskError> {
                 dashboard_port,
                 ingest_port,
                 image: &image,
+                allow_unpinned_dependencies,
                 access_url: &access_url,
                 overwrite,
             })?;
@@ -647,6 +711,23 @@ mod tests {
                 Err(XtaskError::InvalidBinary)
             ));
         }
+    }
+
+    #[test]
+    fn package_refuses_a_private_marker_inside_a_binary() {
+        let root = tempdir().expect("temporary directory");
+        let binary = root.path().join("input-binary");
+        let private_path = format!("binary\0/{}/example/private", "Users");
+        fs::write(&binary, private_path).expect("test binary");
+        assert!(matches!(
+            package_binary(
+                Product::Core,
+                SUPPORTED_TARGETS[0],
+                &binary,
+                &root.path().join("dist").join(SUPPORTED_TARGETS[0]),
+            ),
+            Err(XtaskError::InvalidBinary)
+        ));
     }
 
     #[test]

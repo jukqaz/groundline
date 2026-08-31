@@ -48,9 +48,18 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
 
     let rust = text(&workflows.join("rust.yml"))?;
     let setup = text(&root.join(".github/actions/setup-rust-stable/action.yml"))?;
+    let compose = text(&root.join("infrastructure/compose.template.yaml"))?;
+    super::compose::verify_compatibility_profile(
+        &root.join("infrastructure/compatibility.json"),
+        false,
+    )?;
     for required in [
         "workflow_dispatch:",
         "build_release_artifacts:",
+        "clickhouse_image:",
+        "nginx_image:",
+        "grafana_image:",
+        "grafana_clickhouse_plugin:",
         "pull_request:",
         "push:\n    tags:",
         "concurrency:",
@@ -69,15 +78,35 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
         r#"GROUNDLINE_CLICKHOUSE_TEST_ALLOW_MUTATION: "true""#,
         "cargo clippy --workspace --all-targets --all-features --locked -- -D warnings",
         "cargo run --locked -p xtask -- verify-source --root . --json",
+        "cargo run --locked -p xtask -- verify-history --root . --json",
+        "fetch-depth: 0",
+        "name: Exercise the rendered ClickHouse, API, and Grafana stack",
+        "name: Prepare one coherent compatibility profile",
+        "name: Validate the release-tested and selected compatibility profiles",
+        "name: Start the selected ClickHouse integration service",
+        "name: Stop the selected ClickHouse integration service",
+        "all four compatibility candidate inputs must be supplied together",
+        "cargo run --locked -p xtask -- verify-compatibility-profile",
+        "cargo run --locked -p xtask --bin groundline-deploy -- verify-stack",
+        "--secrets-file \"$secrets_path\"",
+        "docker compose --project-name \"$project\" -f \"$compose_path\" up --detach --wait --wait-timeout 240",
+        "test \"$unauthenticated_status\" = \"302\"",
+        "grep --quiet --ignore-case '^location: .*/login' \"$unauthenticated_headers\"",
+        "--noproxy '*'",
+        "--connect-timeout 5",
+        "--max-time 10",
         "retention-days: 14",
         "name: promote both plugins to stable",
         "--product core",
         "--product insights",
         "linux/amd64,linux/arm64",
         "cargo run --locked -p xtask -- render-compose",
+        "--compatibility-profile \"$COMPATIBILITY_PROFILE\"",
         "cargo run --locked -p xtask -- promote-stable",
         "uses: ./.github/actions/setup-rust-stable",
         "name: publish signed multi-architecture Insights API image\n    if: startsWith(github.ref, 'refs/tags/v')\n    needs: artifacts",
+        "name: Remap GitHub runner paths from release binaries",
+        "--remap-path-prefix=%s=/_groundline --remap-path-prefix=%s=/_cargo_home",
     ] {
         if !rust.contains(required) {
             return Err(XtaskError::InvalidSource);
@@ -92,6 +121,9 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
         || rust.contains("RUSTUP_TOOLCHAIN: \"1.")
         || rust.contains("rust-version: \"1.")
         || rust.contains("sync-package")
+        || rust.contains("chmod 0777")
+        || rust.contains("--allow-mutable-image")
+        || rust.matches("--allow-unpinned-dependencies").count() != 3
         || rust
             .matches("cargo test --workspace --all-features --locked")
             .count()
@@ -100,11 +132,28 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
             .matches("cargo clippy --workspace --all-targets --all-features --locked")
             .count()
             != 1
+        || rust
+            .matches("cargo run --locked -p xtask -- verify-history --root . --json")
+            .count()
+            != 1
+        || rust
+            .matches("cargo run --locked -p xtask --bin groundline-deploy -- verify-stack")
+            .count()
+            != 1
         || rust.matches("runs-on:").count() != rust.matches("timeout-minutes:").count()
         || !actions_are_pinned(&rust)
         || !setup.contains("using: composite")
         || !setup.contains("rustup toolchain install")
         || setup.contains("curl ")
+        || !compose.contains(r#"GF_AUTH_ANONYMOUS_ENABLED: "false""#)
+        || compose.contains(r#"GF_AUTH_ANONYMOUS_ENABLED: "true""#)
+        || !compose.contains(r#"GF_ANALYTICS_REPORTING_ENABLED: "false""#)
+        || !compose.contains(r#"GF_ANALYTICS_CHECK_FOR_UPDATES: "false""#)
+        || !compose.contains(r#"GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false""#)
+        || !compose.contains(r#"GF_PLUGINS_PREINSTALL_AUTO_UPDATE: "false""#)
+        || !compose.contains("grafana-storage-init:")
+        || !compose.contains("condition: service_completed_successfully")
+        || !compose.contains("network_mode: none")
     {
         return Err(XtaskError::InvalidSource);
     }

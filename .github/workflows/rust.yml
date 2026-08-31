@@ -8,6 +8,22 @@ on:
         required: true
         default: false
         type: boolean
+      clickhouse_image:
+        description: Optional latest-candidate ClickHouse image tag or digest; set all four candidate inputs together
+        required: false
+        type: string
+      nginx_image:
+        description: Optional latest-candidate Nginx image tag or digest; set all four candidate inputs together
+        required: false
+        type: string
+      grafana_image:
+        description: Optional latest-candidate Grafana image tag or digest; set all four candidate inputs together
+        required: false
+        type: string
+      grafana_clickhouse_plugin:
+        description: Optional exact plugin ref or unversioned plugin ID for latest; set all four candidate inputs together
+        required: false
+        type: string
   pull_request:
     paths:
       - ".agents/plugins/**"
@@ -91,22 +107,46 @@ jobs:
     needs: fast
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    services:
-      clickhouse:
-        image: clickhouse/clickhouse-server:25.8.28.1-alpine@sha256:f40cd6034fb8c54dce6a85338750fbad79f387e2705e1991a85f2e7086b5b9ea
-        env:
-          CLICKHOUSE_USER: groundline_test
-          CLICKHOUSE_PASSWORD: groundline_test_password
-          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
-        ports:
-          - 8123:8123
-        options: >-
-          --health-cmd "clickhouse-client --user groundline_test --password groundline_test_password --query 'SELECT 1'"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Prepare one coherent compatibility profile
+        id: compatibility
+        shell: bash
+        env:
+          CANDIDATE_CLICKHOUSE_IMAGE: ${{ inputs.clickhouse_image }}
+          CANDIDATE_NGINX_IMAGE: ${{ inputs.nginx_image }}
+          CANDIDATE_GRAFANA_IMAGE: ${{ inputs.grafana_image }}
+          CANDIDATE_GRAFANA_CLICKHOUSE_PLUGIN: ${{ inputs.grafana_clickhouse_plugin }}
+        run: |
+          profile="$RUNNER_TEMP/groundline-compatibility-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
+          populated=0
+          for value in \
+            "$CANDIDATE_CLICKHOUSE_IMAGE" \
+            "$CANDIDATE_NGINX_IMAGE" \
+            "$CANDIDATE_GRAFANA_IMAGE" \
+            "$CANDIDATE_GRAFANA_CLICKHOUSE_PLUGIN"; do
+            if [ -n "$value" ]; then
+              populated=$((populated + 1))
+            fi
+          done
+          if [ "$populated" -eq 0 ]; then
+            cp infrastructure/compatibility.json "$profile"
+          elif [ "$populated" -eq 4 ]; then
+            jq --null-input \
+              --arg clickhouse "$CANDIDATE_CLICKHOUSE_IMAGE" \
+              --arg nginx "$CANDIDATE_NGINX_IMAGE" \
+              --arg grafana "$CANDIDATE_GRAFANA_IMAGE" \
+              --arg plugin "$CANDIDATE_GRAFANA_CLICKHOUSE_PLUGIN" \
+              '{schema_version: 1, profile_name: "latest-candidate", clickhouse_image: $clickhouse, nginx_image: $nginx, grafana_image: $grafana, grafana_clickhouse_plugin: $plugin}' \
+              > "$profile"
+          else
+            echo "all four compatibility candidate inputs must be supplied together" >&2
+            exit 1
+          fi
+          chmod 0600 "$profile"
+          echo "path=$profile" >> "$GITHUB_OUTPUT"
       - name: Select the moving Rust stable channel
         uses: ./.github/actions/setup-rust-stable
         with:
@@ -130,6 +170,44 @@ jobs:
           for feature in insights-client insights-state tailnet-probe; do
             cargo check --locked -p groundline-runtime --no-default-features --features "$feature"
           done
+      - name: Validate the release-tested and selected compatibility profiles
+        env:
+          COMPATIBILITY_PROFILE: ${{ steps.compatibility.outputs.path }}
+        run: |
+          cargo run --locked -p xtask -- verify-compatibility-profile \
+            --profile infrastructure/compatibility.json \
+            --json
+          cargo run --locked -p xtask -- verify-compatibility-profile \
+            --profile "$COMPATIBILITY_PROFILE" \
+            --allow-unpinned-dependencies \
+            --json
+      - name: Start the selected ClickHouse integration service
+        id: clickhouse
+        shell: bash
+        env:
+          COMPATIBILITY_PROFILE: ${{ steps.compatibility.outputs.path }}
+        run: |
+          container="groundline-clickhouse-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          image="$(jq --raw-output .clickhouse_image "$COMPATIBILITY_PROFILE")"
+          docker run --detach \
+            --name "$container" \
+            --publish 127.0.0.1:8123:8123 \
+            --env CLICKHOUSE_USER=groundline_test \
+            --env CLICKHOUSE_PASSWORD=groundline_test_password \
+            --env CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
+            "$image"
+          echo "container=$container" >> "$GITHUB_OUTPUT"
+          for _attempt in $(seq 1 60); do
+            if docker exec "$container" clickhouse-client \
+              --user groundline_test \
+              --password groundline_test_password \
+              --query 'SELECT 1' >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs "$container"
+          exit 1
       - name: Run the portable Rust suite once
         run: cargo test --workspace --all-features --locked
       - name: Exercise the isolated ClickHouse and Grafana integration lane
@@ -144,8 +222,12 @@ jobs:
       - name: Deny Rust warnings once
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: Verify canonical packages and public source
-        run: cargo run --locked -p xtask -- verify-source --root . --json
+        run: |
+          cargo run --locked -p xtask -- verify-source --root . --json
+          cargo run --locked -p xtask -- verify-history --root . --json
       - name: Validate the generic compose template
+        env:
+          COMPATIBILITY_PROFILE: ${{ steps.compatibility.outputs.path }}
         run: |
           compose_path="$RUNNER_TEMP/groundline-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.yaml"
           secrets_path="$RUNNER_TEMP/groundline-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-secrets.json"
@@ -157,9 +239,71 @@ jobs:
             --dataset-root /mnt/tank/apps/groundline-insights \
             --tailscale-bind-ip 100.64.0.1 \
             --image ghcr.io/jukqaz/groundline-insights-api:ci \
+            --compatibility-profile "$COMPATIBILITY_PROFILE" \
+            --allow-unpinned-dependencies \
             --access-url https://insights.example.invalid \
             --json
           docker compose -f "$compose_path" config --quiet
+      - name: Exercise the rendered ClickHouse, API, and Grafana stack
+        shell: bash
+        env:
+          COMPATIBILITY_PROFILE: ${{ steps.compatibility.outputs.path }}
+        run: |
+          stack_root="$RUNNER_TEMP/groundline-stack-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          compose_path="$stack_root/compose.yaml"
+          secrets_path="$stack_root/secrets.json"
+          dataset_root="$stack_root/data"
+          project="groundline-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          bind_ip="100.127.255.254"
+          cleanup() {
+            docker compose --project-name "$project" -f "$compose_path" down --volumes --remove-orphans >/dev/null 2>&1 || true
+            sudo ip address del "$bind_ip/32" dev lo >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          mkdir -p "$dataset_root/clickhouse" "$dataset_root/grafana"
+          chmod 0750 "$dataset_root/clickhouse" "$dataset_root/grafana"
+          sudo ip address add "$bind_ip/32" dev lo
+          docker build \
+            --file services/insights-api/Dockerfile \
+            --tag local/groundline-insights-api:ci \
+            .
+          cargo run --locked -p xtask -- render-compose \
+            --output "$compose_path" \
+            --secrets-file "$secrets_path" \
+            --dataset-root "$dataset_root" \
+            --tailscale-bind-ip "$bind_ip" \
+            --dashboard-port 13000 \
+            --ingest-port 18080 \
+            --image local/groundline-insights-api:ci \
+            --compatibility-profile "$COMPATIBILITY_PROFILE" \
+            --allow-unpinned-dependencies \
+            --access-url https://insights.example.invalid \
+            --json
+          docker compose --project-name "$project" -f "$compose_path" config --quiet
+          docker compose --project-name "$project" -f "$compose_path" up --detach --wait --wait-timeout 240
+          unauthenticated_headers="$stack_root/unauthenticated.headers"
+          unauthenticated_status="$(curl --silent --show-error \
+            --noproxy '*' \
+            --connect-timeout 5 \
+            --max-time 10 \
+            --header 'Host: insights.example.invalid' \
+            --dump-header "$unauthenticated_headers" \
+            --output /dev/null \
+            --write-out '%{http_code}' \
+            "http://$bind_ip:13000/d/groundline-insights/groundline-insights")"
+          test "$unauthenticated_status" = "302"
+          grep --quiet --ignore-case '^location: .*/login' "$unauthenticated_headers"
+          cargo run --locked -p xtask --bin groundline-deploy -- verify-stack \
+            --api-url "http://$bind_ip:18080/healthz" \
+            --grafana-url "http://$bind_ip:13000/api/health" \
+            --access-url https://insights.example.invalid \
+            --secrets-file "$secrets_path" \
+            --json
+      - name: Stop the selected ClickHouse integration service
+        if: always() && steps.clickhouse.outputs.container != ''
+        env:
+          CLICKHOUSE_CONTAINER: ${{ steps.clickhouse.outputs.container }}
+        run: docker rm --force "$CLICKHOUSE_CONTAINER"
       - name: Exercise offline operational commands
         run: |
           mkdir -p /tmp/groundline-empty-codex-home
@@ -200,6 +344,15 @@ jobs:
         uses: ./.github/actions/setup-rust-stable
         with:
           target: ${{ matrix.target }}
+      - name: Remap GitHub runner paths from release binaries
+        shell: bash
+        run: |
+          runner_home="$HOME"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            runner_home="$USERPROFILE"
+          fi
+          printf 'RUSTFLAGS=--remap-path-prefix=%s=/_groundline --remap-path-prefix=%s=/_cargo_home\n' \
+            "$GITHUB_WORKSPACE" "$runner_home" >> "$GITHUB_ENV"
       - name: Install the musl linker
         if: contains(matrix.target, 'unknown-linux-musl')
         shell: bash
@@ -215,7 +368,9 @@ jobs:
           echo "${linker_key}=musl-gcc" >> "$GITHUB_ENV"
       - name: Run Windows file-security contracts once
         if: matrix.runtime-tests
-        run: cargo test --locked -p groundline-runtime local_file
+        run: |
+          cargo test --locked -p groundline-runtime local_file
+          cargo test --locked -p xtask dataset_roots_are_portable_absolute_and_injection_safe
       - name: Build both release binaries and the host packager
         run: |
           cargo build --locked -p xtask

@@ -34,8 +34,17 @@ marketplace를 갱신해도 설치하지 않은 형제 플러그인이 자동 �
 | ClickHouse | 필수 저장소 | API 소유 schema migration, idempotent ingest, 고정 report view |
 | CLI JSON report | 내장 | 엄격한 7일·30일·90일 owner report |
 | Grafana | 기본 dashboard | provision된 ClickHouse datasource와 고정 dashboard query |
-| Docker Compose | 기본 self-hosting | placeholder만 포함한 범용 topology와 비공개 secret 렌더링 |
-| TrueNAS | 지원 운영 경로 | 범용 배포 계약 위에서 owner가 실행하는 preflight/apply controller |
+| Docker Compose | 공개 self-hosting preview | placeholder만 포함한 범용 topology, 인증 필수 Grafana, 비공개 secret 렌더링 |
+| TrueNAS | 선택형 운영 overlay | 범용 배포 계약 위에서 owner가 실행하는 preflight/apply controller, private inventory는 미포함 |
+
+immutable checkout, private render, 실제 stack, Grafana semantic 검증,
+collector enrollment 순서는 [GroundLine Insights 셀프호스팅](self-hosting.md)을
+참조합니다. 서버 배포는 source checkout에서 실행하며 Codex 플러그인만 설치해도
+Docker service가 설치되지는 않습니다.
+
+collector와 API 계약은 공개 Compose preview와 분리해 release qualification합니다.
+운영 준비 완료를 주장하려면 정확한 release image digest, fresh-host stack 검증,
+해당 운영 배포의 외부 TLS/Tailnet 인증 검증이 추가로 필요합니다.
 
 각 사용자는 자신의 Tailnet endpoint, enrollment credential, 저장소, retention,
 접근 제어를 제공합니다. 공개 플러그인을 설치해도 maintainer의 ClickHouse,

@@ -2,7 +2,7 @@ name: groundline-insights
 
 services:
   clickhouse:
-    image: clickhouse/clickhouse-server:25.8.28.1-alpine@sha256:f40cd6034fb8c54dce6a85338750fbad79f387e2705e1991a85f2e7086b5b9ea
+    image: __CLICKHOUSE_IMAGE__
     restart: unless-stopped
     environment:
       CLICKHOUSE_DB: groundline
@@ -12,7 +12,7 @@ services:
       GROUNDLINE_GRAFANA_READER_PASSWORD: "__GRAFANA_READER_PASSWORD__"
     volumes:
       - type: bind
-        source: __DATASET_ROOT__/clickhouse
+        source: "__DATASET_ROOT__/clickhouse"
         target: /var/lib/clickhouse
     configs:
       - source: clickhouse_limits
@@ -67,7 +67,7 @@ services:
       - data
 
   api-ingress:
-    image: nginx:1.30.4-alpine@sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46
+    image: __NGINX_IMAGE__
     restart: unless-stopped
     user: "101:101"
     read_only: true
@@ -147,10 +147,38 @@ services:
     cpus: 0.25
     networks:
       - data
-      - egress
+      - ingress-host
+
+  grafana-storage-init:
+    image: __GRAFANA_IMAGE__
+    restart: "no"
+    user: "0:0"
+    read_only: true
+    entrypoint:
+      - /bin/sh
+      - -ec
+    command:
+      - |
+        chown 472:0 /var/lib/grafana
+        chmod 0750 /var/lib/grafana
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: bind
+        source: "__DATASET_ROOT__/grafana"
+        target: /var/lib/grafana
+    network_mode: none
+    mem_limit: 64m
+    cpus: 0.25
 
   grafana:
-    image: grafana/grafana:13.1.1-ubuntu@sha256:5a9df011defa8384ee01fc9b393854daecc6afb98132c66e2e658b3f564830e8
+    image: __GRAFANA_IMAGE__
     restart: unless-stopped
     environment:
       GF_SERVER_ROOT_URL: "__INSIGHTS_ACCESS_URL__/"
@@ -163,15 +191,17 @@ services:
       GF_SECURITY_DISABLE_GRAVATAR: "true"
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_USERS_ALLOW_ORG_CREATE: "false"
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_NAME: Main Org.
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_AUTH_BASIC_ENABLED: "true"
-      GF_PLUGINS_PREINSTALL_SYNC: grafana-clickhouse-datasource@4.20.0
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_PLUGINS_PREINSTALL_SYNC: __GRAFANA_CLICKHOUSE_PLUGIN__
+      GF_PLUGINS_PREINSTALL_AUTO_UPDATE: "false"
       GROUNDLINE_GRAFANA_READER_PASSWORD: "__GRAFANA_READER_PASSWORD__"
     volumes:
       - type: bind
-        source: __DATASET_ROOT__/grafana
+        source: "__DATASET_ROOT__/grafana"
         target: /var/lib/grafana
     configs:
       - source: grafana_datasource
@@ -185,6 +215,8 @@ services:
     depends_on:
       api:
         condition: service_healthy
+      grafana-storage-init:
+        condition: service_completed_successfully
     mem_limit: 1536m
     cpus: 1.5
     networks:
@@ -194,6 +226,7 @@ services:
 networks:
   data:
     internal: true
+  ingress-host: {}
   egress: {}
 
 configs:

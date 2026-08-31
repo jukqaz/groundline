@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "profile_name": "release-tested",
+  "clickhouse_image": "clickhouse/clickhouse-server:26.8.1.2041@sha256:9f8fa0d51f86611fda226c4085cdafdddce35312a60c934de2e4450d61fcb99a",
+  "nginx_image": "nginx:1.30.4-alpine@sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46",
+  "grafana_image": "grafana/grafana:13.2.0@sha256:3fd54ae1214669f8355f065ec9f6445d5279a3d77095ab048ca045685272429b",
+  "grafana_clickhouse_plugin": "grafana-clickhouse-datasource@4.21.1"
+}

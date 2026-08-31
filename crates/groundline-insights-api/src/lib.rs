@@ -1809,7 +1809,7 @@ mod tests {
     }
 
     fn dashboard_queries() -> Vec<String> {
-        let template = include_str!("../../../infrastructure/truenas/compose.template.yaml");
+        let template = include_str!("../../../infrastructure/compose.template.yaml");
         let dashboard = template
             .split_once("  grafana_dashboard:\n    content: |\n")
             .expect("Grafana dashboard config")

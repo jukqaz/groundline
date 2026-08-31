@@ -76,8 +76,9 @@ The supported collector runtimes are Codex App and Codex CLI. The worker accepts
 only a Tailnet IPv4 or `*.ts.net` endpoint, and every operator supplies their own
 private service and credentials. The official service path is the Rust/Axum API,
 ClickHouse storage, strict 7/30/90-day CLI JSON reports, and the provisioned
-Grafana dashboard. Docker Compose is the generic self-hosting path; TrueNAS is
-one supported operator deployment path, not a requirement for the plugin.
+Grafana dashboard. Docker Compose is the public self-hosting preview; TrueNAS is
+an optional operator overlay, not a requirement for the plugin. A production
+deployment still needs fresh-host, immutable-image, and external TLS evidence.
 
 The API is the canonical ClickHouse schema migrator. Collection tables use
 `ReplacingMergeTree`; report and Grafana queries read the `basic_active` view,
@@ -95,6 +96,7 @@ public CI never receives production credentials.
 
 See [operations troubleshooting](references/operations-troubleshooting.md),
 [native upgrade](references/native-upgrade.md), and the repository
+[self-hosting guide](../../docs/self-hosting.md) and
 [privacy policy](../../docs/privacy.md). Unsupported sinks and future adapter
 requirements are listed in the [integration matrix](../../docs/integrations.md).
 

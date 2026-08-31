@@ -26,6 +26,7 @@ const INSPECTION_TIMEOUT: Duration = Duration::from_secs(30);
 const HEALTH_RPC_TIMEOUT: Duration = Duration::from_secs(30);
 const PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const DEPLOY_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+const STACK_VERIFY_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 const RPC_TIMEOUT: Duration = Duration::from_secs(600);
 const JOB_POLL_DELAY: Duration = Duration::from_secs(1);
 const POST_DEPLOY_HEALTH_TIMEOUT: Duration = Duration::from_secs(4 * 60);
@@ -35,6 +36,8 @@ const HEALTH_DELAY: Duration = Duration::from_secs(10);
 const ROLLBACK_HEALTH_ATTEMPTS: usize = 12;
 const PREFLIGHT_HEALTH_ATTEMPTS: usize = 3;
 const PREFLIGHT_HEALTH_DELAY: Duration = Duration::from_secs(5);
+const STACK_VERIFY_ATTEMPTS: usize = 24;
+const STACK_VERIFY_DELAY: Duration = Duration::from_secs(5);
 const GRAFANA_REFERENCE_REF_ID: &str = "H1";
 const MANAGED_BLOCKS: &[&str] = &[
     "clickhouse_limits",
@@ -887,6 +890,7 @@ async fn grafana_datasource_healthy(
     base: &Url,
     public_host: &str,
     template: &str,
+    admin_password: Option<&SecretString>,
 ) -> bool {
     let Ok(plan) = grafana_query_plan(template) else {
         return false;
@@ -906,14 +910,15 @@ async fn grafana_datasource_healthy(
     if body.len() > MAX_CONFIG_BYTES {
         return false;
     }
-    let Ok(response) = client
+    let mut request = client
         .post(url)
         .header(HOST, public_host)
         .header(CONTENT_TYPE, "application/json")
-        .body(body)
-        .send()
-        .await
-    else {
+        .body(body);
+    if let Some(password) = admin_password {
+        request = request.basic_auth("groundline-admin", Some(password.expose_secret()));
+    }
+    let Ok(response) = request.send().await else {
         return false;
     };
     bounded_json(response, MAX_GRAFANA_RESPONSE_BYTES)
@@ -939,6 +944,7 @@ async fn service_healthy(
     public_host: &str,
     template: &str,
     require_datasource: bool,
+    grafana_admin_password: Option<&SecretString>,
 ) -> bool {
     let Ok(url) = Url::parse(url) else {
         return false;
@@ -965,7 +971,14 @@ async fn service_healthy(
             (value.get("database").and_then(Value::as_str) == Some("ok")
                 || value.get("status").and_then(Value::as_str) == Some("ok"))
                 && (!require_datasource
-                    || grafana_datasource_healthy(client, &url, public_host, template).await)
+                    || grafana_datasource_healthy(
+                        client,
+                        &url,
+                        public_host,
+                        template,
+                        grafana_admin_password,
+                    )
+                    .await)
         }
         _ => false,
     }
@@ -1026,6 +1039,7 @@ struct HealthInputs<'a> {
     access_url: &'a str,
     public_host: &'a str,
     template: &'a str,
+    grafana_admin_password: &'a SecretString,
 }
 
 async fn wait_for_health<S>(
@@ -1050,6 +1064,7 @@ where
                 inputs.public_host,
                 inputs.template,
                 false,
+                None,
             )
             .await
             && service_healthy(
@@ -1059,6 +1074,7 @@ where
                 inputs.public_host,
                 inputs.template,
                 require_datasource,
+                Some(inputs.grafana_admin_password),
             )
             .await
             && access_gate_healthy(&client, inputs.access_url).await
@@ -1155,6 +1171,7 @@ struct RuntimeInputs {
     username: String,
     api_key: SecretString,
     enrollment_token: SecretString,
+    grafana_admin_password: SecretString,
     app_name: String,
     api_health: String,
     grafana_health: String,
@@ -1171,6 +1188,10 @@ impl RuntimeInputs {
         let api_key = SecretString::from(required_env("GROUNDLINE_TRUENAS_API_KEY", 32)?);
         let enrollment_token =
             SecretString::from(required_env("GROUNDLINE_INSIGHTS_ENROLLMENT_TOKEN", 32)?);
+        let grafana_admin_password = SecretString::from(required_env(
+            "GROUNDLINE_INSIGHTS_GRAFANA_ADMIN_PASSWORD",
+            32,
+        )?);
         let app_name = std::env::var("GROUNDLINE_TRUENAS_APP_NAME")
             .unwrap_or_else(|_| "groundline-insights".to_owned());
         let api_health = required_env("GROUNDLINE_INSIGHTS_API_HEALTH_URL", 1)?;
@@ -1219,6 +1240,7 @@ impl RuntimeInputs {
             username,
             api_key,
             enrollment_token,
+            grafana_admin_password,
             app_name,
             api_health,
             grafana_health,
@@ -1237,6 +1259,7 @@ impl RuntimeInputs {
             access_url: &self.access_url,
             public_host: &self.public_host,
             template: &self.template,
+            grafana_admin_password: &self.grafana_admin_password,
         }
     }
 }
@@ -1416,6 +1439,114 @@ fn deployment_runtime() -> Result<tokio::runtime::Runtime, XtaskError> {
         .map_err(|_| XtaskError::RuntimeFailed)
 }
 
+async fn verify_stack_async(
+    api_health: &str,
+    grafana_health: &str,
+    access_url: &str,
+    compose_template: &Path,
+    secrets_file: &Path,
+) -> Result<Value, XtaskError> {
+    let api_url = Url::parse(api_health).map_err(|_| XtaskError::InvalidRuntimeConfiguration)?;
+    let grafana_url =
+        Url::parse(grafana_health).map_err(|_| XtaskError::InvalidRuntimeConfiguration)?;
+    let access = Url::parse(access_url).map_err(|_| XtaskError::InvalidRuntimeConfiguration)?;
+    if !health_url_allowed(&api_url)
+        || !health_url_allowed(&grafana_url)
+        || !access_url_allowed(&access)
+    {
+        return Err(XtaskError::InvalidRuntimeConfiguration);
+    }
+    let public_host = access
+        .host_str()
+        .ok_or(XtaskError::InvalidRuntimeConfiguration)?;
+    let metadata = std::fs::symlink_metadata(compose_template)
+        .map_err(|_| XtaskError::InvalidRuntimeConfiguration)?;
+    if !metadata.file_type().is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.len() == 0
+        || metadata.len() > MAX_CONFIG_BYTES as u64
+    {
+        return Err(XtaskError::InvalidRuntimeConfiguration);
+    }
+    let template = std::fs::read_to_string(compose_template)
+        .map_err(|_| XtaskError::InvalidRuntimeConfiguration)?;
+    let plan =
+        grafana_query_plan(&template).map_err(|_| XtaskError::InvalidRuntimeConfiguration)?;
+    let grafana_admin_password =
+        crate::secret_store::load_private_secret(secrets_file, "GRAFANA_ADMIN_PASSWORD")
+            .map_err(|_| XtaskError::InvalidRuntimeConfiguration)?;
+    let client = http_client().ok_or(XtaskError::RuntimeFailed)?;
+    for attempt in 0..STACK_VERIFY_ATTEMPTS {
+        let api_ready = service_healthy(
+            &client,
+            api_health,
+            "api",
+            public_host,
+            &template,
+            false,
+            None,
+        )
+        .await;
+        let grafana_ready = api_ready
+            && service_healthy(
+                &client,
+                grafana_health,
+                "grafana",
+                public_host,
+                &template,
+                true,
+                Some(&grafana_admin_password),
+            )
+            .await;
+        if grafana_ready {
+            return Ok(json!({
+                "kind":"groundline-insights-stack-verification",
+                "schema":1,
+                "status":"PASS",
+                "api_health_verified":true,
+                "grafana_health_verified":true,
+                "grafana_authentication_verified":true,
+                "grafana_datasource_verified":true,
+                "grafana_query_count":plan.queries.len(),
+                "grafana_semantics_verified":true,
+                "access_origin_validated":true,
+                "external_tls_gate_verified":false,
+                "mutation_performed":false,
+                "private_url_printed":false,
+                "secret_value_printed":false,
+            }));
+        }
+        if attempt + 1 < STACK_VERIFY_ATTEMPTS {
+            sleep(STACK_VERIFY_DELAY).await;
+        }
+    }
+    Err(XtaskError::VerificationFailed)
+}
+
+pub fn verify_stack(
+    api_health: &str,
+    grafana_health: &str,
+    access_url: &str,
+    compose_template: &Path,
+    secrets_file: &Path,
+) -> Result<Value, XtaskError> {
+    let runtime = deployment_runtime()?;
+    runtime.block_on(async {
+        timeout(
+            STACK_VERIFY_TIMEOUT,
+            verify_stack_async(
+                api_health,
+                grafana_health,
+                access_url,
+                compose_template,
+                secrets_file,
+            ),
+        )
+        .await
+        .map_err(|_| XtaskError::RuntimeFailed)?
+    })
+}
+
 pub fn preflight(compose_template: &Path) -> Result<Value, XtaskError> {
     let runtime = deployment_runtime()?;
     runtime.block_on(async {
@@ -1460,7 +1591,7 @@ mod tests {
     use super::{
         ApplyFailure, DeploymentOps, RpcClient, access_url_allowed, apply_with_rollback,
         config_sha256, deploy, ensure_crypto_provider, grafana_query_plan, grafana_query_ready,
-        health_url_allowed, inspect_current, sha256_regex, update_compose,
+        health_url_allowed, inspect_current, sha256_regex, update_compose, verify_stack,
     };
 
     fn enrollment_credential() -> SecretString {
@@ -1613,6 +1744,20 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn stack_verifier_rejects_public_plain_http_before_network_access() {
+        assert!(
+            verify_stack(
+                "http://192.168.1.2:18080/healthz",
+                "http://192.168.1.2:13000/api/health",
+                "https://insights.example.invalid",
+                Path::new("infrastructure/compose.template.yaml"),
+                Path::new("missing-secrets.json"),
+            )
+            .is_err()
+        );
+    }
+
     fn frame(rows: &[serde_json::Value]) -> serde_json::Value {
         let first = rows[0].as_object().unwrap();
         let names = first.keys().cloned().collect::<Vec<_>>();
@@ -1631,8 +1776,7 @@ mod tests {
 
     fn valid_grafana_response() -> (serde_json::Value, super::GrafanaQueryPlan) {
         let template = fs::read_to_string(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../infrastructure/truenas/compose.template.yaml"),
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../infrastructure/compose.template.yaml"),
         )
         .unwrap();
         let plan = grafana_query_plan(&template).unwrap();

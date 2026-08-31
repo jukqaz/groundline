@@ -111,18 +111,30 @@ ClickHouse, Grafana, admin, enrollment, and proxy credentials. Production
 endpoints, credentials, dataset paths, TrueNAS inventory, and deployment
 receipts remain outside Git.
 
+Infrastructure versions are supplied by a strict compatibility profile rather
+than hard-coded into the template. The checked-in profile is the release-tested
+default. An operator or manual CI run may supply a complete newer four-component
+profile; partial sets fail closed, and any unpinned discovery run requires an
+explicit qualification-only override. Passing the live stack verifier does not
+mutate the default profile or deploy the candidate.
+
 The deployment controller validates every required input before mutation,
 accepts only digest-pinned Insights API images, compares the current app
 configuration with the preflight fingerprint, applies one bounded update, and
 verifies API, ClickHouse, and Grafana evidence. Rollback outcome is reported
-separately from code validation.
+separately from code validation. `preflight` and `apply` require an explicit
+owner-rendered private `--compose-template`; passing the public placeholder
+template is rejected rather than guessed or partially rendered.
 
 Both `preflight` and `apply` require the owner-local
-`GROUNDLINE_INSIGHTS_ENROLLMENT_TOKEN` environment variable. It is never a
-repository or release-workflow secret. The controller preserves an existing
-valid `GROUNDLINE_ENROLLMENT_TOKEN` in the TrueNAS app configuration and uses
-the local input only when migrating an installation that does not have one.
-Malformed existing values fail closed, and receipts never contain the value.
+`GROUNDLINE_INSIGHTS_ENROLLMENT_TOKEN` and
+`GROUNDLINE_INSIGHTS_GRAFANA_ADMIN_PASSWORD` environment variables. They are
+never repository or release-workflow secrets. The Grafana credential is used
+only for authenticated datasource and dashboard semantics checks. The
+controller preserves an existing valid `GROUNDLINE_ENROLLMENT_TOKEN` in the
+TrueNAS app configuration and uses the local input only when migrating an
+installation that does not have one. Malformed existing values fail closed,
+and receipts never contain either value.
 
 ## Required verification
 

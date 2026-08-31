@@ -34,8 +34,18 @@ user into an uninstalled sibling plugin.
 | ClickHouse | Required storage | API-owned schema migration, idempotent event ingestion, and fixed report views |
 | CLI JSON reports | Built in | Strict 7, 30, or 90-day owner reports |
 | Grafana | First-party dashboard | Provisioned ClickHouse datasource and fixed GroundLine dashboard queries |
-| Docker Compose | First-party self-hosting | Generic placeholder-only service topology and private rendered secrets |
-| TrueNAS | Supported operator path | Owner-run preflight/apply controller layered over the generic deployment contract |
+| Docker Compose | Public self-hosting preview | Generic placeholder-only service topology, authenticated Grafana, and private rendered secrets |
+| TrueNAS | Optional operator overlay | Owner-run preflight/apply controller layered over the generic deployment contract; no private inventory is shipped |
+
+See [self-hosting GroundLine Insights](self-hosting.md) for the immutable
+checkout, private render, real stack, semantic Grafana verification, and
+collector enrollment sequence. Server deployment runs from a source checkout;
+installing the Codex plugin alone does not install Docker services.
+
+The collector and API contracts are release-qualified independently from the
+public Compose preview. A production claim additionally requires the exact
+release image digest, fresh-host stack verification, and an external
+TLS/Tailnet authentication check for that operator deployment.
 
 Every operator supplies their own private endpoint, enrollment credential,
 storage, retention, and access control. Installing the public plugin does not

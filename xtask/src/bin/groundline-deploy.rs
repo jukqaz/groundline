@@ -19,9 +19,25 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Verify a running API, Grafana datasource, dashboard queries, and semantic frames.
+    VerifyStack {
+        #[arg(long)]
+        api_url: String,
+        #[arg(long)]
+        grafana_url: String,
+        #[arg(long)]
+        access_url: String,
+        #[arg(long, default_value = "infrastructure/compose.template.yaml")]
+        compose_template: PathBuf,
+        #[arg(long)]
+        secrets_file: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
     /// Validate credentials, the current app, migration plan, and live health without mutation.
     Preflight {
-        #[arg(long, default_value = "infrastructure/truenas/compose.template.yaml")]
+        /// Owner-rendered private Compose file; the public placeholder template is invalid here.
+        #[arg(long)]
         compose_template: PathBuf,
         #[arg(long)]
         json: bool,
@@ -30,7 +46,8 @@ enum Command {
     Apply {
         #[arg(long)]
         image: String,
-        #[arg(long, default_value = "infrastructure/truenas/compose.template.yaml")]
+        /// Owner-rendered private Compose file used by the matching preflight.
+        #[arg(long)]
         compose_template: PathBuf,
         #[arg(long)]
         expected_current_config_sha256: String,
@@ -143,6 +160,24 @@ fn failure_receipt(error: &DeployError, command: &str) -> Value {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let (command, json, result) = match cli.command {
+        Command::VerifyStack {
+            api_url,
+            grafana_url,
+            access_url,
+            compose_template,
+            secrets_file,
+            json,
+        } => (
+            "verify-stack",
+            json,
+            xtask::deploy::verify_stack(
+                &api_url,
+                &grafana_url,
+                &access_url,
+                &compose_template,
+                &secrets_file,
+            ),
+        ),
         Command::Preflight {
             compose_template,
             json,

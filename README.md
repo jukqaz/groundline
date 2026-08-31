@@ -7,12 +7,15 @@ worktrees, review, compaction, and upgrades.
 | Plugin | Purpose | Default network behavior |
 | --- | --- | --- |
 | `groundline` | Local guidance, project audits, evidence boundaries, and aggregate usage analysis | Offline; no hooks or collector identity |
-| `groundline-insights` | Optional self-hosted aggregate collection, ClickHouse reports, and Grafana dashboards | Disabled until an owner profile and enrollment credential are configured |
+| `groundline-insights` | Optional aggregate collection plus a public self-hosting preview for ClickHouse and Grafana | Disabled until an owner profile and enrollment credential are configured |
 
 The plugin packages are canonical under `plugins/`. Shared Rust contracts and
 runtime code live under `crates/`; generic self-hosting assets live under
 `infrastructure/` and `services/`. Real endpoints, credentials, dataset paths,
 deployment receipts, and infrastructure inventories must remain outside Git.
+The Compose template has no baked-in infrastructure versions: a strict
+compatibility profile selects a release-tested or newer candidate dependency
+set, and the newer set must pass the same live stack verifier.
 
 ## Install and upgrade
 
@@ -81,6 +84,8 @@ Run the complete gate once after the change is frozen:
 cargo test --workspace --all-features --locked
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo run --locked -p xtask -- verify-source --root . --json
+cargo run --locked -p xtask -- verify-history --root . --json
+cargo run --locked -p xtask -- verify-compatibility-profile --json
 git diff --check
 ```
 
@@ -90,5 +95,6 @@ release tag, with cancellation, timeouts, and bounded retention. No self-hosted
 runner or production credential is required by public CI.
 
 See [integrations and installation profiles](docs/integrations.md),
-[Privacy](docs/privacy.md), [Security](SECURITY.md), and the
+[Insights self-hosting](docs/self-hosting.md), [Privacy](docs/privacy.md),
+[Security](SECURITY.md), and the
 [release checklist](docs/release-checklist.md).

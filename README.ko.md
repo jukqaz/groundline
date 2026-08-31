@@ -7,11 +7,14 @@ GroundLine은 공개 Rust 모노레포 하나에서 서로 독립적으로 설�
 | 플러그인 | 역할 | 기본 네트워크 동작 |
 | --- | --- | --- |
 | `groundline` | 로컬 가이드, 프로젝트 감사, 증거 경계, 집계 사용량 분석 | 오프라인, hook·collector identity 없음 |
-| `groundline-insights` | 선택형 self-hosted 수집, ClickHouse report, Grafana dashboard | owner profile과 enrollment credential 설정 전에는 비활성 |
+| `groundline-insights` | 선택형 집계 수집과 ClickHouse·Grafana 공개 self-hosting preview | owner profile과 enrollment credential 설정 전에는 비활성 |
 
 설치 package의 canonical source는 `plugins/` 아래 두 디렉터리뿐입니다. 실제
 endpoint, credential, dataset 경로, 배포 receipt, 인프라 inventory는 Git 밖의
 owner-private 상태에 둡니다.
+Compose template에는 인프라 버전을 직접 넣지 않습니다. strict compatibility
+profile이 release-tested 조합 또는 더 최신 후보 조합을 선택하고, 최신 후보도 동일한
+실제 stack verifier를 통과해야 합니다.
 
 ## 설치와 업그레이드
 
@@ -62,10 +65,15 @@ token을 사용합니다. 공개 저장소에는 placeholder와 범용 template�
 ## 개발 검증
 
 개발 중에는 변경 범위에 맞는 fast lane만 실행하고, 변경이 고정된 뒤 전체
-workspace test·Clippy·source verification을 한 번 실행합니다. GitHub Actions의
-전체 qualification과 6개 플랫폼·2개 제품 artifact matrix는 수동 실행 또는
-release tag에서만 동작합니다. public CI는 self-hosted runner와 production
-credential을 요구하지 않습니다.
+workspace test·Clippy·현재 source와 reachable Git history 검증을 한 번
+실행합니다. GitHub Actions의 전체 qualification과 6개 플랫폼·2개 제품 artifact
+matrix는 수동 실행 또는 release tag에서만 동작합니다. public CI는 self-hosted
+runner와 production credential을 요구하지 않습니다.
 
-자세한 선택지는 [연동과 설치 프로필](docs/ko/integrations.md), 영문 README,
+더 최신 ClickHouse·Nginx·Grafana·datasource plugin 후보는 수동 workflow에 네 값을
+한 세트로 넣어 검증할 수 있습니다. 이 검증은 기본 profile이나 운영 배포를 자동으로
+바꾸지 않습니다.
+
+자세한 선택지는 [연동과 설치 프로필](docs/ko/integrations.md),
+[Insights 셀프호스팅](docs/ko/self-hosting.md), 영문 README,
 [release checklist](docs/release-checklist.md)를 참조하세요.

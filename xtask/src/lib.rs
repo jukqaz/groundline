@@ -3,6 +3,7 @@
 use thiserror::Error;
 
 pub mod deploy;
+pub mod secret_store;
 
 #[derive(Debug, Error)]
 pub enum DeployError {

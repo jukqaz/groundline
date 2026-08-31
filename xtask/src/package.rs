@@ -11,6 +11,10 @@ use walkdir::WalkDir;
 use super::XtaskError;
 
 const MAX_SOURCE_FILE_BYTES: u64 = 4 * 1024 * 1024;
+const PRIVATE_MARKER_DECLARATION_PREFIX: &[u8] = b"const PRIVATE_MARKERS:";
+const PRIVATE_MARKER_TEST_PREFIX: &[u8] =
+    b"fn public_source_guard_rejects_private_artifact_names_and_secret_markers()";
+const MAX_PRIVATE_MARKER_DECLARATION_BYTES: usize = 4096;
 const PRIVATE_MARKERS: &[&[u8]] = &[
     b"@gmail.com",
     b"/Users/",
@@ -97,13 +101,66 @@ fn source_scan_path(root: &Path, path: &Path) -> bool {
         && !path.starts_with(root.join("plugins/groundline-insights/bin"))
 }
 
-fn contains_private_marker(bytes: &[u8]) -> bool {
+pub(super) fn contains_private_marker(bytes: &[u8]) -> bool {
     PRIVATE_MATCHER
         .get_or_init(|| AhoCorasick::new(PRIVATE_MARKERS).expect("fixed private markers"))
         .is_match(bytes)
 }
 
-fn private_source_name(path: &Path) -> bool {
+fn mask_braced_item(bytes: &mut [u8], prefix: &[u8]) -> bool {
+    let Some(start) = bytes
+        .windows(prefix.len())
+        .position(|window| window == prefix)
+    else {
+        return true;
+    };
+    let Some(open_offset) = bytes[start..].iter().position(|byte| *byte == b'{') else {
+        return false;
+    };
+    let open = start + open_offset;
+    let mut depth = 0_usize;
+    for index in open..bytes.len() {
+        match bytes[index] {
+            b'{' => depth += 1,
+            b'}' => {
+                let Some(next_depth) = depth.checked_sub(1) else {
+                    return false;
+                };
+                depth = next_depth;
+                if depth == 0 {
+                    bytes[start..=index].fill(b'_');
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+pub(super) fn contains_private_marker_outside_scanner_fixtures(bytes: &[u8]) -> bool {
+    let Some(start) = bytes
+        .windows(PRIVATE_MARKER_DECLARATION_PREFIX.len())
+        .position(|window| window == PRIVATE_MARKER_DECLARATION_PREFIX)
+    else {
+        return contains_private_marker(bytes);
+    };
+    let declaration = &bytes[start
+        ..bytes
+            .len()
+            .min(start + MAX_PRIVATE_MARKER_DECLARATION_BYTES)];
+    let Some(end_offset) = declaration.windows(2).position(|window| window == b"];") else {
+        return contains_private_marker(bytes);
+    };
+    let mut normalized = bytes.to_vec();
+    normalized[start..start + end_offset + 2].fill(b'_');
+    if !mask_braced_item(&mut normalized, PRIVATE_MARKER_TEST_PREFIX) {
+        return true;
+    }
+    contains_private_marker(&normalized)
+}
+
+pub(super) fn private_source_name(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
         return true;
     };
@@ -253,7 +310,12 @@ pub fn verify_source(root: &Path) -> Result<Value, XtaskError> {
             return Err(XtaskError::InvalidSource);
         }
         let bytes = regular_bytes(entry.path())?;
-        if entry.path() != root.join("xtask/src/package.rs") && contains_private_marker(&bytes) {
+        let private_marker_found = if entry.path() == root.join("xtask/src/package.rs") {
+            contains_private_marker_outside_scanner_fixtures(&bytes)
+        } else {
+            contains_private_marker(&bytes)
+        };
+        if private_marker_found {
             return Err(XtaskError::InvalidSource);
         }
         scanned += 1;
@@ -289,7 +351,10 @@ pub fn verify_source(root: &Path) -> Result<Value, XtaskError> {
 mod tests {
     use tempfile::tempdir;
 
-    use super::{contains_private_marker, private_source_name, regular_bytes, source_scan_path};
+    use super::{
+        contains_private_marker, contains_private_marker_outside_scanner_fixtures,
+        private_source_name, regular_bytes, source_scan_path,
+    };
 
     #[test]
     fn source_reads_reject_symlinks_and_generated_binary_trees() {
@@ -308,6 +373,20 @@ mod tests {
             std::os::unix::fs::symlink(&file, root.path().join("link")).unwrap();
             assert!(regular_bytes(&root.path().join("link")).is_err());
         }
+    }
+
+    #[test]
+    fn scanner_declaration_normalization_does_not_hide_a_later_leak() {
+        let declaration =
+            format!("const PRIVATE_MARKERS: &[&[u8]] = &[b\"/{}/\"];\n", "Users").into_bytes();
+        assert!(!contains_private_marker_outside_scanner_fixtures(
+            &declaration
+        ));
+        let mut leaked = declaration;
+        leaked.extend_from_slice(
+            format!("const LEAK: &str = \"/{}/private\";\n", "Users").as_bytes(),
+        );
+        assert!(contains_private_marker_outside_scanner_fixtures(&leaked));
     }
 
     #[test]
@@ -330,13 +409,13 @@ mod tests {
             assert!(!private_source_name(std::path::Path::new(path)), "{path}");
         }
         for marker in [
-            b"-----BEGIN PRIVATE KEY-----".as_slice(),
-            b"github_pat_example".as_slice(),
-            b"glpat-example".as_slice(),
-            b"sk-proj-example".as_slice(),
-            b"xoxb-example".as_slice(),
+            [b"-----BEGIN PRIVATE".as_slice(), b" KEY-----"].concat(),
+            [b"github_".as_slice(), b"pat_example"].concat(),
+            [b"gl".as_slice(), b"pat-example"].concat(),
+            [b"sk-".as_slice(), b"proj-example"].concat(),
+            [b"xox".as_slice(), b"b-example"].concat(),
         ] {
-            assert!(contains_private_marker(marker));
+            assert!(contains_private_marker(&marker));
         }
     }
 }

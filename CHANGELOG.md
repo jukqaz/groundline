@@ -2,6 +2,25 @@
 
 ## 0.20.1
 
+- Remove baked-in ClickHouse, Nginx, Grafana, and datasource-plugin versions
+  from the public Compose template. Select them through a strict compatibility
+  profile, accept a complete newer candidate set in manual qualification, and
+  run that candidate through the real mutation and authenticated Grafana query
+  lanes without silently changing the release-tested default or production.
+- Add a reachable Git-object privacy gate so deleting a leaked source file no
+  longer makes release qualification pass while the old blob remains public.
+  Scan binary markers too, distinguish exact public GitHub runner roots, and
+  remap runner workspace and home paths from future release binaries. Normalize
+  only the scanner's marker declaration instead of excluding its whole source
+  blob, so a separate leak in that file still fails qualification. Inventory
+  historical file names independently so a deleted forbidden secret-file name
+  cannot be hidden by blob reuse under another path.
+- Add a release-only rendered stack gate that boots ClickHouse, the Axum API,
+  and Grafana, then executes every dashboard query through the provisioned
+  datasource and validates semantic frames.
+- Generalize private Compose dataset roots for Linux, macOS, and Windows Docker
+  hosts, move the canonical template out of the TrueNAS-specific path, and add
+  end-to-end self-hosting instructions.
 - Document independent Core-only, Insights-only, and combined installation
   profiles plus the supported Codex, Tailnet, API, ClickHouse, Grafana, Docker
   Compose, and TrueNAS integration boundary.
@@ -13,6 +32,21 @@
 - Add a tested fail-closed owner-profile example and clarify that native plugin
   executables must be resolved from the installed target directory rather than
   assuming a user-shell `PATH` alias.
+- Require immutable API image digests for normal self-hosted renders, make the
+  mutable CI/development exception explicit and machine-auditable, and reject
+  unauthenticated Grafana access in the release-only live stack gate.
+- Disable Grafana anonymous access, initialize its bind directory with a
+  one-shot least-privilege service instead of world-writable permissions, and
+  separate the dedicated published-port ingress bridge from Grafana's
+  plugin-download egress.
+- Authenticate both generic-stack and optional TrueNAS controller Grafana
+  semantics checks with owner-local credentials; no secret enters public CI or
+  verification receipts. Require the TrueNAS controller's owner-rendered
+  Compose input explicitly so it cannot mistake the public placeholder template
+  for deployable configuration.
+- Reject aliased template, rendered Compose, and secret-store paths; require
+  every deployment placeholder before generating credentials and fail closed if
+  either generated file is not private to the current user.
 
 ## 0.20.0
 

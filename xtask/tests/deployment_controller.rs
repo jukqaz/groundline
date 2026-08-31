@@ -7,6 +7,7 @@ const DEPLOYMENT_ENV: &[&str] = &[
     "GROUNDLINE_TRUENAS_USERNAME",
     "GROUNDLINE_TRUENAS_API_KEY",
     "GROUNDLINE_INSIGHTS_ENROLLMENT_TOKEN",
+    "GROUNDLINE_INSIGHTS_GRAFANA_ADMIN_PASSWORD",
     "GROUNDLINE_TRUENAS_APP_NAME",
     "GROUNDLINE_INSIGHTS_API_HEALTH_URL",
     "GROUNDLINE_INSIGHTS_GRAFANA_HEALTH_URL",
@@ -19,6 +20,13 @@ fn controller() -> Command {
         command.env_remove(name);
     }
     command
+}
+
+fn compose_template() -> &'static str {
+    concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../infrastructure/compose.template.yaml"
+    )
 }
 
 fn receipt(output: &Output) -> Value {
@@ -45,6 +53,8 @@ fn apply_rejects_an_invalid_image_before_reading_secrets() {
             "apply",
             "--image",
             "invalid",
+            "--compose-template",
+            compose_template(),
             "--expected-current-config-sha256",
             &"a".repeat(64),
             "--json",
@@ -62,7 +72,15 @@ fn apply_rejects_an_invalid_image_before_reading_secrets() {
 
 #[test]
 fn preflight_fails_closed_with_a_redacted_receipt_when_inputs_are_missing() {
-    let output = controller().args(["preflight", "--json"]).output().unwrap();
+    let output = controller()
+        .args([
+            "preflight",
+            "--compose-template",
+            compose_template(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
     assert!(!output.status.success());
     let receipt = receipt(&output);
     assert_eq!(receipt["kind"], "groundline-insights-deployment-preflight");
@@ -71,6 +89,35 @@ fn preflight_fails_closed_with_a_redacted_receipt_when_inputs_are_missing() {
     assert_eq!(receipt["rollback"], "not_required");
     assert_eq!(receipt["configuration_printed"], false);
     assert_eq!(receipt["private_url_printed"], false);
+    assert_eq!(receipt["secret_value_printed"], false);
+}
+
+#[test]
+fn preflight_requires_owner_local_grafana_authentication() {
+    let output = controller()
+        .args([
+            "preflight",
+            "--compose-template",
+            compose_template(),
+            "--json",
+        ])
+        .env(
+            "GROUNDLINE_TRUENAS_URI",
+            "wss://truenas.example.invalid/api/current",
+        )
+        .env("GROUNDLINE_TRUENAS_USERNAME", "groundline")
+        .env("GROUNDLINE_TRUENAS_API_KEY", "a".repeat(32))
+        .env("GROUNDLINE_INSIGHTS_ENROLLMENT_TOKEN", "b".repeat(32))
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let receipt = receipt(&output);
+    assert_eq!(receipt["reason"], "missing_deployment_input");
+    assert_eq!(
+        receipt["input"],
+        "GROUNDLINE_INSIGHTS_GRAFANA_ADMIN_PASSWORD"
+    );
+    assert_eq!(receipt["mutation_started"], false);
     assert_eq!(receipt["secret_value_printed"], false);
 }
 
@@ -85,6 +132,8 @@ fn apply_rejects_a_malformed_preflight_hash_before_connecting() {
             "apply",
             "--image",
             &image,
+            "--compose-template",
+            compose_template(),
             "--expected-current-config-sha256",
             "not-a-sha256",
             "--json",

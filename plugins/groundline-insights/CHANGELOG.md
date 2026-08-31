@@ -2,6 +2,13 @@
 
 ## v0.20.1 - 2026-08-31
 
+- Move ClickHouse, Nginx, Grafana, and datasource-plugin selection from fixed
+  Compose strings to a strict compatibility profile, and add a manual latest
+  candidate lane that runs the selected set through the full live verifier.
+- Add a source-checkout self-hosting guide, portable absolute Compose dataset
+  roots, and a real API/ClickHouse/Grafana semantic verification command.
+- Require release qualification to scan reachable Git history and to boot the
+  rendered stack once on the release tag without production credentials.
 - Document Insights-only and combined install profiles, the current integration
   matrix, owner-operated infrastructure boundary, and unsupported sink classes.
 - Make a missing owner policy explicitly disabled so installation and lifecycle
@@ -23,6 +30,16 @@
 - Ship a complete, privacy-safe owner-profile example with an intentionally
   invalid placeholder token and execute it through configure/enable in the CLI
   contract harness after test-only substitution.
+- Require immutable image digests and an exact datasource-plugin version for
+  normal public self-hosting renders, keep unpinned discovery behind an explicit
+  qualification-only override, and expose profile pinning plus its fingerprint
+  in the redacted renderer receipt.
+- Disable anonymous Grafana access, initialize bind storage through a bounded
+  one-shot service, separate the published-port ingress bridge from Grafana
+  egress, and test the login boundary in the release-only live stack lane.
+- Require the optional TrueNAS controller to authenticate its Grafana semantic
+  health checks with an owner-local credential instead of relying on anonymous
+  dashboard access.
 
 ## v0.20.0 - 2026-08-30
 
