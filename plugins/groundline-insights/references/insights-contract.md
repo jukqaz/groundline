@@ -8,11 +8,21 @@ provider compatibility are not part of the active interface.
 GroundLine Core owns offline guidance and local analysis. GroundLine Insights
 owns the optional networked path: four Codex hooks, collector state, Tailnet
 transport, the API, ClickHouse, Grafana, and generic self-hosting tools. It does
-not install skills, change global Codex configuration, or route models.
+not require or install Core, install skills, change global Codex configuration,
+or route models. Core-only, Insights-only, and combined installations are all
+valid profiles.
 
 Supported runtime families are `codex_app` and `codex_cli`. Supported execution
 modes are `desktop`, `local_headless`, and `remote_headless`. Supported platforms
 are macOS, Linux, and Windows on ARM64 and x86-64.
+
+The current integration contract is deliberately narrow: Codex App/CLI are the
+only collector sources, Tailnet is the only remote transport, the Rust/Axum API
+is the ingestion service, ClickHouse is the storage and report backend, and
+Grafana is the first-party dashboard. Docker Compose is the generic self-hosting
+path and TrueNAS is one supported owner-run deployment path. Arbitrary Internet
+endpoints, generic webhooks, third-party observability exporters, alternative
+databases, and hosted GroundLine accounts are outside the current contract.
 
 ## Activation and local state
 

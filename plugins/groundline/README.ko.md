@@ -21,8 +21,14 @@ GroundLine은 Codex 작업 준비, 증거 기반 완료, 프로젝트 설정 감
 ## 설치와 업그레이드
 
 Codex marketplace에 `https://github.com/jukqaz/groundline.git`을 추가하고
-`groundline` 플러그인을 설치합니다. refresh와 upgrade는 Codex가 담당하며,
-GroundLine은 자체 업데이트나 trust 변경을 수행하지 않습니다.
+`groundline` 플러그인을 설치합니다. 이 명령은 Core만 설치하며
+`groundline-insights`를 설치하거나 활성화하지 않습니다. refresh와 upgrade는
+Codex가 담당하며, GroundLine은 자체 업데이트나 trust 변경을 수행하지 않습니다.
+
+```console
+codex plugin marketplace add https://github.com/jukqaz/groundline.git --ref stable --json
+codex plugin add groundline@groundline --json
+```
 
 업그레이드 후 설치 package와 native artifact를 각각 검증합니다.
 
@@ -51,5 +57,6 @@ groundline efficiency compare --input comparison.json --json
 `.worktreeinclude` 개수만 세고 내용은 읽거나 반환하지 않습니다. audit는 로컬
 Codex state store를 수정하지 않으며, efficiency 입력은 외부로 전송하지 않습니다.
 
-개발 검증 명령은 영문 README와 [release checklist](../../docs/release-checklist.md)를
+Insights 선택 기준은 [연동과 설치 프로필](../../docs/ko/integrations.md), 개발
+검증 명령은 영문 README와 [release checklist](../../docs/release-checklist.md)를
 참조하세요.

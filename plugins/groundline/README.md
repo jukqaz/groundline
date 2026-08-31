@@ -22,8 +22,14 @@ Python runtime dependencies, duplicate package roots, and CI contract drift.
 ## Install and upgrade
 
 Add `https://github.com/jukqaz/groundline.git` as a Codex marketplace and install
-the `groundline` plugin. Codex owns refresh and upgrade. GroundLine does not
+the `groundline` plugin. This installs Core only; it does not install or activate
+`groundline-insights`. Codex owns refresh and upgrade. GroundLine does not
 self-update or change plugin trust.
+
+```console
+codex plugin marketplace add https://github.com/jukqaz/groundline.git --ref stable --json
+codex plugin add groundline@groundline --json
+```
 
 After an upgrade, verify the installed package and native artifact independently:
 
@@ -66,5 +72,6 @@ Pull requests run only the fast lane. Full qualification and six-platform releas
 artifacts are explicit manual workflows, with concurrency cancellation, timeouts,
 and short artifact retention.
 
-See the repository [Privacy](../../docs/privacy.md), [Security](../../SECURITY.md),
-and [release checklist](../../docs/release-checklist.md).
+See the repository [integration profiles](../../docs/integrations.md),
+[Privacy](../../docs/privacy.md), [Security](../../SECURITY.md), and
+[release checklist](../../docs/release-checklist.md).

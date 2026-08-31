@@ -27,7 +27,7 @@
   "interface": {
     "displayName": "GroundLine",
     "shortDescription": "Local-first Codex evidence and project audits.",
-    "longDescription": "GroundLine is a compact, local-first operating layer for Codex. Six focused skills coordinate native Goals, frozen implementation batches, task boundaries, live proof, redacted evidence, model and effort guidance, and App-first surface alignment. The optional Rust CLI reads bounded local files for diagnostics and aggregate audits. The public plugin installs no lifecycle hooks, performs no network requests, creates no background process, and stores no collector identity. Codex continues to own execution, worktrees, review, permissions, agents, compaction, settings, and upgrades.",
+    "longDescription": "GroundLine is a compact, local-first operating layer for Codex. Six focused skills coordinate native Goals, frozen implementation batches, task boundaries, live proof, redacted evidence, model and effort guidance, and App-first surface alignment. The optional Rust CLI reads bounded local files for diagnostics and aggregate audits. This Core plugin installs independently and never installs or activates GroundLine Insights. It installs no lifecycle hooks, performs no network requests, creates no background process, and stores no collector identity. Codex continues to own execution, worktrees, review, permissions, agents, compaction, settings, and upgrades.",
     "developerName": "GroundLine",
     "category": "Coding",
     "capabilities": [

@@ -15,13 +15,26 @@ owner-private 상태에 둡니다.
 
 ## 설치와 업그레이드
 
-moving `stable` branch를 한 번 등록하고 필요한 플러그인을 선택합니다.
+moving `stable` branch를 한 번 등록한 뒤 설치 프로필을 선택합니다. 두 플러그인은
+독립적이며 하나를 설치해도 다른 플러그인이 자동 설치·활성화되지 않습니다.
 
 ```console
 codex plugin marketplace add https://github.com/jukqaz/groundline.git --ref stable --json
+```
+
+외부 연동이 없는 Core만 설치하려면:
+
+```console
 codex plugin add groundline@groundline --json
+```
+
+owner가 운영하는 수집·분석 노드에 Insights만 설치하려면:
+
+```console
 codex plugin add groundline-insights@groundline --json
 ```
+
+Core 기능과 비공개 집계 분석을 함께 쓸 때만 `plugin add` 두 개를 모두 실행합니다.
 
 새 버전은 하나의 marketplace snapshot을 갱신해 적용합니다.
 
@@ -54,5 +67,5 @@ workspace test·Clippy·source verification을 한 번 실행합니다. GitHub A
 release tag에서만 동작합니다. public CI는 self-hosted runner와 production
 credential을 요구하지 않습니다.
 
-자세한 명령은 영문 README와 [release checklist](docs/release-checklist.md)를
-참조하세요.
+자세한 선택지는 [연동과 설치 프로필](docs/ko/integrations.md), 영문 README,
+[release checklist](docs/release-checklist.md)를 참조하세요.

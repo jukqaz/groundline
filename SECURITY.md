@@ -9,12 +9,14 @@ Security fixes target the latest stable GroundLine release.
 GroundLine Core is offline and hook-free. It rejects symlinked or oversized
 bounded inputs, opens Codex SQLite read-only, and emits aggregates or reason codes.
 
-GroundLine Insights is a separate opt-in plugin. It owns exactly four fail-open
-Codex lifecycle hooks, owner-private local state, a no-proxy/no-redirect Tailnet
-client, an authenticated Axum API, ClickHouse, and Grafana. Tailnet reachability
-alone never authorizes enrollment: first contact also requires an owner-issued
-enrollment credential, then every collector uses a distinct token. Administrative
-and trusted-proxy tokens remain separate.
+GroundLine Insights is a separately installed opt-in plugin and does not require
+Core. It owns exactly four fail-open Codex lifecycle hooks, owner-private local
+state, a no-proxy/no-redirect Tailnet client, an authenticated Axum API,
+ClickHouse, and Grafana. Collector endpoints are restricted to Tailnet IPv4 or
+`*.ts.net`; arbitrary public endpoints and generic exporters are unsupported.
+Tailnet reachability alone never authorizes enrollment: first contact also
+requires an owner-issued enrollment credential, then every collector uses a
+distinct token. Administrative and trusted-proxy tokens remain separate.
 
 All secret files are outside the plugin, opened as bounded regular files, and
 required to be private to the current user where the platform exposes permission

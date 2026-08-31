@@ -7,5 +7,7 @@ relying on them.
 
 GroundLine does not provide a hosted account, storage allocation, or managed
 data-processing service. GroundLine Insights is owner-operated self-hosted
-software; operators are responsible for access control, retention, backups, and
-the services they connect. Codex and GitHub are governed by their own terms.
+software and is installed independently from Core; operators are responsible for
+access control, retention, backups, and every service they connect. Installing
+the public plugin never grants access to a maintainer-operated Tailnet,
+ClickHouse, or Grafana. Codex and GitHub are governed by their own terms.

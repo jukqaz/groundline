@@ -4,6 +4,10 @@ Codex owns marketplace refresh, plugin installation, and plugin upgrade. A
 GroundLine release publishes immutable target artifacts and advances the moving
 `stable` branch only after qualification.
 
+Core and Insights share that marketplace channel but remain independent plugin
+installations. Refreshing Core never installs or activates Insights, and an
+Insights-only installation does not require Core.
+
 After refresh or upgrade, verify four distinct lanes:
 
 1. source revision and tag;

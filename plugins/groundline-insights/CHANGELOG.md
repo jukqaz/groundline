@@ -2,6 +2,8 @@
 
 ## v0.20.1 - 2026-08-31
 
+- Document Insights-only and combined install profiles, the current integration
+  matrix, owner-operated infrastructure boundary, and unsupported sink classes.
 - Make a missing owner policy explicitly disabled so installation and lifecycle
   hooks remain inert until reviewed configuration and `worker enable` complete.
 - Validate the complete owner-policy contract, require a valid profile and

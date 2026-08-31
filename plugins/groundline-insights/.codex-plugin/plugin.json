@@ -1,7 +1,7 @@
 {
   "name": "groundline-insights",
   "version": "0.20.1",
-  "description": "Public-source, opt-in self-hosted Insights companion for GroundLine.",
+  "description": "Independently installable, opt-in self-hosted Insights for Codex.",
   "author": {
     "name": "GroundLine contributors",
     "url": "https://github.com/jukqaz/groundline"
@@ -20,7 +20,7 @@
   "interface": {
     "displayName": "GroundLine Insights",
     "shortDescription": "Opt-in self-hosted Insights for GroundLine.",
-    "longDescription": "GroundLine Insights is the public-source, private-data companion for the GroundLine core. It owns four fail-open Codex lifecycle hooks, local collector state, Tailnet transport, ClickHouse ingestion and reports, Grafana dashboards, and generic self-hosted deployment tooling. It does not ship GroundLine guidance skills, change global Codex configuration, install a daemon, or replace Codex execution and permission behavior.",
+    "longDescription": "GroundLine Insights is an independently installable, public-source, private-data companion for Codex and GroundLine Core. It does not require or install Core. It owns four fail-open Codex lifecycle hooks, local collector state, owner-selected Tailnet transport, ClickHouse ingestion and reports, Grafana dashboards, and generic self-hosted deployment tooling. Every operator supplies their own endpoint, credentials, retention, and access control. It does not ship GroundLine guidance skills, change global Codex configuration, install a daemon, or replace Codex execution and permission behavior.",
     "developerName": "GroundLine contributors",
     "category": "Coding",
     "capabilities": [

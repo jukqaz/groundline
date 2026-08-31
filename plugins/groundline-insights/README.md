@@ -1,7 +1,8 @@
 # GroundLine Insights
 
 GroundLine Insights is the optional self-hosted data companion shipped from the
-same public monorepo as GroundLine Core. It owns only the networked surface:
+same public monorepo as GroundLine Core. It is independently installable and
+does not require Core. It owns only the networked surface:
 
 - four fail-open Codex lifecycle hooks;
 - owner-private identity, consent, checkpoint, credential, and outbox state;
@@ -14,14 +15,18 @@ a daemon or scheduler, or replace Codex permissions and execution.
 
 ## Install and upgrade
 
-Register the monorepo once and install the Insights plugin from the same
-marketplace as Core:
+Register the monorepo once and install the Insights plugin. This does not install
+Core; install `groundline@groundline` separately only when Core skills and local
+audits are also wanted.
 
 ```console
 codex plugin marketplace add https://github.com/jukqaz/groundline.git --ref stable --json
 codex plugin add groundline-insights@groundline --json
 codex plugin marketplace upgrade groundline --json
 ```
+
+See [integrations and installation profiles](../../docs/integrations.md) for the
+Core-only, Insights-only, and combined choices.
 
 The packaged executable is `groundline-insights` (`groundline-insights.exe` on
 Windows). macOS, Linux, and Windows are supported on ARM64 and x86-64. Resolve
@@ -67,6 +72,13 @@ The wire contract excludes raw prompts, responses, transcripts, commands, patche
 paths, hostnames, repository names, task IDs, rollout IDs, account identifiers,
 and IP addresses.
 
+The supported collector runtimes are Codex App and Codex CLI. The worker accepts
+only a Tailnet IPv4 or `*.ts.net` endpoint, and every operator supplies their own
+private service and credentials. The official service path is the Rust/Axum API,
+ClickHouse storage, strict 7/30/90-day CLI JSON reports, and the provisioned
+Grafana dashboard. Docker Compose is the generic self-hosting path; TrueNAS is
+one supported operator deployment path, not a requirement for the plugin.
+
 The API is the canonical ClickHouse schema migrator. Collection tables use
 `ReplacingMergeTree`; report and Grafana queries read the `basic_active` view,
 which uses `FINAL` for logically deduplicated results. A retry is idempotent at
@@ -83,6 +95,7 @@ public CI never receives production credentials.
 
 See [operations troubleshooting](references/operations-troubleshooting.md),
 [native upgrade](references/native-upgrade.md), and the repository
-[privacy policy](../../docs/privacy.md).
+[privacy policy](../../docs/privacy.md). Unsupported sinks and future adapter
+requirements are listed in the [integration matrix](../../docs/integrations.md).
 
 License: MIT.

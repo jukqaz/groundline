@@ -2,6 +2,9 @@
 
 ## 0.20.1
 
+- Document independent Core-only, Insights-only, and combined installation
+  profiles plus the supported Codex, Tailnet, API, ClickHouse, Grafana, Docker
+  Compose, and TrueNAS integration boundary.
 - Enforce explicit owner opt-in for Insights, preserve only the exact deployed
   private-state upgrade contracts, and expose actionable readiness, freshness,
   clock-skew, Tailnet, and delivery states.

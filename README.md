@@ -16,14 +16,27 @@ deployment receipts, and infrastructure inventories must remain outside Git.
 
 ## Install and upgrade
 
-Register this repository once on the moving `stable` branch, then choose either
-or both plugins:
+Register this repository once on the moving `stable` branch, then choose a
+profile. The plugin IDs are independent; installing one never installs or
+activates the other.
 
 ```console
 codex plugin marketplace add https://github.com/jukqaz/groundline.git --ref stable --json
+```
+
+Core only (the offline default):
+
+```console
 codex plugin add groundline@groundline --json
+```
+
+Insights only (for an owner-operated collector or operations node):
+
+```console
 codex plugin add groundline-insights@groundline --json
 ```
+
+Run both `plugin add` commands only when the combined profile is desired.
 
 Refresh the single marketplace snapshot to adopt a newer release:
 
@@ -76,5 +89,6 @@ six-platform two-product artifact matrix run only for a manual request or a
 release tag, with cancellation, timeouts, and bounded retention. No self-hosted
 runner or production credential is required by public CI.
 
-See [Privacy](docs/privacy.md), [Security](SECURITY.md), and the
+See [integrations and installation profiles](docs/integrations.md),
+[Privacy](docs/privacy.md), [Security](SECURITY.md), and the
 [release checklist](docs/release-checklist.md).

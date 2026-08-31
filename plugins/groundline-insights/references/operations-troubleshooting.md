@@ -1,6 +1,8 @@
 # GroundLine Insights Operations Troubleshooting
 
 Diagnose from bounded evidence before reinstalling or changing state.
+Core is not an Insights dependency; an absent Core installation is not an
+Insights fault. Diagnose only the selected installation profile.
 
 ## Read-only sequence
 

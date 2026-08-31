@@ -3,6 +3,8 @@
 GroundLine Insights uses the same Codex Git marketplace as GroundLine Core.
 Register the public monorepo over HTTPS with `--ref stable` for a moving upgrade
 channel. An exact release tag is an immutable freeze or rollback channel.
+Core and Insights remain separate install records: refreshing the shared
+marketplace never opts the user into an uninstalled sibling plugin.
 
 ## Before mutation
 

@@ -2,6 +2,8 @@
 
 ## 0.20.1
 
+- Make the Core-only install path explicit and document that Core never installs
+  or activates the independently packaged Insights plugin.
 - Clarify that agents must resolve the packaged native executable from the
   installed plugin root instead of assuming Codex adds it to the user shell's
   `PATH`.

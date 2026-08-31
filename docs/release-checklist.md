@@ -10,7 +10,9 @@
    accepted upload, duplicate retry, weekly reporting, every Grafana query, and
    authenticated collector deletion.
 4. Validate both canonical manifests. Confirm Core has zero hooks and Insights
-   has exactly four fail-open hooks using `groundline-insights`.
+   has exactly four fail-open hooks using `groundline-insights`. Confirm public
+   metadata and documentation describe Core-only, Insights-only, and combined
+   installation without implying an automatic sibling dependency.
 5. Confirm source contains no production endpoint, credential, personal path,
    infrastructure inventory, deployment receipt, Python runtime dependency, or
    duplicate root package.

@@ -1,7 +1,8 @@
 # GroundLine Insights
 
 GroundLine Insights는 GroundLine Core와 같은 공개 모노레포에서 배포되는 선택형
-self-hosted 데이터 플러그인입니다. 네트워크 기능은 Insights에만 있습니다.
+self-hosted 데이터 플러그인입니다. Core와 독립적으로 설치할 수 있고 Core를
+필수 의존성으로 요구하지 않습니다. 네트워크 기능은 Insights에만 있습니다.
 
 - fail-open Codex lifecycle hook 4개
 - owner-private identity, consent, checkpoint, credential, outbox
@@ -13,13 +14,18 @@ scheduler, model router를 만들지 않습니다.
 
 ## 설치와 업그레이드
 
-모노레포를 한 번 등록하고 같은 marketplace에서 설치합니다.
+모노레포를 한 번 등록하고 Insights를 설치합니다. 이 명령은 Core를 자동으로
+설치하지 않습니다. Core skill과 로컬 감사도 필요할 때만
+`groundline@groundline`을 별도로 설치합니다.
 
 ```console
 codex plugin marketplace add https://github.com/jukqaz/groundline.git --ref stable --json
 codex plugin add groundline-insights@groundline --json
 codex plugin marketplace upgrade groundline --json
 ```
+
+Core만, Insights만, 둘 다 설치하는 선택 기준은
+[연동과 설치 프로필](../../docs/ko/integrations.md)에 정리되어 있습니다.
 
 binary 이름은 macOS/Linux에서 `groundline-insights`, Windows에서
 `groundline-insights.exe`입니다. 세 운영체제의 ARM64·x86-64를 지원합니다.
@@ -46,6 +52,13 @@ hostname, 저장소명, task/rollout/account/IP 식별자를 거부합니다.
 첫 수집 대기, 7일 이상 수집 정체, 시계 오차, 정상 수집 상태를 구분합니다.
 `tailnet_connected: null`은 연결 끊김이 아니라 현재 실행 경계에서 확인하지
 못했다는 뜻입니다.
+
+지원 collector runtime은 Codex App과 Codex CLI입니다. worker endpoint는 Tailnet
+IPv4 또는 `*.ts.net`만 허용하며, 각 운영자가 자신의 비공개 서비스와 credential을
+제공합니다. 공식 서비스 경로는 Rust/Axum API, ClickHouse 저장소, 엄격한
+7일·30일·90일 CLI JSON report, provision된 Grafana dashboard입니다. Docker
+Compose는 범용 self-hosting 경로이고 TrueNAS는 지원되는 운영 배포 경로 중
+하나일 뿐 plugin 필수 조건이 아닙니다.
 
 ClickHouse schema migration의 단일 소유자는 Insights API입니다. 수집 테이블은
 `ReplacingMergeTree`를 사용하고 report와 Grafana는 `FINAL`이 적용된
