@@ -24,6 +24,11 @@ codex plugin add groundline-insights@groundline --json
 codex plugin marketplace upgrade groundline --json
 ```
 
+업그레이드로 `hooks/hooks.json` hash가 바뀌면 Codex에서 새 hook을 다시 검토하고
+신뢰해야 합니다. GroundLine은 자신의 trust를 승인하지 않습니다.
+`codex plugin list`는 설치·활성화 증거일 뿐 새 hook의 검토·실행 증거가 아니므로,
+새 task의 lifecycle receipt를 별도로 확인합니다.
+
 Core만, Insights만, 둘 다 설치하는 선택 기준은
 [연동과 설치 프로필](../../docs/ko/integrations.md)에 정리되어 있습니다.
 
@@ -47,6 +52,23 @@ owner-private 값으로 바꾼 복사본만 `worker configure --input`에 전달
 수집 wire contract는 raw prompt, response, transcript, command, patch, path,
 hostname, 저장소명, task/rollout/account/IP 식별자를 거부합니다.
 
+fleet 전체 CLI report는 관리 작업입니다. collector token은 사용할 수 없고,
+별도의 admin token만 들어 있는 owner-private 파일을 명시해야 합니다.
+
+```console
+groundline-insights insights fetch-report \
+  --admin-token-file /owner-private/admin-report-token \
+  --days 7 --json
+```
+
+이 파일은 collector 전용 호스트에 복사하거나 Git에 commit·출력하면 안 됩니다.
+
+`worker enable`은 owner-service upload에 대한 명시적 동의 경계입니다. 네트워크
+업로드를 금지했던 레거시 receipt는 자동 확대하지 않고
+`reconsent_required`로 표시합니다. 사용자가 다시 `worker enable`을 실행하면 새
+receipt를 발급하며, 이전 receipt의 pending event는 업로드·삭제하지 않고
+owner-private quarantine으로 이동합니다.
+
 `worker status`는 `collection_state`, `ready_to_collect`, 제한된
 `blocking_reason_codes`로 의도적인 비활성, 설정 누락/오류, Tailnet 미확인/끊김,
 첫 수집 대기, 7일 이상 수집 정체, 시계 오차, 정상 수집 상태를 구분합니다.
@@ -65,6 +87,13 @@ ClickHouse schema migration의 단일 소유자는 Insights API입니다. 수집
 `ReplacingMergeTree`를 사용하고 report와 Grafana는 `FINAL`이 적용된
 `basic_active` view를 읽어 논리 중복을 제거합니다. API 재전송은 idempotent하게
 처리하며, 물리 중복 row가 생기면 storage report에 품질 신호로 드러냅니다.
+기본 서비스 계약은 365일을 보존하고 collector별 retained event 4,096개와 논리
+payload 256 MiB를 제한합니다. dataset row·byte ceiling의 90%에 도달하면 관리
+작업용 여유 공간을 남기기 위해 추가 ingest를 중단합니다.
+로컬 outbox도 event 256개·16 MiB·전송 batch 16개로 제한합니다. 재시도 가능한
+장애는 영속적인 capped backoff를 사용하고 영구 remote 거절은 operator 조치를
+요구합니다. Grafana TTL panel은 보존 기한이 지났지만 ClickHouse background
+merge를 기다리는 row를 표시하며 `OPTIMIZE`나 삭제를 자동 실행하지 않습니다.
 
 marketplace refresh, package checksum, hook 4개, lifecycle dispatch, accepted
 upload, ClickHouse 반영, Grafana frame, image 게시, 배포, stable 승격은 각각

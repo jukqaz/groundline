@@ -1,6 +1,6 @@
 {
   "name": "groundline-insights",
-  "version": "0.20.1",
+  "version": "0.20.2",
   "description": "Independently installable, opt-in self-hosted Insights for Codex.",
   "author": {
     "name": "GroundLine contributors",

@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Read;
 use std::path::Path;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -13,6 +14,8 @@ use tokio::time::{sleep, timeout};
 use tokio_tungstenite::tungstenite::Message;
 use url::{Host, Url};
 use uuid::Uuid;
+
+use groundline_runtime::local_file::{open_bounded_regular_file, private_for_current_user};
 
 use crate::DeployError as XtaskError;
 
@@ -215,6 +218,27 @@ fn required_env(name: &'static str, minimum: usize) -> Result<String, XtaskError
         Err(std::env::VarError::NotPresent) => Err(XtaskError::MissingDeploymentInput(name)),
         Err(std::env::VarError::NotUnicode(_)) => Err(XtaskError::InvalidDeploymentInput(name)),
     }
+}
+
+fn read_private_runtime_config(path: &Path) -> Result<String, XtaskError> {
+    let mut file = open_bounded_regular_file(path, 1, MAX_CONFIG_BYTES as u64)
+        .map_err(|_| XtaskError::InvalidRuntimeConfiguration)?;
+    if !private_for_current_user(&file) {
+        return Err(XtaskError::InvalidRuntimeConfiguration);
+    }
+    let mut bytes = Vec::with_capacity(
+        file.metadata()
+            .map_err(|_| XtaskError::InvalidRuntimeConfiguration)?
+            .len() as usize,
+    );
+    file.by_ref()
+        .take(MAX_CONFIG_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| XtaskError::InvalidRuntimeConfiguration)?;
+    if bytes.len() > MAX_CONFIG_BYTES {
+        return Err(XtaskError::InvalidRuntimeConfiguration);
+    }
+    String::from_utf8(bytes).map_err(|_| XtaskError::InvalidRuntimeConfiguration)
 }
 
 fn line_key(line: &str) -> (&str, usize) {
@@ -1223,8 +1247,7 @@ impl RuntimeInputs {
             .map(str::to_owned)
             .ok_or(XtaskError::InvalidRuntimeConfiguration)?;
         let access_origin = format!("https://{public_host}");
-        let template = std::fs::read_to_string(compose_template)
-            .map_err(|_| XtaskError::InvalidRuntimeConfiguration)?;
+        let template = read_private_runtime_config(compose_template)?;
         let template = template
             .replace("__INSIGHTS_ACCESS_URL__", &access_origin)
             .replace("__INSIGHTS_ACCESS_HOST__", &public_host);
@@ -1591,7 +1614,8 @@ mod tests {
     use super::{
         ApplyFailure, DeploymentOps, RpcClient, access_url_allowed, apply_with_rollback,
         config_sha256, deploy, ensure_crypto_provider, grafana_query_plan, grafana_query_ready,
-        health_url_allowed, inspect_current, sha256_regex, update_compose, verify_stack,
+        health_url_allowed, inspect_current, read_private_runtime_config, sha256_regex,
+        update_compose, verify_stack,
     };
 
     fn enrollment_credential() -> SecretString {
@@ -1673,6 +1697,28 @@ mod tests {
             updated.pointer("/services/api/environment/GROUNDLINE_ENROLLMENT_TOKEN"),
             Some(&json!("e".repeat(32)))
         );
+    }
+
+    #[test]
+    fn runtime_config_reader_requires_a_private_bounded_regular_file() {
+        use groundline_runtime::local_file::atomic_write_private;
+        use tempfile::tempdir;
+
+        let root = tempdir().expect("temporary directory");
+        let config = root.path().join("compose.yaml");
+        atomic_write_private(&config, b"services: {}\n").expect("private config");
+        assert_eq!(
+            read_private_runtime_config(&config).expect("read private config"),
+            "services: {}\n"
+        );
+        assert!(read_private_runtime_config(root.path()).is_err());
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&config, root.path().join("compose-link.yaml"))
+                .expect("config symlink");
+            assert!(read_private_runtime_config(&root.path().join("compose-link.yaml")).is_err());
+        }
     }
 
     #[test]
@@ -1845,7 +1891,7 @@ mod tests {
     #[test]
     fn grafana_gate_executes_every_panel_and_checks_semantics() {
         let (response, plan) = valid_grafana_response();
-        assert_eq!(plan.queries.len(), 19);
+        assert_eq!(plan.queries.len(), 20);
         assert!(grafana_query_ready(&response, &plan));
 
         let mut drifted = response;

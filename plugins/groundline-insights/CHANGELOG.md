@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.20.2 - 2026-08-31
+
+- Separate owner-admin reporting from collector ingestion credentials and read
+  report credentials only from explicit private token files.
+- Add scoped request budgets, bounded readiness caching and storage concurrency,
+  strict event-metric invariants, cardinality allowlists, collector quotas,
+  global storage watermarks, and a bounded ClickHouse retention TTL.
+- Replace the mutable Docker builder with checksummed stable-Rust musl artifacts,
+  a digest-pinned final image, restricted context, SBOMs, provenance, and
+  registry attestations.
+- Separate collection cadence from bounded delivery retries, cap the private
+  outbox at 256 events and 16 MiB, drain 16-event batches with durable backoff,
+  and persist a private trigger marker before each detached hook worker.
+- Require explicit re-consent for the former no-network contract, rotate its
+  receipt, and quarantine incompatible pending events without upload or loss.
+- Add collector pre-authentication budgets, non-queuing storage admission,
+  reserved operator capacity, single-flight readiness, binary attestations, and
+  visible ClickHouse TTL cleanup pressure.
+- Run pre-authentication before bounded body reads, preserve operator-required
+  delivery stops, durably checkpoint accepted uploads before outbox deletion,
+  and generation-claim hook markers so concurrent captures survive.
+- Reject non-private or symlinked TrueNAS runtime configuration files.
+
 ## v0.20.1 - 2026-08-31
 
 - Move ClickHouse, Nginx, Grafana, and datasource-plugin selection from fixed

@@ -32,7 +32,7 @@ user into an uninstalled sibling plugin.
 | Tailscale/Tailnet | Required transport | A Tailnet IPv4 address or `*.ts.net` HTTPS endpoint; arbitrary public endpoints are rejected |
 | GroundLine Insights API | Built in | Rust/Axum enrollment, upload, report, and administration API |
 | ClickHouse | Required storage | API-owned schema migration, idempotent event ingestion, and fixed report views |
-| CLI JSON reports | Built in | Strict 7, 30, or 90-day owner reports |
+| CLI JSON reports | Built in | Strict 7, 30, or 90-day owner reports using a separate admin-token file; collector tokens are rejected |
 | Grafana | First-party dashboard | Provisioned ClickHouse datasource and fixed GroundLine dashboard queries |
 | Docker Compose | Public self-hosting preview | Generic placeholder-only service topology, authenticated Grafana, and private rendered secrets |
 | TrueNAS | Optional operator overlay | Owner-run preflight/apply controller layered over the generic deployment contract; no private inventory is shipped |

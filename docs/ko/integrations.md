@@ -32,7 +32,7 @@ marketplace를 갱신해도 설치하지 않은 형제 플러그인이 자동 �
 | Tailscale/Tailnet | 필수 전송 경로 | Tailnet IPv4 또는 `*.ts.net` HTTPS endpoint만 허용 |
 | GroundLine Insights API | 내장 | Rust/Axum enrollment, upload, report, 관리 API |
 | ClickHouse | 필수 저장소 | API 소유 schema migration, idempotent ingest, 고정 report view |
-| CLI JSON report | 내장 | 엄격한 7일·30일·90일 owner report |
+| CLI JSON report | 내장 | 별도 admin-token 파일이 필요한 엄격한 7일·30일·90일 owner report, collector token은 거부 |
 | Grafana | 기본 dashboard | provision된 ClickHouse datasource와 고정 dashboard query |
 | Docker Compose | 공개 self-hosting preview | placeholder만 포함한 범용 topology, 인증 필수 Grafana, 비공개 secret 렌더링 |
 | TrueNAS | 선택형 운영 overlay | 범용 배포 계약 위에서 owner가 실행하는 preflight/apply controller, private inventory는 미포함 |

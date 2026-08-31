@@ -1,15 +1,16 @@
 #![forbid(unsafe_code)]
 #![recursion_limit = "512"]
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use axum::Json;
 use axum::body::Body;
-use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, Query, State};
+use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, Query, Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::middleware::{Next, from_fn_with_state};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Router, serve};
@@ -32,6 +33,22 @@ const API_VERSION: &str = "3";
 const MAX_REQUEST_BYTES: usize = 64 * 1024;
 const MAX_CLICKHOUSE_BYTES: usize = 1024 * 1024;
 const MAX_REQUESTS_PER_MINUTE: usize = 600;
+const MAX_PRE_AUTH_REQUESTS_PER_MINUTE: usize = 120;
+const MAX_PRE_AUTH_GLOBAL_REQUESTS_PER_MINUTE: usize = 2400;
+const MAX_ENROLLMENTS_PER_MINUTE: usize = 60;
+const MAX_HEALTH_REQUESTS_PER_MINUTE: usize = 120;
+const HEALTH_CACHE_SECONDS: u64 = 5;
+const MAX_CONCURRENT_COLLECTOR_STORAGE_REQUESTS: usize = 28;
+const MAX_CONCURRENT_OPERATOR_STORAGE_REQUESTS: usize = 4;
+const MAX_CONCURRENT_COLLECTOR_REQUESTS: usize = 64;
+const REQUEST_BODY_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_ACTIVE_RATE_SCOPES: usize = 4096;
+const DEFAULT_RETENTION_DAYS: u64 = 365;
+const DEFAULT_COLLECTOR_MAX_EVENTS: u64 = 4096;
+const DEFAULT_COLLECTOR_MAX_PAYLOAD_BYTES: u64 = 256 * 1024 * 1024;
+const DEFAULT_DATASET_MAX_ROWS: u64 = 2_000_000;
+const DEFAULT_DATASET_MAX_BYTES: u64 = 64 * 1024 * 1024 * 1024;
+const DATASET_INGESTION_WATERMARK_PERCENT: u64 = 90;
 const TOKEN_MIN_BYTES: usize = 32;
 const REPORT_FRESHNESS_HOURS: u64 = 48;
 const INITIAL_REPORT_GRACE_HOURS: u64 = 24;
@@ -302,6 +319,27 @@ struct Config {
     owner_enrollment_enabled: bool,
     latest_version: String,
     minimum_supported_version: String,
+    retention_days: u64,
+    collector_max_events: u64,
+    collector_max_payload_bytes: u64,
+    dataset_max_rows: u64,
+    dataset_max_bytes: u64,
+}
+
+fn bounded_env_u64(name: &str, default: u64, minimum: u64, maximum: u64) -> Result<u64, ApiError> {
+    let value = std::env::var(name)
+        .ok()
+        .map(|value| value.parse::<u64>())
+        .transpose()
+        .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "invalid_request"))?
+        .unwrap_or(default);
+    if !(minimum..=maximum).contains(&value) {
+        return Err(ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "invalid_request",
+        ));
+    }
+    Ok(value)
 }
 
 impl Config {
@@ -338,6 +376,36 @@ impl Config {
             .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_owned());
         let minimum_supported_version = std::env::var("GROUNDLINE_MINIMUM_SUPPORTED_VERSION")
             .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_owned());
+        let retention_days = bounded_env_u64(
+            "GROUNDLINE_RETENTION_DAYS",
+            DEFAULT_RETENTION_DAYS,
+            90,
+            3650,
+        )?;
+        let collector_max_events = bounded_env_u64(
+            "GROUNDLINE_COLLECTOR_MAX_EVENTS",
+            DEFAULT_COLLECTOR_MAX_EVENTS,
+            128,
+            1_000_000,
+        )?;
+        let collector_max_payload_bytes = bounded_env_u64(
+            "GROUNDLINE_COLLECTOR_MAX_PAYLOAD_BYTES",
+            DEFAULT_COLLECTOR_MAX_PAYLOAD_BYTES,
+            8 * 1024 * 1024,
+            64 * 1024 * 1024 * 1024,
+        )?;
+        let dataset_max_rows = bounded_env_u64(
+            "GROUNDLINE_DATASET_MAX_ROWS",
+            DEFAULT_DATASET_MAX_ROWS,
+            4096,
+            1_000_000_000,
+        )?;
+        let dataset_max_bytes = bounded_env_u64(
+            "GROUNDLINE_DATASET_MAX_BYTES",
+            DEFAULT_DATASET_MAX_BYTES,
+            1024 * 1024 * 1024,
+            16 * 1024 * 1024 * 1024 * 1024,
+        )?;
         let clickhouse_database = std::env::var("GROUNDLINE_CLICKHOUSE_DATABASE")
             .unwrap_or_else(|_| "groundline".to_owned());
         if clickhouse_database != "groundline" {
@@ -370,6 +438,11 @@ impl Config {
                 .is_ok_and(|value| value.eq_ignore_ascii_case("true")),
             latest_version,
             minimum_supported_version,
+            retention_days,
+            collector_max_events,
+            collector_max_payload_bytes,
+            dataset_max_rows,
+            dataset_max_bytes,
         })
     }
 }
@@ -492,20 +565,19 @@ impl ClickHouse {
         for (index, query) in STORAGE_MIGRATIONS.iter().enumerate() {
             self.request_at(query, &[], None, index != 0).await?;
         }
-        let ttl_present = self
-            .request(
-                "SELECT count() FROM system.tables WHERE database = 'groundline' AND name = 'basic_weekly' AND positionCaseInsensitive(create_table_query, ' TTL ') > 0 FORMAT TabSeparated",
-                &[],
-                None,
-            )
-            .await?;
-        if ttl_present != b"0\n" && ttl_present != b"0" && !ttl_present.is_empty() {
-            self.request("ALTER TABLE groundline.basic_weekly REMOVE TTL", &[], None)
-                .await?;
-        }
+        self.request(
+            &format!(
+                "ALTER TABLE groundline.basic_weekly MODIFY TTL received_at + toIntervalDay({})",
+                config.retention_days
+            ),
+            &[],
+            None,
+        )
+        .await?;
         for query in [
             "CREATE OR REPLACE VIEW groundline.basic_active AS SELECT events.* FROM (SELECT * FROM groundline.basic_weekly FINAL) AS events INNER JOIN (SELECT collector_id, current_generation FROM groundline.collectors FINAL WHERE revoked = 0) AS active ON events.collector_id = active.collector_id AND events.collection_generation = active.current_generation",
             "CREATE TABLE IF NOT EXISTS groundline.release_policy (policy_key LowCardinality(String), latest_version String, minimum_supported_version String, updated_at DateTime64(3, 'UTC')) ENGINE = ReplacingMergeTree(updated_at) ORDER BY policy_key",
+            "ALTER TABLE groundline.release_policy ADD COLUMN IF NOT EXISTS retention_days UInt16 DEFAULT 365",
         ] {
             self.request(query, &[], None).await?;
         }
@@ -513,6 +585,7 @@ impl ClickHouse {
             "policy_key":"stable",
             "latest_version":config.latest_version,
             "minimum_supported_version":config.minimum_supported_version,
+            "retention_days":config.retention_days,
             "updated_at":Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
         });
         let mut body = serde_json::to_vec(&policy).map_err(|_| ApiError::storage())?;
@@ -674,24 +747,85 @@ impl Collector {
 struct AppState {
     config: Config,
     clickhouse: ClickHouse,
-    requests: Arc<Mutex<VecDeque<Instant>>>,
+    rate_limits: Arc<Mutex<BTreeMap<RateLimitScope, VecDeque<Instant>>>>,
+    health: Arc<tokio::sync::Mutex<HealthState>>,
+    health_probe: Arc<tokio::sync::Mutex<()>>,
+    ingestion_gate: Arc<tokio::sync::Mutex<()>>,
+    collector_request_permits: Arc<tokio::sync::Semaphore>,
+    collector_storage_permits: Arc<tokio::sync::Semaphore>,
+    operator_storage_permits: Arc<tokio::sync::Semaphore>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum RateLimitScope {
+    Admin,
+    Collector(Uuid),
+    Enrollment,
+    PreAuthGlobal,
+    PreAuthPeer(IpAddr),
+}
+
+#[derive(Clone, Copy)]
+enum StorageClass {
+    Collector,
+    Operator,
+}
+
+#[derive(Default)]
+struct HealthState {
+    requests: VecDeque<Instant>,
+    readiness: Option<(Instant, bool)>,
 }
 
 impl AppState {
-    fn rate_limit(&self) -> Result<(), ApiError> {
-        let mut requests = self
-            .requests
+    fn rate_limit(&self, scope: RateLimitScope, limit: usize) -> Result<(), ApiError> {
+        let mut scopes = self
+            .rate_limits
             .lock()
             .map_err(|_| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable"))?;
-        let threshold = Instant::now() - Duration::from_secs(60);
-        while requests.front().is_some_and(|value| *value <= threshold) {
-            requests.pop_front();
-        }
-        if requests.len() >= MAX_REQUESTS_PER_MINUTE {
-            return Err(ApiError::new(StatusCode::TOO_MANY_REQUESTS, "rate_limited"));
-        }
-        requests.push_back(Instant::now());
-        Ok(())
+        charge_rate_limit(&mut scopes, scope, limit, Instant::now())
+    }
+
+    fn storage_permit(
+        &self,
+        class: StorageClass,
+    ) -> Result<tokio::sync::OwnedSemaphorePermit, ApiError> {
+        let permits = match class {
+            StorageClass::Collector => &self.collector_storage_permits,
+            StorageClass::Operator => &self.operator_storage_permits,
+        };
+        permits
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "storage_busy"))
+    }
+}
+
+fn charge_rate_limit(
+    scopes: &mut BTreeMap<RateLimitScope, VecDeque<Instant>>,
+    scope: RateLimitScope,
+    limit: usize,
+    now: Instant,
+) -> Result<(), ApiError> {
+    let threshold = now - Duration::from_secs(60);
+    for requests in scopes.values_mut() {
+        expire_requests(requests, threshold);
+    }
+    scopes.retain(|_, requests| !requests.is_empty());
+    if !scopes.contains_key(&scope) && scopes.len() >= MAX_ACTIVE_RATE_SCOPES {
+        return Err(ApiError::new(StatusCode::TOO_MANY_REQUESTS, "rate_limited"));
+    }
+    let requests = scopes.entry(scope).or_default();
+    if requests.len() >= limit {
+        return Err(ApiError::new(StatusCode::TOO_MANY_REQUESTS, "rate_limited"));
+    }
+    requests.push_back(now);
+    Ok(())
+}
+
+fn expire_requests(requests: &mut VecDeque<Instant>, threshold: Instant) {
+    while requests.front().is_some_and(|value| *value <= threshold) {
+        requests.pop_front();
     }
 }
 
@@ -711,9 +845,9 @@ fn require_tailnet(
     state: &AppState,
     peer: SocketAddr,
     headers: &HeaderMap,
-) -> Result<(), ApiError> {
+) -> Result<IpAddr, ApiError> {
     if tailnet_address(peer.ip()) {
-        return Ok(());
+        return Ok(peer.ip());
     }
     if !private_address(peer.ip())
         || !constant_time_equal(
@@ -734,7 +868,47 @@ fn require_tailnet(
     if !forwarded.is_some_and(tailnet_address) {
         return Err(ApiError::new(StatusCode::UNAUTHORIZED, "invalid_auth"));
     }
-    Ok(())
+    Ok(forwarded.expect("validated forwarded Tailnet address"))
+}
+
+fn admit_tailnet(
+    state: &AppState,
+    peer: SocketAddr,
+    headers: &HeaderMap,
+) -> Result<IpAddr, ApiError> {
+    let effective_peer = require_tailnet(state, peer, headers)?;
+    state.rate_limit(
+        RateLimitScope::PreAuthPeer(effective_peer),
+        MAX_PRE_AUTH_REQUESTS_PER_MINUTE,
+    )?;
+    state.rate_limit(
+        RateLimitScope::PreAuthGlobal,
+        MAX_PRE_AUTH_GLOBAL_REQUESTS_PER_MINUTE,
+    )?;
+    Ok(effective_peer)
+}
+
+async fn admit_collector_request(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    request: Request,
+    next: Next,
+) -> Result<Response, ApiError> {
+    admit_tailnet(&state, peer, request.headers())?;
+    let _request_permit = state
+        .collector_request_permits
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "request_busy"))?;
+    let (parts, body) = request.into_parts();
+    let body = tokio::time::timeout(
+        REQUEST_BODY_TIMEOUT,
+        axum::body::to_bytes(body, MAX_REQUEST_BYTES),
+    )
+    .await
+    .map_err(|_| ApiError::new(StatusCode::REQUEST_TIMEOUT, "request_timeout"))?
+    .map_err(|_| ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"))?;
+    Ok(next.run(Request::from_parts(parts, Body::from(body))).await)
 }
 
 fn require_token(headers: &HeaderMap, expected: &SecretString) -> Result<(), ApiError> {
@@ -751,6 +925,10 @@ fn require_enrollment(config: &Config, headers: &HeaderMap) -> Result<(), ApiErr
         return Err(ApiError::new(StatusCode::FORBIDDEN, "enrollment_disabled"));
     }
     Ok(())
+}
+
+fn require_admin_report(config: &Config, headers: &HeaderMap) -> Result<(), ApiError> {
+    require_token(headers, &config.admin_token)
 }
 
 async fn require_collector_token(
@@ -771,8 +949,43 @@ async fn require_collector_token(
 }
 
 async fn health(State(state): State<AppState>) -> Result<Response, ApiError> {
-    state.rate_limit()?;
-    let ready = state.clickhouse.ready().await;
+    let cached = {
+        let mut health = state.health.lock().await;
+        let now = Instant::now();
+        expire_requests(&mut health.requests, now - Duration::from_secs(60));
+        if health.requests.len() >= MAX_HEALTH_REQUESTS_PER_MINUTE {
+            return Err(ApiError::new(StatusCode::TOO_MANY_REQUESTS, "rate_limited"));
+        }
+        health.requests.push_back(now);
+        health
+            .readiness
+            .filter(|(checked_at, _)| {
+                now.duration_since(*checked_at) < Duration::from_secs(HEALTH_CACHE_SECONDS)
+            })
+            .map(|(_, ready)| ready)
+    };
+    let ready = if let Some(ready) = cached {
+        ready
+    } else {
+        let _probe = state.health_probe.lock().await;
+        let cached = {
+            let health = state.health.lock().await;
+            let now = Instant::now();
+            health
+                .readiness
+                .filter(|(checked_at, _)| {
+                    now.duration_since(*checked_at) < Duration::from_secs(HEALTH_CACHE_SECONDS)
+                })
+                .map(|(_, ready)| ready)
+        };
+        if let Some(ready) = cached {
+            ready
+        } else {
+            let ready = state.clickhouse.ready().await;
+            state.health.lock().await.readiness = Some((Instant::now(), ready));
+            ready
+        }
+    };
     Ok(safe_response(
         if ready {
             StatusCode::OK
@@ -813,9 +1026,10 @@ async fn enroll(
     headers: HeaderMap,
     Json(input): Json<Enrollment>,
 ) -> Result<Response, ApiError> {
-    state.rate_limit()?;
     require_tailnet(&state, peer, &headers)?;
     require_enrollment(&state.config, &headers)?;
+    state.rate_limit(RateLimitScope::Enrollment, MAX_ENROLLMENTS_PER_MINUTE)?;
+    let _storage_permit = state.storage_permit(StorageClass::Operator)?;
     if input.schema_version != 2
         || input.kind != "groundline-insights-owner-enrollment"
         || !(TOKEN_MIN_BYTES..=4096).contains(&input.collector_token.len())
@@ -1045,14 +1259,75 @@ async fn event_exists(state: &AppState, event_id: Uuid) -> Result<bool, ApiError
         .map(|value| value != b"0\n" && value != b"0")
 }
 
+fn reaches_ingestion_watermark(current: u64, candidate: u64, maximum: u64) -> bool {
+    u128::from(current.saturating_add(candidate)) * 100
+        >= u128::from(maximum) * u128::from(DATASET_INGESTION_WATERMARK_PERCENT)
+}
+
+async fn enforce_ingestion_capacity(
+    state: &AppState,
+    collector_id: Uuid,
+    candidate_payload_bytes: u64,
+) -> Result<(), ApiError> {
+    let collector = state
+        .clickhouse
+        .json_row(
+            "SELECT count() AS event_count, coalesce(sum(length(payload_json)), 0) AS payload_bytes FROM groundline.basic_weekly FINAL WHERE collector_id = {collector_id:UUID} FORMAT JSONEachRow",
+            &[("collector_id", collector_id.to_string())],
+        )
+        .await?
+        .unwrap_or_else(|| json!({}));
+    if count(&collector, "event_count").saturating_add(1) > state.config.collector_max_events
+        || count(&collector, "payload_bytes").saturating_add(candidate_payload_bytes)
+            > state.config.collector_max_payload_bytes
+    {
+        return Err(ApiError::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "collector_quota_exceeded",
+        ));
+    }
+
+    let dataset = state
+        .clickhouse
+        .json_row(
+            "SELECT coalesce(sum(rows), 0) AS row_count, coalesce(sum(bytes_on_disk), 0) AS disk_bytes FROM system.parts WHERE active AND database = 'groundline' AND table = 'basic_weekly' FORMAT JSONEachRow",
+            &[],
+        )
+        .await?
+        .unwrap_or_else(|| json!({}));
+    if reaches_ingestion_watermark(
+        count(&dataset, "row_count"),
+        1,
+        state.config.dataset_max_rows,
+    ) || reaches_ingestion_watermark(
+        count(&dataset, "disk_bytes"),
+        candidate_payload_bytes,
+        state.config.dataset_max_bytes,
+    ) {
+        return Err(ApiError::new(
+            StatusCode::INSUFFICIENT_STORAGE,
+            "dataset_capacity_reserved",
+        ));
+    }
+    Ok(())
+}
+
 async fn ingest_event(
     State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<Response, ApiError> {
-    state.rate_limit()?;
-    require_tailnet(&state, peer, &headers)?;
+    let collector_header = headers
+        .get("x-groundline-collector-id")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| Uuid::parse_str(value).ok())
+        .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "invalid_auth"))?;
+    let _storage_permit = state.storage_permit(StorageClass::Collector)?;
+    let collector = require_collector_token(&state, &headers, collector_header).await?;
+    state.rate_limit(
+        RateLimitScope::Collector(collector_header),
+        MAX_REQUESTS_PER_MINUTE,
+    )?;
     if headers
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
@@ -1074,11 +1349,6 @@ async fn ingest_event(
         .as_str()
         .and_then(|value| Uuid::parse_str(value).ok())
         .ok_or_else(|| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid_event"))?;
-    let collector_header = headers
-        .get("x-groundline-collector-id")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| Uuid::parse_str(value).ok())
-        .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "invalid_auth"))?;
     if collector_header != collector_id
         || headers
             .get("idempotency-key")
@@ -1087,15 +1357,17 @@ async fn ingest_event(
     {
         return Err(ApiError::new(StatusCode::UNAUTHORIZED, "invalid_auth"));
     }
-    let collector = require_collector_token(&state, &headers, collector_id).await?;
     let generation = pointer_u64(&event, "/source/collection_generation");
     let next_generation = collector.current_generation.checked_add(1).map(u64::from);
     if generation != u64::from(collector.current_generation) && Some(generation) != next_generation
     {
         return Err(ApiError::new(StatusCode::CONFLICT, "invalid_generation"));
     }
+    let candidate_payload_bytes = u64::try_from(body.len()).map_err(|_| ApiError::storage())?;
+    let _ingestion_guard = state.ingestion_gate.lock().await;
     let duplicate = event_exists(&state, event_id).await?;
     if !duplicate {
+        enforce_ingestion_capacity(&state, collector_id, candidate_payload_bytes).await?;
         let row = event_row(&event, Utc::now())?;
         let mut body = serde_json::to_vec(&row).map_err(|_| ApiError::storage())?;
         body.push(b'\n');
@@ -1170,20 +1442,22 @@ struct Activation {
 
 async fn activate_generation(
     State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Json(input): Json<Activation>,
 ) -> Result<Response, ApiError> {
-    state.rate_limit()?;
-    require_tailnet(&state, peer, &headers)?;
     if input.schema_version != 1
         || input.kind != "groundline-insights-generation-activation"
         || input.target_generation == 0
     {
         return Err(ApiError::new(StatusCode::BAD_REQUEST, "invalid_request"));
     }
+    let _storage_permit = state.storage_permit(StorageClass::Collector)?;
     let mut collector =
         require_collector_token(&state, &headers, input.collector_instance_id).await?;
+    state.rate_limit(
+        RateLimitScope::Collector(input.collector_instance_id),
+        MAX_REQUESTS_PER_MINUTE,
+    )?;
     if input.target_generation == collector.current_generation {
         return Ok(safe_response(
             StatusCode::OK,
@@ -1227,9 +1501,10 @@ async fn delete_collector(
     Path(collector_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
-    state.rate_limit()?;
     require_tailnet(&state, peer, &headers)?;
-    require_token(&headers, &state.config.admin_token)?;
+    require_admin_report(&state.config, &headers)?;
+    state.rate_limit(RateLimitScope::Admin, MAX_REQUESTS_PER_MINUTE)?;
+    let _storage_permit = state.storage_permit(StorageClass::Operator)?;
     let confirmation = collector_id.to_string();
     if headers
         .get("x-groundline-delete-confirm")
@@ -1297,20 +1572,13 @@ async fn weekly_report(
     headers: HeaderMap,
     Query(query): Query<ReportQuery>,
 ) -> Result<Response, ApiError> {
-    state.rate_limit()?;
     require_tailnet(&state, peer, &headers)?;
+    require_admin_report(&state.config, &headers)?;
+    state.rate_limit(RateLimitScope::Admin, MAX_REQUESTS_PER_MINUTE)?;
     if !matches!(query.days, 7 | 30 | 90) {
         return Err(ApiError::new(StatusCode::BAD_REQUEST, "invalid_request"));
     }
-    let collector = headers
-        .get("x-groundline-collector-id")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| Uuid::parse_str(value).ok());
-    if let Some(collector) = collector {
-        require_collector_token(&state, &headers, collector).await?;
-    } else {
-        require_token(&headers, &state.config.admin_token)?;
-    }
+    let _storage_permit = state.storage_permit(StorageClass::Operator)?;
     let end = Utc::now();
     let start = end - ChronoDuration::days(i64::from(query.days));
     let params = [
@@ -1416,6 +1684,9 @@ async fn weekly_report(
     if count(&storage, "duplicate_event_row_count") > 0 {
         quality.insert("physical_event_duplicates_detected".to_owned());
     }
+    if count(&storage, "ttl_expired_event_row_count") > 0 {
+        quality.insert("retention_cleanup_pending".to_owned());
+    }
     if count(&storage, "overdue_delivery_event_count") > 0 {
         quality.insert("event_delivery_overdue".to_owned());
     } else if count(&storage, "delayed_delivery_event_count") > 0 {
@@ -1485,7 +1756,7 @@ async fn weekly_report(
             "roster_status":"AVAILABLE","latest_received_at_utc":latest_received,"freshness_status":freshness,
             "freshness_threshold_hours":REPORT_FRESHNESS_HOURS,"initial_report_grace_hours":INITIAL_REPORT_GRACE_HOURS,
             "stored_event_row_count":count(&storage,"stored_event_row_count"),"deduplicated_event_count":count(&storage,"deduplicated_event_count"),
-            "duplicate_event_row_count":count(&storage,"duplicate_event_row_count"),"delayed_delivery_event_count":count(&storage,"delayed_delivery_event_count"),
+            "duplicate_event_row_count":count(&storage,"duplicate_event_row_count"),"ttl_expired_event_row_count":count(&storage,"ttl_expired_event_row_count"),"delayed_delivery_event_count":count(&storage,"delayed_delivery_event_count"),
             "overdue_delivery_event_count":count(&storage,"overdue_delivery_event_count"),"clock_skew_event_count":count(&storage,"clock_skew_event_count"),
             "delivery_delay_threshold_hours":REPORT_DELIVERY_DELAY_HOURS,"delivery_overdue_threshold_hours":REPORT_DELIVERY_OVERDUE_HOURS,
             "clock_skew_tolerance_minutes":REPORT_CLOCK_SKEW_TOLERANCE_MINUTES
@@ -1553,7 +1824,7 @@ async fn weekly_report(
 
 const REPORT_SUMMARY_QUERY: &str = r#"SELECT count() AS event_count, sum(eligible_root_count) AS eligible_root_total, sum(selected_root_count) AS selected_root_total, sum(observed_root_count) AS observed_root_total, sum(task_completed) AS completed_turn_count, sum(unreadable_root_count) AS unreadable_root_count, sum(root_truncated_count) AS root_truncated_count, sum(truncated_count) AS non_root_truncated_count, sum(originator_unclassified_excluded_root_count) AS originator_unclassified_count, sum(originator_source_fallback_root_count) AS originator_source_fallback_count, countIf(observed_root_count > 0) AS root_usage_applicable_event_count, countIf(observed_root_count > 0 AND usage_source IN ('unavailable','unknown')) AS root_usage_missing_event_count, countIf(fallback_rollout_count > 0) AS root_usage_fallback_event_count, countIf(delegated_count > 0) AS delegated_usage_applicable_event_count, countIf(delegated_count > 0 AND delegated_usage_source IN ('unavailable','unknown')) AS delegated_usage_missing_event_count, countIf(delegated_fallback_rollout_count > 0) AS delegated_usage_fallback_event_count, countIf(guardian_count > 0) AS guardian_usage_applicable_event_count, countIf(guardian_count > 0 AND guardian_usage_source IN ('unavailable','unknown')) AS guardian_usage_missing_event_count, countIf(guardian_fallback_rollout_count > 0) AS guardian_usage_fallback_event_count, sum(guardian_incomplete_excluded_count) AS guardian_incomplete_excluded_count, countIf(selection_mode != 'activity_window') AS completed_root_coverage_applicable_event_count, countIf(capability_completed_root_coverage = 1 AND selection_mode != 'activity_window') AS completed_root_coverage_capable_event_count, countIf(capability_latency_completed_count = 1) AS latency_capable_event_count, countIf(capability_root_boundary_counts = 1) AS boundary_count_capable_event_count, countIf(guardian_review_count > 0) AS guardian_attribution_applicable_event_count, countIf(guardian_review_count > 0 AND capability_guardian_workspace_attribution = 1) AS guardian_attribution_capable_event_count, countIf(root_status != 'PASS' OR delegated_status != 'PASS' OR guardian_status != 'PASS') AS component_nonpass_event_count, countIf(sample_sufficient = 1) AS sample_sufficient_event_count, countIf(sample_sufficient = 0) AS sample_insufficient_event_count, countIf((observed_root_count > 0 AND usage_source IN ('unavailable','unknown')) OR (delegated_count > 0 AND delegated_usage_source IN ('unavailable','unknown')) OR (guardian_count > 0 AND guardian_usage_source IN ('unavailable','unknown'))) AS usage_missing_count, sum(fallback_rollout_count + delegated_fallback_rollout_count + guardian_fallback_rollout_count) AS usage_fallback_count, sum(input_tokens) AS input_tokens, sum(cached_input_tokens) AS cached_input_tokens, sum(non_cached_input_tokens) AS non_cached_input_tokens, sum(output_tokens) AS output_tokens, sum(reasoning_output_tokens) AS reasoning_output_tokens, sum(total_tokens) AS total_tokens, sum(delegated_total_tokens) AS delegated_total_tokens, sum(guardian_total_tokens) AS guardian_total_tokens, sum(compactions) AS compactions, sum(long_turn_count) AS long_turn_count, sum(exact_repeated_call_groups) AS exact_repeated_call_groups, sum(calls_in_exact_repeated_groups) AS calls_in_exact_repeated_groups, sum(nonzero_exit_count + timeout_count + rejected_count) AS failure_signal_count, sum(tool_call_count) AS tool_call_count, sum(user_messages_with_text) AS user_messages_with_text, sum(short_message_count) AS short_message_count, sum(broad_scope_message_count) AS broad_scope_message_count, sum(boundary_review_root_count) AS boundary_review_root_count, sum(long_lived_root_count) AS long_lived_root_count, sum(verification_tool_calls) AS verification_tool_call_count, sum(verification_success_count) AS verification_success_count, sum(verification_failure_count) AS verification_failure_count, sum(verification_unresolved_count) AS verification_unresolved_count, sum(guardian_review_count) AS guardian_review_total, sum(guardian_workspace_attributed_review_count) AS guardian_workspace_attributed_review_count FROM groundline.basic_active WHERE ifNull(period_end, generated_at) > parseDateTimeBestEffort({start:String}) AND ifNull(period_end, generated_at) <= parseDateTimeBestEffort({end:String}) FORMAT JSONEachRow"#;
 const REPORT_FLEET_QUERY: &str = r#"WITH policy AS (SELECT argMax(latest_version, updated_at) AS latest_version FROM groundline.release_policy FINAL WHERE policy_key='stable'), enrolled AS (SELECT collector_id, created_at, enrollment_schema_version, os_family, runtime_family, execution_mode, groundline_version FROM groundline.collectors FINAL WHERE revoked=0), any_events AS (SELECT collector_id, max(received_at) AS last_seen FROM groundline.basic_active GROUP BY collector_id), reporting AS (SELECT collector_id FROM groundline.basic_active WHERE ifNull(period_end, generated_at) > parseDateTimeBestEffort({start:String}) AND ifNull(period_end, generated_at) <= parseDateTimeBestEffort({end:String}) GROUP BY collector_id), current_events AS (SELECT collector_id, received_at, ifNull(period_end, generated_at) AS event_time FROM groundline.basic_active CROSS JOIN policy WHERE groundline_version=policy.latest_version), current_observed AS (SELECT collector_id, max(received_at) AS last_seen FROM current_events GROUP BY collector_id), current_reporting AS (SELECT collector_id FROM current_events WHERE event_time > parseDateTimeBestEffort({start:String}) AND event_time <= parseDateTimeBestEffort({end:String}) GROUP BY collector_id) SELECT policy.latest_version AS policy_latest_version, count() AS enrolled_installation_count, countIf(enrollment_schema_version=2 AND os_family!='unknown' AND runtime_family!='unknown' AND execution_mode!='unknown' AND groundline_version!='unknown') AS metadata_known_installation_count, count() - metadata_known_installation_count AS metadata_unknown_installation_count, countIf(any_events.collector_id IS NOT NULL) AS observed_installation_count, countIf(reporting.collector_id IS NOT NULL) AS reporting_installation_count, countIf(any_events.last_seen >= now('UTC') - INTERVAL 7 DAY) AS recent_installation_count, countIf(any_events.collector_id IS NULL) AS never_reported_installation_count, countIf(any_events.collector_id IS NULL AND enrolled.created_at > now('UTC') - INTERVAL 24 HOUR) AS pending_initial_report_installation_count, countIf(any_events.collector_id IS NULL AND enrolled.created_at <= now('UTC') - INTERVAL 24 HOUR) AS overdue_never_reported_installation_count, countIf(any_events.collector_id IS NOT NULL AND any_events.last_seen < now('UTC') - INTERVAL 7 DAY) AS stale_observed_installation_count, countIf(enrolled.groundline_version=policy.latest_version) AS current_package_claim_installation_count, countIf(enrolled.groundline_version=policy.latest_version AND current_observed.collector_id IS NULL) AS current_package_claim_unobserved_installation_count, countIf(current_observed.collector_id IS NOT NULL) AS current_observed_installation_count, countIf(current_reporting.collector_id IS NOT NULL) AS current_reporting_installation_count, countIf(current_observed.last_seen >= now('UTC') - INTERVAL 7 DAY) AS current_recent_installation_count, if(countIf(any_events.last_seen IS NOT NULL)=0, CAST(NULL, 'Nullable(String)'), formatDateTime(max(any_events.last_seen), '%Y-%m-%dT%H:%i:%SZ', 'UTC')) AS latest_received_at_utc, toUInt8(max(any_events.last_seen) >= now('UTC') - INTERVAL 48 HOUR) AS fresh FROM enrolled CROSS JOIN policy LEFT JOIN any_events USING collector_id LEFT JOIN reporting USING collector_id LEFT JOIN current_observed USING collector_id LEFT JOIN current_reporting USING collector_id GROUP BY policy.latest_version FORMAT JSONEachRow"#;
-const REPORT_STORAGE_QUERY: &str = r#"WITH logical AS (SELECT event_id, received_at, generated_at FROM groundline.basic_active WHERE ifNull(period_end, generated_at) > parseDateTimeBestEffort({start:String}) AND ifNull(period_end, generated_at) <= parseDateTimeBestEffort({end:String})), active AS (SELECT collector_id,current_generation FROM groundline.collectors FINAL WHERE revoked=0), stored AS (SELECT events.event_id FROM groundline.basic_weekly events INNER JOIN active ON events.collector_id=active.collector_id AND events.collection_generation=active.current_generation INNER JOIN logical USING event_id) SELECT (SELECT count() FROM stored) AS stored_event_row_count, (SELECT count() FROM logical) AS deduplicated_event_count, stored_event_row_count-deduplicated_event_count AS duplicate_event_row_count, (SELECT countIf(dateDiff('second',generated_at,received_at)>21600) FROM logical) AS delayed_delivery_event_count, (SELECT countIf(dateDiff('second',generated_at,received_at)>86400) FROM logical) AS overdue_delivery_event_count, (SELECT countIf(generated_at>received_at+INTERVAL 5 MINUTE) FROM logical) AS clock_skew_event_count FORMAT JSONEachRow"#;
+const REPORT_STORAGE_QUERY: &str = r#"WITH policy AS (SELECT argMax(retention_days,updated_at) AS retention_days FROM groundline.release_policy FINAL WHERE policy_key='stable'), logical AS (SELECT event_id, received_at, generated_at FROM groundline.basic_active WHERE ifNull(period_end, generated_at) > parseDateTimeBestEffort({start:String}) AND ifNull(period_end, generated_at) <= parseDateTimeBestEffort({end:String})), active AS (SELECT collector_id,current_generation FROM groundline.collectors FINAL WHERE revoked=0), stored AS (SELECT events.event_id FROM groundline.basic_weekly events INNER JOIN active ON events.collector_id=active.collector_id AND events.collection_generation=active.current_generation INNER JOIN logical USING event_id) SELECT (SELECT count() FROM stored) AS stored_event_row_count, (SELECT count() FROM logical) AS deduplicated_event_count, stored_event_row_count-deduplicated_event_count AS duplicate_event_row_count, (SELECT count() FROM groundline.basic_weekly CROSS JOIN policy WHERE received_at < now('UTC') - toIntervalDay(policy.retention_days)) AS ttl_expired_event_row_count, (SELECT countIf(dateDiff('second',generated_at,received_at)>21600) FROM logical) AS delayed_delivery_event_count, (SELECT countIf(dateDiff('second',generated_at,received_at)>86400) FROM logical) AS overdue_delivery_event_count, (SELECT countIf(generated_at>received_at+INTERVAL 5 MINUTE) FROM logical) AS clock_skew_event_count FORMAT JSONEachRow"#;
 const REPORT_EVENT_COHORT_QUERY: &str = r#"SELECT dimension,value,count() AS count FROM (SELECT 'schema_version' dimension,toString(schema_version) value FROM groundline.basic_active WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) UNION ALL SELECT 'groundline_version',groundline_version FROM groundline.basic_active WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) UNION ALL SELECT 'os_family',os_family FROM groundline.basic_active WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) UNION ALL SELECT 'runtime_family',runtime_family FROM groundline.basic_active WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) UNION ALL SELECT 'execution_mode',execution_mode FROM groundline.basic_active WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String})) GROUP BY dimension,value ORDER BY dimension,value FORMAT JSONEachRow"#;
 const REPORT_INSTALL_COHORT_QUERY: &str = r#"SELECT dimension,value,count() AS count FROM (SELECT 'groundline_version' dimension,groundline_version value FROM groundline.collectors FINAL WHERE revoked=0 UNION ALL SELECT 'os_family',os_family FROM groundline.collectors FINAL WHERE revoked=0 UNION ALL SELECT 'runtime_family',runtime_family FROM groundline.collectors FINAL WHERE revoked=0 UNION ALL SELECT 'execution_mode',execution_mode FROM groundline.collectors FINAL WHERE revoked=0) GROUP BY dimension,value ORDER BY dimension,value FORMAT JSONEachRow"#;
 const REPORT_MODEL_EFFORT_QUERY: &str = r#"SELECT tupleElement(item,1) AS model_family, tupleElement(item,2) AS effort, sum(tupleElement(item,3)) AS context_count FROM groundline.basic_active ARRAY JOIN arrayZip(model_families,efforts,model_effort_counts) AS item WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) GROUP BY model_family,effort ORDER BY model_family,effort FORMAT JSONEachRow"#;
@@ -1571,13 +1842,16 @@ pub enum RunError {
 }
 
 fn app(state: AppState) -> Router {
+    let collector_routes = Router::new()
+        .route("/v1/events", post(ingest_event))
+        .route("/v1/generations/activate", post(activate_generation))
+        .route_layer(from_fn_with_state(state.clone(), admit_collector_request));
     Router::new()
         .route("/healthz", get(health))
         .route("/v3/reports/weekly", get(weekly_report))
         .route("/v1/enroll", post(enroll))
-        .route("/v1/events", post(ingest_event))
-        .route("/v1/generations/activate", post(activate_generation))
         .route("/v1/collectors/{collector_id}", delete(delete_collector))
+        .merge(collector_routes)
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BYTES))
         .with_state(state)
 }
@@ -1593,7 +1867,19 @@ pub async fn run() -> Result<(), RunError> {
     let state = AppState {
         config,
         clickhouse,
-        requests: Arc::new(Mutex::new(VecDeque::new())),
+        rate_limits: Arc::new(Mutex::new(BTreeMap::new())),
+        health: Arc::new(tokio::sync::Mutex::new(HealthState::default())),
+        health_probe: Arc::new(tokio::sync::Mutex::new(())),
+        ingestion_gate: Arc::new(tokio::sync::Mutex::new(())),
+        collector_request_permits: Arc::new(tokio::sync::Semaphore::new(
+            MAX_CONCURRENT_COLLECTOR_REQUESTS,
+        )),
+        collector_storage_permits: Arc::new(tokio::sync::Semaphore::new(
+            MAX_CONCURRENT_COLLECTOR_STORAGE_REQUESTS,
+        )),
+        operator_storage_permits: Arc::new(tokio::sync::Semaphore::new(
+            MAX_CONCURRENT_OPERATOR_STORAGE_REQUESTS,
+        )),
     };
     tracing_subscriber::fmt()
         .with_max_level(Level::INFO)
@@ -1626,6 +1912,44 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
+
+    fn unit_config() -> Config {
+        Config {
+            listen: "127.0.0.1:8080".parse().expect("socket"),
+            clickhouse_url: Url::parse("http://127.0.0.1:18123/").expect("url"),
+            clickhouse_database: "groundline".to_owned(),
+            clickhouse_user: "groundline".to_owned(),
+            clickhouse_password: SecretString::from("x".repeat(32)),
+            admin_token: SecretString::from("x".repeat(32)),
+            enrollment_token: SecretString::from("e".repeat(32)),
+            proxy_token: SecretString::from("p".repeat(32)),
+            owner_enrollment_enabled: true,
+            latest_version: env!("CARGO_PKG_VERSION").to_owned(),
+            minimum_supported_version: env!("CARGO_PKG_VERSION").to_owned(),
+            retention_days: DEFAULT_RETENTION_DAYS,
+            collector_max_events: DEFAULT_COLLECTOR_MAX_EVENTS,
+            collector_max_payload_bytes: DEFAULT_COLLECTOR_MAX_PAYLOAD_BYTES,
+            dataset_max_rows: DEFAULT_DATASET_MAX_ROWS,
+            dataset_max_bytes: DEFAULT_DATASET_MAX_BYTES,
+        }
+    }
+
+    fn unit_state(collector_permits: usize, operator_permits: usize) -> AppState {
+        let config = unit_config();
+        AppState {
+            clickhouse: ClickHouse::new(&config).expect("ClickHouse client"),
+            config,
+            rate_limits: Arc::new(Mutex::new(BTreeMap::new())),
+            health: Arc::new(tokio::sync::Mutex::new(HealthState::default())),
+            health_probe: Arc::new(tokio::sync::Mutex::new(())),
+            ingestion_gate: Arc::new(tokio::sync::Mutex::new(())),
+            collector_request_permits: Arc::new(tokio::sync::Semaphore::new(
+                MAX_CONCURRENT_COLLECTOR_REQUESTS,
+            )),
+            collector_storage_permits: Arc::new(tokio::sync::Semaphore::new(collector_permits)),
+            operator_storage_permits: Arc::new(tokio::sync::Semaphore::new(operator_permits)),
+        }
+    }
 
     fn clickhouse_test_config() -> Config {
         assert_eq!(
@@ -1662,6 +1986,11 @@ mod tests {
             owner_enrollment_enabled: true,
             latest_version: env!("CARGO_PKG_VERSION").to_owned(),
             minimum_supported_version: env!("CARGO_PKG_VERSION").to_owned(),
+            retention_days: DEFAULT_RETENTION_DAYS,
+            collector_max_events: DEFAULT_COLLECTOR_MAX_EVENTS,
+            collector_max_payload_bytes: DEFAULT_COLLECTOR_MAX_PAYLOAD_BYTES,
+            dataset_max_rows: DEFAULT_DATASET_MAX_ROWS,
+            dataset_max_bytes: DEFAULT_DATASET_MAX_BYTES,
         }
     }
 
@@ -1833,19 +2162,7 @@ mod tests {
 
     #[test]
     fn enrollment_requires_the_owner_credential() {
-        let mut config = Config {
-            listen: "127.0.0.1:8080".parse().expect("socket"),
-            clickhouse_url: Url::parse("http://clickhouse:8123/").expect("url"),
-            clickhouse_database: "groundline".to_owned(),
-            clickhouse_user: "groundline".to_owned(),
-            clickhouse_password: SecretString::from("x".repeat(32)),
-            admin_token: SecretString::from("x".repeat(32)),
-            enrollment_token: SecretString::from("e".repeat(32)),
-            proxy_token: SecretString::from("x".repeat(32)),
-            owner_enrollment_enabled: true,
-            latest_version: "0.20.0".to_owned(),
-            minimum_supported_version: "0.20.0".to_owned(),
-        };
+        let mut config = unit_config();
         let mut headers = HeaderMap::new();
         assert!(require_enrollment(&config, &headers).is_err());
 
@@ -1870,6 +2187,178 @@ mod tests {
                 reason: "enrollment_disabled"
             }
         ));
+
+        headers.insert(
+            "x-groundline-collector-id",
+            HeaderValue::from_str(&Uuid::new_v4().to_string()).unwrap(),
+        );
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {}", "e".repeat(32))).unwrap(),
+        );
+        assert!(require_admin_report(&config, &headers).is_err());
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {}", "x".repeat(32))).unwrap(),
+        );
+        assert!(require_admin_report(&config, &headers).is_ok());
+    }
+
+    #[test]
+    fn authenticated_rate_budgets_are_isolated_by_role_and_collector() {
+        let now = Instant::now();
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        let mut scopes = BTreeMap::new();
+        charge_rate_limit(&mut scopes, RateLimitScope::Collector(first), 1, now).unwrap();
+        assert!(charge_rate_limit(&mut scopes, RateLimitScope::Collector(first), 1, now).is_err());
+        charge_rate_limit(&mut scopes, RateLimitScope::Collector(second), 1, now).unwrap();
+        charge_rate_limit(&mut scopes, RateLimitScope::Admin, 1, now).unwrap();
+        charge_rate_limit(
+            &mut scopes,
+            RateLimitScope::Collector(first),
+            1,
+            now + Duration::from_secs(61),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn pre_auth_peer_budgets_are_bounded_and_do_not_consume_authenticated_scopes() {
+        let now = Instant::now();
+        let peer = IpAddr::V4(Ipv4Addr::new(100, 64, 0, 7));
+        let collector = Uuid::new_v4();
+        let mut scopes = BTreeMap::new();
+        charge_rate_limit(&mut scopes, RateLimitScope::PreAuthPeer(peer), 1, now).unwrap();
+        assert!(charge_rate_limit(&mut scopes, RateLimitScope::PreAuthPeer(peer), 1, now).is_err());
+        charge_rate_limit(&mut scopes, RateLimitScope::Collector(collector), 1, now).unwrap();
+        charge_rate_limit(&mut scopes, RateLimitScope::Admin, 1, now).unwrap();
+    }
+
+    #[test]
+    fn saturated_collector_storage_is_shed_without_consuming_operator_capacity() {
+        let state = unit_state(1, 1);
+        let _collector = state
+            .storage_permit(StorageClass::Collector)
+            .expect("first collector permit");
+        assert!(matches!(
+            state.storage_permit(StorageClass::Collector),
+            Err(ApiError::Rejected {
+                status: StatusCode::SERVICE_UNAVAILABLE,
+                reason: "storage_busy"
+            })
+        ));
+        let _operator = state
+            .storage_permit(StorageClass::Operator)
+            .expect("reserved operator permit");
+    }
+
+    #[tokio::test]
+    async fn invalid_collectors_are_budgeted_before_storage_and_operator_routes_remain_available() {
+        let router = app(unit_state(0, 1));
+        let collector_id = Uuid::new_v4();
+        let headers = [("x-groundline-collector-id", collector_id.to_string())];
+        for _ in 0..MAX_PRE_AUTH_REQUESTS_PER_MINUTE {
+            let response = router
+                .clone()
+                .oneshot(local_request(
+                    Method::POST,
+                    "/v1/events",
+                    &"invalid".repeat(8),
+                    Some(&json!({})),
+                    &headers,
+                ))
+                .await
+                .expect("bounded response");
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        }
+        let response = router
+            .clone()
+            .oneshot(local_request(
+                Method::POST,
+                "/v1/events",
+                &"invalid".repeat(8),
+                Some(&json!({"oversized":"x".repeat(MAX_REQUEST_BYTES)})),
+                &headers,
+            ))
+            .await
+            .expect("rate-limited response");
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+
+        let response = router
+            .oneshot(local_request(
+                Method::GET,
+                "/v3/reports/weekly?days=1",
+                &"x".repeat(32),
+                None,
+                &[],
+            ))
+            .await
+            .expect("operator response");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn collector_concurrency_is_rejected_before_body_buffering() {
+        let state = unit_state(1, 1);
+        state.collector_request_permits.close();
+        let response = app(state)
+            .oneshot(local_request(
+                Method::POST,
+                "/v1/events",
+                &"invalid".repeat(8),
+                Some(&json!({"oversized":"x".repeat(MAX_REQUEST_BYTES)})),
+                &[("x-groundline-collector-id", Uuid::new_v4().to_string())],
+            ))
+            .await
+            .expect("bounded response");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn effective_tailnet_peer_ignores_direct_xff_and_accepts_one_trusted_proxy_hop() {
+        let state = unit_state(1, 1);
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", HeaderValue::from_static("100.64.0.9"));
+        let direct = require_tailnet(
+            &state,
+            "100.64.0.7:41000".parse().expect("direct peer"),
+            &headers,
+        )
+        .expect("direct Tailnet peer");
+        assert_eq!(direct, IpAddr::V4(Ipv4Addr::new(100, 64, 0, 7)));
+
+        headers.insert(
+            "x-groundline-proxy-token",
+            HeaderValue::from_str(&"p".repeat(32)).expect("proxy token"),
+        );
+        let proxied = require_tailnet(
+            &state,
+            "192.168.1.10:41000".parse().expect("proxy peer"),
+            &headers,
+        )
+        .expect("trusted proxy");
+        assert_eq!(proxied, IpAddr::V4(Ipv4Addr::new(100, 64, 0, 9)));
+
+        headers.insert(
+            "x-forwarded-for",
+            HeaderValue::from_static("100.64.0.9, 100.64.0.10"),
+        );
+        assert!(
+            require_tailnet(
+                &state,
+                "192.168.1.10:41000".parse().expect("proxy peer"),
+                &headers,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn dataset_watermark_reserves_administrative_capacity() {
+        assert!(!reaches_ingestion_watermark(88, 1, 100));
+        assert!(reaches_ingestion_watermark(89, 1, 100));
+        assert!(reaches_ingestion_watermark(u64::MAX, 1, u64::MAX));
     }
 
     #[test]
@@ -1894,6 +2383,11 @@ mod tests {
             owner_enrollment_enabled: true,
             latest_version: "0.20.0".to_owned(),
             minimum_supported_version: "0.20.0".to_owned(),
+            retention_days: DEFAULT_RETENTION_DAYS,
+            collector_max_events: DEFAULT_COLLECTOR_MAX_EVENTS,
+            collector_max_payload_bytes: DEFAULT_COLLECTOR_MAX_PAYLOAD_BYTES,
+            dataset_max_rows: DEFAULT_DATASET_MAX_ROWS,
+            dataset_max_bytes: DEFAULT_DATASET_MAX_BYTES,
         };
         assert_eq!(
             update_advisory(&config, Some("0.17.9"))
@@ -1943,13 +2437,26 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires an isolated loopback ClickHouse and explicit mutation opt-in"]
     async fn clickhouse_collection_duplicate_report_and_deletion_are_end_to_end() {
-        let config = clickhouse_test_config();
+        let mut config = clickhouse_test_config();
+        config.collector_max_events = 1;
         let clickhouse = ClickHouse::new(&config).expect("ClickHouse client");
         clickhouse.ensure_storage(&config).await.expect("schema");
         let state = AppState {
             config: config.clone(),
             clickhouse: clickhouse.clone(),
-            requests: Arc::new(Mutex::new(VecDeque::new())),
+            rate_limits: Arc::new(Mutex::new(BTreeMap::new())),
+            health: Arc::new(tokio::sync::Mutex::new(HealthState::default())),
+            health_probe: Arc::new(tokio::sync::Mutex::new(())),
+            ingestion_gate: Arc::new(tokio::sync::Mutex::new(())),
+            collector_request_permits: Arc::new(tokio::sync::Semaphore::new(
+                MAX_CONCURRENT_COLLECTOR_REQUESTS,
+            )),
+            collector_storage_permits: Arc::new(tokio::sync::Semaphore::new(
+                MAX_CONCURRENT_COLLECTOR_STORAGE_REQUESTS,
+            )),
+            operator_storage_permits: Arc::new(tokio::sync::Semaphore::new(
+                MAX_CONCURRENT_OPERATOR_STORAGE_REQUESTS,
+            )),
         };
         let router = app(state);
         let collector_id = Uuid::new_v4();
@@ -2019,6 +2526,31 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response_json(response).await["outcome"], "duplicate");
 
+        let second_event = integration_event(collector_id);
+        let second_headers = [
+            ("x-groundline-collector-id", collector_id.to_string()),
+            (
+                "idempotency-key",
+                second_event["idempotency_key"]
+                    .as_str()
+                    .expect("idempotency key")
+                    .to_owned(),
+            ),
+            ("x-groundline-version", env!("CARGO_PKG_VERSION").to_owned()),
+        ];
+        let response = router
+            .clone()
+            .oneshot(local_request(
+                Method::POST,
+                "/v1/events",
+                &collector_token,
+                Some(&second_event),
+                &second_headers,
+            ))
+            .await
+            .expect("quota response");
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+
         let physical_count = clickhouse
             .request(
                 "SELECT count() FROM groundline.basic_weekly WHERE event_id = {event_id:UUID} FORMAT TabSeparated",
@@ -2059,6 +2591,19 @@ mod tests {
                 .await
                 .unwrap_or_else(|_| panic!("{name} query failed with populated storage"));
         }
+
+        let response = router
+            .clone()
+            .oneshot(local_request(
+                Method::GET,
+                "/v3/reports/weekly?days=7",
+                &collector_token,
+                None,
+                &[("x-groundline-collector-id", collector_id.to_string())],
+            ))
+            .await
+            .expect("collector report response");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
         let response = router
             .clone()

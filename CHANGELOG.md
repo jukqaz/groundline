@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.20.2
+
+- Restrict weekly reports to the owner admin credential and require the Insights
+  CLI to read that credential from an explicit private, no-follow token file.
+- Isolate authenticated request budgets by role and collector, cache bounded
+  readiness probes, and cap concurrent storage work and active rate scopes.
+- Reject contradictory, overflowing, and high-cardinality event metrics before
+  ClickHouse insertion; enforce per-collector and global storage watermarks with
+  a bounded retention TTL while preserving idempotent retries.
+- Harden local Codex audit reads against symlink, ownership, traversal, oversized
+  metadata, and unbounded row allocation across macOS, Linux, and Windows.
+- Build the API image from separately verified stable-Rust musl binaries using a
+  digest-pinned final image, bounded Docker context, checksums, OCI provenance,
+  SBOMs, and registry attestations instead of a mutable in-Docker toolchain.
+- Separate collection cadence from bounded delivery retries, cap the private
+  outbox at 256 events and 16 MiB, drain 16-event batches with durable backoff,
+  and capture every hook trigger before starting a detached worker.
+- Require explicit re-consent before replacing a legacy no-network receipt,
+  issue a new owner-service receipt, and preserve incompatible pending events
+  in a private quarantine instead of uploading or deleting them.
+- Apply Tailnet-peer and global pre-authentication budgets before collector
+  body reads and lookup, bound body-read time and concurrent requests, shed
+  saturated collector work without queued waiters, reserve operator storage
+  capacity, and keep readiness probes single-flight outside the cache lock.
+- Preserve permanent-rejection stops across automatic cycles, classify 4xx
+  before parsing its body, checkpoint accepted delivery before deleting outbox
+  files, and claim hook markers so a concurrent later capture cannot be lost.
+- Attest every binary release asset, surface eventual ClickHouse TTL cleanup in
+  reports and Grafana, and require private no-follow TrueNAS runtime inputs.
+
 ## 0.20.1
 
 - Remove baked-in ClickHouse, Nginx, Grafana, and datasource-plugin versions

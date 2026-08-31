@@ -262,6 +262,44 @@ fn verify_insights(root: &Path) -> Result<(), XtaskError> {
     {
         return Err(XtaskError::InvalidSource);
     }
+    for (event, trigger) in [
+        ("SessionStart", "session_start_hook"),
+        ("Stop", "stop_hook"),
+        ("PostCompact", "post_compact_hook"),
+        ("SessionEnd", "session_end_hook"),
+    ] {
+        let registrations = events
+            .get(event)
+            .and_then(Value::as_array)
+            .filter(|values| values.len() == 1)
+            .ok_or(XtaskError::InvalidSource)?;
+        let commands = registrations[0]
+            .get("hooks")
+            .and_then(Value::as_array)
+            .filter(|values| values.len() == 1)
+            .ok_or(XtaskError::InvalidSource)?;
+        let command = &commands[0];
+        let unix = command
+            .get("command")
+            .and_then(Value::as_str)
+            .ok_or(XtaskError::InvalidSource)?;
+        let windows = command
+            .get("commandWindows")
+            .and_then(Value::as_str)
+            .ok_or(XtaskError::InvalidSource)?;
+        if command.get("type").and_then(Value::as_str) != Some("command")
+            || command.get("timeout").and_then(Value::as_u64) != Some(3)
+            || command.get("async").is_some()
+            || ![unix, windows].iter().all(|value| {
+                value.contains("groundline-insights")
+                    && value.contains(" checkpoint ")
+                    && value.contains(trigger)
+                    && !value.contains("worker run-once")
+            })
+        {
+            return Err(XtaskError::InvalidSource);
+        }
+    }
     let text = serde_json::to_string(&hooks)?;
     if !text.contains("groundline-insights")
         || !text.contains("checkpoint")

@@ -135,6 +135,22 @@ separate private file, writes the rendered Compose file with private
 permissions, rejects public bind addresses, and refuses overwrite unless
 explicitly requested.
 
+Both `SECRETS_FILE` and the rendered `COMPOSE_FILE` contain live service
+credentials and are secret-bearing owner files. Protect, back up, rotate, and
+delete them under the same policy; the Compose file is not a public derivative.
+For `insights fetch-report`, provision a separate private file containing only
+the `GROUNDLINE_ADMIN_TOKEN` value and pass it with `--admin-token-file`. Do not
+reuse or copy a collector token: collector credentials are intentionally denied
+access to the owner-wide report.
+
+The checked-in service defaults retain events for 365 days, cap each collector
+at 4,096 retained events and 256 MiB of logical payload, and reserve the last
+10% of the two-million-row or 64 GiB dataset ceiling for administrative work.
+Override `GROUNDLINE_RETENTION_DAYS`, `GROUNDLINE_COLLECTOR_MAX_EVENTS`,
+`GROUNDLINE_COLLECTOR_MAX_PAYLOAD_BYTES`, `GROUNDLINE_DATASET_MAX_ROWS`, or
+`GROUNDLINE_DATASET_MAX_BYTES` only in an owner-private rendered Compose file;
+the API rejects values outside its documented safety bounds.
+
 The one-shot `grafana-storage-init` service narrows the Grafana bind directory
 to UID 472 with mode `0750`; do not work around ownership failures with `0777`.
 Grafana needs outbound access on first start to download the pinned ClickHouse
@@ -163,7 +179,7 @@ For discovery only, all three image references may use explicit moving tags and
 the plugin may be exactly `grafana-clickhouse-datasource`; add
 `--allow-unpinned-dependencies` to both verification and rendering. Grafana then
 selects the current plugin version. Never retain that rendered file for
-production. After the complete stack and all 19 provisioned queries pass, copy
+production. After the complete stack and all 20 provisioned queries pass, copy
 the resolved image digests and installed plugin version into a pinned candidate
 profile, rerender without the override, and repeat the verification.
 

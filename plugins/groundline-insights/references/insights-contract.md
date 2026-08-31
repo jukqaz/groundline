@@ -52,6 +52,13 @@ bounded private files below `~/.codex/groundline/insights`. Status and error
 receipts return booleans and reason codes, never paths, endpoints, IDs, or
 secret values.
 
+Consent schema 2 states the network boundary directly: upload to the configured
+owner service is enabled only while the separate owner policy is active, and
+third-party upload remains disabled. An exact schema-1 consent created by the
+previous public release is migrated without changing its receipt, acceptance
+time, collection scope, or diagnostic setting; unknown consent shapes fail
+closed.
+
 ## Enrollment and authentication
 
 The `/v1/enroll` route requires all of the following:
@@ -68,13 +75,23 @@ The enrollment credential is distinct from the proxy, admin, and collector
 tokens. A collector UUID cannot be rebound to a different collector token.
 After enrollment, event upload and collector-scoped operations require the
 per-collector token. Administrative reports and deletion use the admin token.
+The CLI requires that admin token through an explicit owner-private token file;
+an authenticated collector token never authorizes the fleet-wide report.
 Comparisons are constant-time and request bodies, responses, and rate windows
 are bounded.
 
 ## Collection and transport
 
-Hooks ignore hook input and detach one fail-open checkpoint process. The worker
-coalesces concurrent work, persists before upload, and retries from the outbox.
+Hooks ignore hook input, persist one bounded private marker per lifecycle event,
+and detach one fail-open checkpoint process. The worker atomically claims the
+current marker generation, coalesces concurrent work, and acknowledges only the
+claimed generation after it has durably handled the cycle; a later capture stays
+pending. Accepted delivery advances durable collection state before its outbox
+file is removed.
+Collection cadence and delivery retry cadence are independent. The outbox is
+limited to 256 events and 16 MiB, uploads at most 16 events per cycle, and uses
+capped exponential backoff. Permanent remote rejection pauses automatic retry
+for operator action.
 It opens Codex SQLite read-only and produces schema-5
 `groundline-insights-basic-weekly` events. The event contract contains aggregate
 usage, lifecycle, latency, verification, and boundary counters plus
@@ -94,6 +111,16 @@ tables. Reports and Grafana read the `basic_active` view with `FINAL`, while
 storage counters expose any physical duplicate excess caused by a race or
 external writer. Logical deduplication is therefore part of the read contract;
 physical duplicates remain an observable quality signal.
+
+The service applies an owner-configured retention TTL, retained per-collector
+event and logical-payload quotas, and dataset row/byte watermarks. Ingest stops at
+90% of the configured dataset ceilings to reserve capacity for administration.
+Duplicate retries do not consume quota, and quota check plus insert is serialized
+within the supported single API instance.
+TTL cleanup is eventual because ClickHouse removes expired rows during
+background merges. The release policy stores the active retention window, and
+the report plus Grafana expose rows that have passed that deadline without
+triggering `OPTIMIZE` or manual deletion.
 
 Reports are schema-3 `groundline-insights-weekly-report` documents with fixed
 7, 30, or 90-day windows, sufficiency and coverage signals, bounded
@@ -124,7 +151,9 @@ configuration with the preflight fingerprint, applies one bounded update, and
 verifies API, ClickHouse, and Grafana evidence. Rollback outcome is reported
 separately from code validation. `preflight` and `apply` require an explicit
 owner-rendered private `--compose-template`; passing the public placeholder
-template is rejected rather than guessed or partially rendered.
+template is rejected rather than guessed or partially rendered. The controller
+opens that rendered file without following symbolic links, enforces a bounded
+size, and requires it to be private to the current user.
 
 Both `preflight` and `apply` require the owner-local
 `GROUNDLINE_INSIGHTS_ENROLLMENT_TOKEN` and

@@ -10,10 +10,14 @@ use rusqlite::{Connection, OpenFlags};
 use serde_json::{Value, json};
 use thiserror::Error;
 
-use crate::local_file::open_bounded_regular_file;
+use crate::local_file::{open_bounded_regular_file, owned_by_current_user};
 
 const MAX_ROLLOUT_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_AUDIT_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_STATE_DATABASE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+const MAX_THREAD_ROWS: usize = 100_000;
+const MAX_ROLLOUT_PATH_BYTES: usize = 4096;
+const MAX_SOURCE_BYTES: usize = 64 * 1024;
 const MINIMUM_ROOTS: u64 = 5;
 
 #[derive(Debug, Error)]
@@ -48,9 +52,21 @@ struct ThreadRow {
 }
 
 fn state_database(codex_home: &Path) -> Result<PathBuf, AuditStoreError> {
+    let home_metadata =
+        std::fs::symlink_metadata(codex_home).map_err(|_| AuditStoreError::DatabaseNotFound)?;
+    if !home_metadata.is_dir() || home_metadata.file_type().is_symlink() {
+        return Err(AuditStoreError::DatabaseUnavailable);
+    }
     let preferred = codex_home.join("state_5.sqlite");
-    if preferred.is_file() {
-        return Ok(preferred);
+    if std::fs::symlink_metadata(&preferred).is_ok() {
+        let file = open_bounded_regular_file(&preferred, 1, MAX_STATE_DATABASE_BYTES)
+            .map_err(|_| AuditStoreError::DatabaseUnavailable)?;
+        if !owned_by_current_user(&file) {
+            return Err(AuditStoreError::DatabaseUnavailable);
+        }
+        return preferred
+            .canonicalize()
+            .map_err(|_| AuditStoreError::DatabaseUnavailable);
     }
     let mut candidates = std::fs::read_dir(codex_home)
         .map_err(|_| AuditStoreError::DatabaseNotFound)?
@@ -61,9 +77,17 @@ fn state_database(codex_home: &Path) -> Result<PathBuf, AuditStoreError> {
                 .and_then(|value| value.to_str())
                 .is_some_and(|value| value.starts_with("state_") && value.ends_with(".sqlite"))
         })
+        .filter(|path| {
+            open_bounded_regular_file(path, 1, MAX_STATE_DATABASE_BYTES)
+                .is_ok_and(|file| owned_by_current_user(&file))
+        })
         .collect::<Vec<_>>();
     candidates.sort();
-    candidates.pop().ok_or(AuditStoreError::DatabaseNotFound)
+    candidates
+        .pop()
+        .ok_or(AuditStoreError::DatabaseNotFound)?
+        .canonicalize()
+        .map_err(|_| AuditStoreError::DatabaseUnavailable)
 }
 
 fn source_kind(source: &str) -> ThreadKind {
@@ -79,13 +103,23 @@ fn source_kind(source: &str) -> ThreadKind {
 }
 
 fn thread_rows(database: &Path) -> Result<Vec<ThreadRow>, AuditStoreError> {
+    let database_file = open_bounded_regular_file(database, 1, MAX_STATE_DATABASE_BYTES)
+        .map_err(|_| AuditStoreError::DatabaseUnavailable)?;
+    if !owned_by_current_user(&database_file) {
+        return Err(AuditStoreError::DatabaseUnavailable);
+    }
     let connection = Connection::open_with_flags(
         database,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        OpenFlags::SQLITE_OPEN_READ_ONLY
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
     )
     .map_err(|_| AuditStoreError::DatabaseUnavailable)?;
     connection
         .busy_timeout(Duration::from_secs(2))
+        .map_err(|_| AuditStoreError::DatabaseUnavailable)?;
+    connection
+        .execute_batch("BEGIN DEFERRED")
         .map_err(|_| AuditStoreError::DatabaseUnavailable)?;
     let columns = connection
         .prepare("PRAGMA table_info(threads)")
@@ -118,11 +152,24 @@ fn thread_rows(database: &Path) -> Result<Vec<ThreadRow>, AuditStoreError> {
     } else {
         "(has_user_event != 0)"
     };
-    let query = format!("SELECT rollout_path, source, archived, {visible}, {recency} FROM threads");
+    let (row_count, oversized_count) = connection
+        .query_row(
+            "SELECT count(), coalesce(sum(CASE WHEN length(CAST(rollout_path AS BLOB)) > ?1 OR length(CAST(source AS BLOB)) > ?2 THEN 1 ELSE 0 END), 0) FROM threads",
+            [MAX_ROLLOUT_PATH_BYTES as i64, MAX_SOURCE_BYTES as i64],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .map_err(|_| AuditStoreError::DatabaseUnavailable)?;
+    if row_count < 0 || row_count as usize > MAX_THREAD_ROWS || oversized_count != 0 {
+        return Err(AuditStoreError::UnsupportedDatabase);
+    }
+    let query = format!(
+        "SELECT rollout_path, source, archived, {visible}, {recency} FROM threads LIMIT {}",
+        MAX_THREAD_ROWS + 1
+    );
     let mut statement = connection
         .prepare(&query)
         .map_err(|_| AuditStoreError::DatabaseUnavailable)?;
-    statement
+    let rows = statement
         .query_map([], |row| {
             let source = row.get::<_, String>(1)?;
             Ok(ThreadRow {
@@ -136,12 +183,58 @@ fn thread_rows(database: &Path) -> Result<Vec<ThreadRow>, AuditStoreError> {
         })
         .map_err(|_| AuditStoreError::DatabaseUnavailable)?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| AuditStoreError::DatabaseUnavailable)
+        .map_err(|_| AuditStoreError::DatabaseUnavailable)?;
+    if rows.len() > MAX_THREAD_ROWS {
+        return Err(AuditStoreError::UnsupportedDatabase);
+    }
+    Ok(rows)
 }
 
-fn read_rollout(path: &Path, total: &mut u64) -> Result<String, AuditStoreError> {
-    let mut file = open_bounded_regular_file(path, 1, MAX_ROLLOUT_BYTES)
+fn rollout_roots(codex_home: &Path) -> Result<Vec<PathBuf>, AuditStoreError> {
+    let mut roots = Vec::new();
+    for directory in ["sessions", "archived_sessions"] {
+        let path = codex_home.join(directory);
+        let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+            return Err(AuditStoreError::InputUnavailable);
+        }
+        roots.push(
+            path.canonicalize()
+                .map_err(|_| AuditStoreError::InputUnavailable)?,
+        );
+    }
+    if roots.is_empty() {
+        return Err(AuditStoreError::InputUnavailable);
+    }
+    Ok(roots)
+}
+
+fn read_rollout(
+    path: &Path,
+    allowed_roots: &[PathBuf],
+    total: &mut u64,
+) -> Result<String, AuditStoreError> {
+    if !path.is_absolute() {
+        return Err(AuditStoreError::InputUnavailable);
+    }
+    let metadata =
+        std::fs::symlink_metadata(path).map_err(|_| AuditStoreError::InputUnavailable)?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(AuditStoreError::InputUnavailable);
+    }
+    let canonical = path
+        .canonicalize()
         .map_err(|_| AuditStoreError::InputUnavailable)?;
+    if !allowed_roots.iter().any(|root| canonical.starts_with(root)) {
+        return Err(AuditStoreError::InputUnavailable);
+    }
+    let mut file = open_bounded_regular_file(&canonical, 1, MAX_ROLLOUT_BYTES)
+        .map_err(|_| AuditStoreError::InputUnavailable)?;
+    if !owned_by_current_user(&file) {
+        return Err(AuditStoreError::InputUnavailable);
+    }
     let size = file
         .metadata()
         .map_err(|_| AuditStoreError::InputUnavailable)?
@@ -257,6 +350,7 @@ pub fn collect_audit(
         return Err(AuditStoreError::AuditFailed);
     }
     let rows = thread_rows(&state_database(codex_home)?)?;
+    let allowed_roots = rollout_roots(codex_home)?;
     let start_ms = start.timestamp_millis();
     let end_ms = end.timestamp_millis();
     let mut root = Vec::new();
@@ -280,7 +374,7 @@ pub fn collect_audit(
             duplicates = duplicates.saturating_add(1);
             continue;
         }
-        let contents = match read_rollout(&row.rollout, &mut total_bytes) {
+        let contents = match read_rollout(&row.rollout, &allowed_roots, &mut total_bytes) {
             Ok(contents) => contents,
             Err(_) => {
                 if row.kind == ThreadKind::Root {
@@ -386,4 +480,99 @@ pub fn earliest_recency(codex_home: &Path) -> Result<Option<DateTime<Utc>>, Audi
 
 pub fn contract_error(error: AuditStoreError) -> ContractError {
     ContractError(error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use rusqlite::{Connection, params};
+    use tempfile::{TempDir, tempdir, tempdir_in};
+
+    use super::{read_rollout, rollout_roots, state_database, thread_rows};
+
+    fn fixture_database(home: &Path, rollout: &Path, source: &str) -> PathBuf {
+        let database = home.join("state_5.sqlite");
+        let connection = Connection::open(&database).expect("fixture database");
+        connection
+            .execute_batch(
+                "CREATE TABLE threads (
+                    rollout_path TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    archived INTEGER NOT NULL,
+                    has_user_event INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );",
+            )
+            .expect("fixture schema");
+        connection
+            .execute(
+                "INSERT INTO threads (rollout_path, source, archived, has_user_event, updated_at) VALUES (?1, ?2, 0, 1, 1)",
+                params![rollout.to_string_lossy(), source],
+            )
+            .expect("fixture row");
+        drop(connection);
+        database
+    }
+
+    use std::path::{Path, PathBuf};
+
+    fn codex_home() -> TempDir {
+        tempdir_in(env!("CARGO_MANIFEST_DIR")).expect("Codex home")
+    }
+
+    #[test]
+    fn accepts_owned_database_and_rollout_inside_codex_roots() {
+        let home = codex_home();
+        let sessions = home.path().join("sessions/2026/08/31");
+        fs::create_dir_all(&sessions).expect("sessions");
+        let rollout = sessions.join("rollout.jsonl");
+        fs::write(&rollout, b"{\"type\":\"event_msg\"}\n").expect("rollout");
+        let database = fixture_database(home.path(), &rollout, "cli");
+
+        assert_eq!(
+            state_database(home.path()).unwrap(),
+            database.canonicalize().unwrap()
+        );
+        assert_eq!(thread_rows(&database).unwrap().len(), 1);
+        let roots = rollout_roots(home.path()).unwrap();
+        let mut total = 0;
+        assert!(read_rollout(&rollout, &roots, &mut total).is_ok());
+        assert!(total > 0);
+    }
+
+    #[test]
+    fn rejects_database_metadata_and_rollouts_outside_codex_roots() {
+        let home = codex_home();
+        let sessions = home.path().join("sessions");
+        fs::create_dir(&sessions).expect("sessions");
+        let rollout = sessions.join("rollout.jsonl");
+        fs::write(&rollout, b"{}\n").expect("rollout");
+        let oversized_source = "x".repeat(super::MAX_SOURCE_BYTES + 1);
+        let database = fixture_database(home.path(), &rollout, &oversized_source);
+        assert!(thread_rows(&database).is_err());
+
+        let outside = home.path().join("outside.jsonl");
+        fs::write(&outside, b"{}\n").expect("outside rollout");
+        let roots = rollout_roots(home.path()).unwrap();
+        let mut total = 0;
+        assert!(read_rollout(&outside, &roots, &mut total).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_database_and_session_root() {
+        use std::os::unix::fs::symlink;
+
+        let home = codex_home();
+        let target = home.path().join("actual.sqlite");
+        fs::write(&target, b"not sqlite").expect("target");
+        symlink(&target, home.path().join("state_5.sqlite")).expect("database symlink");
+        assert!(state_database(home.path()).is_err());
+
+        fs::remove_file(home.path().join("state_5.sqlite")).unwrap();
+        let outside = tempdir().expect("outside sessions");
+        symlink(outside.path(), home.path().join("sessions")).expect("sessions symlink");
+        assert!(rollout_roots(home.path()).is_err());
+    }
 }

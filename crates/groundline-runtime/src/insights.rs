@@ -13,14 +13,12 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use thiserror::Error;
 use url::{Host, Url};
-use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use crate::local_file::{open_bounded_regular_file, private_for_current_user};
 
 const OWNER_PROFILE_PATH: &str = "groundline/insights/owner-profile.json";
 const MAX_PROFILE_BYTES: u64 = 16 * 1024;
-const MAX_IDENTITY_BYTES: u64 = 64 * 1024;
 const MAX_TOKEN_BYTES: u64 = 4096;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 static CRYPTO_PROVIDER: OnceLock<Result<(), ()>> = OnceLock::new();
@@ -54,19 +52,6 @@ struct OwnerProfile {
     checkpoint_min_interval_seconds: u64,
     diagnostic_enabled: bool,
     trigger_mode: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Identity {
-    schema_version: u8,
-    kind: String,
-    collector_instance_id: Uuid,
-    os_family: String,
-    runtime_family: String,
-    execution_mode: String,
-    created_at_utc: String,
-    resettable: bool,
 }
 
 fn read_opened_bounded(mut file: File, maximum: u64) -> Result<Vec<u8>, InsightsRuntimeError> {
@@ -111,35 +96,8 @@ fn read_profile(codex_home: &Path) -> Result<OwnerProfile, InsightsRuntimeError>
     Ok(profile)
 }
 
-fn read_identity(directory: &Path) -> Result<Identity, InsightsRuntimeError> {
-    let bytes = read_bounded(&directory.join("identity.json"), MAX_IDENTITY_BYTES)?;
-    let identity: Identity =
-        serde_json::from_slice(&bytes).map_err(|_| InsightsRuntimeError::InvalidLocalState)?;
-    if identity.schema_version != 1
-        || identity.kind != "groundline-insights-identity"
-        || !matches!(
-            identity.os_family.as_str(),
-            "macos" | "windows" | "linux" | "unknown"
-        )
-        || !matches!(
-            identity.runtime_family.as_str(),
-            "codex_app" | "codex_cli" | "unknown"
-        )
-        || !matches!(
-            identity.execution_mode.as_str(),
-            "desktop" | "local_headless" | "remote_headless" | "unknown"
-        )
-        || chrono::DateTime::parse_from_rfc3339(&identity.created_at_utc).is_err()
-        || !identity.resettable
-    {
-        return Err(InsightsRuntimeError::InvalidLocalState);
-    }
-    Ok(identity)
-}
-
-fn read_token(directory: &Path) -> Result<SecretString, InsightsRuntimeError> {
-    let path = directory.join("collector-token");
-    let file = open_bounded_regular_file(&path, 32, MAX_TOKEN_BYTES)
+fn read_token_file(path: &Path) -> Result<SecretString, InsightsRuntimeError> {
+    let file = open_bounded_regular_file(path, 32, MAX_TOKEN_BYTES)
         .map_err(|_| InsightsRuntimeError::InvalidLocalState)?;
     if !private_for_current_user(&file) {
         return Err(InsightsRuntimeError::InvalidLocalState);
@@ -273,12 +231,11 @@ pub fn discover_plugin_root() -> Result<PathBuf, InsightsRuntimeError> {
 pub async fn fetch_weekly_report(
     _plugin_root: &Path,
     codex_home: &Path,
+    admin_token_file: &Path,
     days: u16,
 ) -> Result<WeeklyReport, InsightsRuntimeError> {
     let profile = read_profile(codex_home)?;
-    let directory = state_directory(codex_home);
-    let identity = read_identity(&directory)?;
-    let token = read_token(&directory)?;
+    let token = read_token_file(admin_token_file)?;
     let url = report_url(&profile.endpoint, days)?;
     ensure_crypto_provider()?;
 
@@ -290,11 +247,6 @@ pub async fn fetch_weekly_report(
     headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
     headers.insert(AUTHORIZATION, authorization);
     headers.insert(
-        "x-groundline-collector-id",
-        HeaderValue::from_str(&identity.collector_instance_id.to_string())
-            .map_err(|_| InsightsRuntimeError::InvalidLocalState)?,
-    );
-    headers.insert(
         "x-groundline-version",
         HeaderValue::from_str(env!("CARGO_PKG_VERSION"))
             .map_err(|_| InsightsRuntimeError::InvalidLocalState)?,
@@ -303,7 +255,7 @@ pub async fn fetch_weekly_report(
         .redirect(Policy::none())
         .no_proxy()
         .timeout(REQUEST_TIMEOUT)
-        .user_agent("groundline-insights-report/4")
+        .user_agent("groundline-insights-report/5")
         .default_headers(headers)
         .build()
         .map_err(|_| InsightsRuntimeError::InvalidLocalState)?;
@@ -355,7 +307,7 @@ mod tests {
 
     use crate::local_file::atomic_write_private;
 
-    use super::{InsightsRuntimeError, ensure_crypto_provider, read_token, report_url};
+    use super::{InsightsRuntimeError, ensure_crypto_provider, read_token_file, report_url};
 
     #[test]
     fn ring_crypto_provider_is_installed_once_without_panicking() {
@@ -392,14 +344,14 @@ mod tests {
     #[test]
     fn token_reader_rejects_empty_oversized_and_symlink_state() {
         let root = tempdir().unwrap();
-        let token = root.path().join("collector-token");
+        let token = root.path().join("admin-report-token");
         atomic_write_private(&token, "x".repeat(32).as_bytes()).unwrap();
         assert_eq!(
-            secrecy::ExposeSecret::expose_secret(&read_token(root.path()).unwrap()),
+            secrecy::ExposeSecret::expose_secret(&read_token_file(&token).unwrap()),
             "x".repeat(32)
         );
         fs::write(&token, "short").unwrap();
-        assert!(read_token(root.path()).is_err());
+        assert!(read_token_file(&token).is_err());
 
         #[cfg(unix)]
         {
@@ -407,8 +359,8 @@ mod tests {
 
             fs::write(&token, "x".repeat(32)).unwrap();
             let linked_root = tempdir().unwrap();
-            symlink(&token, linked_root.path().join("collector-token")).unwrap();
-            assert!(read_token(linked_root.path()).is_err());
+            symlink(&token, linked_root.path().join("admin-report-token")).unwrap();
+            assert!(read_token_file(&linked_root.path().join("admin-report-token")).is_err());
         }
     }
 }

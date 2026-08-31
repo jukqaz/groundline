@@ -126,6 +126,9 @@ enum InsightsCommand {
     FetchReport {
         #[arg(long, value_parser = parse_report_days, default_value_t = 7)]
         days: u16,
+        /// Owner-private file containing only the administrative report token.
+        #[arg(long)]
+        admin_token_file: PathBuf,
         #[arg(long)]
         json: bool,
         #[arg(long, hide = true)]
@@ -281,6 +284,7 @@ async fn run(cli: Cli) -> Result<(), ExitCode> {
             command:
                 InsightsCommand::FetchReport {
                     days,
+                    admin_token_file,
                     json,
                     plugin_root,
                     codex_home,
@@ -297,7 +301,14 @@ async fn run(cli: Cli) -> Result<(), ExitCode> {
                 });
             match roots {
                 Ok((root, home)) => {
-                    match insights_runtime::fetch_weekly_report(&root, &home, days).await {
+                    match insights_runtime::fetch_weekly_report(
+                        &root,
+                        &home,
+                        &admin_token_file,
+                        days,
+                    )
+                    .await
+                    {
                         Ok(report) => match serde_json::to_value(report) {
                             Ok(result) => {
                                 emit(&result, json);
@@ -485,7 +496,10 @@ async fn run(cli: Cli) -> Result<(), ExitCode> {
                 .map_err(|_| ExitCode::FAILURE)?;
             match insights_state::checkpoint_enabled(&home) {
                 Ok(false) => Ok(()),
-                Ok(true) => checkpoint::spawn_worker(&trigger, plugin_root.as_deref(), Some(&home))
+                Ok(true) => checkpoint::capture_trigger(&home, &trigger)
+                    .and_then(|()| {
+                        checkpoint::spawn_worker(&trigger, plugin_root.as_deref(), Some(&home))
+                    })
                     .map_err(|_| ExitCode::FAILURE),
                 Err(_) => Err(ExitCode::FAILURE),
             }

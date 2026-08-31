@@ -33,14 +33,17 @@
    each product's target set, executable name, manifest, size, and SHA-256. Remap
    GitHub runner workspace and home paths before compiling release binaries.
 9. Publish one immutable GitHub release and the Insights API image. Record the
-   multi-platform image index digest and confirm the normal renderer rejects a
+   multi-platform image index digest, verify every binary asset with
+   `gh attestation verify --repo jukqaz/groundline <asset>`, and confirm the
+   normal renderer rejects a
    moving image tag or unversioned Grafana plugin without the explicit
    qualification-only override. Do not inject
    production deployment credentials into release jobs.
 10. Before an owner-run TrueNAS preflight or apply, provide
    `GROUNDLINE_INSIGHTS_ENROLLMENT_TOKEN` and
    `GROUNDLINE_INSIGHTS_GRAFANA_ADMIN_PASSWORD` from owner-private local state.
-   Pass the exact owner-rendered private Compose file explicitly and confirm
+   Pass the exact owner-rendered private Compose file explicitly, confirm it is
+   a bounded regular file private to the current user rather than a symlink, and
    that the authenticated, redacted preflight passes before any mutation.
 11. Assemble both plugin binary trees in one generated commit and advance `stable`
    only with a verified tag, monotonic version, exact artifact diff, and

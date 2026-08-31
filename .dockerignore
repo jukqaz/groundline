@@ -1,0 +1,7 @@
+**
+!services/
+!services/insights-api/
+!services/insights-api/Dockerfile
+!image-context/
+!image-context/groundline-insights-api-amd64
+!image-context/groundline-insights-api-arm64

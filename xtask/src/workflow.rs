@@ -49,6 +49,8 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
     let rust = text(&workflows.join("rust.yml"))?;
     let setup = text(&root.join(".github/actions/setup-rust-stable/action.yml"))?;
     let compose = text(&root.join("infrastructure/compose.template.yaml"))?;
+    let api_dockerfile = text(&root.join("services/insights-api/Dockerfile"))?;
+    let dockerignore = text(&root.join(".dockerignore"))?;
     super::compose::verify_compatibility_profile(
         &root.join("infrastructure/compatibility.json"),
         false,
@@ -104,9 +106,14 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
         "--compatibility-profile \"$COMPATIBILITY_PROFILE\"",
         "cargo run --locked -p xtask -- promote-stable",
         "uses: ./.github/actions/setup-rust-stable",
-        "name: publish signed multi-architecture Insights API image\n    if: startsWith(github.ref, 'refs/tags/v')\n    needs: artifacts",
+        "name: publish attested multi-architecture Insights API image\n    if: startsWith(github.ref, 'refs/tags/v')\n    needs: artifacts",
         "name: Remap GitHub runner paths from release binaries",
         "--remap-path-prefix=%s=/_groundline --remap-path-prefix=%s=/_cargo_home",
+        "name: Stage the integrity-checked Insights API image input",
+        "sha256sum --check groundline-insights-api.sha256",
+        "GROUNDLINE_RUSTC_VERSION=${{ steps.image-inputs.outputs.rustc-version }}",
+        "GROUNDLINE_BUILD_PACKAGES=${{ steps.image-inputs.outputs.musl-packages }}",
+        "musl-tools=1.2.4-2",
     ] {
         if !rust.contains(required) {
             return Err(XtaskError::InvalidSource);
@@ -123,6 +130,7 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
         || rust.contains("sync-package")
         || rust.contains("chmod 0777")
         || rust.contains("--allow-mutable-image")
+        || rust.contains("apt-get install --yes musl-tools\n")
         || rust.matches("--allow-unpinned-dependencies").count() != 3
         || rust
             .matches("cargo test --workspace --all-features --locked")
@@ -154,6 +162,16 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
         || !compose.contains("grafana-storage-init:")
         || !compose.contains("condition: service_completed_successfully")
         || !compose.contains("network_mode: none")
+        || !compose.contains(r#"GROUNDLINE_RETENTION_DAYS: "365""#)
+        || !compose.contains(r#"GROUNDLINE_COLLECTOR_MAX_EVENTS: "4096""#)
+        || !compose.contains(r#"GROUNDLINE_DATASET_MAX_BYTES: "68719476736""#)
+        || !api_dockerfile.starts_with("FROM alpine:3.23@sha256:")
+        || api_dockerfile.contains("FROM rust:")
+        || api_dockerfile.contains("apk add")
+        || !api_dockerfile.contains("COPY image-context/groundline-insights-api-${TARGETARCH}")
+        || !dockerignore.starts_with("**\n")
+        || !dockerignore.contains("!image-context/groundline-insights-api-amd64")
+        || !dockerignore.contains("!image-context/groundline-insights-api-arm64")
     {
         return Err(XtaskError::InvalidSource);
     }

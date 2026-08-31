@@ -105,7 +105,7 @@ jobs:
     name: full source qualification
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     needs: fast
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -151,6 +151,13 @@ jobs:
         uses: ./.github/actions/setup-rust-stable
         with:
           components: clippy
+          target: x86_64-unknown-linux-musl
+      - name: Install the pinned Ubuntu Noble musl toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends musl-tools=1.2.4-2
+          echo "CC_x86_64_unknown_linux_musl=musl-gcc" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc" >> "$GITHUB_ENV"
       - name: Reuse bounded source-check build cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -263,8 +270,16 @@ jobs:
           mkdir -p "$dataset_root/clickhouse" "$dataset_root/grafana"
           chmod 0750 "$dataset_root/clickhouse" "$dataset_root/grafana"
           sudo ip address add "$bind_ip/32" dev lo
+          cargo build --release --locked --bin groundline-insights-api --target x86_64-unknown-linux-musl
+          mkdir -p image-context
+          cp target/x86_64-unknown-linux-musl/release/groundline-insights-api image-context/groundline-insights-api-amd64
+          rustc_release="$(rustc --version --verbose | sed -n 's/^release: //p')"
+          musl_packages="$(dpkg-query --show --showformat='${Package}=${Version}\n' musl musl-dev musl-tools | LC_ALL=C sort | paste -sd, -)"
           docker build \
             --file services/insights-api/Dockerfile \
+            --build-arg TARGETARCH=amd64 \
+            --build-arg "GROUNDLINE_RUSTC_VERSION=$rustc_release" \
+            --build-arg "GROUNDLINE_BUILD_PACKAGES=$musl_packages" \
             --tag local/groundline-insights-api:ci \
             .
           cargo run --locked -p xtask -- render-compose \
@@ -331,7 +346,7 @@ jobs:
             target: x86_64-apple-darwin
           - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
-          - runner: ubuntu-latest
+          - runner: ubuntu-24.04
             target: x86_64-unknown-linux-musl
           - runner: windows-11-arm
             target: aarch64-pc-windows-msvc
@@ -360,7 +375,7 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           sudo apt-get update
-          sudo apt-get install --yes musl-tools
+          sudo apt-get install --yes --no-install-recommends musl-tools=1.2.4-2
           cc_key="CC_${TARGET//-/_}"
           linker_key="CARGO_TARGET_${TARGET^^}_LINKER"
           linker_key="${linker_key//-/_}"
@@ -375,6 +390,9 @@ jobs:
         run: |
           cargo build --locked -p xtask
           cargo build --release --locked --bin groundline --bin groundline-insights --target "${{ matrix.target }}"
+      - name: Build the Linux Insights API from the same moving stable toolchain
+        if: contains(matrix.target, 'unknown-linux-musl')
+        run: cargo build --release --locked --bin groundline-insights-api --target "${{ matrix.target }}"
       - name: Package and smoke both artifacts
         shell: bash
         run: |
@@ -397,6 +415,32 @@ jobs:
               --output "dist/${product}/${{ matrix.target }}"
             "dist/${product}/${{ matrix.target }}/${executable}" platform --json
           done
+      - name: Stage the integrity-checked Insights API image input
+        if: contains(matrix.target, 'unknown-linux-musl')
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          destination="dist/api/$TARGET"
+          mkdir -p "$destination"
+          cp "target/$TARGET/release/groundline-insights-api" "$destination/groundline-insights-api"
+          chmod 0755 "$destination/groundline-insights-api"
+          (
+            cd "$destination"
+            sha256sum groundline-insights-api > groundline-insights-api.sha256
+          )
+          rustc_release="$(rustc --version --verbose | sed -n 's/^release: //p')"
+          rustc_commit="$(rustc --version --verbose | sed -n 's/^commit-hash: //p')"
+          musl_packages="$(dpkg-query --show --showformat='${Package}=${Version}\n' musl musl-dev musl-tools | LC_ALL=C sort | paste -sd, -)"
+          test -n "$rustc_release"
+          test -n "$rustc_commit"
+          jq --null-input \
+            --arg target "$TARGET" \
+            --arg rustc_release "$rustc_release" \
+            --arg rustc_commit "$rustc_commit" \
+            --arg musl_packages "$musl_packages" \
+            '{schema_version:1,target:$target,rustc_release:$rustc_release,rustc_commit:$rustc_commit,musl_packages:$musl_packages}' \
+            > "$destination/build-metadata.json"
       - name: Upload one bounded target artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -412,7 +456,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
+      attestations: write
       contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Select the moving Rust stable channel
@@ -438,6 +484,10 @@ jobs:
           done
           cd release-assets
           sha256sum groundline-*.tar.gz | LC_ALL=C sort > SHA256SUMS
+      - name: Attest every immutable binary release asset
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: release-assets/*
       - name: Create the immutable release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -453,7 +503,7 @@ jobs:
             --notes "GroundLine Core and Insights artifacts built on their target-native GitHub-hosted runners and verified against the tagged public source."
 
   publish-image:
-    name: publish signed multi-architecture Insights API image
+    name: publish attested multi-architecture Insights API image
     if: startsWith(github.ref, 'refs/tags/v')
     needs: artifacts
     runs-on: ubuntu-latest
@@ -467,6 +517,39 @@ jobs:
       IMAGE: ghcr.io/${{ github.repository }}-insights-api
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Download the two target-native API binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: groundline-*-unknown-linux-musl
+          path: image-artifacts
+          merge-multiple: true
+      - name: Verify and stage immutable image inputs
+        id: image-inputs
+        shell: bash
+        run: |
+          mkdir -p image-context
+          targets=(x86_64-unknown-linux-musl aarch64-unknown-linux-musl)
+          architectures=(amd64 arm64)
+          for index in "${!targets[@]}"; do
+            target="${targets[$index]}"
+            architecture="${architectures[$index]}"
+            source="image-artifacts/api/$target"
+            (
+              cd "$source"
+              sha256sum --check groundline-insights-api.sha256
+            )
+            cp "$source/groundline-insights-api" "image-context/groundline-insights-api-$architecture"
+          done
+          amd64_rustc="$(jq --raw-output .rustc_release image-artifacts/api/x86_64-unknown-linux-musl/build-metadata.json)"
+          arm64_rustc="$(jq --raw-output .rustc_release image-artifacts/api/aarch64-unknown-linux-musl/build-metadata.json)"
+          test -n "$amd64_rustc"
+          test "$amd64_rustc" = "$arm64_rustc"
+          amd64_musl="$(jq --raw-output .musl_packages image-artifacts/api/x86_64-unknown-linux-musl/build-metadata.json)"
+          arm64_musl="$(jq --raw-output .musl_packages image-artifacts/api/aarch64-unknown-linux-musl/build-metadata.json)"
+          test -n "$amd64_musl"
+          test "$amd64_musl" = "$arm64_musl"
+          echo "rustc-version=$amd64_rustc" >> "$GITHUB_OUTPUT"
+          echo "musl-packages=$amd64_musl" >> "$GITHUB_OUTPUT"
       - name: Normalize the strict release version
         id: release
         shell: bash
@@ -494,7 +577,10 @@ jobs:
         with:
           context: .
           file: services/insights-api/Dockerfile
-          build-args: GROUNDLINE_VERSION=${{ steps.release.outputs.version }}
+          build-args: |
+            GROUNDLINE_VERSION=${{ steps.release.outputs.version }}
+            GROUNDLINE_RUSTC_VERSION=${{ steps.image-inputs.outputs.rustc-version }}
+            GROUNDLINE_BUILD_PACKAGES=${{ steps.image-inputs.outputs.musl-packages }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}

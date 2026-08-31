@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use chrono::{DateTime, SecondsFormat, Timelike, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -103,6 +103,7 @@ pub struct CollectionHealth {
     pub stored_event_row_count: u64,
     pub deduplicated_event_count: u64,
     pub duplicate_event_row_count: u64,
+    pub ttl_expired_event_row_count: u64,
     pub delayed_delivery_event_count: u64,
     pub overdue_delivery_event_count: u64,
     pub clock_skew_event_count: u64,
@@ -731,6 +732,9 @@ impl WeeklyReport {
         if health.duplicate_event_row_count > 0 {
             quality_reasons.insert("physical_event_duplicates_detected");
         }
+        if health.ttl_expired_event_row_count > 0 {
+            quality_reasons.insert("retention_cleanup_pending");
+        }
         if health.overdue_delivery_event_count > 0 {
             quality_reasons.insert("event_delivery_overdue");
         } else if health.delayed_delivery_event_count > 0 {
@@ -835,6 +839,15 @@ fn non_negative_u32(value: &Value) -> bool {
     value
         .as_u64()
         .is_some_and(|value| value <= u64::from(u32::MAX))
+}
+
+fn allowed_u32_counts(value: &Value, allowed_keys: &[&str]) -> bool {
+    value.as_object().is_some_and(|counts| {
+        counts.len() <= allowed_keys.len()
+            && counts
+                .iter()
+                .all(|(key, value)| allowed_keys.contains(&key.as_str()) && non_negative_u32(value))
+    })
 }
 
 fn exact_boolean_contract(value: &Value, expected: &[(&str, bool)]) -> bool {
@@ -985,7 +998,20 @@ fn validate_usage(value: &Value, include_non_cached: bool) -> bool {
         && keys
             .iter()
             .filter(|key| !matches!(**key, "source" | "cached_input_ratio"))
-            .all(|key| object.get(*key).is_some_and(non_negative_u64))
+            .all(|key| {
+                object.get(*key).is_some_and(|value| {
+                    if matches!(
+                        *key,
+                        "cumulative_rollout_count"
+                            | "fallback_rollout_count"
+                            | "rollout_count_with_usage"
+                    ) {
+                        non_negative_u32(value)
+                    } else {
+                        non_negative_u64(value)
+                    }
+                })
+            })
         && object
             .get("cached_input_ratio")
             .is_some_and(optional_non_negative_number)
@@ -1047,7 +1073,7 @@ fn validate_session_metrics(value: &Value) -> bool {
         || !object
             .get("activity")
             .and_then(Value::as_object)
-            .is_some_and(|activity| activity.values().all(non_negative_u64))
+            .is_some_and(|activity| activity.values().all(non_negative_u32))
         || !exact_object_keys(
             object.get("latency").unwrap_or(&Value::Null),
             &[
@@ -1063,7 +1089,7 @@ fn validate_session_metrics(value: &Value) -> bool {
             .and_then(Value::as_object)
             .is_some_and(|latency| {
                 latency.iter().all(|(key, value)| match key.as_str() {
-                    "completed_count" | "long_turn_count" => non_negative_u64(value),
+                    "completed_count" | "long_turn_count" => non_negative_u32(value),
                     _ => optional_non_negative_number(value),
                 })
             })
@@ -1076,7 +1102,7 @@ fn validate_session_metrics(value: &Value) -> bool {
     if model_effort.len() > 16
         || !model_effort.iter().all(|item| {
             exact_object_keys(item, &["count", "effort", "model_family"])
-                && item.get("count").is_some_and(non_negative_u64)
+                && item.get("count").is_some_and(non_negative_u32)
                 && allowed_string(
                     item.get("model_family").unwrap_or(&Value::Null),
                     MODEL_FAMILIES,
@@ -1103,18 +1129,40 @@ fn validate_session_metrics(value: &Value) -> bool {
         "verification_tool_calls",
         "verification_unresolved_count",
     ];
-    quality.is_some_and(|quality| {
+    let valid_quality = quality.is_some_and(|quality| {
         quality.len() == quality_keys.len()
             && quality_keys.iter().all(|key| quality.contains_key(*key))
             && quality.iter().all(|(key, value)| match key.as_str() {
                 "task_boundary_review_recommended" | "long_lived_root_session" => {
                     value.is_boolean()
                 }
-                "failure_signals" => value.as_object().is_some_and(|signals| {
-                    signals.len() <= 8 && signals.values().all(non_negative_u64)
-                }),
-                _ => non_negative_u64(value),
+                "failure_signals" => allowed_u32_counts(
+                    value,
+                    &[
+                        "invalid_arguments",
+                        "nonzero_exit",
+                        "rejected",
+                        "timeout",
+                        "yielded_for_wait",
+                    ],
+                ),
+                _ => non_negative_u32(value),
             })
+            && allowed_u32_counts(
+                object.get("tool_categories").unwrap_or(&Value::Null),
+                &[
+                    "codex_runtime",
+                    "coordination",
+                    "git_or_github",
+                    "inspection",
+                    "mutation",
+                    "other_command",
+                    "other_tool",
+                    "research",
+                    "verification",
+                    "wait_or_poll",
+                ],
+            )
             && quality
                 .get("verification_tool_calls")
                 .and_then(Value::as_u64)
@@ -1139,7 +1187,47 @@ fn validate_session_metrics(value: &Value) -> bool {
                         .and_then(|value| value.checked_add(unresolved))
                         == Some(total)
                 })
-    })
+    });
+    if !valid_quality {
+        return false;
+    }
+
+    let activity = object
+        .get("activity")
+        .and_then(Value::as_object)
+        .expect("validated activity");
+    let latency = object
+        .get("latency")
+        .and_then(Value::as_object)
+        .expect("validated latency");
+    let quality = quality.expect("validated quality proxies");
+    let count = |values: &Map<String, Value>, key: &str| {
+        values.get(key).and_then(Value::as_u64).unwrap_or(u64::MAX)
+    };
+    let tool_calls = count(quality, "tool_call_count");
+    let repeated_calls = count(quality, "calls_in_exact_repeated_groups");
+    let repeated_groups = count(quality, "exact_repeated_call_groups");
+    let user_messages = count(activity, "user_messages_with_text");
+    let completed_turns = count(activity, "task_completed");
+    let latency_completed = count(latency, "completed_count");
+    let long_turns = count(latency, "long_turn_count");
+    let failure_signals = quality
+        .get("failure_signals")
+        .and_then(Value::as_object)
+        .and_then(|signals| {
+            signals
+                .values()
+                .try_fold(0_u64, |total, value| total.checked_add(value.as_u64()?))
+        });
+
+    latency_completed <= completed_turns
+        && long_turns <= latency_completed
+        && repeated_groups <= repeated_calls
+        && repeated_calls <= tool_calls
+        && failure_signals.is_some_and(|total| total <= tool_calls)
+        && count(quality, "verification_tool_calls") <= tool_calls
+        && count(quality, "short_message_count") <= user_messages
+        && count(quality, "broad_scope_message_count") <= user_messages
 }
 
 fn validate_guardian_metrics(value: &Value) -> bool {
@@ -1158,59 +1246,74 @@ fn validate_guardian_metrics(value: &Value) -> bool {
         return false;
     }
     let object = value.as_object().expect("validated object");
-    allowed_string(
-        object.get("status").unwrap_or(&Value::Null),
-        &[
-            "PASS",
-            "PARTIAL",
-            "INSUFFICIENT_EVIDENCE",
-            "FAIL",
-            "UNKNOWN",
-        ],
-    ) && validate_usage(object.get("usage").unwrap_or(&Value::Null), false)
-        && object.get("review_count").is_some_and(non_negative_u64)
-        && object.get("rollout_count").is_some_and(non_negative_u64)
-        && object
-            .get("outcomes")
-            .and_then(Value::as_object)
-            .is_some_and(|value| value.len() <= 5 && value.values().all(non_negative_u64))
-        && object
-            .get("risk_levels")
-            .and_then(Value::as_object)
-            .is_some_and(|value| value.len() <= 5 && value.values().all(non_negative_u64))
-        && object
-            .get("signals")
-            .and_then(Value::as_object)
-            .is_some_and(|signals| {
-                exact_object_keys(
-                    &Value::Object(signals.clone()),
-                    &[
-                        "outside_workspace_action_rate",
-                        "reviewer_already_low_effort",
-                        "temporary_workspace_action_rate",
-                        "workspace_attributed_review_count",
-                        "workspace_attribution_coverage",
-                    ],
-                ) && signals
-                    .get("reviewer_already_low_effort")
-                    .is_some_and(Value::is_boolean)
-                    && signals
-                        .get("workspace_attributed_review_count")
-                        .is_some_and(non_negative_u64)
-                    && [
-                        "outside_workspace_action_rate",
-                        "temporary_workspace_action_rate",
-                        "workspace_attribution_coverage",
-                    ]
-                    .iter()
-                    .all(|key| {
-                        signals.get(*key).is_some_and(optional_non_negative_number)
-                            && signals
-                                .get(*key)
-                                .and_then(Value::as_f64)
-                                .is_none_or(|value| value <= 1.0)
-                    })
+    let structurally_valid =
+        allowed_string(
+            object.get("status").unwrap_or(&Value::Null),
+            &[
+                "PASS",
+                "PARTIAL",
+                "INSUFFICIENT_EVIDENCE",
+                "FAIL",
+                "UNKNOWN",
+            ],
+        ) && validate_usage(object.get("usage").unwrap_or(&Value::Null), false)
+            && object.get("review_count").is_some_and(non_negative_u32)
+            && object.get("rollout_count").is_some_and(non_negative_u32)
+            && object.get("outcomes").is_some_and(|value| {
+                allowed_u32_counts(
+                    value,
+                    &["approved", "cancelled", "error", "rejected", "unknown"],
+                )
             })
+            && object.get("risk_levels").is_some_and(|value| {
+                allowed_u32_counts(value, &["critical", "high", "low", "medium", "unknown"])
+            })
+            && object
+                .get("signals")
+                .and_then(Value::as_object)
+                .is_some_and(|signals| {
+                    exact_object_keys(
+                        &Value::Object(signals.clone()),
+                        &[
+                            "outside_workspace_action_rate",
+                            "reviewer_already_low_effort",
+                            "temporary_workspace_action_rate",
+                            "workspace_attributed_review_count",
+                            "workspace_attribution_coverage",
+                        ],
+                    ) && signals
+                        .get("reviewer_already_low_effort")
+                        .is_some_and(Value::is_boolean)
+                        && signals
+                            .get("workspace_attributed_review_count")
+                            .is_some_and(non_negative_u32)
+                        && [
+                            "outside_workspace_action_rate",
+                            "temporary_workspace_action_rate",
+                            "workspace_attribution_coverage",
+                        ]
+                        .iter()
+                        .all(|key| {
+                            signals.get(*key).is_some_and(optional_non_negative_number)
+                                && signals
+                                    .get(*key)
+                                    .and_then(Value::as_f64)
+                                    .is_none_or(|value| value <= 1.0)
+                        })
+                });
+    if !structurally_valid {
+        return false;
+    }
+    object
+        .get("signals")
+        .and_then(Value::as_object)
+        .and_then(|signals| {
+            signals
+                .get("workspace_attributed_review_count")
+                .and_then(Value::as_u64)
+        })
+        .zip(object.get("review_count").and_then(Value::as_u64))
+        .is_some_and(|(attributed, reviews)| attributed <= reviews)
 }
 
 fn validate_basic_semantics(event: &Value) -> bool {
@@ -1414,7 +1517,77 @@ pub fn validate_basic_event_bytes(bytes: &[u8]) -> Result<Value, ContractError> 
 mod tests {
     use serde_json::{Value, json};
 
-    use super::WeeklyReport;
+    use super::{WeeklyReport, validate_guardian_metrics, validate_session_metrics};
+
+    fn session_metrics() -> Value {
+        json!({
+            "status":"PASS",
+            "activity":{"task_started":4,"task_completed":4,"turn_contexts":4,"compactions":0,"user_messages_with_text":4},
+            "latency":{"completed_count":4,"long_turn_count":1,"median_ms":1.0,"p90_ms":2.0,"max_ms":3.0},
+            "model_effort":[],
+            "tool_categories":{},
+            "usage":{"source":"unavailable","input_tokens":0,"cached_input_tokens":0,"non_cached_input_tokens":0,
+                "cache_write_input_tokens":0,"output_tokens":0,"reasoning_output_tokens":0,"total_tokens":0,
+                "cached_input_ratio":null,"cumulative_rollout_count":0,"fallback_rollout_count":0,"rollout_count_with_usage":0},
+            "quality_proxies":{"tool_call_count":4,"verification_tool_calls":1,"verification_success_count":1,
+                "verification_failure_count":0,"verification_unresolved_count":0,"failure_signals":{"nonzero_exit":1},
+                "exact_repeated_call_groups":1,"calls_in_exact_repeated_groups":2,"short_message_count":1,
+                "broad_scope_message_count":1,"task_boundary_review_recommended":false,"long_lived_root_session":false,
+                "boundary_review_root_count":0,"long_lived_root_count":0}
+        })
+    }
+
+    fn guardian_metrics() -> Value {
+        json!({
+            "status":"PASS","rollout_count":2,"review_count":2,
+            "usage":{"source":"unavailable","input_tokens":0,"cached_input_tokens":0,"cache_write_input_tokens":0,
+                "output_tokens":0,"reasoning_output_tokens":0,"total_tokens":0,"cached_input_ratio":null,
+                "cumulative_rollout_count":0,"fallback_rollout_count":0,"rollout_count_with_usage":0},
+            "outcomes":{},"risk_levels":{},
+            "signals":{"outside_workspace_action_rate":null,"temporary_workspace_action_rate":null,
+                "reviewer_already_low_effort":false,"workspace_attributed_review_count":1,
+                "workspace_attribution_coverage":0.5}
+        })
+    }
+
+    #[test]
+    fn event_metric_relationships_reject_report_poisoning_inputs() {
+        assert!(validate_session_metrics(&session_metrics()));
+        for (pointer, value) in [
+            ("/latency/completed_count", json!(5)),
+            ("/latency/long_turn_count", json!(5)),
+            ("/quality_proxies/calls_in_exact_repeated_groups", json!(5)),
+            ("/quality_proxies/exact_repeated_call_groups", json!(3)),
+            ("/quality_proxies/verification_tool_calls", json!(5)),
+            ("/quality_proxies/short_message_count", json!(5)),
+            ("/quality_proxies/broad_scope_message_count", json!(5)),
+            (
+                "/quality_proxies/tool_call_count",
+                json!(u64::from(u32::MAX) + 1),
+            ),
+        ] {
+            let mut metrics = session_metrics();
+            *metrics.pointer_mut(pointer).expect("fixture pointer") = value;
+            assert!(!validate_session_metrics(&metrics), "accepted {pointer}");
+        }
+        let mut metrics = session_metrics();
+        metrics["quality_proxies"]["failure_signals"] = json!({"nonzero_exit":3,"timeout":2});
+        assert!(!validate_session_metrics(&metrics));
+        let mut metrics = session_metrics();
+        metrics["quality_proxies"]["failure_signals"] = json!({"private_path":1});
+        assert!(!validate_session_metrics(&metrics));
+        let mut metrics = session_metrics();
+        metrics["tool_categories"] = json!({"repository_name":1});
+        assert!(!validate_session_metrics(&metrics));
+
+        assert!(validate_guardian_metrics(&guardian_metrics()));
+        let mut guardian = guardian_metrics();
+        guardian["signals"]["workspace_attributed_review_count"] = json!(3);
+        assert!(!validate_guardian_metrics(&guardian));
+        let mut guardian = guardian_metrics();
+        guardian["outcomes"] = json!({"private_identifier":1});
+        assert!(!validate_guardian_metrics(&guardian));
+    }
 
     fn report() -> Value {
         json!({
@@ -1459,6 +1632,7 @@ mod tests {
                 "stored_event_row_count": 2,
                 "deduplicated_event_count": 2,
                 "duplicate_event_row_count": 0,
+                "ttl_expired_event_row_count": 0,
                 "delayed_delivery_event_count": 0,
                 "overdue_delivery_event_count": 0,
                 "clock_skew_event_count": 0,

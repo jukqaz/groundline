@@ -58,6 +58,11 @@ services:
       GROUNDLINE_PROXY_TOKEN: "__PROXY_TOKEN__"
       GROUNDLINE_OWNER_ENROLLMENT_ENABLED: "true"
       GROUNDLINE_MINIMUM_SUPPORTED_VERSION: "0.20.0"
+      GROUNDLINE_RETENTION_DAYS: "365"
+      GROUNDLINE_COLLECTOR_MAX_EVENTS: "4096"
+      GROUNDLINE_COLLECTOR_MAX_PAYLOAD_BYTES: "268435456"
+      GROUNDLINE_DATASET_MAX_ROWS: "2000000"
+      GROUNDLINE_DATASET_MAX_BYTES: "68719476736"
     depends_on:
       clickhouse:
         condition: service_healthy
@@ -659,6 +664,17 @@ configs:
             "targets": [{"datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"}, "editorType": "sql", "format": 1, "queryType": "table", "rawSql": "WITH logical_events AS (SELECT event_id, received_at, generated_at FROM groundline.basic_active WHERE $$__timeFilter(ifNull(period_end, generated_at))), active_collectors AS (SELECT collector_id, current_generation FROM groundline.collectors FINAL WHERE revoked = 0), stored_events AS (SELECT events.event_id FROM groundline.basic_weekly AS events INNER JOIN active_collectors AS active ON events.collector_id = active.collector_id AND events.collection_generation = active.current_generation INNER JOIN (SELECT event_id FROM logical_events) AS selected USING (event_id)) SELECT (SELECT count() FROM stored_events) AS stored_event_row_count, (SELECT count() FROM logical_events) AS deduplicated_event_count, stored_event_row_count - deduplicated_event_count AS duplicate_event_row_count, (SELECT countIf(dateDiff('second', generated_at, received_at) > 21600) FROM logical_events) AS delayed_delivery_event_count, (SELECT countIf(dateDiff('second', generated_at, received_at) > 86400) FROM logical_events) AS overdue_delivery_event_count, (SELECT countIf(generated_at > received_at + INTERVAL 5 MINUTE) FROM logical_events) AS clock_skew_event_count", "refId": "A"}],
             "title": "ClickHouse 저장·전송 품질",
             "type": "table"
+          },
+          {
+            "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
+            "description": "Physical rows whose configured retention deadline has passed but which remain until a background TTL merge removes them. This is eventual-cleanup pressure, not a request to run OPTIMIZE or a manual deletion.",
+            "fieldConfig": {"defaults": {"decimals": 0}, "overrides": []},
+            "gridPos": {"h": 6, "w": 12, "x": 12, "y": 18},
+            "id": 19,
+            "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+            "targets": [{"datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"}, "editorType": "sql", "format": 1, "queryType": "table", "rawSql": "WITH policy AS (SELECT argMax(retention_days, updated_at) AS retention_days FROM groundline.release_policy FINAL WHERE policy_key = 'stable') SELECT count() AS value FROM groundline.basic_weekly CROSS JOIN policy WHERE received_at < now('UTC') - toIntervalDay(policy.retention_days)", "refId": "A"}],
+            "title": "ClickHouse TTL 정리 대기 row",
+            "type": "stat"
           }
         ],
         "refresh": "30m",
@@ -670,6 +686,6 @@ configs:
         "timezone": "utc",
         "title": "GroundLine Insights",
         "uid": "groundline-insights",
-        "version": 10,
+        "version": 11,
         "weekStart": "monday"
       }

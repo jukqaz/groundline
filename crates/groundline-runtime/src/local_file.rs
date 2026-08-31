@@ -20,6 +20,19 @@ fn open_no_follow(path: &Path) -> io::Result<File> {
     .map_err(io::Error::from)
 }
 
+#[cfg(unix)]
+fn open_no_follow_read_write(path: &Path) -> io::Result<File> {
+    use rustix::fs::{Mode, OFlags};
+
+    rustix::fs::open(
+        path,
+        OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )
+    .map(File::from)
+    .map_err(io::Error::from)
+}
+
 #[cfg(windows)]
 fn open_no_follow(path: &Path) -> io::Result<File> {
     use std::os::windows::fs::OpenOptionsExt;
@@ -27,6 +40,18 @@ fn open_no_follow(path: &Path) -> io::Result<File> {
 
     OpenOptions::new()
         .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+}
+
+#[cfg(windows)]
+fn open_no_follow_read_write(path: &Path) -> io::Result<File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+
+    OpenOptions::new()
+        .read(true)
+        .write(true)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
         .open(path)
 }
@@ -40,6 +65,17 @@ fn open_no_follow(path: &Path) -> io::Result<File> {
         ));
     }
     OpenOptions::new().read(true).open(path)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn open_no_follow_read_write(path: &Path) -> io::Result<File> {
+    if std::fs::symlink_metadata(path)?.file_type().is_symlink() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "symbolic links are not allowed",
+        ));
+    }
+    OpenOptions::new().read(true).write(true).open(path)
 }
 
 #[cfg(windows)]
@@ -105,6 +141,37 @@ pub fn create_private_new(path: &Path) -> io::Result<File> {
         std::fs::create_dir_all(parent)?;
     }
     create_private_file(path)
+}
+
+pub fn open_or_create_private_lock(path: &Path) -> io::Result<File> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "missing parent"))?;
+    std::fs::create_dir_all(parent)?;
+    if std::fs::symlink_metadata(parent)?.file_type().is_symlink() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "symbolic-link parent rejected",
+        ));
+    }
+    let file = match create_private_file(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            open_no_follow_read_write(path)?
+        }
+        Err(error) => return Err(error),
+    };
+    let metadata = file.metadata()?;
+    if !metadata.file_type().is_file()
+        || is_reparse_point(&metadata)
+        || !private_for_current_user(&file)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "private lock file rejected",
+        ));
+    }
+    Ok(file)
 }
 
 #[cfg(windows)]
@@ -187,6 +254,42 @@ pub fn atomic_write_private(path: &Path, contents: &[u8]) -> io::Result<()> {
         let _ = std::fs::remove_file(&temporary);
     }
     result
+}
+
+#[cfg(unix)]
+pub fn owned_by_current_user(file: &File) -> bool {
+    use std::os::unix::fs::MetadataExt;
+
+    file.metadata()
+        .map(|metadata| metadata.uid() == rustix::process::geteuid().as_raw())
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+pub fn owned_by_current_user(file: &File) -> bool {
+    use windows_permissions::constants::{SeObjectType, SecurityInformation};
+    use windows_permissions::utilities::current_process_sid;
+
+    let Ok(current_user) = current_process_sid() else {
+        return false;
+    };
+    windows_permissions::wrappers::GetSecurityInfo(
+        file,
+        SeObjectType::SE_FILE_OBJECT,
+        SecurityInformation::Owner,
+    )
+    .ok()
+    .and_then(|descriptor| {
+        descriptor
+            .owner()
+            .map(|owner| owner == current_user.as_ref())
+    })
+    .unwrap_or(false)
+}
+
+#[cfg(not(any(unix, windows)))]
+pub fn owned_by_current_user(_file: &File) -> bool {
+    false
 }
 
 #[cfg(unix)]
@@ -274,7 +377,10 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use super::{atomic_write_private, open_bounded_regular_file, private_for_current_user};
+    use super::{
+        atomic_write_private, open_bounded_regular_file, owned_by_current_user,
+        private_for_current_user,
+    };
 
     #[test]
     fn accepts_only_regular_files_within_the_size_contract() {
@@ -293,6 +399,7 @@ mod tests {
         let path = root.path().join("state.json");
         atomic_write_private(&path, b"{\"state\":1}\n").expect("private write");
         let file = open_bounded_regular_file(&path, 1, 64).expect("bounded state");
+        assert!(owned_by_current_user(&file));
         assert!(private_for_current_user(&file));
         drop(file);
         atomic_write_private(&path, b"{\"state\":2}\n").expect("private replace");

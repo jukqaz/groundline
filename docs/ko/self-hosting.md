@@ -131,6 +131,19 @@ origin이어야 합니다. renderer는 서비스 credential 6개를 별도 priva
 생성하고, Compose를 private permission으로 쓰며, public bind address와 암묵적
 overwrite를 거부합니다.
 
+`SECRETS_FILE`과 rendered `COMPOSE_FILE`에는 모두 실제 service credential이
+들어 있으므로 같은 owner-secret 정책으로 보호·백업·회전·삭제해야 합니다.
+Compose 파일도 공개 가능한 파생물이 아닙니다. `insights fetch-report`에는
+`GROUNDLINE_ADMIN_TOKEN` 값만 담긴 별도 비공개 파일을 만들고
+`--admin-token-file`로 전달합니다. collector token은 owner-wide report에서
+의도적으로 거부됩니다.
+
+기본 서비스는 event를 365일 보존하고 collector별 retained event 4,096개와
+논리 payload 256 MiB를 제한하며, 200만 row 또는 64 GiB dataset ceiling의 마지막
+10%를 관리 작업용으로 남깁니다. retention·collector quota·dataset ceiling을
+바꾸려면 owner-private rendered Compose에서 문서화된 `GROUNDLINE_*` 값을 사용해야
+하며 API는 안전 범위를 벗어난 값을 거부합니다.
+
 일회성 `grafana-storage-init` service가 Grafana bind directory를 UID 472, mode
 `0750`으로 맞춥니다. ownership 오류를 `0777`로 우회하지 않습니다. Grafana는 첫
 시작에 고정된 ClickHouse datasource plugin을 내려받기 위한 outbound access가
@@ -157,7 +170,7 @@ Compose template에는 ClickHouse·Nginx·Grafana·datasource plugin의 최대 �
 최신 버전 탐색 단계에 한해서 image 세 개에 명시적 moving tag를 쓰고 plugin을
 `grafana-clickhouse-datasource`로만 지정할 수 있습니다. 검증과 렌더링 모두에
 `--allow-unpinned-dependencies`를 추가합니다. 이 Compose는 운영에 보존하지 않습니다.
-전체 stack과 provision된 query 19개가 통과하면 실제 image digest와 설치된 plugin
+전체 stack과 provision된 query 20개가 통과하면 실제 image digest와 설치된 plugin
 버전을 pinned 후보 profile에 기록하고, override 없이 다시 렌더링·검증합니다.
 
 GitHub 수동 workflow에도 후보 입력 네 개가 있습니다. 네 개를 모두 주거나 하나도

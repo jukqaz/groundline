@@ -42,9 +42,17 @@ Interpret the lanes independently:
 - Tailnet disconnected: connect Tailscale, then run an explicitly authorized
   `groundline-insights worker run-once`.
 - delayed/overdue outbox: preserve the outbox, restore Tailnet/API availability,
-  and retry once. Do not delete evidence.
+  and retry once. Automatic hooks honor `delivery_next_attempt_utc`; permanent
+  rejection sets `delivery_operator_required`. Do not delete evidence.
+- `reconsent_required`: review the current owner-service destination and run
+  `worker enable` explicitly. The old receipt is archived and incompatible
+  pending events stay in `outbox-quarantine`; do not move them back into the
+  active outbox without a separate data-authorization decision.
+- `outbox_capacity_exceeded`: collection stops producing new events while the
+  bounded worker drains existing 16-event batches. Restore the endpoint and
+  inspect status; never run a recursive upload or delete the outbox to hide it.
 - changed hook hash: review and trust it in Codex. GroundLine never approves
-  itself.
+  itself. `plugin list` does not prove hook trust or dispatch.
 
 Read `worker status` from the operational fields. `status: PASS` with
 `collection_state: disabled` is an intentional inert installation. `status: WARN`

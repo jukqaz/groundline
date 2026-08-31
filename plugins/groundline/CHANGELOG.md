@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.20.2
+
+- Harden local Codex state and rollout reads against symlink, ownership,
+  traversal, oversized metadata, and unbounded row-allocation attacks while
+  retaining read-only audit behavior on supported desktop platforms.
+
 ## 0.20.1
 
 - Make the Core-only install path explicit and document that Core never installs

@@ -1,4 +1,6 @@
+use std::collections::hash_map::DefaultHasher;
 use std::fs::File;
+use std::hash::{Hash, Hasher};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -35,9 +37,18 @@ const STATUS_FILE: &str = "owner-auto-status.json";
 const TOKEN_FILE: &str = "collector-token";
 const TOKEN_METADATA_FILE: &str = "collector-token.json";
 const OUTBOX_DIR: &str = "outbox";
+const QUARANTINE_DIR: &str = "outbox-quarantine";
+const RETRY_FILE: &str = "delivery-retry.json";
 const LOCK_FILE: &str = "owner-auto.lock";
 const MAX_STATE_BYTES: u64 = 64 * 1024;
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
+const MAX_OUTBOX_EVENTS: usize = 256;
+const OUTBOX_HIGH_WATERMARK_EVENTS: usize = 224;
+const MAX_OUTBOX_BYTES: u64 = 16 * 1024 * 1024;
+const UPLOAD_BATCH_EVENTS: usize = 16;
+const UPLOAD_CYCLE_TIMEOUT: Duration = Duration::from_secs(45);
+const RETRY_BASE_SECONDS: u64 = 60;
+const RETRY_MAX_SECONDS: u64 = 60 * 60;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const COLLECTION_STALE_AFTER: chrono::Duration = chrono::Duration::days(7);
 const MAX_CLOCK_SKEW: chrono::Duration = chrono::Duration::minutes(5);
@@ -61,20 +72,35 @@ pub enum StateError {
     EnrollmentFailed,
     #[error("event_upload_failed")]
     UploadFailed,
+    #[error("remote_request_rejected")]
+    RemoteRejected,
+    #[error("outbox_capacity_exceeded")]
+    OutboxCapacity,
+    #[error("reconsent_required")]
+    ReconsentRequired,
 }
 
 impl StateError {
     pub fn network_performed(&self) -> bool {
-        matches!(self, Self::EnrollmentFailed | Self::UploadFailed)
+        matches!(
+            self,
+            Self::EnrollmentFailed | Self::UploadFailed | Self::RemoteRejected
+        )
     }
 
     pub fn mutation_performed(&self) -> Option<bool> {
         match self {
-            Self::InvalidProfile | Self::AlreadyRunning | Self::Disabled => Some(false),
+            Self::InvalidProfile
+            | Self::AlreadyRunning
+            | Self::Disabled
+            | Self::ReconsentRequired => Some(false),
             Self::TailnetDisconnected => Some(true),
-            Self::LocalState | Self::AuditFailed | Self::EnrollmentFailed | Self::UploadFailed => {
-                None
-            }
+            Self::LocalState
+            | Self::AuditFailed
+            | Self::EnrollmentFailed
+            | Self::UploadFailed
+            | Self::RemoteRejected
+            | Self::OutboxCapacity => None,
         }
     }
 }
@@ -110,6 +136,20 @@ struct Identity {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Consent {
+    schema_version: u8,
+    kind: String,
+    scope: String,
+    status: String,
+    receipt_id: Uuid,
+    accepted_at_utc: String,
+    diagnostic_enabled: bool,
+    owner_service_upload_enabled: bool,
+    third_party_upload_enabled: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ImportedConsentV1 {
     schema_version: u8,
     kind: String,
     scope: String,
@@ -168,6 +208,30 @@ struct Status {
     pending_event_count: u64,
     tailnet_status: String,
     last_trigger: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeliveryRetry {
+    schema_version: u8,
+    kind: String,
+    attempt_count: u32,
+    next_attempt_utc: Option<String>,
+    last_error_code: String,
+    operator_required: bool,
+}
+
+struct OutboxInventory {
+    batch: Vec<(PathBuf, Value)>,
+    observed_count: usize,
+    observed_bytes: u64,
+    capacity_exceeded: bool,
+}
+
+struct UploadReceipt {
+    uploaded_count: u64,
+    acknowledged_paths: Vec<PathBuf>,
+    collected_through_utc: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -377,7 +441,113 @@ fn environment() -> (&'static str, String, String) {
     (os, runtime, mode)
 }
 
+fn valid_active_consent(value: &Consent) -> bool {
+    value.schema_version == 2
+        && value.kind == "groundline-insights-consent"
+        && value.scope == "basic_weekly"
+        && value.status == "active"
+        && !value.receipt_id.is_nil()
+        && !value.diagnostic_enabled
+        && value.owner_service_upload_enabled
+        && !value.third_party_upload_enabled
+        && parse_timestamp(&value.accepted_at_utc).is_ok()
+}
+
+fn valid_legacy_consent(value: &ImportedConsentV1) -> bool {
+    value.schema_version == 1
+        && value.kind == "groundline-insights-consent"
+        && value.scope == "basic_weekly"
+        && value.status == "active"
+        && !value.receipt_id.is_nil()
+        && !value.diagnostic_enabled
+        && !value.network_upload_enabled
+        && parse_timestamp(&value.accepted_at_utc).is_ok()
+}
+
+fn active_consent(directory: &Path) -> Result<Consent, StateError> {
+    let path = directory.join(CONSENT_FILE);
+    if !path.exists() {
+        return Err(StateError::ReconsentRequired);
+    }
+    let bytes = read_bytes(&path, MAX_STATE_BYTES, true)?;
+    if let Ok(value) = serde_json::from_slice::<Consent>(&bytes) {
+        return if valid_active_consent(&value) {
+            Ok(value)
+        } else {
+            Err(StateError::ReconsentRequired)
+        };
+    }
+    let imported: ImportedConsentV1 =
+        serde_json::from_slice(&bytes).map_err(|_| StateError::Disabled)?;
+    if valid_legacy_consent(&imported) {
+        Err(StateError::ReconsentRequired)
+    } else {
+        Err(StateError::Disabled)
+    }
+}
+
+fn consent_status(directory: &Path) -> Result<&'static str, StateError> {
+    let path = directory.join(CONSENT_FILE);
+    if !path.exists() {
+        return Ok("missing");
+    }
+    let bytes = read_bytes(&path, MAX_STATE_BYTES, true)?;
+    if let Ok(value) = serde_json::from_slice::<Consent>(&bytes) {
+        return Ok(if valid_active_consent(&value) {
+            "active"
+        } else {
+            "reconsent_required"
+        });
+    }
+    let imported: ImportedConsentV1 =
+        serde_json::from_slice(&bytes).map_err(|_| StateError::LocalState)?;
+    if valid_legacy_consent(&imported) {
+        Ok("reconsent_required")
+    } else {
+        Err(StateError::LocalState)
+    }
+}
+
+fn grant_consent(directory: &Path, now: DateTime<Utc>) -> Result<Consent, StateError> {
+    let path = directory.join(CONSENT_FILE);
+    if path.exists() {
+        let bytes = read_bytes(&path, MAX_STATE_BYTES, true)?;
+        if let Ok(value) = serde_json::from_slice::<Consent>(&bytes)
+            && valid_active_consent(&value)
+        {
+            return Ok(value);
+        }
+        let legacy: ImportedConsentV1 =
+            serde_json::from_slice(&bytes).map_err(|_| StateError::Disabled)?;
+        if !valid_legacy_consent(&legacy) {
+            return Err(StateError::Disabled);
+        }
+        let archive = directory.join("consent.legacy-v1.json");
+        if archive.exists() {
+            return Err(StateError::LocalState);
+        }
+        quarantine_pending_events(directory)?;
+        std::fs::rename(&path, archive).map_err(|_| StateError::LocalState)?;
+    } else {
+        quarantine_pending_events(directory)?;
+    }
+    let value = Consent {
+        schema_version: 2,
+        kind: "groundline-insights-consent".to_owned(),
+        scope: "basic_weekly".to_owned(),
+        status: "active".to_owned(),
+        receipt_id: Uuid::new_v4(),
+        accepted_at_utc: now.to_rfc3339_opts(SecondsFormat::Millis, true),
+        diagnostic_enabled: false,
+        owner_service_upload_enabled: true,
+        third_party_upload_enabled: false,
+    };
+    write_json(&path, &value)?;
+    Ok(value)
+}
+
 fn initialize(directory: &Path, now: DateTime<Utc>) -> Result<(Identity, Consent), StateError> {
+    let consent = active_consent(directory)?;
     let (os, runtime, mode) = environment();
     if os == "unknown" {
         return Err(StateError::LocalState);
@@ -410,34 +580,6 @@ fn initialize(directory: &Path, now: DateTime<Utc>) -> Result<(Identity, Consent
             resettable: true,
         };
         write_json(&identity_path, &value)?;
-        value
-    };
-    let consent_path = directory.join(CONSENT_FILE);
-    let consent = if consent_path.exists() {
-        let value: Consent = read_json(&consent_path, true)?;
-        if value.schema_version != 1
-            || value.kind != "groundline-insights-consent"
-            || value.scope != "basic_weekly"
-            || value.status != "active"
-            || value.diagnostic_enabled
-            || value.network_upload_enabled
-            || parse_timestamp(&value.accepted_at_utc).is_err()
-        {
-            return Err(StateError::Disabled);
-        }
-        value
-    } else {
-        let value = Consent {
-            schema_version: 1,
-            kind: "groundline-insights-consent".to_owned(),
-            scope: "basic_weekly".to_owned(),
-            status: "active".to_owned(),
-            receipt_id: Uuid::new_v4(),
-            accepted_at_utc: now.to_rfc3339_opts(SecondsFormat::Millis, true),
-            diagnostic_enabled: false,
-            network_upload_enabled: false,
-        };
-        write_json(&consent_path, &value)?;
         value
     };
     Ok((identity, consent))
@@ -578,6 +720,33 @@ async fn bounded_response(
     Ok((status, value))
 }
 
+fn permanent_remote_rejection(status: reqwest::StatusCode) -> bool {
+    status.is_client_error() && !matches!(status.as_u16(), 408 | 429)
+}
+
+fn classify_response_status(status: reqwest::StatusCode) -> Result<(), StateError> {
+    if permanent_remote_rejection(status) {
+        Err(StateError::RemoteRejected)
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_upload_response(status: reqwest::StatusCode, value: &Value) -> Result<(), StateError> {
+    classify_response_status(status)?;
+    if matches!(status.as_u16(), 200 | 202)
+        && value.get("status").and_then(Value::as_str) == Some("PASS")
+        && matches!(
+            value.get("outcome").and_then(Value::as_str),
+            Some("accepted" | "duplicate")
+        )
+    {
+        Ok(())
+    } else {
+        Err(StateError::UploadFailed)
+    }
+}
+
 fn token_value(directory: &Path) -> Result<Option<SecretString>, StateError> {
     let path = directory.join(TOKEN_FILE);
     if !path.exists() {
@@ -652,6 +821,7 @@ async fn enroll(
         .send()
         .await
         .map_err(|_| StateError::EnrollmentFailed)?;
+    classify_response_status(response.status())?;
     let (status, value) = bounded_response(response)
         .await
         .map_err(|_| StateError::EnrollmentFailed)?;
@@ -673,17 +843,53 @@ async fn enroll(
     Ok(token)
 }
 
-fn pending_events(directory: &Path) -> Result<Vec<(PathBuf, Value)>, StateError> {
+fn pending_events(directory: &Path, batch_limit: usize) -> Result<OutboxInventory, StateError> {
     let outbox = directory.join(OUTBOX_DIR);
     if !outbox.exists() {
-        return Ok(Vec::new());
+        return Ok(OutboxInventory {
+            batch: Vec::new(),
+            observed_count: 0,
+            observed_bytes: 0,
+            capacity_exceeded: false,
+        });
     }
-    let mut result = Vec::new();
+    let mut entries = Vec::new();
+    let mut observed_bytes = 0_u64;
+    let mut capacity_exceeded = false;
     for entry in std::fs::read_dir(&outbox).map_err(|_| StateError::LocalState)? {
-        let path = entry.map_err(|_| StateError::LocalState)?.path();
+        let entry = entry.map_err(|_| StateError::LocalState)?;
+        if !entry
+            .file_type()
+            .map_err(|_| StateError::LocalState)?
+            .is_file()
+        {
+            return Err(StateError::LocalState);
+        }
+        let path = entry.path();
         if path.extension().and_then(|value| value.to_str()) != Some("json") {
             return Err(StateError::LocalState);
         }
+        let file = open_bounded_regular_file(&path, 1, MAX_STATE_BYTES)
+            .map_err(|_| StateError::LocalState)?;
+        if !private_for_current_user(&file) {
+            return Err(StateError::LocalState);
+        }
+        observed_bytes = observed_bytes
+            .checked_add(file.metadata().map_err(|_| StateError::LocalState)?.len())
+            .ok_or(StateError::OutboxCapacity)?;
+        entries.push(path);
+        if entries.len() > MAX_OUTBOX_EVENTS || observed_bytes > MAX_OUTBOX_BYTES {
+            capacity_exceeded = true;
+            break;
+        }
+    }
+    entries.sort();
+    let observed_count = entries.len();
+    let mut batch = Vec::new();
+    for path in entries
+        .into_iter()
+        .take(batch_limit.min(UPLOAD_BATCH_EVENTS))
+    {
         let bytes = read_bytes(&path, 64 * 1024, true)?;
         let event = validate_basic_event_bytes(&bytes).map_err(|_| StateError::LocalState)?;
         if path.file_stem().and_then(|value| value.to_str())
@@ -691,10 +897,85 @@ fn pending_events(directory: &Path) -> Result<Vec<(PathBuf, Value)>, StateError>
         {
             return Err(StateError::LocalState);
         }
-        result.push((path, event));
+        batch.push((path, event));
     }
-    result.sort_by(|left, right| left.0.cmp(&right.0));
-    Ok(result)
+    Ok(OutboxInventory {
+        batch,
+        observed_count,
+        observed_bytes,
+        capacity_exceeded,
+    })
+}
+
+fn quarantine_pending_events(directory: &Path) -> Result<(), StateError> {
+    let outbox = directory.join(OUTBOX_DIR);
+    if !outbox.exists() {
+        return Ok(());
+    }
+    let quarantine = directory.join(QUARANTINE_DIR);
+    std::fs::create_dir_all(&quarantine).map_err(|_| StateError::LocalState)?;
+    for (moved, entry) in std::fs::read_dir(&outbox)
+        .map_err(|_| StateError::LocalState)?
+        .enumerate()
+    {
+        if moved >= MAX_OUTBOX_EVENTS {
+            return Err(StateError::OutboxCapacity);
+        }
+        let entry = entry.map_err(|_| StateError::LocalState)?;
+        if !entry
+            .file_type()
+            .map_err(|_| StateError::LocalState)?
+            .is_file()
+        {
+            return Err(StateError::LocalState);
+        }
+        let source = entry.path();
+        if source.extension().and_then(|value| value.to_str()) != Some("json") {
+            return Err(StateError::LocalState);
+        }
+        let file = open_bounded_regular_file(&source, 1, MAX_STATE_BYTES)
+            .map_err(|_| StateError::LocalState)?;
+        if !private_for_current_user(&file) {
+            return Err(StateError::LocalState);
+        }
+        drop(file);
+        let destination = quarantine.join(source.file_name().ok_or(StateError::LocalState)?);
+        if destination.exists() {
+            return Err(StateError::LocalState);
+        }
+        std::fs::rename(source, destination).map_err(|_| StateError::LocalState)?;
+    }
+    Ok(())
+}
+
+fn quarantined_event_count(directory: &Path) -> Result<(usize, bool), StateError> {
+    let quarantine = directory.join(QUARANTINE_DIR);
+    if !quarantine.exists() {
+        return Ok((0, false));
+    }
+    let mut count = 0_usize;
+    for entry in std::fs::read_dir(quarantine).map_err(|_| StateError::LocalState)? {
+        let entry = entry.map_err(|_| StateError::LocalState)?;
+        let path = entry.path();
+        if !entry
+            .file_type()
+            .map_err(|_| StateError::LocalState)?
+            .is_file()
+            || path.extension().and_then(|value| value.to_str()) != Some("json")
+        {
+            return Err(StateError::LocalState);
+        }
+        let file = open_bounded_regular_file(&path, 1, MAX_STATE_BYTES)
+            .map_err(|_| StateError::LocalState)?;
+        if !private_for_current_user(&file) {
+            return Err(StateError::LocalState);
+        }
+        count = count.checked_add(1).ok_or(StateError::OutboxCapacity)?;
+        if count > MAX_OUTBOX_EVENTS {
+            return Ok((count, true));
+        }
+    }
+    Ok((count, false))
 }
 
 fn enqueue(directory: &Path, event: &Value) -> Result<(), StateError> {
@@ -711,6 +992,22 @@ fn enqueue(directory: &Path, event: &Value) -> Result<(), StateError> {
             Err(StateError::LocalState)
         };
     }
+    let inventory = pending_events(directory, 0)?;
+    let event_bytes = serde_json::to_vec_pretty(event)
+        .map_err(|_| StateError::LocalState)?
+        .len()
+        .checked_add(1)
+        .and_then(|value| u64::try_from(value).ok())
+        .ok_or(StateError::OutboxCapacity)?;
+    if inventory.capacity_exceeded
+        || inventory.observed_count >= MAX_OUTBOX_EVENTS
+        || inventory
+            .observed_bytes
+            .checked_add(event_bytes)
+            .is_none_or(|value| value > MAX_OUTBOX_BYTES)
+    {
+        return Err(StateError::OutboxCapacity);
+    }
     write_json(&path, event)
 }
 
@@ -719,8 +1016,10 @@ async fn upload(
     identity: &Identity,
     token: &SecretString,
     events: Vec<(PathBuf, Value)>,
-) -> Result<u64, StateError> {
+) -> Result<UploadReceipt, StateError> {
     let mut uploaded = 0_u64;
+    let mut acknowledged_paths = Vec::new();
+    let mut collected_through = None::<DateTime<Utc>>;
     for (path, event) in events {
         let body = serde_json::to_vec(&event).map_err(|_| StateError::LocalState)?;
         let mut headers = HeaderMap::new();
@@ -756,20 +1055,180 @@ async fn upload(
             .send()
             .await
             .map_err(|_| StateError::UploadFailed)?;
+        classify_response_status(response.status())?;
         let (status, value) = bounded_response(response).await?;
-        if !matches!(status.as_u16(), 200 | 202)
-            || value.get("status").and_then(Value::as_str) != Some("PASS")
-            || !matches!(
-                value.get("outcome").and_then(Value::as_str),
-                Some("accepted" | "duplicate")
-            )
+        validate_upload_response(status, &value)?;
+        let event_through = event
+            .pointer("/period/end_utc")
+            .and_then(Value::as_str)
+            .and_then(|value| parse_timestamp(value).ok());
+        if event_through
+            .is_some_and(|value| collected_through.is_none_or(|current| value > current))
         {
-            return Err(StateError::UploadFailed);
+            collected_through = event_through;
         }
-        std::fs::remove_file(path).map_err(|_| StateError::LocalState)?;
+        acknowledged_paths.push(path);
         uploaded = uploaded.checked_add(1).ok_or(StateError::LocalState)?;
     }
-    Ok(uploaded)
+    Ok(UploadReceipt {
+        uploaded_count: uploaded,
+        acknowledged_paths,
+        collected_through_utc: collected_through
+            .map(|value| value.to_rfc3339_opts(SecondsFormat::Millis, true)),
+    })
+}
+
+fn remove_acknowledged_events(receipt: &UploadReceipt) -> Result<(), StateError> {
+    for path in &receipt.acknowledged_paths {
+        let file = open_bounded_regular_file(path, 1, MAX_STATE_BYTES)
+            .map_err(|_| StateError::LocalState)?;
+        if !private_for_current_user(&file) {
+            return Err(StateError::LocalState);
+        }
+        drop(file);
+        std::fs::remove_file(path).map_err(|_| StateError::LocalState)?;
+    }
+    Ok(())
+}
+
+fn latest_timestamp(current: Option<String>, candidate: Option<String>) -> Option<String> {
+    match (current, candidate) {
+        (Some(current), Some(candidate)) => {
+            let current_at = parse_timestamp(&current).ok();
+            let candidate_at = parse_timestamp(&candidate).ok();
+            if candidate_at
+                .zip(current_at)
+                .is_some_and(|(candidate, current)| candidate > current)
+            {
+                Some(candidate)
+            } else {
+                Some(current)
+            }
+        }
+        (current, candidate) => current.or(candidate),
+    }
+}
+
+fn read_delivery_retry(directory: &Path) -> Result<Option<DeliveryRetry>, StateError> {
+    let path = directory.join(RETRY_FILE);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let value: DeliveryRetry = read_json(&path, true)?;
+    if value.schema_version != 1
+        || value.kind != "groundline-insights-delivery-retry"
+        || value.attempt_count > 32
+        || value.last_error_code.is_empty()
+        || value
+            .next_attempt_utc
+            .as_deref()
+            .is_some_and(|timestamp| parse_timestamp(timestamp).is_err())
+        || (value.operator_required && value.next_attempt_utc.is_some())
+    {
+        return Err(StateError::LocalState);
+    }
+    Ok(Some(value))
+}
+
+fn retry_delay_seconds(directory: &Path, attempt_count: u32) -> u64 {
+    let exponent = attempt_count.saturating_sub(1).min(6);
+    let base = RETRY_BASE_SECONDS
+        .saturating_mul(1_u64 << exponent)
+        .min(RETRY_MAX_SECONDS);
+    let mut hasher = DefaultHasher::new();
+    directory.hash(&mut hasher);
+    attempt_count.hash(&mut hasher);
+    let jitter_window = base / 4;
+    base.saturating_add(hasher.finish() % jitter_window.saturating_add(1))
+        .min(RETRY_MAX_SECONDS)
+}
+
+fn record_delivery_retry(
+    directory: &Path,
+    now: DateTime<Utc>,
+    error: &StateError,
+) -> Result<DeliveryRetry, StateError> {
+    let previous = read_delivery_retry(directory)?;
+    let attempt_count = previous
+        .as_ref()
+        .map(|value| value.attempt_count)
+        .unwrap_or(0)
+        .saturating_add(1)
+        .min(32);
+    let operator_required = matches!(error, StateError::RemoteRejected);
+    let next_attempt_utc = if operator_required {
+        None
+    } else {
+        Some(
+            (now + chrono::Duration::seconds(retry_delay_seconds(directory, attempt_count) as i64))
+                .to_rfc3339_opts(SecondsFormat::Millis, true),
+        )
+    };
+    let value = DeliveryRetry {
+        schema_version: 1,
+        kind: "groundline-insights-delivery-retry".to_owned(),
+        attempt_count,
+        next_attempt_utc,
+        last_error_code: error.to_string(),
+        operator_required,
+    };
+    write_json(&directory.join(RETRY_FILE), &value)?;
+    Ok(value)
+}
+
+fn schedule_remaining_delivery(
+    directory: &Path,
+    now: DateTime<Utc>,
+) -> Result<DeliveryRetry, StateError> {
+    let value = DeliveryRetry {
+        schema_version: 1,
+        kind: "groundline-insights-delivery-retry".to_owned(),
+        attempt_count: 0,
+        next_attempt_utc: Some(
+            (now + chrono::Duration::seconds(RETRY_BASE_SECONDS as i64))
+                .to_rfc3339_opts(SecondsFormat::Millis, true),
+        ),
+        last_error_code: "delivery_batch_pending".to_owned(),
+        operator_required: false,
+    };
+    write_json(&directory.join(RETRY_FILE), &value)?;
+    Ok(value)
+}
+
+fn clear_delivery_retry(directory: &Path) -> Result<(), StateError> {
+    let path = directory.join(RETRY_FILE);
+    if !path.exists() {
+        return Ok(());
+    }
+    let file =
+        open_bounded_regular_file(&path, 1, MAX_STATE_BYTES).map_err(|_| StateError::LocalState)?;
+    if !private_for_current_user(&file) {
+        return Err(StateError::LocalState);
+    }
+    drop(file);
+    std::fs::remove_file(path).map_err(|_| StateError::LocalState)
+}
+
+fn delivery_is_due(trigger: &str, retry: Option<&DeliveryRetry>, now: DateTime<Utc>) -> bool {
+    if matches!(trigger, "manual" | "history_sync") {
+        return true;
+    }
+    let Some(retry) = retry else {
+        return true;
+    };
+    retry
+        .next_attempt_utc
+        .as_deref()
+        .and_then(|value| parse_timestamp(value).ok())
+        .is_some_and(|value| value <= now)
+}
+
+fn explicit_operator_retry(trigger: &str) -> bool {
+    matches!(trigger, "manual" | "history_sync")
+}
+
+fn operator_retry_blocked(trigger: &str, retry: Option<&DeliveryRetry>) -> bool {
+    retry.is_some_and(|value| value.operator_required) && !explicit_operator_retry(trigger)
 }
 
 fn valid_status_trigger(trigger: &str) -> bool {
@@ -782,6 +1241,24 @@ fn valid_status_trigger(trigger: &str) -> bool {
             | "post_compact_hook"
             | "session_end_hook"
     )
+}
+
+fn collection_is_due(
+    trigger: &str,
+    previous: Option<&Status>,
+    now: DateTime<Utc>,
+    minimum_interval_seconds: u64,
+) -> bool {
+    if matches!(trigger, "manual" | "history_sync") {
+        return true;
+    }
+    let Some(last_check) = previous.and_then(|value| parse_timestamp(&value.last_check_utc).ok())
+    else {
+        return true;
+    };
+    let elapsed = now.signed_duration_since(last_check);
+    elapsed < chrono::Duration::zero()
+        || elapsed >= chrono::Duration::seconds(minimum_interval_seconds as i64)
 }
 
 fn valid_tailnet_status(status: &str) -> bool {
@@ -927,9 +1404,13 @@ pub fn enable(codex_home: &Path) -> Result<Value, StateError> {
     let now = Utc::now();
     load_profile(codex_home)?;
     enrollment_token(codex_home).map_err(|_| StateError::InvalidProfile)?;
+    grant_consent(&directory, now)?;
     initialize(&directory, now)?;
     set_policy(&directory, true, now)?;
-    Ok(json!({"status":"PASS","enabled":true,"mutation_performed":true}))
+    Ok(json!({
+        "status":"PASS","enabled":true,"mutation_performed":true,
+        "consent_status":"active",
+    }))
 }
 
 pub fn disable(codex_home: &Path) -> Result<Value, StateError> {
@@ -954,7 +1435,11 @@ fn status_with_tailnet_at(
     let directory = state_directory(codex_home);
     let policy_configured = tailnet::is_regular_file(&directory.join(POLICY_FILE));
     let enabled = policy_enabled(&directory)?;
-    let pending = pending_events(&directory)?.len() as u64;
+    let outbox = pending_events(&directory, 0)?;
+    let pending = outbox.observed_count as u64;
+    let retry = read_delivery_retry(&directory)?;
+    let consent_status = consent_status(&directory)?;
+    let (quarantined, quarantine_capacity_exceeded) = quarantined_event_count(&directory)?;
     let previous = current_status(&directory)?;
     let profile_present = tailnet::is_regular_file(&codex_home.join(PROFILE_PATH));
     let profile_configured = load_profile(codex_home).is_ok();
@@ -971,8 +1456,12 @@ fn status_with_tailnet_at(
     let collection_stale =
         last_success_at.is_some_and(|value| now - value > COLLECTION_STALE_AFTER);
     let collection_clock_skew = last_success_at.is_some_and(|value| value - now > MAX_CLOCK_SKEW);
-    let ready_to_collect =
-        enabled && profile_configured && credential_valid && tailnet_connected == Some(true);
+    let ready_to_collect = enabled
+        && profile_configured
+        && credential_valid
+        && consent_status == "active"
+        && tailnet_connected == Some(true)
+        && retry.as_ref().is_none_or(|value| !value.operator_required);
     let mut blocking_reason_codes = Vec::new();
     let (overall_status, collection_state) = if !enabled {
         ("PASS", "disabled")
@@ -990,12 +1479,21 @@ fn status_with_tailnet_at(
             "enrollment_credential_required"
         });
         ("WARN", "configuration_required")
+    } else if consent_status != "active" {
+        blocking_reason_codes.push("reconsent_required");
+        ("WARN", "reconsent_required")
     } else if tailnet_connected == Some(false) {
         blocking_reason_codes.push("tailnet_not_connected");
         ("WARN", "tailnet_disconnected")
     } else if tailnet_connected.is_none() {
         blocking_reason_codes.push("tailnet_connection_unverified");
         ("WARN", "tailnet_unverified")
+    } else if outbox.capacity_exceeded {
+        blocking_reason_codes.push("outbox_capacity_exceeded");
+        ("WARN", "outbox_capacity_exceeded")
+    } else if retry.as_ref().is_some_and(|value| value.operator_required) {
+        blocking_reason_codes.push("delivery_operator_action_required");
+        ("WARN", "delivery_operator_action_required")
     } else if pending > 0 {
         blocking_reason_codes.push("delivery_pending");
         ("WARN", "delivery_pending")
@@ -1021,8 +1519,15 @@ fn status_with_tailnet_at(
         "owner_profile_present":profile_present,"owner_profile_configured":profile_configured,
         "enrollment_credential_present":credential_present,"enrollment_credential_valid":credential_valid,
         "identity_present":directory.join(IDENTITY_FILE).is_file(),
-        "consent_status":if directory.join(CONSENT_FILE).is_file() {"active"} else {"missing"},"collector_token_present":directory.join(TOKEN_FILE).is_file(),
-        "pending_event_count":pending,"last_check_result_code":last_result_code,
+        "consent_status":consent_status,"collector_token_present":directory.join(TOKEN_FILE).is_file(),
+        "pending_event_count":pending,"pending_event_bytes":outbox.observed_bytes,
+        "outbox_capacity_exceeded":outbox.capacity_exceeded,
+        "quarantined_event_count":quarantined,
+        "quarantine_capacity_exceeded":quarantine_capacity_exceeded,
+        "delivery_attempt_count":retry.as_ref().map(|value| value.attempt_count).unwrap_or(0),
+        "delivery_next_attempt_utc":retry.as_ref().and_then(|value| value.next_attempt_utc.as_deref()),
+        "delivery_operator_required":retry.as_ref().is_some_and(|value| value.operator_required),
+        "last_check_result_code":last_result_code,
         "last_check_utc":previous.as_ref().map(|value| value.last_check_utc.as_str()),"last_success_utc":last_success_utc,
         "last_collected_through_utc":previous.as_ref().and_then(|value| value.last_collected_through_utc.as_deref()),
         "tailnet":tailnet,"raw_content_emitted":false,"private_paths_emitted":false,"secret_value_printed":false,
@@ -1041,6 +1546,44 @@ pub fn checkpoint_enabled(codex_home: &Path) -> Result<bool, StateError> {
     policy_enabled(&state_directory(codex_home))
 }
 
+struct StatusUpdate<'a> {
+    result_code: &'a str,
+    collected_through_utc: Option<String>,
+    uploaded_count: u64,
+    pending_event_count: u64,
+    tailnet_status: String,
+    trigger: &'a str,
+    successful: bool,
+}
+
+fn persist_cycle_status(
+    directory: &Path,
+    previous: Option<&Status>,
+    now: DateTime<Utc>,
+    update: StatusUpdate<'_>,
+) -> Result<(), StateError> {
+    write_status(
+        directory,
+        &Status {
+            schema_version: 4,
+            kind: "groundline-insights-owner-auto-status".to_owned(),
+            enabled: true,
+            last_result_code: update.result_code.to_owned(),
+            last_check_utc: now.to_rfc3339_opts(SecondsFormat::Millis, true),
+            last_success_utc: if update.successful {
+                Some(now.to_rfc3339_opts(SecondsFormat::Millis, true))
+            } else {
+                previous.and_then(|value| value.last_success_utc.clone())
+            },
+            last_collected_through_utc: update.collected_through_utc,
+            uploaded_count: update.uploaded_count,
+            pending_event_count: update.pending_event_count,
+            tailnet_status: update.tailnet_status,
+            last_trigger: update.trigger.to_owned(),
+        },
+    )
+}
+
 pub async fn run_once(
     _plugin_root: &Path,
     codex_home: &Path,
@@ -1055,7 +1598,41 @@ pub async fn run_once(
     }
     let profile = load_profile(codex_home)?;
     let _lock = CycleLock::acquire(&directory)?;
+    crate::checkpoint::claim_triggers(codex_home).map_err(|_| StateError::LocalState)?;
     let now = Utc::now();
+    let previous = previous_status(&directory);
+    let mut outbox = pending_events(&directory, UPLOAD_BATCH_EVENTS)?;
+    let retry = read_delivery_retry(&directory)?;
+    let collection_due = collection_is_due(
+        trigger,
+        previous.as_ref(),
+        now,
+        profile.checkpoint_min_interval_seconds,
+    );
+    let delivery_due = outbox.observed_count > 0 && delivery_is_due(trigger, retry.as_ref(), now);
+    if operator_retry_blocked(trigger, retry.as_ref()) {
+        crate::checkpoint::acknowledge_claimed_triggers(codex_home)
+            .map_err(|_| StateError::LocalState)?;
+        return Ok(json!({
+            "status":"WARN","result_code":"delivery_operator_action_required","uploaded_count":0,
+            "pending_event_count":outbox.observed_count,"delivery_next_attempt_utc":Value::Null,
+            "last_collected_through_utc":previous.as_ref().and_then(|value| value.last_collected_through_utc.as_deref()),
+            "network_performed":false,"mutation_performed":false,
+            "raw_content_emitted":false,"private_paths_emitted":false,"secret_value_printed":false,
+        }));
+    }
+    if !collection_due && !delivery_due {
+        crate::checkpoint::acknowledge_claimed_triggers(codex_home)
+            .map_err(|_| StateError::LocalState)?;
+        return Ok(json!({
+            "status":"PASS","result_code":"not_due","uploaded_count":0,
+            "pending_event_count":outbox.observed_count,
+            "delivery_next_attempt_utc":retry.as_ref().and_then(|value| value.next_attempt_utc.as_deref()),
+            "last_collected_through_utc":previous.as_ref().and_then(|value| value.last_collected_through_utc.as_deref()),
+            "network_performed":false,"mutation_performed":false,
+            "raw_content_emitted":false,"private_paths_emitted":false,"secret_value_printed":false,
+        }));
+    }
     let (identity, consent) = initialize(&directory, now)?;
     let tailnet_state = tailnet::probe();
     let tailnet_status = tailnet_state
@@ -1068,91 +1645,203 @@ pub async fn run_once(
         .and_then(Value::as_bool)
         != Some(true)
     {
-        write_status(
+        let error = StateError::TailnetDisconnected;
+        record_delivery_retry(&directory, now, &error)?;
+        persist_cycle_status(
             &directory,
-            &Status {
-                schema_version: 4,
-                kind: "groundline-insights-owner-auto-status".to_owned(),
-                enabled: true,
-                last_result_code: "tailnet_not_connected".to_owned(),
-                last_check_utc: now.to_rfc3339_opts(SecondsFormat::Millis, true),
-                last_success_utc: previous_status(&directory)
-                    .and_then(|value| value.last_success_utc),
-                last_collected_through_utc: previous_status(&directory)
-                    .and_then(|value| value.last_collected_through_utc),
+            previous.as_ref(),
+            now,
+            StatusUpdate {
+                result_code: "tailnet_not_connected",
+                collected_through_utc: previous
+                    .as_ref()
+                    .and_then(|value| value.last_collected_through_utc.clone()),
                 uploaded_count: 0,
-                pending_event_count: pending_events(&directory)
-                    .map(|items| items.len() as u64)
-                    .unwrap_or(0),
+                pending_event_count: outbox.observed_count as u64,
                 tailnet_status,
-                last_trigger: trigger.to_owned(),
+                trigger,
+                successful: false,
             },
         )?;
         return Err(StateError::TailnetDisconnected);
     }
-    let token = enroll(&profile, codex_home, &directory, &identity).await?;
-    let previous = previous_status(&directory);
-    let start = previous
+    let token = match enroll(&profile, codex_home, &directory, &identity).await {
+        Ok(token) => token,
+        Err(error) => {
+            record_delivery_retry(&directory, now, &error)?;
+            persist_cycle_status(
+                &directory,
+                previous.as_ref(),
+                now,
+                StatusUpdate {
+                    result_code: &error.to_string(),
+                    collected_through_utc: previous
+                        .as_ref()
+                        .and_then(|value| value.last_collected_through_utc.clone()),
+                    uploaded_count: 0,
+                    pending_event_count: outbox.observed_count as u64,
+                    tailnet_status,
+                    trigger,
+                    successful: false,
+                },
+            )?;
+            return Err(error);
+        }
+    };
+    let mut collected_through = previous
         .as_ref()
-        .and_then(|value| value.last_collected_through_utc.as_deref())
-        .and_then(|value| parse_timestamp(value).ok())
-        .or_else(|| earliest_recency(codex_home).ok().flatten())
-        .unwrap_or_else(|| now - chrono::Duration::days(7));
-    let start = start.min(now - chrono::Duration::seconds(1));
-    let audit = collect_audit(
-        codex_home,
-        start,
-        now,
-        Some(identity.runtime_family.as_str()),
-        false,
-    )
-    .map_err(|_| StateError::AuditFailed)?;
-    if audit
-        .pointer("/scope/observed_root_sample_count")
-        .and_then(Value::as_u64)
-        .unwrap_or(0)
-        > 0
-    {
-        let event = build_basic_event(
-            &audit,
-            EventIdentity {
-                instance_id: identity.collector_instance_id,
-                os_family: &identity.os_family,
-                runtime_family: &identity.runtime_family,
-                execution_mode: &identity.execution_mode,
-            },
-            EventConsent {
-                receipt_id: consent.receipt_id,
-                accepted_at_utc: &consent.accepted_at_utc,
-            },
-            env!("CARGO_PKG_VERSION"),
-            0,
-            trigger,
-        )
-        .map_err(|_| StateError::AuditFailed)?;
-        enqueue(&directory, &event)?;
+        .and_then(|value| value.last_collected_through_utc.clone());
+    let collection_deferred = outbox.observed_count > 0
+        || outbox.capacity_exceeded
+        || outbox.observed_count >= OUTBOX_HIGH_WATERMARK_EVENTS
+        || retry.as_ref().is_some_and(|value| value.operator_required);
+    if collection_due && !collection_deferred {
+        let start = collected_through
+            .as_deref()
+            .and_then(|value| parse_timestamp(value).ok())
+            .or_else(|| earliest_recency(codex_home).ok().flatten())
+            .unwrap_or_else(|| now - chrono::Duration::days(7));
+        let start = start.min(now - chrono::Duration::seconds(1));
+        let audit = match collect_audit(
+            codex_home,
+            start,
+            now,
+            Some(identity.runtime_family.as_str()),
+            false,
+        ) {
+            Ok(audit) => audit,
+            Err(_) => {
+                let error = StateError::AuditFailed;
+                record_delivery_retry(&directory, now, &error)?;
+                persist_cycle_status(
+                    &directory,
+                    previous.as_ref(),
+                    now,
+                    StatusUpdate {
+                        result_code: "audit_failed",
+                        collected_through_utc: collected_through.clone(),
+                        uploaded_count: 0,
+                        pending_event_count: outbox.observed_count as u64,
+                        tailnet_status,
+                        trigger,
+                        successful: false,
+                    },
+                )?;
+                return Err(error);
+            }
+        };
+        if audit
+            .pointer("/scope/observed_root_sample_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+            > 0
+        {
+            let event = build_basic_event(
+                &audit,
+                EventIdentity {
+                    instance_id: identity.collector_instance_id,
+                    os_family: &identity.os_family,
+                    runtime_family: &identity.runtime_family,
+                    execution_mode: &identity.execution_mode,
+                },
+                EventConsent {
+                    receipt_id: consent.receipt_id,
+                    accepted_at_utc: &consent.accepted_at_utc,
+                },
+                env!("CARGO_PKG_VERSION"),
+                0,
+                trigger,
+            )
+            .map_err(|_| StateError::AuditFailed)?;
+            enqueue(&directory, &event)?;
+        }
+        collected_through = Some(now.to_rfc3339_opts(SecondsFormat::Millis, true));
+        outbox = pending_events(&directory, UPLOAD_BATCH_EVENTS)?;
     }
-    let uploaded = upload(&profile, &identity, &token, pending_events(&directory)?).await?;
-    let pending = pending_events(&directory)?.len() as u64;
-    write_status(
+    let uploaded = if outbox.observed_count > 0 && delivery_is_due(trigger, retry.as_ref(), now) {
+        let result = tokio::time::timeout(
+            UPLOAD_CYCLE_TIMEOUT,
+            upload(&profile, &identity, &token, outbox.batch),
+        )
+        .await
+        .unwrap_or(Err(StateError::UploadFailed));
+        match result {
+            Ok(receipt) => {
+                collected_through =
+                    latest_timestamp(collected_through, receipt.collected_through_utc.clone());
+                persist_cycle_status(
+                    &directory,
+                    previous.as_ref(),
+                    now,
+                    StatusUpdate {
+                        result_code: "delivery_acknowledged",
+                        collected_through_utc: collected_through.clone(),
+                        uploaded_count: receipt.uploaded_count,
+                        pending_event_count: outbox.observed_count as u64,
+                        tailnet_status: tailnet_status.clone(),
+                        trigger,
+                        successful: false,
+                    },
+                )?;
+                remove_acknowledged_events(&receipt)?;
+                receipt.uploaded_count
+            }
+            Err(error) => {
+                record_delivery_retry(&directory, now, &error)?;
+                let remaining = pending_events(&directory, 0)?;
+                persist_cycle_status(
+                    &directory,
+                    previous.as_ref(),
+                    now,
+                    StatusUpdate {
+                        result_code: &error.to_string(),
+                        collected_through_utc: collected_through.clone(),
+                        uploaded_count: 0,
+                        pending_event_count: remaining.observed_count as u64,
+                        tailnet_status,
+                        trigger,
+                        successful: false,
+                    },
+                )?;
+                return Err(error);
+            }
+        }
+    } else {
+        0
+    };
+    let remaining = pending_events(&directory, 0)?;
+    let result_code = if remaining.observed_count > 0 {
+        schedule_remaining_delivery(&directory, now)?;
+        if remaining.capacity_exceeded {
+            "outbox_capacity_exceeded"
+        } else {
+            "delivery_pending"
+        }
+    } else {
+        clear_delivery_retry(&directory)?;
+        "pass"
+    };
+    persist_cycle_status(
         &directory,
-        &Status {
-            schema_version: 4,
-            kind: "groundline-insights-owner-auto-status".to_owned(),
-            enabled: true,
-            last_result_code: "pass".to_owned(),
-            last_check_utc: now.to_rfc3339_opts(SecondsFormat::Millis, true),
-            last_success_utc: Some(now.to_rfc3339_opts(SecondsFormat::Millis, true)),
-            last_collected_through_utc: Some(now.to_rfc3339_opts(SecondsFormat::Millis, true)),
+        previous.as_ref(),
+        now,
+        StatusUpdate {
+            result_code,
+            collected_through_utc: collected_through.clone(),
             uploaded_count: uploaded,
-            pending_event_count: pending,
+            pending_event_count: remaining.observed_count as u64,
             tailnet_status,
-            last_trigger: trigger.to_owned(),
+            trigger,
+            successful: result_code == "pass",
         },
     )?;
+    crate::checkpoint::acknowledge_claimed_triggers(codex_home)
+        .map_err(|_| StateError::LocalState)?;
     Ok(json!({
-        "status":"PASS","result_code":"pass","uploaded_count":uploaded,"pending_event_count":pending,
-        "last_collected_through_utc":now.to_rfc3339_opts(SecondsFormat::Millis, true),
+        "status":if result_code == "pass" {"PASS"} else {"WARN"},"result_code":result_code,
+        "uploaded_count":uploaded,"pending_event_count":remaining.observed_count,
+        "outbox_capacity_exceeded":remaining.capacity_exceeded,
+        "last_collected_through_utc":collected_through,
         "raw_content_emitted":false,"private_paths_emitted":false,"secret_value_printed":false,
     }))
 }
@@ -1182,9 +1871,13 @@ mod tests {
     use crate::local_file::{open_bounded_regular_file, private_for_current_user};
 
     use super::{
-        ENROLLMENT_TOKEN_PATH, OUTBOX_DIR, POLICY_FILE, PROFILE_PATH, STATUS_FILE, StateError,
-        Status, configure_profile, enable, policy_enabled, set_policy, state_directory,
-        status_with_tailnet, status_with_tailnet_at, write_json, write_status,
+        CONSENT_FILE, DeliveryRetry, ENROLLMENT_TOKEN_PATH, MAX_OUTBOX_EVENTS, OUTBOX_DIR,
+        POLICY_FILE, PROFILE_PATH, QUARANTINE_DIR, STATUS_FILE, StateError, Status,
+        classify_response_status, collection_is_due, configure_profile, delivery_is_due, enable,
+        explicit_operator_retry, initialize, latest_timestamp, operator_retry_blocked,
+        pending_events, policy_enabled, record_delivery_retry, set_policy, state_directory,
+        status_with_tailnet, status_with_tailnet_at, validate_upload_response, write_json,
+        write_status,
     };
 
     fn profile(extra: &str) -> Vec<u8> {
@@ -1469,6 +2162,226 @@ mod tests {
         assert_eq!(
             future["blocking_reason_codes"],
             json!(["collection_clock_skew"])
+        );
+    }
+
+    #[test]
+    fn collection_cadence_and_delivery_retry_are_independent() {
+        let now = DateTime::parse_from_rfc3339("2026-08-31T00:10:00Z")
+            .expect("fixed now")
+            .with_timezone(&Utc);
+        let status = Status {
+            schema_version: 4,
+            kind: "groundline-insights-owner-auto-status".to_owned(),
+            enabled: true,
+            last_result_code: "pass".to_owned(),
+            last_check_utc: "2026-08-31T00:00:01Z".to_owned(),
+            last_success_utc: Some("2026-08-31T00:00:01Z".to_owned()),
+            last_collected_through_utc: Some("2026-08-31T00:00:01Z".to_owned()),
+            uploaded_count: 1,
+            pending_event_count: 0,
+            tailnet_status: "connected".to_owned(),
+            last_trigger: "session_end_hook".to_owned(),
+        };
+
+        assert!(!collection_is_due(
+            "session_end_hook",
+            Some(&status),
+            now,
+            900
+        ));
+        assert!(collection_is_due("manual", Some(&status), now, 900));
+        assert!(collection_is_due("history_sync", Some(&status), now, 900));
+        assert!(collection_is_due(
+            "session_end_hook",
+            Some(&Status {
+                last_check_utc: "2026-08-31T00:20:00Z".to_owned(),
+                ..status
+            }),
+            now,
+            900
+        ));
+
+        let retry = DeliveryRetry {
+            schema_version: 1,
+            kind: "groundline-insights-delivery-retry".to_owned(),
+            attempt_count: 1,
+            next_attempt_utc: Some("2026-08-31T00:11:00Z".to_owned()),
+            last_error_code: "event_upload_failed".to_owned(),
+            operator_required: false,
+        };
+        assert!(!delivery_is_due("session_end_hook", Some(&retry), now));
+        assert!(delivery_is_due(
+            "session_end_hook",
+            Some(&retry),
+            now + chrono::Duration::minutes(2)
+        ));
+        assert!(delivery_is_due("manual", Some(&retry), now));
+    }
+
+    #[test]
+    fn legacy_no_network_consent_requires_explicit_reconsent_and_quarantines_pending_work() {
+        let home = tempdir().expect("temporary Codex home");
+        let directory = state_directory(home.path());
+        let receipt = "10000000-0000-4000-8000-000000000001";
+        configure_profile(home.path(), &profile("")).expect("configure profile");
+        write_json(
+            &directory.join(CONSENT_FILE),
+            &json!({
+                "schema_version":1,
+                "kind":"groundline-insights-consent",
+                "scope":"basic_weekly",
+                "status":"active",
+                "receipt_id":receipt,
+                "accepted_at_utc":"2026-08-31T00:00:00Z",
+                "diagnostic_enabled":false,
+                "network_upload_enabled":false
+            }),
+        )
+        .expect("legacy consent");
+        write_json(
+            &directory.join(OUTBOX_DIR).join("legacy.json"),
+            &json!({"legacy":"pending"}),
+        )
+        .expect("legacy pending event");
+        let original = std::fs::read(directory.join(CONSENT_FILE)).expect("legacy consent bytes");
+
+        assert_eq!(
+            initialize(
+                &directory,
+                DateTime::parse_from_rfc3339("2026-08-31T00:10:00Z")
+                    .expect("fixed now")
+                    .with_timezone(&Utc),
+            )
+            .unwrap_err()
+            .to_string(),
+            "reconsent_required"
+        );
+        assert_eq!(
+            std::fs::read(directory.join(CONSENT_FILE)).expect("unchanged legacy consent"),
+            original
+        );
+        assert!(!directory.join("identity.json").exists());
+
+        enable(home.path()).expect("explicit reconsent");
+        let (_, consent) = initialize(
+            &directory,
+            DateTime::parse_from_rfc3339("2026-08-31T00:10:00Z")
+                .expect("fixed now")
+                .with_timezone(&Utc),
+        )
+        .expect("active consent");
+        assert_eq!(consent.schema_version, 2);
+        assert!(consent.owner_service_upload_enabled);
+        assert!(!consent.third_party_upload_enabled);
+        assert_ne!(consent.receipt_id.to_string(), receipt);
+        let stored: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(directory.join(CONSENT_FILE)).expect("stored consent"),
+        )
+        .expect("stored JSON");
+        assert_eq!(stored["owner_service_upload_enabled"], true);
+        assert_eq!(stored["third_party_upload_enabled"], false);
+        assert!(stored.get("network_upload_enabled").is_none());
+        assert!(directory.join("consent.legacy-v1.json").is_file());
+        assert!(directory.join(QUARANTINE_DIR).join("legacy.json").is_file());
+        assert!(!directory.join(OUTBOX_DIR).join("legacy.json").exists());
+    }
+
+    #[test]
+    fn outbox_inventory_and_retry_state_are_bounded() {
+        let home = tempdir().expect("temporary Codex home");
+        let directory = state_directory(home.path());
+        for index in 0..=MAX_OUTBOX_EVENTS {
+            write_json(
+                &directory.join(OUTBOX_DIR).join(format!("{index:04}.json")),
+                &json!({"index":index}),
+            )
+            .expect("outbox fixture");
+        }
+        let inventory = pending_events(&directory, 0).expect("bounded inventory");
+        assert!(inventory.capacity_exceeded);
+        assert_eq!(inventory.observed_count, MAX_OUTBOX_EVENTS + 1);
+        assert!(inventory.batch.is_empty());
+
+        let now = DateTime::parse_from_rfc3339("2026-08-31T00:10:00Z")
+            .expect("fixed now")
+            .with_timezone(&Utc);
+        let retry =
+            record_delivery_retry(&directory, now, &StateError::UploadFailed).expect("retry state");
+        assert_eq!(retry.attempt_count, 1);
+        assert!(retry.next_attempt_utc.is_some());
+        assert!(!retry.operator_required);
+        let rejected = record_delivery_retry(&directory, now, &StateError::RemoteRejected)
+            .expect("operator state");
+        assert_eq!(rejected.attempt_count, 2);
+        assert!(rejected.next_attempt_utc.is_none());
+        assert!(rejected.operator_required);
+    }
+
+    #[test]
+    fn upload_response_matrix_separates_retryable_and_operator_failures() {
+        for status in [200, 202] {
+            for outcome in ["accepted", "duplicate"] {
+                assert!(
+                    validate_upload_response(
+                        reqwest::StatusCode::from_u16(status).unwrap(),
+                        &json!({"status":"PASS","outcome":outcome}),
+                    )
+                    .is_ok()
+                );
+            }
+        }
+        for status in [408, 429, 500, 503] {
+            assert_eq!(
+                validate_upload_response(
+                    reqwest::StatusCode::from_u16(status).unwrap(),
+                    &json!({"status":"FAIL"}),
+                )
+                .unwrap_err()
+                .to_string(),
+                "event_upload_failed"
+            );
+        }
+        for status in [400, 401, 403, 422] {
+            assert_eq!(
+                validate_upload_response(
+                    reqwest::StatusCode::from_u16(status).unwrap(),
+                    &json!({"status":"FAIL"}),
+                )
+                .unwrap_err()
+                .to_string(),
+                "remote_request_rejected"
+            );
+            assert_eq!(
+                classify_response_status(reqwest::StatusCode::from_u16(status).unwrap())
+                    .unwrap_err()
+                    .to_string(),
+                "remote_request_rejected"
+            );
+        }
+        assert!(!explicit_operator_retry("session_end_hook"));
+        assert!(explicit_operator_retry("manual"));
+        assert!(explicit_operator_retry("history_sync"));
+        let operator_retry = DeliveryRetry {
+            schema_version: 1,
+            kind: "groundline-insights-delivery-retry".to_owned(),
+            attempt_count: 1,
+            next_attempt_utc: None,
+            last_error_code: "remote_request_rejected".to_owned(),
+            operator_required: true,
+        };
+        assert!(operator_retry_blocked(
+            "session_end_hook",
+            Some(&operator_retry)
+        ));
+        assert!(!operator_retry_blocked("manual", Some(&operator_retry)));
+        assert_eq!(
+            latest_timestamp(
+                Some("2026-08-31T00:00:00Z".to_owned()),
+                Some("2026-08-31T00:01:00Z".to_owned())
+            )
+            .as_deref(),
+            Some("2026-08-31T00:01:00Z")
         );
     }
 

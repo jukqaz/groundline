@@ -129,6 +129,14 @@ fn fresh_install_is_inert_until_owner_configuration_and_enablement() {
 }
 
 #[test]
+fn owner_report_requires_an_explicit_administrative_token_file() {
+    let output = run(&["insights", "fetch-report", "--json"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("--admin-token-file"), "stderr={stderr}");
+}
+
+#[test]
 fn provider_smoke_verifies_one_native_binary_package() {
     let root = tempdir().expect("temporary directory");
     let platform = run(&["platform", "--json"]);

@@ -59,6 +59,11 @@ and `.worktreeinclude` without reading or returning their values. Audit commands
 read the local Codex state store without modifying it. Efficiency commands accept
 explicit JSON files and never transmit them.
 
+The state database must be an owner-owned, non-symlinked regular file no larger
+than 8 GiB. Audits read at most 100,000 thread metadata rows and accept rollout
+files only below the canonical, non-symlinked `sessions` or `archived_sessions`
+root, with the existing per-file and total audit byte ceilings.
+
 ## Development
 
 ```console

@@ -57,6 +57,11 @@ groundline efficiency compare --input comparison.json --json
 `.worktreeinclude` 개수만 세고 내용은 읽거나 반환하지 않습니다. audit는 로컬
 Codex state store를 수정하지 않으며, efficiency 입력은 외부로 전송하지 않습니다.
 
+state database는 현재 사용자 소유의 symlink가 아닌 8 GiB 이하 regular file이어야
+합니다. audit은 thread metadata를 최대 100,000개만 읽고, canonical하며 symlink가
+아닌 `sessions` 또는 `archived_sessions` root 아래 rollout만 기존 file별·전체 byte
+상한 안에서 처리합니다.
+
 Insights 선택 기준은 [연동과 설치 프로필](../../docs/ko/integrations.md), 개발
 검증 명령은 영문 README와 [release checklist](../../docs/release-checklist.md)를
 참조하세요.

@@ -25,6 +25,11 @@ codex plugin add groundline-insights@groundline --json
 codex plugin marketplace upgrade groundline --json
 ```
 
+An upgrade that changes `hooks/hooks.json` requires a fresh Codex review of the
+new hook hash. GroundLine never grants trust to itself. `codex plugin list`
+proves installation and enablement, not that a changed hook was reviewed or
+dispatched; verify a new-task lifecycle receipt separately.
+
 See [integrations and installation profiles](../../docs/integrations.md) for the
 Core-only, Insights-only, and combined choices.
 
@@ -37,7 +42,9 @@ plugin installation does not by itself promise a user-shell `PATH` entry.
 groundline-insights provider-smoke --require-installed --json
 groundline-insights worker status
 groundline-insights worker run-once
-groundline-insights insights fetch-report --days 7 --json
+groundline-insights insights fetch-report \
+  --admin-token-file /owner-private/admin-report-token \
+  --days 7 --json
 ```
 
 ## Owner configuration
@@ -48,6 +55,10 @@ schema-7 input containing a Tailnet endpoint and an owner-issued
 owner-private files under `~/.codex/groundline/insights`; the secret is never
 printed or copied into the plugin. First-contact enrollment requires both
 Tailnet reachability and that credential. Each collector then uses its own token.
+The fleet-wide CLI report is an administrative operation: it requires an
+explicit owner-private file containing only the separate admin token. Collector
+tokens cannot fetch it. Keep that file off collector-only hosts and never commit
+or print it.
 
 ```console
 cp references/owner-profile.example.json owner-profile.json
@@ -56,6 +67,12 @@ groundline-insights worker configure --input owner-profile.json
 groundline-insights worker enable
 groundline-insights worker run-once
 ```
+
+`worker enable` is the explicit owner-service upload consent boundary. A legacy
+receipt whose contract disabled network upload is never broadened in place. The
+worker reports `reconsent_required`; running `worker enable` issues a new receipt
+and moves any legacy pending events into owner-private quarantine rather than
+uploading or deleting them.
 
 `worker status` reports the operational lane separately: `collection_state`,
 `ready_to_collect`, and bounded `blocking_reason_codes` distinguish an intentional
@@ -85,6 +102,15 @@ The API is the canonical ClickHouse schema migrator. Collection tables use
 which uses `FINAL` for logically deduplicated results. A retry is idempotent at
 the API boundary, while the storage report keeps any physical duplicate rows
 observable instead of hiding data-quality drift.
+The default service contract retains 365 days, caps each collector at 4,096
+retained events and 256 MiB of logical payload, and stops ingest at 90% of the
+configured dataset row or byte ceiling so administrative operations retain
+capacity. Operators may change only the documented bounded environment values.
+Local delivery is independently bounded to 256 queued events, 16 MiB, and
+16-event upload batches. Retryable failures use durable capped backoff; permanent
+remote rejection requires operator action. Grafana's TTL cleanup panel reports
+rows whose retention deadline passed but which still await ClickHouse's
+background merge. It never runs `OPTIMIZE` or deletes data.
 
 ## Evidence lanes
 
