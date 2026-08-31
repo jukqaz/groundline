@@ -51,6 +51,15 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
     let compose = text(&root.join("infrastructure/compose.template.yaml"))?;
     let api_dockerfile = text(&root.join("services/insights-api/Dockerfile"))?;
     let dockerignore = text(&root.join(".dockerignore"))?;
+    let stable_promotion_cleans_staging = rust
+        .split_once("\n  promote-stable:")
+        .and_then(|(_, stable)| {
+            Some((
+                stable.find("rm -rf distribution")?,
+                stable.find("cargo run --locked -p xtask -- verify-source --root . --json")?,
+            ))
+        })
+        .is_some_and(|(cleanup, verification)| cleanup < verification);
     super::compose::verify_compatibility_profile(
         &root.join("infrastructure/compatibility.json"),
         false,
@@ -99,6 +108,7 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
         "--max-time 10",
         "retention-days: 14",
         "name: promote both plugins to stable",
+        "rm -rf distribution",
         "--product core",
         "--product insights",
         "linux/amd64,linux/arm64",
@@ -149,6 +159,7 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
             .count()
             != 1
         || rust.matches("runs-on:").count() != rust.matches("timeout-minutes:").count()
+        || !stable_promotion_cleans_staging
         || !actions_are_pinned(&rust)
         || !setup.contains("using: composite")
         || !setup.contains("rustup toolchain install")
