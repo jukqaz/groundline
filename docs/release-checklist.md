@@ -44,10 +44,14 @@
 8. Build both binaries for all six targets from the exact release commit. Verify
    each product's target set, executable name, manifest, size, and SHA-256. Remap
    GitHub runner workspace and home paths before compiling release binaries.
-9. Publish one immutable GitHub release and the Insights API image. Record the
+9. Publish one versioned GitHub release without replacing an existing release,
+   and publish the Insights API image. Record the
    multi-platform image index digest, verify every binary asset with
-   `gh attestation verify --repo jukqaz/groundline <asset>`, and confirm the
-   normal renderer rejects a
+   `gh attestation verify --repo jukqaz/groundline --source-digest <commit> --source-ref refs/tags/<tag> --signer-workflow jukqaz/groundline/.github/workflows/rust.yml --deny-self-hosted-runners <asset>`.
+   Apply the same source/workflow checks to `oci://<image>@sha256:<digest>`.
+   Record GitHub's `isImmutable` result separately: the workflow's no-overwrite
+   check does not enable [GitHub release locking](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases).
+   Confirm the normal renderer rejects a
    moving image tag or unversioned Grafana plugin without the explicit
    qualification-only override. Do not inject
    production deployment credentials into release jobs.
@@ -63,6 +67,9 @@
 12. Refresh the marketplace in Codex. Verify Core and Insights package fingerprints
    independently, then verify hook dispatch, upload, ClickHouse, Grafana, and any
    production deployment as separate live lanes.
+   Version tags contain source; `stable` adds the verified native binaries.
+   If refresh leaves an installed version unchanged, reinstall only that same
+   plugin ID from the refreshed distribution and verify its checksum.
 13. Keep the generic Compose path labeled public preview until the exact release
    passes on a fresh host and another Tailnet node verifies TLS reachability,
    unauthenticated rejection, authenticated dashboard access, collector upload,

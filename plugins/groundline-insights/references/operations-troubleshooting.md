@@ -54,6 +54,8 @@ Interpret the lanes independently:
   advertises Basic schema 5 and ingest contract revision 3 or newer. Then run
   `worker run-once` explicitly. Cached credentials do not bypass this check;
   pending aggregates remain local and are not silently downgraded.
+  Authenticated enrollment must return the active collection generation; reuse
+  the same collector identity and token rather than assuming generation zero.
 - `invalid_owner_profile`: install the reviewed owner-local schema-7 input with
   `groundline-insights worker configure --input <profile.json>`; it must contain
   an enrollment credential, and neither the real endpoint nor credential belongs
@@ -95,6 +97,20 @@ package-integrity failure. Enabling without a valid owner profile and enrollment
 credential is rejected before identity, consent, or policy state is created.
 Seven days without a successful collection becomes `collection_state: stale`;
 a success timestamp more than five minutes in the future becomes `clock_skew`.
+
+## Unrecoverable historical gaps
+
+Some copied histories have no trustworthy ownership boundary. Do not infer one
+from rewritten timestamps or weaken collection checks to make the upload pass.
+If the owner chooses to resume current collection, preserve the original state,
+cursor, outbox, and server records; record the exact unprocessed interval and
+new boundary in a private owner ledger. Mark that interval unprocessed, never
+successfully uploaded. Changing the boundary needs explicit scope approval;
+an existing approval for that exact action remains sufficient.
+
+This is an owner-controlled recovery, not an automatic format migration or a
+public cursor-reset command. `worker backfill-history --confirm-rebuild` retries
+the current collection path and does not reconstruct all earlier history.
 
 Never expose token files, edit Codex SQLite, delete task data, run
 `VACUUM`, or infer completion from an idle task.

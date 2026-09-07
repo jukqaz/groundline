@@ -17,7 +17,7 @@ an operator deployment as production-ready.
 - Rust stable for the source-checkout deployment tools;
 - an HTTPS access origin for Grafana, normally supplied by Tailscale Serve or an
   owner-managed reverse proxy;
-- an immutable GroundLine release tag and Insights API image digest for
+- a reviewed GroundLine source release tag and Insights API image digest for
   production;
 - one infrastructure compatibility profile. The checked-in
   `infrastructure/compatibility.json` is the release-tested default, not a
@@ -27,7 +27,7 @@ Linux, macOS, and Windows Docker hosts can render absolute dataset roots. Use a
 path shared with the Docker VM on Docker Desktop. The collector plugin itself is
 released separately for ARM64 and x86-64 on all three operating systems.
 
-## 1. Check out one immutable release
+## 1. Check out one source release
 
 ```console
 RELEASE_TAG="vMAJOR.MINOR.PATCH"
@@ -48,7 +48,12 @@ multi-platform index digest into an immutable image reference such as
 `ghcr.io/jukqaz/groundline-insights-api@sha256:...`. Do not deploy a moving image
 tag in production.
 
-PowerShell uses the same immutable inputs:
+The source tag does not contain installed plugin binaries. Collector installation
+uses the verified `stable` distribution separately. A tag or release name alone
+does not prove GitHub release locking; verify the exact commit, asset checksums,
+and signed provenance before deployment.
+
+PowerShell uses the same versioned source and digest-pinned image:
 
 ```powershell
 $ReleaseTag = "vMAJOR.MINOR.PATCH"
@@ -239,9 +244,16 @@ shared shell transcript.
 
 ## 5. Configure each collector
 
+Upgrade the API before installing or enabling updated collectors. Its `/healthz`
+must advertise Basic schema 5 and ingest contract revision 3 or newer; enrollment
+returns the active collection generation. Existing identities and tokens are
+reused. Keep unsupported local state for explicit owner review instead of
+deleting it to force a fresh enrollment.
+
 Copy the installed plugin's `references/owner-profile.example.json` outside the
-plugin, replace the endpoint and enrollment placeholder with owner-private
-values, then run:
+plugin and repository, restrict it to the owner (`0600` on Unix or an equivalent
+private ACL on Windows), and replace its endpoint and enrollment placeholder.
+From that private directory, run:
 
 ```console
 groundline-insights worker configure --input owner-profile.json
@@ -253,6 +265,12 @@ groundline-insights worker status
 Resolve `groundline-insights` from the installed plugin's `bin/<target>` folder
 if Codex did not add it to the shell `PATH`. Confirm accepted upload, ClickHouse
 visibility, and Grafana frames independently.
+
+First collection covers seven days; later runs resume from the saved cursor.
+Unknown ownership, unreadable records, or inconsistent counters preserve the
+incomplete window and stop automatic reads after three attempts. See
+[operations troubleshooting](../plugins/groundline-insights/references/operations-troubleshooting.md)
+before changing state or retrying a historical gap.
 
 ## Failure boundaries
 

@@ -61,7 +61,7 @@ retain priority; a missing source must not delete or prevent draining the outbox
 | Docker Compose | Public self-hosting preview | Generic placeholder-only service topology, authenticated Grafana, and private rendered secrets |
 | TrueNAS | Optional operator overlay | Owner-run preflight/apply controller layered over the generic deployment contract; no private inventory is shipped |
 
-See [self-hosting GroundLine Insights](self-hosting.md) for the immutable
+See [self-hosting GroundLine Insights](self-hosting.md) for the versioned source
 checkout, private render, real stack, semantic Grafana verification, and
 collector enrollment sequence. Server deployment runs from a source checkout;
 installing the Codex plugin alone does not install Docker services.
@@ -103,9 +103,15 @@ upgrade or reconfigure anyone's private service.
 ## User-selectable operations
 
 An owner can choose whether to install Insights, when to enable or disable it,
-which private Tailnet endpoint to use, whether to run an explicit initial
-backfill, and whether to consume strict JSON reports or the supplied Grafana
+which private Tailnet endpoint to use, when to explicitly retry collection,
+and whether to consume strict JSON reports or the supplied Grafana
 dashboard. Report windows are 7, 30, or 90 days.
+
+The first collection covers seven days; subsequent runs use the saved cursor.
+`worker backfill-history --confirm-rebuild` retries that same collection path;
+it does not rewind the cursor, replay all history, or replace existing server
+events. Unrecoverable historical gaps need an explicit owner decision and a
+preserved gap record before changing the collection boundary.
 
 The current privacy contract intentionally fixes aggregate-only collection,
 native hook checkpoints, a 900-second minimum checkpoint interval, disabled

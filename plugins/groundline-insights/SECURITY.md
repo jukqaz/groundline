@@ -3,7 +3,7 @@
 GroundLine Insights is the optional public-source, owner-operated data companion
 for GroundLine. It is independently installable, is not the Core guidance plugin,
 and remains inactive until the owner configures a schema-7 profile, a separate
-enrollment credential, and hook trust.
+enrollment credential, explicit `worker enable` consent, and hook trust.
 
 ## Current boundaries
 

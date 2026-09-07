@@ -83,8 +83,9 @@ by this preflight, and the existing bounded readiness cache and rate limit apply
 
 The first collection covers the preceding seven days. Existing valid cursors
 are preserved; `history_sync` retries the current window, not all historical
-data. Task modification times only prune old candidates; they never exclude a
-thread because it continued after the requested end. Records decide event time.
+data. The newest update/recency timestamp prunes old candidates; stale sidebar
+ordering cannot exclude an active turn. Continuing after the requested end does
+not remove historical events. Records decide event time.
 
 A private `collection-window.json` (at most 128 KiB) freezes the start/end and
 counts attempts before reading. Only complete owned-scope reads prepare an
@@ -148,7 +149,12 @@ enabled; rejected events stay operator-visible.
 
 Activity samples count selected ongoing or completed roots with
 `completed_root_coverage=false`; weekly samples require a final completed turn.
-Compressed Codex rollouts are read within decoded-byte limits. Read failures and
+Streaming reads cap decoded input at 1 GiB per rollout and 8 GiB per invocation,
+retaining at most 512 MiB of audit records. Native thread totals and UI totals
+use independent baselines; valid native totals take precedence without adding
+the streams. Selected-source resets inside the window and uncovered response
+suffixes remain incomplete. Resets before the window do not poison its later
+baseline. Read failures and
 unread shared-history prefixes remain partial evidence, never a
 claim that all provider history was collected.
 

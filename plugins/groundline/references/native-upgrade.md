@@ -1,8 +1,11 @@
 # Native upgrade boundary
 
 Codex owns marketplace refresh, plugin installation, and plugin upgrade. A
-GroundLine release publishes immutable target artifacts and advances the moving
+GroundLine release publishes checksummed, attested target artifacts and advances the moving
 `stable` branch only after qualification.
+
+Version tags contain source; the generated `stable` commit adds both native
+binary trees. A source tag alone is not an installable binary distribution.
 
 Core and Insights share that marketplace channel but remain independent plugin
 installations. Refreshing Core never installs or activates Insights, and an
@@ -17,9 +20,10 @@ After refresh or upgrade, verify four distinct lanes:
 
 A result from one lane does not prove the others.
 
-Use the provider's current upgrade command or App action. Codex CLI 0.153.0
-added remote-marketplace operations and merged-configuration Git marketplace
-upgrades; a remote marketplace and GroundLine's Git `stable` channel remain
+Use Codex App Refresh or `codex plugin marketplace upgrade groundline --json`.
+Inspect `codex plugin list --json`; if Core remains on the old version, install
+the same ID again with `codex plugin add groundline@groundline --json` and verify
+its checksum. A remote marketplace and GroundLine's Git `stable` channel are
 different sources. Inspect the actual installed source before troubleshooting.
 GroundLine does not maintain a parallel updater or rewrite Codex plugin state.
 

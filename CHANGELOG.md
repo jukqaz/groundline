@@ -1,7 +1,5 @@
 # Changelog
 
-## Unreleased
-
 ## 0.21.2
 
 - Keep native response and UI usage totals on independent baselines, preserving
@@ -11,6 +9,9 @@
   semantics, and reject other runtimes after metadata without reading their bodies.
 - Include active turns whose sidebar recency predates their latest update.
   Preserve explicit incomplete results for unreadable or unattributed history.
+- Consolidate package release summaries and language guidance, remove unwired
+  scenario files, and align installation, history retry, and release verification
+  documentation in English and Korean. Preserve older notes in Git history.
 
 ## 0.21.1
 

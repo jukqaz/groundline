@@ -30,6 +30,9 @@ codex plugin marketplace add https://github.com/jukqaz/groundline.git --ref stab
 codex plugin add groundline@groundline --json
 ```
 
+갱신 절차는 [네이티브 업그레이드](references/native-upgrade.md)를 따릅니다.
+버전 태그에는 소스가 있으므로 설치에는 실행 파일이 포함된 `stable`을 사용합니다.
+
 업그레이드 후 설치 package와 native artifact를 각각 검증합니다.
 
 ```console
@@ -48,6 +51,8 @@ shell의 `PATH` 등록까지 보장하는 것은 아닙니다.
 ```console
 groundline platform --json
 groundline project-audit --repo . --json
+groundline config-audit --config /private/config.toml --catalog /private/models.json --json
+groundline guidance audit --profile /private/review/profile.json --baseline /private/review/baseline.json --json
 groundline audit weekly --days 7 --json
 groundline efficiency batch --input batch.json --json
 groundline efficiency compare --input comparison.json --json
@@ -57,11 +62,18 @@ groundline efficiency compare --input comparison.json --json
 `.worktreeinclude` 개수만 세고 내용은 읽거나 반환하지 않습니다. audit는 로컬
 Codex state store를 수정하지 않으며, efficiency 입력은 외부로 전송하지 않습니다.
 
+`config-audit`는 제공한 네이티브 모델 카탈로그와 설정을 비교합니다.
+`align-agent-home`은 개인 스킬 점검을 담당하며, `guidance audit`는 추가·삭제·변경을
+확인하고 `guidance snapshot`은 기존 파일을 덮어쓰지 않는 비공개 기준 기록을
+만듭니다. 자세한 절차는 [스킬 관리](references/skill-maintenance.md)를 참고하세요.
+
 state database는 현재 사용자 소유의 symlink가 아닌 8 GiB 이하 regular file이어야
 합니다. audit은 thread metadata를 최대 100,000개만 읽고, canonical하며 symlink가
-아닌 `sessions` 또는 `archived_sessions` root 아래 rollout만 기존 file별·전체 byte
-상한 안에서 처리합니다.
+아닌 `sessions` 또는 `archived_sessions` 아래 기록만 읽습니다. 압축 해제 입력은
+파일당 1 GiB, 감사당 8 GiB, 보관할 집계 레코드는 512 MiB로 제한합니다.
+사용량 기준값과 불완전 이력의 처리는 [주간 감사](references/weekly-usage-audit.md)에
+정리되어 있습니다.
 
-Insights 선택 기준은 [연동과 설치 프로필](../../docs/ko/integrations.md), 개발
-검증 명령은 영문 README와 [release checklist](../../docs/release-checklist.md)를
+Insights 선택 기준은 [연동과 설치 프로필](https://github.com/jukqaz/groundline/blob/main/docs/ko/integrations.md), 개발
+검증 명령은 [영문 README](README.md)와 [release checklist](https://github.com/jukqaz/groundline/blob/main/docs/release-checklist.md)를
 참조하세요.

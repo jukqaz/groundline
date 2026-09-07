@@ -31,6 +31,10 @@ codex plugin marketplace add https://github.com/jukqaz/groundline.git --ref stab
 codex plugin add groundline@groundline --json
 ```
 
+Use [native upgrade](references/native-upgrade.md) to refresh the installed
+package. Version tags contain source; use the binary-bearing `stable`
+distribution for installation.
+
 After an upgrade, verify the installed package and native artifact independently:
 
 ```console
@@ -74,7 +78,9 @@ or user-home verification script is required by the native commands.
 The state database must be an owner-owned, non-symlinked regular file no larger
 than 8 GiB. Audits read at most 100,000 thread metadata rows and accept rollout
 files only below the canonical, non-symlinked `sessions` or `archived_sessions`
-root, with the existing per-file and total audit byte ceilings.
+root. Streaming input is bounded to 1 GiB per rollout and 8 GiB per audit, with
+at most 512 MiB of retained audit records. See [weekly audit](references/weekly-usage-audit.md)
+for event windows, independent native/UI baselines, and incomplete history.
 
 ## Development
 
@@ -86,9 +92,10 @@ cargo run --locked -p xtask -- verify-source --root . --json
 ```
 
 Pull requests run only the fast lane. Full qualification and six-platform release
-artifacts are explicit manual workflows, with concurrency cancellation, timeouts,
+artifacts run for release tags or explicit manual requests, with concurrency cancellation, timeouts,
 and short artifact retention.
 
-See the repository [integration profiles](../../docs/integrations.md),
-[Privacy](../../docs/privacy.md), [Security](../../SECURITY.md), and
-[release checklist](../../docs/release-checklist.md).
+See the repository [integration profiles](https://github.com/jukqaz/groundline/blob/main/docs/integrations.md),
+[Privacy](https://github.com/jukqaz/groundline/blob/main/docs/privacy.md),
+[Security](SECURITY.md), and
+[release checklist](https://github.com/jukqaz/groundline/blob/main/docs/release-checklist.md).

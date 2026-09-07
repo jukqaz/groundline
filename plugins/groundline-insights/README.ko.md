@@ -26,8 +26,12 @@ Grafana는 이 API에 연결됩니다. 모델 설정이나 추론 인증 정보�
 ```console
 codex plugin marketplace add https://github.com/jukqaz/groundline.git --ref stable --json
 codex plugin add groundline-insights@groundline --json
-codex plugin marketplace upgrade groundline --json
 ```
+
+갱신은 `codex plugin marketplace upgrade groundline --json`으로 실행한 뒤
+`codex plugin list --json`으로 설치 버전을 확인합니다. 필요하면 같은 Insights ID를
+다시 설치합니다. 소스 태그에는 실행 파일이 없으므로
+[네이티브 업그레이드](references/native-upgrade.md)의 배포본·API 우선 절차를 따릅니다.
 
 업그레이드로 `hooks/hooks.json` hash가 바뀌면 Codex에서 새 hook을 다시 검토하고
 신뢰해야 합니다. GroundLine은 자신의 trust를 승인하지 않습니다.
@@ -35,7 +39,7 @@ codex plugin marketplace upgrade groundline --json
 새 task의 lifecycle receipt를 별도로 확인합니다.
 
 Core만, Insights만, 둘 다 설치하는 선택 기준은
-[연동과 설치 프로필](../../docs/ko/integrations.md)에 정리되어 있습니다.
+[연동과 설치 프로필](https://github.com/jukqaz/groundline/blob/main/docs/ko/integrations.md)에 정리되어 있습니다.
 
 binary 이름은 macOS/Linux에서 `groundline-insights`, Windows에서
 `groundline-insights.exe`입니다. 세 운영체제의 ARM64·x86-64를 지원합니다.
@@ -54,6 +58,15 @@ token을 사용합니다. 설정 입력은 운영 비밀이므로 Git에 commit�
 `references/owner-profile.example.json`은 전체 필드를 제공하지만 `REPLACE_ME`를
 의도적으로 짧게 두었으므로 그대로는 활성화되지 않습니다. endpoint와 token을
 owner-private 값으로 바꾼 복사본만 `worker configure --input`에 전달합니다.
+복사본은 플러그인·저장소 밖에 두고 소유자만 읽을 수 있게 제한합니다.
+
+```console
+groundline-insights worker configure --input /owner-private/owner-profile.json
+groundline-insights worker enable
+groundline-insights worker run-once
+groundline-insights worker status
+```
+
 수집 wire contract는 raw prompt, response, transcript, command, patch, path,
 hostname, 저장소명, task/rollout/account/IP 식별자를 거부합니다.
 
@@ -75,6 +88,11 @@ groundline-insights insights fetch-report \
 명시적으로 승인받아 새로 설정해야 합니다. 동의서가 없는 경우에만 enable이 새
 receipt를 만들고 미동의 pending event를 quarantine으로 격리합니다. 유효한
 동의서는 다시 활성화해도 유지합니다.
+
+최초 수집은 최근 7일입니다. 이후에는 커서를 보존하며, 불완전한 구간을 고정한 채
+자동 읽기를 최대 3회 시도합니다. 과거 누락 구간의 시작 경계를 바꾸려면 원본과
+미처리 기록을 보존하고 운영자가 명시적으로 결정해야 합니다.
+[문제 해결](references/operations-troubleshooting.md)을 참고하세요.
 
 `worker status`는 `collection_state`, `ready_to_collect`, 제한된
 `blocking_reason_codes`로 의도적인 비활성, 설정 누락/오류, Tailnet 미확인/끊김,
@@ -114,6 +132,6 @@ upload, ClickHouse 반영, Grafana frame, image 게시, 배포, stable 승격은
 Git과 public CI 밖에 둡니다.
 
 서버 checkout, private Compose render, 실제 ClickHouse·Grafana 검증 순서는
-[셀프호스팅 가이드](../../docs/ko/self-hosting.md)를 참조하세요.
+[셀프호스팅 가이드](https://github.com/jukqaz/groundline/blob/main/docs/ko/self-hosting.md)를 참조하세요.
 
 License: MIT.

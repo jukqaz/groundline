@@ -28,15 +28,20 @@ audits are also wanted.
 ```console
 codex plugin marketplace add https://github.com/jukqaz/groundline.git --ref stable --json
 codex plugin add groundline-insights@groundline --json
-codex plugin marketplace upgrade groundline --json
 ```
+
+Refresh with `codex plugin marketplace upgrade groundline --json`, then verify
+the installed version with `codex plugin list --json`. If necessary, install
+the same Insights ID again. Source tags do not contain native binary trees;
+the [native upgrade guide](references/native-upgrade.md) describes the verified
+distribution and API-first sequence.
 
 An upgrade that changes `hooks/hooks.json` requires a fresh Codex review of the
 new hook hash. GroundLine never grants trust to itself. `codex plugin list`
 proves installation and enablement, not that a changed hook was reviewed or
 dispatched; verify a new-task lifecycle receipt separately.
 
-See [integrations and installation profiles](../../docs/integrations.md) for the
+See [integrations and installation profiles](https://github.com/jukqaz/groundline/blob/main/docs/integrations.md) for the
 Core-only, Insights-only, and combined choices.
 
 The packaged executable is `groundline-insights` (`groundline-insights.exe` on
@@ -66,12 +71,15 @@ explicit owner-private file containing only the separate admin token. Collector
 tokens cannot fetch it. Keep that file off collector-only hosts and never commit
 or print it.
 
+Copy the installed `references/owner-profile.example.json` to an owner-private
+directory outside the plugin and repository. Restrict it to the owner before
+filling in the endpoint and credential, then use that absolute path:
+
 ```console
-cp references/owner-profile.example.json owner-profile.json
-# Replace the example endpoint and REPLACE_ME with owner-private values.
-groundline-insights worker configure --input owner-profile.json
+groundline-insights worker configure --input /owner-private/owner-profile.json
 groundline-insights worker enable
 groundline-insights worker run-once
+groundline-insights worker status
 ```
 
 `worker enable` is the explicit owner-service upload consent boundary. Only the
@@ -81,6 +89,11 @@ formats return `unsupported_local_state` without conversion or deletion;
 stop collection, and obtain explicit approval before a fresh setup. When no
 consent exists, explicit enable creates a receipt and quarantines unconsented
 pending events. An existing valid receipt is preserved on re-enable.
+
+New collection starts with a seven-day lookback. Later runs preserve the cursor
+and freeze any incomplete window; automatic reading stops after three failures.
+Historical-gap recovery requires an owner decision and preserved evidence. See
+[operations troubleshooting](references/operations-troubleshooting.md).
 
 `worker status` reports the operational lane separately: `collection_state`,
 `ready_to_collect`, and bounded `blocking_reason_codes` distinguish an intentional
@@ -138,8 +151,8 @@ public CI never receives production credentials.
 
 See [operations troubleshooting](references/operations-troubleshooting.md),
 [native upgrade](references/native-upgrade.md), and the repository
-[self-hosting guide](../../docs/self-hosting.md) and
-[privacy policy](../../docs/privacy.md). Unsupported sinks and future adapter
-requirements are listed in the [integration matrix](../../docs/integrations.md).
+[self-hosting guide](https://github.com/jukqaz/groundline/blob/main/docs/self-hosting.md) and
+[privacy policy](https://github.com/jukqaz/groundline/blob/main/docs/privacy.md). Unsupported sinks and future adapter
+requirements are listed in the [integration matrix](https://github.com/jukqaz/groundline/blob/main/docs/integrations.md).
 
 License: MIT.
