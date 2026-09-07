@@ -5,99 +5,53 @@ description: Use when explicitly aligning Codex guidance, worktree readiness, pl
 
 # Align Agent Home
 
-## Purpose
+Audit the requested Codex project/home surfaces and apply authorized changes,
+preserving official components and user-owned settings.
 
-Audit Codex project and home surfaces while preserving official plugins,
-private state, and user-owned settings.
+## Select the relevant checks
 
-## Workflow
+Resolve the installed platform binary using
+[platform commands](../../references/platform-commands.md). Source, installed
+package, App-bundled CLI, and PATH CLI are separate evidence. Do not patch
+provider caches or substitute an unrelated binary when one is missing.
 
-1. Resolve the installed platform binary from this file's plugin root. Never
-   assume the current repository is GroundLine or that `groundline` is on the
-   user shell's `PATH`. In the examples below, invoke that resolved absolute
-   executable path in place of the bare command name.
+- Project structure: `groundline project-audit --repo . --json` inventories
+  guidance, config, skills, agents, rules, hooks, and worktree surfaces.
+- Installed package: `groundline provider-smoke --require-installed --json`
+  verifies the package and native artifact.
+- Slow or inconsistent local state: `groundline doctor --json` checks only
+  presence and installation structure; it does not read stored content.
+- Configuration, model/effort, permissions, or worktree readiness: read
+  [configuration review](../../references/codex-configuration.md). Use its
+  offline `config-audit` and native strict doctor only when relevant.
+- Personal/imported skill inventory, source refresh, deduplication, or regression
+  checks: read [skill maintenance](../../references/skill-maintenance.md).
+  GroundLine owns profile/baseline checks; Codex performs reviewed changes.
 
-2. Start read-only:
+Do not load every reference or run every command for a narrow request. Before
+adopting current Codex features, consult official OpenAI documentation and the
+actual runtime. Keep native diagnostics separate from GroundLine checks.
 
-```bash
-groundline project-audit --repo . --json
-groundline provider-smoke --require-installed --json
-```
+## Apply the requested alignment
 
-If Codex slows after long use, add the explicit read-only health probe:
+Read-only reviews do not authorize edits. An implementation request covers its
+routine in-scope steps; ask only for a material missing choice or new authority.
+Keep user steering attached to the same task while its outcome remains aligned.
 
-```bash
-groundline doctor --json
-```
+Keep global guidance minimal and repository behavior local. Remove custom
+duplicates only after establishing ownership. Preserve model, effort, service
+tier, permissions, experiments, Chronicle, personality, and UI unless the user
+requests a change. Native Codex owns planning, delegation, context management,
+and plugin upgrades; no parallel orchestration layer is needed.
 
-It reports only plugin, platform, and local state-store presence; it neither
-prints stored content nor mutates Codex state.
+Never copy private configuration, personal skills, credentials, transcripts,
+databases, or runtime caches into the public plugin. Emit structural counts and
+minimal relevant non-secret excerpts, not whole private files. Core has no
+lifecycle hooks; optional Insights has a separate consented checkpoint contract.
+Hook trust alone does not prove installation, dispatch, or collection consent.
 
-Run Codex's strict native doctor separately when current provider diagnostics
-are needed; keep its evidence distinct from GroundLine's read-only checks.
-
-3. Map `AGENTS.md`, `.codex/config.toml`, skills, agents, rules, one hook form
-   per layer, plugins, MCP, root `.worktreeinclude`, and
-   `.codex/environments/*.toml`. Emit structural counts,
-   never values or bodies. Leave trust-dependent activation `UNVERIFIED`
-   absent provider evidence.
-4. Load design guidance on demand, outside always-on context.
-5. Keep auth, sessions, logs, OAuth material, shell snapshots, caches,
-   databases, MCP headers, and environment values out of source and output.
-6. Verify drift-prone claims locally. The App-bundled CLI is primary; PATH CLI
-   is a secondary automation surface:
-
-```bash
-/Applications/ChatGPT.app/Contents/Resources/codex --version
-codex --version
-codex features list
-codex debug models
-codex debug prompt-input
-codex --strict-config doctor --summary --no-color --ascii
-```
-
-Keep catalog, runtime, persisted settings, defaults, token metadata, quota,
-and billing distinct.
-7. Check current official OpenAI documentation before adopting plugin surfaces.
-8. For App-managed local worktrees, prefer checked-in local environments for
-   setup and actions. Create root `.worktreeinclude` only when failed setup or
-   project evidence proves an ignored file is required and the user requested
-   changes. Use minimal patterns, exclude tracked files and broad directories,
-   never emit values, verify targets are ignored, and smoke a fresh worktree
-   when practical. It does not affect Remote or CLI Git worktrees.
-9. Keep official components. Remove custom duplicates only after identifying
-   ownership; keep repository capabilities local and prefer Codex-native
-   planning, delegation, debugging, review, and verification. Do not import
-   orchestration packs wholesale; add GroundLine only for a repeated gap.
-10. Report bundled and PATH CLIs separately; never infer App support from PATH.
-11. Treat models, effort, quotas, and compaction as Codex-owned. Preserve
-    App-authored settings, plugins, connectors, experiments, Chronicle,
-    personality, and UI. Explain Fast/priority tradeoffs; change
-    `service_tier` only on request.
-12. The public GroundLine package must have no lifecycle hook. Treat any
-    packaged owner hook as a failed installation contract and do not trust it.
-13. Preserve requested permissions and approvals. Never mix or silently
-    migrate beta profiles with legacy
-    `sandbox_mode`. Prefer `:workspace`, retain
-    `approvals_reviewer = "auto_review"`, and never map safe Auto to
-    `:danger-full-access`. Report review cost and latency.
-14. Validate App-bundled runtime first, then PATH CLI audit and smoke.
-
-## Source Boundaries
-
-Source control may contain reviewed guidance, intentional config, selected
-agents, rules, hooks, and skills. Keep private runtime files and secrets out.
-
-## Output Contract
-
-```text
-Conclusion: aligned / partially aligned / blocked
-Changed:
-- ...
-Preserved runtime/private state:
-- ...
-Verification:
-- command and result
-Unverified:
-- ...
-```
+Verify affected behavior once, then broaden only for new changes or unresolved
+risk. Report the result, useful evidence, and remaining gaps without empty
+templates. Distinguish source changes, package validation, installed runtime,
+and live behavior. Name and link the exact skill instruction if it causes a
+pause or changes the requested direction.

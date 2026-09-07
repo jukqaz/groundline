@@ -31,6 +31,49 @@ fn path_argument(path: &Path) -> &str {
 }
 
 #[test]
+fn doctor_uses_native_store_discovery_without_model_configuration_or_executables() {
+    let home = tempdir().unwrap();
+    let empty_path = home.path().join("empty-path");
+    fs::create_dir(&empty_path).unwrap();
+    let config = b"INVALID TOML [ PRIVATE_CONFIG_SENTINEL";
+    fs::write(home.path().join("config.toml"), config).unwrap();
+    // Doctor proves presence only, not SQLite schema validity or live delivery.
+    fs::write(home.path().join("state_42.sqlite"), b"presence-fixture").unwrap();
+    let inspect = || {
+        let output = Command::new(groundline())
+            .args([
+                "doctor",
+                "--codex-home",
+                path_argument(home.path()),
+                "--json",
+            ])
+            .env("PATH", &empty_path)
+            .env("OPENCODEX_HOME", home.path().join("removed-proxy"))
+            .env("OPENAI_BASE_URL", "http://127.0.0.1:1")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "stderr={:?}", output.stderr);
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("PRIVATE_CONFIG_SENTINEL"));
+        parse_stdout(&output)
+    };
+    let result = inspect();
+    assert_eq!(result["codex_state_store_present"], true);
+    assert_eq!(result["collection_source"], "native_codex_state");
+    for field in [
+        "inference_proxy_required",
+        "model_catalog_required",
+        "core_plugin_required",
+        "network_performed",
+        "mutation_performed",
+    ] {
+        assert_eq!(result[field], false);
+    }
+    fs::write(home.path().join("state_43.sqlite"), []).unwrap();
+    assert_eq!(inspect()["codex_state_store_present"], false);
+    assert_eq!(fs::read(home.path().join("config.toml")).unwrap(), config);
+}
+
+#[test]
 fn platform_command_reports_the_native_packaging_contract() {
     let output = run(&["platform", "--json"]);
     assert!(output.status.success(), "stderr={:?}", output.stderr);
@@ -126,6 +169,69 @@ fn fresh_install_is_inert_until_owner_configuration_and_enablement() {
     let enable = run(&["worker", "enable", "--codex-home", home_arg]);
     assert!(enable.status.success(), "stderr={:?}", enable.stderr);
     assert_eq!(parse_stdout(&enable)["enabled"], true);
+}
+
+#[test]
+fn enable_rejects_unsupported_state_with_a_private_nonzero_receipt() {
+    let example = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../plugins/groundline-insights/references/owner-profile.example.json");
+    let profile = fs::read_to_string(example)
+        .unwrap()
+        .replace("REPLACE_ME", &"e".repeat(32));
+    for file in [
+        "consent.json",
+        "owner-auto-policy.json",
+        "owner-auto-status.json",
+    ] {
+        let home = tempdir().unwrap();
+        groundline_runtime::insights_state::configure_profile(home.path(), profile.as_bytes())
+            .unwrap();
+        groundline_runtime::insights_state::enable(home.path()).unwrap();
+        let directory = groundline_runtime::insights::state_directory(home.path());
+        let unsupported = br#"{"schema_version":0,"private_value":"PRIVATE_SENTINEL"}"#;
+        groundline_runtime::local_file::atomic_write_private(&directory.join(file), unsupported)
+            .unwrap();
+        let files = [
+            "consent.json",
+            "owner-auto-policy.json",
+            "owner-auto-status.json",
+            "identity.json",
+        ];
+        let before = files.map(|name| fs::read(directory.join(name)).ok());
+        let output = run(&[
+            "worker",
+            "enable",
+            "--codex-home",
+            path_argument(home.path()),
+        ]);
+        assert_eq!(output.status.code(), Some(1));
+        let result = parse_stdout(&output);
+        assert_eq!(result["status"], "FAIL");
+        assert_eq!(result["result_code"], "unsupported_local_state");
+        assert_eq!(result["network_performed"], false);
+        assert_eq!(result["private_paths_emitted"], false);
+        assert_eq!(result["secret_value_printed"], false);
+        let emitted = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!emitted.contains("PRIVATE_SENTINEL"));
+        assert!(!emitted.contains(path_argument(home.path())));
+        assert_eq!(
+            files.map(|name| fs::read(directory.join(name)).ok()),
+            before
+        );
+        // Explicit revocation must remain possible even when activation is blocked.
+        let disable = run(&[
+            "worker",
+            "disable",
+            "--codex-home",
+            path_argument(home.path()),
+        ]);
+        assert!(disable.status.success());
+        assert!(!groundline_runtime::insights_state::checkpoint_enabled(home.path()).unwrap());
+    }
 }
 
 #[test]

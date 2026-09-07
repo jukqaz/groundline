@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased
+
+## v0.21.0 - 2026-09-07
+
+- Make native Codex-only collection an explicit contract, independent of Core,
+  inference proxies, generated model catalogs, and inference configuration.
+- Share version-independent state discovery between doctor and collection;
+  report missing native activity without false readiness or outbox deletion.
+- Reject Unix FIFO inputs before blocking on open, and test native activity
+  through valid outbox events without model configuration or proxy executables.
+
+- Remove consent-v1 and former private policy/status imports. Unsupported state
+  fails explicitly without conversion, deletion, or implicit re-enablement.
+- Validate existing policy and status before enablement writes; preserve current
+  consent across re-enable and quarantine unconsented data only on fresh consent.
+
+- Stage immutable collection windows and exact prepared aggregates before
+  advancing the cursor; partial reads retry at most three times automatically.
+- Start initial collection at a seven-day lookback, preserve incomplete windows,
+  and separate owned-scope completeness from sample confidence.
+- Preflight API ingest capabilities even with a cached token, retain incompatible
+  outbox data, and normalize consent timestamps to the strict wire format.
+- Reuse the bounded compressed-rollout reader and shared model/effort label
+  contract for Astra and future model IDs.
+- Fix activity-event sample consistency so an ongoing selected root can pass
+  the strict ingestion contract without claiming it completed.
+- Accept bounded `astra` and `gpt-6` family dimensions in ingestion, reports,
+  and comparisons. Upgrade the API before updated collectors; unknown model
+  identifiers remain `other`, and arbitrary dimensions remain rejected.
+- Share usage provenance labels between producer and validator, including
+  deduplicated native response usage and mixed-source aggregates.
+
 ## v0.20.2 - 2026-08-31
 
 - Separate owner-admin reporting from collector ingestion credentials and read

@@ -454,17 +454,8 @@ fn comparison_snapshot(value: &Value, label: &str) -> Result<ComparisonSnapshot,
             "execution_mode",
             &["desktop", "local_headless", "remote_headless", "unknown"][..],
         ),
-        (
-            "model_family",
-            &["luna", "terra", "sol", "gpt-5", "other", "unknown"][..],
-        ),
-        (
-            "effort",
-            &[
-                "none", "unset", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
-                "unknown",
-            ][..],
-        ),
+        ("model_family", crate::model::MODEL_FAMILIES),
+        ("effort", crate::model::EFFORTS),
     ] {
         if !allowed(cohort.get(field), options) {
             return Err(ContractError(format!(

@@ -13,6 +13,12 @@ does not require Core. It owns only the networked surface:
 It does not package GroundLine skills, alter global Codex configuration, install
 a daemon or scheduler, or replace Codex permissions and execution.
 
+Native Codex App/CLI is the collection source. No inference proxy, generated
+model catalog, custom provider configuration, or Core installation is required.
+Insights reads native activity into a private aggregate outbox and sends it
+directly to the owner API over Tailnet; ClickHouse and Grafana remain downstream
+of that API. It does not read model configuration or inference credentials.
+
 ## Install and upgrade
 
 Register the monorepo once and install the Insights plugin. This does not install
@@ -68,11 +74,13 @@ groundline-insights worker enable
 groundline-insights worker run-once
 ```
 
-`worker enable` is the explicit owner-service upload consent boundary. A legacy
-receipt whose contract disabled network upload is never broadened in place. The
-worker reports `reconsent_required`; running `worker enable` issues a new receipt
-and moves any legacy pending events into owner-private quarantine rather than
-uploading or deleting them.
+`worker enable` is the explicit owner-service upload consent boundary. Only the
+current consent, policy, and status formats are supported. Older or unknown
+formats return `unsupported_local_state` without conversion or deletion;
+`worker enable` does not migrate them. Preserve that state and pending events,
+stop collection, and obtain explicit approval before a fresh setup. When no
+consent exists, explicit enable creates a receipt and quarantines unconsented
+pending events. An existing valid receipt is preserved on re-enable.
 
 `worker status` reports the operational lane separately: `collection_state`,
 `ready_to_collect`, and bounded `blocking_reason_codes` distinguish an intentional
@@ -80,6 +88,14 @@ disabled state, missing or invalid configuration, an unverified/disconnected
 Tailnet, a pending first collection, a seven-day stale collector, clock skew, and
 an active collector. A Tailnet probe with `tailnet_connected: null` is unverified,
 not proof of disconnection.
+
+Native source discovery is shared by `doctor` and the collector and follows the
+highest numeric `state_<n>.sqlite`. `codex_state_store_present` is a presence
+check, not schema or delivery proof. Without a usable source, status reports
+`native_activity_unavailable` and readiness is false; existing pending-delivery
+or operator-action reasons retain priority. Keep the source home, identity,
+consent, and outbox when removing an inference wrapper; do not copy proxy state
+or silently initialize another collector.
 
 The input file is owner-private operational material and must not be committed.
 The checked-in example deliberately contains an invalid short token and cannot

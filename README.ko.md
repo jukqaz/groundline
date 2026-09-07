@@ -16,6 +16,10 @@ Compose template에는 인프라 버전을 직접 넣지 않습니다. strict co
 profile이 release-tested 조합 또는 더 최신 후보 조합을 선택하고, 최신 후보도 동일한
 실제 stack verifier를 통과해야 합니다.
 
+Insights는 자기 서비스 연결 방식입니다. 서로 다른 운영자는 별도의 비공개 인스턴스,
+저장소, credential을 사용하며 공개 플러그인 설치로 maintainer 서비스에 가입되지
+않습니다. [개인 운영 경계](docs/ko/integrations.md#개인-운영-경계)를 참고하세요.
+
 ## 설치와 업그레이드
 
 moving `stable` branch를 한 번 등록한 뒤 설치 프로필을 선택합니다. 두 플러그인은
@@ -50,6 +54,22 @@ marketplace 갱신, 설치 package checksum, hook 신뢰, collector upload,
 ClickHouse 반영, Grafana frame, image 게시, 운영 배포, stable 승격은 서로 다른
 증거 lane입니다.
 
+## 개인 스킬 관리
+
+Codex 설정·모델 점검은 `groundline config-audit --config <config.toml>
+--catalog <native-models.json> --json`으로 실행합니다. `--catalog -`로 네이티브
+카탈로그를 바로 전달할 수도 있습니다. 선택된 항목만 비교하며 설정값을 출력하거나
+수정하지 않습니다. 실제 유효 설정은 Codex의 strict doctor로 별도 검증합니다.
+[설정 점검](plugins/groundline/references/codex-configuration.md)을 참고하세요.
+
+`$groundline:align-agent-home`에 가져온 스킬의 점검·업데이트를 요청하면 됩니다.
+GroundLine은 `guidance audit|snapshot`으로 스킬의 추가·삭제·변경, 원본 비교,
+메타데이터와 파일 지문을 관리합니다. 기기별 경로 설정과 경로 없는 비교 기록을
+분리하며, 이전 개인 JSON 형식을 런타임 호환 코드로 유지하지 않습니다. Codex는 원본 변경을 리뷰하고
+승인된 수정을 적용한 뒤 관련 테스트를 실행합니다. 개인 스킬·설정·출처 기록은
+공개 저장소 밖에 남으며 플러그인 업그레이드가 이를 덮어쓰지 않습니다.
+자세한 절차는 [스킬 관리](plugins/groundline/references/skill-maintenance.md)를 참고하세요.
+
 ## 개인정보와 보안
 
 Core는 lifecycle hook을 설치하거나 네트워크 요청을 하지 않습니다. Insights만
@@ -75,5 +95,6 @@ runner와 production credential을 요구하지 않습니다.
 바꾸지 않습니다.
 
 자세한 선택지는 [연동과 설치 프로필](docs/ko/integrations.md),
+[Codex 업데이트 대응과 지원 범위](docs/ko/codex-compatibility.md),
 [Insights 셀프호스팅](docs/ko/self-hosting.md), 영문 README,
 [release checklist](docs/release-checklist.md)를 참조하세요.

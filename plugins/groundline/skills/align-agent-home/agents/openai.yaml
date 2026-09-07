@@ -1,7 +1,7 @@
 interface:
   display_name: "Align Agent Home"
-  short_description: "Audit Codex project and home surfaces"
-  default_prompt: "Use $align-agent-home to audit this project's Codex guidance, worktree readiness, plugins, skills, MCP, rules, hooks, and model posture; preserve official capabilities and propose only evidence-backed changes."
+  short_description: "Audit Codex guidance and maintain skill sources"
+  default_prompt: "Use $align-agent-home to audit Codex guidance and maintain imported skills with source comparison and relevant tests; preserve local changes, official capabilities, and user settings."
 policy:
   allow_implicit_invocation: false
 dependencies:

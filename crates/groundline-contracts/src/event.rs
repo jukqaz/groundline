@@ -82,38 +82,6 @@ fn filtered_counts(value: Option<&Value>, allowed: &[&str]) -> Value {
     )
 }
 
-fn model_family(value: &str) -> &'static str {
-    let value = value.to_ascii_lowercase();
-    if value.contains("luna") {
-        "luna"
-    } else if value.contains("terra") {
-        "terra"
-    } else if value.contains("sol") {
-        "sol"
-    } else if value.starts_with("gpt-5") {
-        "gpt-5"
-    } else if matches!(value.as_str(), "unknown" | "unset" | "") {
-        "unknown"
-    } else {
-        "other"
-    }
-}
-
-fn normalized_effort(value: &str) -> &'static str {
-    match value {
-        "none" => "none",
-        "unset" => "unset",
-        "minimal" => "minimal",
-        "low" => "low",
-        "medium" => "medium",
-        "high" => "high",
-        "xhigh" => "xhigh",
-        "max" => "max",
-        "ultra" => "ultra",
-        _ => "unknown",
-    }
-}
-
 fn model_effort(component: &Map<String, Value>) -> Value {
     let counts = object(
         component
@@ -125,8 +93,8 @@ fn model_effort(component: &Map<String, Value>) -> Value {
         let amount = value.as_u64().unwrap_or(0);
         let (model, effort) = key.split_once('|').unwrap_or((key, "unknown"));
         let key = (
-            model_family(model).to_owned(),
-            normalized_effort(effort).to_owned(),
+            crate::model::family(model).to_owned(),
+            crate::model::effort(effort).to_owned(),
         );
         let current = normalized.get(&key).copied().unwrap_or(0);
         if let Some(next) = current.checked_add(amount) {
@@ -136,7 +104,6 @@ fn model_effort(component: &Map<String, Value>) -> Value {
     Value::Array(
         normalized
             .into_iter()
-            .take(16)
             .map(|((model_family, effort), count)| {
                 json!({"model_family":model_family,"effort":effort,"count":count})
             })
@@ -149,16 +116,8 @@ fn usage(component: &Map<String, Value>, include_non_cached: bool) -> Value {
     let input = count(source.get("input_tokens"));
     let cached = count(source.get("cached_input_tokens"));
     let mut result = json!({
-        "source": source.get("source").and_then(Value::as_str).filter(|value| matches!(
-            *value,
-            "codex-cumulative-total-snapshots"
-                | "codex-cumulative-and-last-usage-fallback"
-                | "codex-last-usage-events-summed-fallback"
-                | "codex-cumulative-window-delta"
-                | "codex-window-delta-and-last-usage-fallback"
-                | "codex-last-usage-events-summed-window"
-                | "unavailable"
-        )).unwrap_or("unknown"),
+        "source": source.get("source").and_then(Value::as_str)
+            .filter(|value| crate::usage::SOURCES.contains(value)).unwrap_or("unknown"),
         "rollout_count_with_usage":count(source.get("rollout_count_with_usage")),
         "cumulative_rollout_count":count(source.get("cumulative_rollout_count")),
         "fallback_rollout_count":count(source.get("fallback_rollout_count")),
@@ -333,6 +292,8 @@ pub fn build_basic_event(
     {
         return Err(ContractError("invalid_audit".to_owned()));
     }
+    let accepted_at = timestamp(Some(&Value::from(consent.accepted_at_utc)))
+        .ok_or_else(|| ContractError("invalid_consent_timestamp".to_owned()))?;
     let mut event = json!({
         "schema_version":5,
         "kind":"groundline-insights-basic-weekly",
@@ -341,7 +302,7 @@ pub fn build_basic_event(
         "period":{"start_utc":start,"end_utc":end,"generated_at_utc":generated},
         "capabilities":{"completed_root_coverage":audit_kind == "groundline-codex-weekly-audit","latency_completed_count":true,"root_boundary_counts":true,"guardian_workspace_attribution":false},
         "sample":{
-            "selection_mode":selection,"requested_days":count(scope.get("requested_days")),"root_count":count(scope.get("completed_root_sample_count")),
+            "selection_mode":selection,"requested_days":count(scope.get("requested_days")),"root_count":count(scope.get("selected_root_count")),
             "observed_root_count":count(scope.get("observed_root_sample_count")).max(count(scope.get("completed_root_sample_count"))),
             "minimum_root_count":count(scope.get("minimum_root_sample_count")),"sample_sufficient":scope.get("sample_sufficient").and_then(Value::as_bool).unwrap_or(false),
             "delegated_count":count(scope.get("delegated_rollout_count")),"guardian_count":count(scope.get("guardian_rollout_count")),
@@ -354,7 +315,7 @@ pub fn build_basic_event(
         "metrics":{"root":session_metrics(root),"delegated":session_metrics(delegated),"guardian":guardian_metrics(guardian)},
         "quality_contract":{"provider_usage_only":true,"billing_inference_performed":false,"verification_is_a_tool_call_proxy":true,"verification_outcome_is_a_tool_result_proxy":true,"rework_not_observed":true,"correlation_is_not_causation":true},
         "privacy":{"basic_aggregate_only":true},
-        "consent":{"scope":"basic_weekly","receipt_id":consent.receipt_id,"accepted_at_utc":consent.accepted_at_utc},
+        "consent":{"scope":"basic_weekly","receipt_id":consent.receipt_id,"accepted_at_utc":accepted_at},
     });
     let encoded =
         serde_json::to_vec(&event).map_err(|_| ContractError("invalid_basic_event".to_owned()))?;
@@ -372,4 +333,44 @@ pub fn build_basic_event(
         &serde_json::to_vec(&event).map_err(|_| ContractError("invalid_basic_event".to_owned()))?,
     )?;
     Ok(event)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn astra_labels_use_the_same_allowlist_for_collection_and_validation() {
+        let counts = json!({"model_effort":{"counts":{
+            "gpt-6-astra|high":2,"astra|high":3,"gpt-6.1|low":1,"private-console|low":4
+        }}});
+        let result = model_effort(counts.as_object().unwrap());
+        assert_eq!(
+            result,
+            json!([
+                {"model_family":"astra","effort":"high","count":5},
+                {"model_family":"gpt-6","effort":"low","count":1},
+                {"model_family":"other","effort":"low","count":4}
+            ])
+        );
+        assert!(!result.to_string().contains("private-console"));
+    }
+
+    #[test]
+    fn bounded_context_matrix_does_not_silently_drop_less_common_models() {
+        let counts = crate::model::MODEL_FAMILIES
+            .iter()
+            .flat_map(|family| {
+                crate::model::EFFORTS
+                    .iter()
+                    .map(move |effort| (format!("{family}|{effort}"), Value::from(1)))
+            })
+            .collect::<Map<_, _>>();
+        let component = json!({"model_effort":{"counts":counts}});
+        let result = model_effort(component.as_object().unwrap());
+        assert_eq!(
+            result.as_array().unwrap().len(),
+            crate::model::MAX_MODEL_CONTEXTS
+        );
+    }
 }

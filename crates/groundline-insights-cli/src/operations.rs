@@ -160,7 +160,7 @@ pub fn provider_smoke(root: &Path, require_installed: bool) -> Result<Value, Con
 
 pub fn doctor(plugin_root: Option<&Path>, codex_home: &Path) -> Result<Value, ContractError> {
     let platform = current_target()?;
-    let state_store_present = regular_file(&codex_home.join("state_5.sqlite"));
+    let state_store_present = groundline_runtime::audit_store::state_store_present(codex_home);
     let plugin = plugin_root
         .map(|root| provider_smoke(root, false))
         .transpose()?;
@@ -177,6 +177,10 @@ pub fn doctor(plugin_root: Option<&Path>, codex_home: &Path) -> Result<Value, Co
         "platform_target":platform,
         "plugin_status":plugin_status,
         "codex_state_store_present":state_store_present,
+        "collection_source":"native_codex_state",
+        "inference_proxy_required":false,
+        "model_catalog_required":false,
+        "core_plugin_required":false,
         "rust_runtime":true,
         "python_runtime_required":false,
         "network_performed":false,

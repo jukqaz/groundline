@@ -11,6 +11,8 @@ use groundline_runtime::local_file::open_bounded_regular_file;
 use groundline_runtime::{audit_store, platform};
 use serde_json::{Value, json};
 
+mod config_audit;
+mod guidance;
 mod operations;
 
 #[derive(Debug, Parser)]
@@ -26,6 +28,21 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Compare one configuration layer to an explicit native model catalog, offline.
+    ConfigAudit {
+        #[arg(long)]
+        config: PathBuf,
+        /// Native debug models JSON file, or - to read a bounded stdin stream.
+        #[arg(long)]
+        catalog: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inspect and track user-owned skill sources without executing or uploading them.
+    Guidance {
+        #[command(subcommand)]
+        command: GuidanceCommand,
+    },
     /// Run a bounded, read-only installation and local-state diagnostic.
     Doctor {
         #[arg(long)]
@@ -68,6 +85,32 @@ enum Command {
     },
     /// Report the binary-distribution target for this host.
     Platform {
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum GuidanceCommand {
+    /// Compare installed files and optionally already-fetched upstream checkouts.
+    Audit {
+        #[arg(long)]
+        profile: PathBuf,
+        #[arg(long)]
+        baseline: Option<PathBuf>,
+        #[arg(long)]
+        with_upstream: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Save current fingerprints to a NEW receipt after review; never install or overwrite.
+    Snapshot {
+        #[arg(long)]
+        profile: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        with_upstream: bool,
         #[arg(long)]
         json: bool,
     },
@@ -180,7 +223,15 @@ fn discover_plugin_root() -> Result<PathBuf, ContractError> {
 }
 
 fn load_bounded(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>, ContractError> {
-    let mut file = open_bounded_regular_file(path, 1, maximum_bytes)
+    load_bounded_range(path, 1, maximum_bytes)
+}
+
+fn load_bounded_range(
+    path: &Path,
+    minimum_bytes: u64,
+    maximum_bytes: u64,
+) -> Result<Vec<u8>, ContractError> {
+    let mut file = open_bounded_regular_file(path, minimum_bytes, maximum_bytes)
         .map_err(|_| ContractError("invalid_input_file".to_owned()))?;
     let mut bytes = Vec::with_capacity(
         file.metadata()
@@ -191,7 +242,7 @@ fn load_bounded(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>, ContractErro
         .take(maximum_bytes + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| ContractError("input_unavailable".to_owned()))?;
-    if bytes.is_empty() || bytes.len() as u64 > maximum_bytes {
+    if (bytes.len() as u64) < minimum_bytes || bytes.len() as u64 > maximum_bytes {
         return Err(ContractError("invalid_input_file".to_owned()));
     }
     Ok(bytes)
@@ -239,6 +290,26 @@ fn failure(error: ContractError) -> Value {
 
 fn run(cli: Cli) -> Result<(), ExitCode> {
     let result: Result<(Value, bool), ContractError> = match cli.command {
+        Command::ConfigAudit {
+            config,
+            catalog,
+            json,
+        } => config_audit::audit(&config, &catalog).map(|value| (value, json)),
+        Command::Guidance { command } => match command {
+            GuidanceCommand::Audit {
+                profile,
+                baseline,
+                with_upstream,
+                json,
+            } => guidance::audit(&profile, baseline.as_deref(), with_upstream)
+                .map(|value| (value, json)),
+            GuidanceCommand::Snapshot {
+                profile,
+                output,
+                with_upstream,
+                json,
+            } => guidance::snapshot(&profile, &output, with_upstream).map(|value| (value, json)),
+        },
         Command::Doctor {
             plugin_root,
             codex_home,
@@ -393,7 +464,15 @@ fn run(cli: Cli) -> Result<(), ExitCode> {
     match result {
         Ok((value, json_output)) => {
             emit(&value, json_output);
-            Ok(())
+            if matches!(
+                value.get("kind").and_then(Value::as_str),
+                Some("groundline-guidance" | "groundline-config-audit")
+            ) && value.get("status").and_then(Value::as_str) == Some("FAIL")
+            {
+                Err(ExitCode::FAILURE)
+            } else {
+                Ok(())
+            }
         }
         Err(error) => {
             emit(&failure(error), true);

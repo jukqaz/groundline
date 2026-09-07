@@ -995,6 +995,7 @@ async fn health(State(state): State<AppState>) -> Result<Response, ApiError> {
         json!({
             "status":if ready {"PASS"} else {"FAIL"},
             "api_version":API_VERSION,
+            "ingest_capabilities":groundline_contracts::insights::ingest_capabilities(),
             "storage_ready":ready,
             "latest_version":state.config.latest_version,
             "minimum_supported_version":state.config.minimum_supported_version,
@@ -1913,6 +1914,31 @@ mod tests {
 
     use super::*;
 
+    #[tokio::test]
+    async fn health_advertises_current_ingest_contract_without_secret_or_storage_roundtrip() {
+        let state = unit_state(1, 1);
+        state.health.lock().await.readiness = Some((Instant::now(), true));
+        let response = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/healthz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let value: Value = serde_json::from_slice(&body).unwrap();
+        assert!(groundline_contracts::insights::supports_current_ingest(
+            &value["ingest_capabilities"]
+        ));
+        assert_eq!(value["storage_ready"], true);
+        assert!(!String::from_utf8_lossy(&body).contains(&"x".repeat(32)));
+    }
+
     fn unit_config() -> Config {
         Config {
             listen: "127.0.0.1:8080".parse().expect("socket"),
@@ -2056,7 +2082,8 @@ mod tests {
                 "delegated_rollout_count":0,
                 "guardian_rollout_count":0
             },
-            "root":{"status":"PASS"},
+            "root":{"status":"PASS","model_effort":{"counts":{"gpt-6-astra|high":1}},
+                "provider_reported_usage":{"source":"codex-response-usage-records","rollout_count_with_usage":1,"fallback_rollout_count":1}},
             "delegated":{"status":"PASS"},
             "guardian":{"status":"PASS"},
             "mutation_performed":false,
@@ -2619,6 +2646,18 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let report = response_json(response).await;
         assert_eq!(report["schema_version"], 3);
+        assert!(
+            report["cohorts"]["model_effort_context_distribution"]
+                .as_array()
+                .expect("model contexts")
+                .iter()
+                .any(|context| {
+                    context["model_family"] == "astra"
+                        && context["effort"] == "high"
+                        && context["context_count"].as_u64().unwrap_or(0) >= 1
+                }),
+            "Astra context must survive collection, ClickHouse, and report validation"
+        );
         assert!(
             report["coverage"]["event_count"].as_u64().unwrap_or(0) >= 1,
             "{report}"

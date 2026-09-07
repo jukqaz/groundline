@@ -5,6 +5,7 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::ContractError;
+use crate::rollout::Record;
 
 const TOKEN_FIELDS: [&str; 6] = [
     "input_tokens",
@@ -15,13 +16,36 @@ const TOKEN_FIELDS: [&str; 6] = [
     "total_tokens",
 ];
 
+const MAX_ERROR_EXAMPLES: usize = 32;
+const MAX_AUDIT_RECORDS: usize = 1_000_000;
+const MAX_RECORD_BYTES: usize = 4 * 1024 * 1024;
+
+#[derive(Default)]
+struct Diagnostics {
+    examples: Vec<String>,
+    count: u64,
+}
+
+impl Diagnostics {
+    fn push(&mut self, message: String) {
+        self.count = self.count.saturating_add(1);
+        if self.examples.len() < MAX_ERROR_EXAMPLES {
+            self.examples.push(message);
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AuditWindow {
     pub start: Option<DateTime<Utc>>,
     pub end: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct Usage {
     values: BTreeMap<&'static str, u64>,
 }
@@ -29,6 +53,12 @@ struct Usage {
 impl Usage {
     fn from_value(value: &Value) -> Option<Self> {
         let object = value.as_object()?;
+        if !TOKEN_FIELDS
+            .iter()
+            .any(|field| object.get(*field).is_some_and(Value::is_u64))
+        {
+            return None;
+        }
         let mut result = Self::default();
         for field in TOKEN_FIELDS {
             let number = object.get(field).and_then(Value::as_u64).unwrap_or(0);
@@ -37,8 +67,11 @@ impl Usage {
         Some(result)
     }
 
-    fn total(&self) -> u64 {
-        self.values.get("total_tokens").copied().unwrap_or(0)
+    fn covers(&self, earlier: &Self) -> bool {
+        TOKEN_FIELDS.iter().all(|field| {
+            self.values.get(field).copied().unwrap_or(0)
+                >= earlier.values.get(field).copied().unwrap_or(0)
+        })
     }
 
     fn add_checked(&mut self, other: &Self) -> Result<(), ContractError> {
@@ -82,9 +115,9 @@ impl Usage {
     }
 }
 
-fn increment(
-    values: &mut BTreeMap<String, u64>,
-    key: impl Into<String>,
+fn increment<K: Ord>(
+    values: &mut BTreeMap<K, u64>,
+    key: impl Into<K>,
 ) -> Result<(), ContractError> {
     let entry = values.entry(key.into()).or_default();
     *entry = entry
@@ -93,8 +126,8 @@ fn increment(
     Ok(())
 }
 
-fn timestamp(value: Option<&Value>) -> Option<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(value?.as_str()?)
+fn timestamp(value: Option<&str>) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(value?)
         .ok()
         .map(|parsed| parsed.with_timezone(&Utc))
 }
@@ -109,11 +142,10 @@ fn in_window(value: Option<DateTime<Utc>>, window: AuditWindow) -> bool {
     }
 }
 
-fn percentile(mut values: Vec<u64>, fraction: f64) -> Option<u64> {
+fn percentile(values: &[u64], fraction: f64) -> Option<u64> {
     if values.is_empty() {
         return None;
     }
-    values.sort_unstable();
     let index = ((values.len() - 1) as f64 * fraction).round() as usize;
     values.get(index).copied()
 }
@@ -247,44 +279,188 @@ pub fn audit_rollouts(
         return Err(ContractError("invalid_audit_window".to_owned()));
     }
 
-    let mut errors = Vec::<String>::new();
+    let mut errors = Diagnostics::default();
+    let mut processed_records = 0_usize;
+    let mut known_scope_exclusions = 0_u64;
     let mut record_count = 0_u64;
-    let mut timestamps = Vec::<DateTime<Utc>>::new();
+    let mut first_timestamp: Option<DateTime<Utc>> = None;
+    let mut last_timestamp: Option<DateTime<Utc>> = None;
     let mut event_counts = BTreeMap::<String, u64>::new();
     let mut model_effort = BTreeMap::<String, u64>::new();
-    let mut model_sequence = Vec::<String>::new();
+    let mut transitions = 0_u64;
     let mut user_lengths = Vec::<u64>::new();
     let mut broad_scope_count = 0_u64;
     let mut tool_names = BTreeMap::<String, u64>::new();
     let mut tool_categories = BTreeMap::<String, u64>::new();
-    let mut call_signatures = BTreeMap::<String, u64>::new();
+    let mut call_signatures = BTreeMap::<[u8; 32], u64>::new();
     let mut failure_counts = BTreeMap::<String, u64>::new();
     let mut completed_durations = Vec::<u64>::new();
-    let mut active_tasks = BTreeMap::<String, DateTime<Utc>>::new();
     let mut provider_usage = Usage::default();
     let mut usage_rollouts = 0_u64;
     let mut usage_events = 0_u64;
     let mut cumulative_rollouts = 0_u64;
     let mut fallback_rollouts = 0_u64;
+    let mut response_rollouts = 0_u64;
     let mut compacted_records = 0_u64;
+    let mut compactions = 0_u64;
     let mut long_lived_rollouts = 0_u64;
     let mut boundary_review_rollouts = 0_u64;
-    let mut verification_calls = BTreeSet::<String>::new();
-    let mut verification_resolved = BTreeSet::<String>::new();
     let mut verification_success = 0_u64;
     let mut verification_failure = 0_u64;
 
     for (rollout_index, contents) in rollouts.iter().enumerate() {
+        let metadata = contents
+            .lines()
+            .take(1024)
+            .filter(|line| line.len() <= MAX_RECORD_BYTES)
+            .find_map(|line| {
+                let record = Record::parse(line).ok()??;
+                if record.string("type").as_deref() != Some("session_meta") {
+                    return None;
+                }
+                record.value("payload").ok().flatten()
+            })
+            .unwrap_or(Value::Null);
+        let inherited = [
+            "history_base",
+            "forked_from_id",
+            "subagent_history_start_ordinal",
+        ]
+        .iter()
+        .any(|field| metadata.get(*field).is_some_and(|value| !value.is_null()));
+        let paginated = metadata.get("history_mode").and_then(Value::as_str) == Some("paginated");
+        let history_base = metadata
+            .pointer("/history_base/end_ordinal_exclusive")
+            .and_then(Value::as_u64);
+        let fork_boundary = metadata
+            .get("forked_from_ordinal_exclusive")
+            .and_then(Value::as_u64);
+        let child_boundary = metadata
+            .get("subagent_history_start_ordinal")
+            .and_then(Value::as_u64);
+        let boundary = [history_base, fork_boundary, child_boundary]
+            .into_iter()
+            .flatten()
+            .max();
+        // Never traverse metadata paths or sum inherited cumulative snapshots.
+        // Native ordinals identify the readable, locally owned suffix. Legacy
+        // copied history without an ownership boundary stays explicitly partial.
+        let known_boundary = paginated
+            && boundary.is_some()
+            && (metadata.get("history_base").is_none_or(Value::is_null) || history_base.is_some())
+            && (metadata.get("forked_from_id").is_none_or(Value::is_null)
+                || fork_boundary.is_some());
+        if inherited && !known_boundary {
+            errors.push(format!(
+                "rollout[{rollout_index}] inherited history attribution unavailable"
+            ));
+            continue;
+        }
+        if inherited {
+            known_scope_exclusions += 1;
+            errors.push(format!(
+                "rollout[{rollout_index}] shared history prefix not read; local suffix only"
+            ));
+        }
+        let owner = metadata
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty());
+        let mut response_usage = Usage::default();
+        let mut response_ids = BTreeSet::<String>::new();
+        let mut response_events = 0_u64;
+        let mut last_ordinal = None;
+        let mut previous_model = None;
+        let mut active_tasks = BTreeMap::<String, DateTime<Utc>>::new();
+        let mut verification_calls = BTreeSet::<String>::new();
+        let mut verification_resolved = BTreeSet::<String>::new();
         let mut latest_usage: Option<Usage> = None;
         let mut baseline_usage: Option<Usage> = None;
+        let mut checkpoint_usage: Option<Usage> = None;
+        let mut uncovered_response = false;
         let mut fallback_usage = Usage::default();
         let mut has_fallback = false;
         let mut rollout_compactions = 0_u64;
+        let mut rollout_compaction_events = 0_u64;
         let mut rollout_broad_scope = 0_u64;
 
         for (line_index, line) in contents.lines().enumerate() {
-            let record: Value = match serde_json::from_str(line) {
-                Ok(Value::Object(record)) => Value::Object(record),
+            if processed_records >= MAX_AUDIT_RECORDS {
+                errors.push("audit record budget exhausted".to_owned());
+                break;
+            }
+            processed_records += 1;
+            if line.len() > MAX_RECORD_BYTES {
+                errors.push(format!(
+                    "rollout[{rollout_index}] record byte limit exceeded"
+                ));
+                continue;
+            }
+            let record = match Record::parse(line) {
+                Ok(Some(record)) => record,
+                Ok(None) => continue,
+                Err(_) => {
+                    errors.push(format!(
+                        "rollout[{rollout_index}] has invalid JSON at line {}",
+                        line_index + 1
+                    ));
+                    continue;
+                }
+            };
+            if paginated {
+                let Some(ordinal) = record.unsigned("ordinal") else {
+                    errors.push(format!("rollout[{rollout_index}] missing history ordinal"));
+                    continue;
+                };
+                if last_ordinal.is_some_and(|previous| ordinal <= previous) {
+                    errors.push(format!(
+                        "rollout[{rollout_index}] non-increasing history ordinal"
+                    ));
+                    continue;
+                }
+                last_ordinal = Some(ordinal);
+                if boundary.is_some_and(|boundary| ordinal < boundary) {
+                    continue;
+                }
+            }
+            let observed_at = timestamp(record.string("timestamp").as_deref());
+            let record_in_window = in_window(observed_at, window);
+            if record_in_window {
+                record_count = record_count
+                    .checked_add(1)
+                    .ok_or_else(|| ContractError("audit_counter_overflow".to_owned()))?;
+                if let Some(value) = observed_at {
+                    first_timestamp = Some(first_timestamp.map_or(value, |at| at.min(value)));
+                    last_timestamp = Some(last_timestamp.map_or(value, |at| at.max(value)));
+                }
+            }
+            let kind = record.string("type");
+            let record_type = kind.as_deref().unwrap_or_default();
+            if observed_at.is_none()
+                && (window.start.is_some() || window.end.is_some())
+                && matches!(
+                    record_type,
+                    "compacted"
+                        | "turn_context"
+                        | "event_msg"
+                        | "response_item"
+                        | "token_usage_record"
+                )
+            {
+                errors.push(format!(
+                    "rollout[{rollout_index}] metric timestamp unavailable"
+                ));
+            }
+            // Unknown/context-storage records still count toward coverage and
+            // syntax validation, but their potentially large bodies are unused.
+            if !matches!(
+                record_type,
+                "compacted" | "turn_context" | "event_msg" | "response_item" | "token_usage_record"
+            ) {
+                continue;
+            }
+            let payload = match record.value("payload") {
+                Ok(Some(Value::Object(payload))) => payload,
                 Ok(_) => continue,
                 Err(_) => {
                     errors.push(format!(
@@ -294,24 +470,51 @@ pub fn audit_rollouts(
                     continue;
                 }
             };
-            let object = record.as_object().expect("matched object");
-            let observed_at = timestamp(object.get("timestamp"));
-            let record_in_window = in_window(observed_at, window);
-            if record_in_window {
-                record_count = record_count
-                    .checked_add(1)
-                    .ok_or_else(|| ContractError("audit_counter_overflow".to_owned()))?;
-                if let Some(value) = observed_at {
-                    timestamps.push(value);
+            if record_type == "token_usage_record"
+                && owner.is_some()
+                && payload.get("thread_id").and_then(Value::as_str) == owner
+                && let Some(response_id) = payload
+                    .get("response_id")
+                    .and_then(Value::as_str)
+                    .filter(|id| !id.is_empty())
+                && let Some(usage) = payload.get("usage").and_then(Usage::from_value)
+                && response_ids.insert(response_id.to_owned())
+            {
+                if record_in_window {
+                    response_usage.add_checked(&usage)?;
+                    response_events = response_events.saturating_add(1);
+                    uncovered_response = true;
+                }
+                // Native thread totals are safe only for an unshared owner.
+                // Shared/forked logs continue to use owned response deltas.
+                if !inherited
+                    && let Some(total) = payload
+                        .get("thread_token_usage")
+                        .and_then(Usage::from_value)
+                    && (record_in_window
+                        || window
+                            .start
+                            .is_some_and(|start| observed_at.is_some_and(|at| at <= start)))
+                {
+                    if !total.covers(&usage)
+                        || checkpoint_usage
+                            .as_ref()
+                            .is_some_and(|old| !total.covers(old))
+                    {
+                        errors.push(format!(
+                            "rollout[{rollout_index}] inconsistent cumulative usage"
+                        ));
+                    } else {
+                        checkpoint_usage = Some(total.clone());
+                        if record_in_window {
+                            latest_usage = Some(total);
+                        } else {
+                            baseline_usage = Some(total);
+                        }
+                        uncovered_response = false;
+                    }
                 }
             }
-            let record_type = object
-                .get("type")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            let Some(payload) = object.get("payload").and_then(Value::as_object) else {
-                continue;
-            };
 
             if record_in_window && record_type == "compacted" {
                 compacted_records = compacted_records.saturating_add(1);
@@ -325,13 +528,23 @@ pub fn audit_rollouts(
                     .unwrap_or("unset");
                 let effort = payload
                     .get("effort")
-                    .or_else(|| payload.get("reasoning_effort"))
                     .and_then(Value::as_str)
                     .filter(|value| !value.is_empty())
+                    .or_else(|| payload.get("reasoning_effort").and_then(Value::as_str))
                     .unwrap_or("unset");
-                let label = format!("{model}|{effort}");
+                let label = format!(
+                    "{}|{}",
+                    crate::model::family(model),
+                    crate::model::effort(effort)
+                );
                 increment(&mut model_effort, label.clone())?;
-                model_sequence.push(label);
+                if previous_model
+                    .as_ref()
+                    .is_some_and(|previous| previous != &label)
+                {
+                    transitions = transitions.saturating_add(1);
+                }
+                previous_model = Some(label);
             }
             if record_type == "event_msg" {
                 let event_type = payload
@@ -341,7 +554,7 @@ pub fn audit_rollouts(
                 if record_in_window && !event_type.is_empty() {
                     increment(&mut event_counts, event_type)?;
                     if event_type == "context_compacted" {
-                        rollout_compactions = rollout_compactions.saturating_add(1);
+                        rollout_compaction_events = rollout_compaction_events.saturating_add(1);
                     }
                 }
                 if record_in_window
@@ -388,7 +601,7 @@ pub fn audit_rollouts(
                                 .max(0) as u64,
                         );
                     }
-                } else if event_type == "token_count" {
+                } else if event_type == "token_count" && !inherited {
                     let info = payload.get("info").and_then(Value::as_object);
                     let cumulative = info
                         .and_then(|value| value.get("total_token_usage"))
@@ -400,20 +613,27 @@ pub fn audit_rollouts(
                         usage_events = usage_events.saturating_add(1);
                     }
                     if let Some(cumulative) = cumulative {
-                        if window
-                            .start
-                            .is_some_and(|start| observed_at.is_some_and(|at| at <= start))
-                            && baseline_usage
-                                .as_ref()
-                                .is_none_or(|existing| cumulative.total() >= existing.total())
+                        if record_in_window
+                            || window
+                                .start
+                                .is_some_and(|start| observed_at.is_some_and(|at| at <= start))
                         {
-                            baseline_usage = Some(cumulative);
-                        } else if record_in_window
-                            && latest_usage
+                            if checkpoint_usage
                                 .as_ref()
-                                .is_none_or(|existing| cumulative.total() >= existing.total())
-                        {
-                            latest_usage = Some(cumulative);
+                                .is_some_and(|old| !cumulative.covers(old))
+                            {
+                                errors.push(format!(
+                                    "rollout[{rollout_index}] inconsistent cumulative usage"
+                                ));
+                            } else {
+                                checkpoint_usage = Some(cumulative.clone());
+                                if record_in_window {
+                                    latest_usage = Some(cumulative);
+                                } else {
+                                    baseline_usage = Some(cumulative);
+                                }
+                                uncovered_response = false;
+                            }
                         }
                     } else if record_in_window && let Some(fallback) = fallback {
                         fallback_usage.add_checked(&fallback)?;
@@ -439,7 +659,7 @@ pub fn audit_rollouts(
                     } else {
                         "unknown"
                     });
-                let arguments = serialized_arguments(payload);
+                let arguments = serialized_arguments(&payload);
                 let category = tool_category(name, &arguments);
                 increment(&mut tool_names, name)?;
                 increment(&mut tool_categories, category)?;
@@ -447,7 +667,7 @@ pub fn audit_rollouts(
                 digest.update(name.as_bytes());
                 digest.update([0]);
                 digest.update(arguments.as_bytes());
-                increment(&mut call_signatures, format!("{:x}", digest.finalize()))?;
+                increment(&mut call_signatures, <[u8; 32]>::from(digest.finalize()))?;
                 if category == "verification"
                     && let Some(call_id) = payload.get("call_id").and_then(Value::as_str)
                 {
@@ -455,7 +675,7 @@ pub fn audit_rollouts(
                 }
             } else if is_tool_output(item_type) {
                 let output = payload.get("output").unwrap_or(&Value::Null);
-                let signals = failure_signals(output, payload);
+                let signals = failure_signals(output, &payload);
                 for signal in &signals {
                     increment(&mut failure_counts, *signal)?;
                 }
@@ -477,6 +697,8 @@ pub fn audit_rollouts(
             }
         }
 
+        let rollout_compactions = rollout_compactions.max(rollout_compaction_events);
+        compactions = compactions.saturating_add(rollout_compactions);
         if rollout_compactions >= 2 {
             long_lived_rollouts = long_lived_rollouts.saturating_add(1);
         }
@@ -484,6 +706,9 @@ pub fn audit_rollouts(
             boundary_review_rollouts = boundary_review_rollouts.saturating_add(1);
         }
         if let Some(latest) = latest_usage {
+            if uncovered_response {
+                errors.push(format!("rollout[{rollout_index}] response usage after last cumulative checkpoint is unverified"));
+            }
             let window_usage = match baseline_usage.as_ref() {
                 Some(baseline) => latest.subtract(baseline),
                 None => latest,
@@ -491,6 +716,12 @@ pub fn audit_rollouts(
             provider_usage.add_checked(&window_usage)?;
             usage_rollouts = usage_rollouts.saturating_add(1);
             cumulative_rollouts = cumulative_rollouts.saturating_add(1);
+        } else if response_events > 0 {
+            provider_usage.add_checked(&response_usage)?;
+            usage_rollouts = usage_rollouts.saturating_add(1);
+            fallback_rollouts = fallback_rollouts.saturating_add(1);
+            response_rollouts = response_rollouts.saturating_add(1);
+            usage_events = usage_events.saturating_add(response_events);
         } else if has_fallback {
             provider_usage.add_checked(&fallback_usage)?;
             usage_rollouts = usage_rollouts.saturating_add(1);
@@ -508,11 +739,16 @@ pub fn audit_rollouts(
         .get("cached_input_tokens")
         .copied()
         .unwrap_or(0);
-    let repeated_groups = call_signatures
-        .values()
-        .copied()
-        .filter(|count| *count >= 3)
-        .collect::<Vec<_>>();
+    let (repeated_groups, repeated_calls, max_repeat) =
+        call_signatures
+            .values()
+            .fold((0_u64, 0_u64, 0_u64), |(groups, calls, maximum), &count| {
+                (
+                    groups + u64::from(count >= 3),
+                    calls + if count >= 3 { count } else { 0 },
+                    maximum.max(count),
+                )
+            });
     let user_messages = user_lengths.len() as u64;
     let short_messages = user_lengths.iter().filter(|value| **value <= 30).count() as u64;
     let verification_tool_calls = tool_categories.get("verification").copied().unwrap_or(0);
@@ -520,13 +756,17 @@ pub fn audit_rollouts(
         .saturating_sub(verification_success)
         .saturating_sub(verification_failure);
     let duration_threshold = long_turn_minutes.saturating_mul(60_000);
-    let transitions = model_sequence
-        .windows(2)
-        .filter(|window| window[0] != window[1])
-        .count() as u64;
-    let start = timestamps.iter().min().map(DateTime::<Utc>::to_rfc3339);
-    let end = timestamps.iter().max().map(DateTime::<Utc>::to_rfc3339);
-    let usage_source = if window.start.is_some() {
+    let start = first_timestamp.as_ref().map(DateTime::<Utc>::to_rfc3339);
+    let end = last_timestamp.as_ref().map(DateTime::<Utc>::to_rfc3339);
+    completed_durations.sort_unstable();
+    user_lengths.sort_unstable();
+    let usage_source = if response_rollouts > 0 {
+        if response_rollouts == usage_rollouts {
+            "codex-response-usage-records"
+        } else {
+            "codex-mixed-usage-sources"
+        }
+    } else if window.start.is_some() {
         match (cumulative_rollouts > 0, fallback_rollouts > 0) {
             (true, false) => "codex-cumulative-window-delta",
             (true, true) => "codex-window-delta-and-last-usage-fallback",
@@ -561,7 +801,10 @@ pub fn audit_rollouts(
         "schema": 1,
         "kind": "groundline-codex-session-audit",
         "status": if errors.is_empty() { "PASS" } else { "PARTIAL" },
-        "errors": errors,
+        "collection_complete": errors.count == known_scope_exclusions,
+        "error_count": errors.count,
+        "error_examples_omitted": errors.count.saturating_sub(errors.examples.len() as u64),
+        "errors": errors.examples,
         "coverage": {
             "rollout_count": rollouts.len(),
             "record_count": record_count,
@@ -574,7 +817,7 @@ pub fn audit_rollouts(
             "task_started": event_counts.get("task_started").copied().unwrap_or(0),
             "task_completed": event_counts.get("task_complete").copied().unwrap_or(0),
             "turn_contexts": model_effort.values().copied().sum::<u64>(),
-            "compactions": event_counts.get("context_compacted").copied().unwrap_or(0).max(compacted_records),
+            "compactions": compactions,
             "compaction_event_count": event_counts.get("context_compacted").copied().unwrap_or(0),
             "compacted_record_count": compacted_records,
         },
@@ -597,9 +840,9 @@ pub fn audit_rollouts(
         },
         "task_latency": {
             "completed_count": completed_durations.len(),
-            "median_ms": percentile(completed_durations.clone(), 0.5),
-            "p90_ms": percentile(completed_durations.clone(), 0.9),
-            "max_ms": completed_durations.iter().max(),
+            "median_ms": percentile(&completed_durations, 0.5),
+            "p90_ms": percentile(&completed_durations, 0.9),
+            "max_ms": completed_durations.last(),
             "long_turn_threshold_minutes": long_turn_minutes,
             "long_turn_count": completed_durations.iter().filter(|duration| **duration >= duration_threshold).count(),
         },
@@ -608,8 +851,8 @@ pub fn audit_rollouts(
             "short_message_count": short_messages,
             "broad_scope_message_count": broad_scope_count,
             "average_user_message_chars": if user_messages == 0 { None } else { Some(((user_lengths.iter().sum::<u64>() as f64 / user_messages as f64) * 10.0).round() / 10.0) },
-            "median_user_message_chars": percentile(user_lengths.clone(), 0.5),
-            "max_user_message_chars": user_lengths.iter().max(),
+            "median_user_message_chars": percentile(&user_lengths, 0.5),
+            "max_user_message_chars": user_lengths.last(),
         },
         "tools": {
             "call_count": tool_names.values().copied().sum::<u64>(),
@@ -619,9 +862,9 @@ pub fn audit_rollouts(
             "verification_failure_count": verification_failure,
             "verification_unresolved_count": verification_unresolved,
             "failure_signals": failure_counts,
-            "exact_repeated_call_groups": repeated_groups.len(),
-            "calls_in_exact_repeated_groups": repeated_groups.iter().copied().sum::<u64>(),
-            "max_exact_repeat_count": call_signatures.values().max().copied().unwrap_or(0),
+            "exact_repeated_call_groups": repeated_groups,
+            "calls_in_exact_repeated_groups": repeated_calls,
+            "max_exact_repeat_count": max_repeat,
         },
         "boundary_signals": {
             "rollout_count_evaluated": rollouts.len(),
@@ -633,6 +876,8 @@ pub fn audit_rollouts(
         "usage_source_contract": {
             "cumulative_total_preferred_per_rollout": true,
             "last_usage_sum_is_fallback_only": true,
+            "response_usage_requires_matching_thread_and_unique_response": true,
+            "inherited_cumulative_usage_excluded": true,
             "window_delta_prevents_double_counting": window.start.is_some(),
             "billing_inference_performed": false,
         },
@@ -646,6 +891,138 @@ pub fn audit_rollouts(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn at(seconds: i64) -> DateTime<Utc> {
+        DateTime::from_timestamp(seconds, 0).unwrap()
+    }
+    fn cumulative(seconds: i64, tokens: u64) -> Value {
+        json!({"timestamp":at(seconds).to_rfc3339(),"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":tokens}}}})
+    }
+    fn response(seconds: i64, id: &str, tokens: u64, total: Option<u64>) -> Value {
+        json!({"timestamp":at(seconds).to_rfc3339(),"type":"token_usage_record","payload":{"thread_id":"owner","response_id":id,"usage":{"total_tokens":tokens},"thread_token_usage":total.map(|n| json!({"total_tokens":n}))}})
+    }
+    fn total_in(data: &str, start: i64, end: i64) -> Value {
+        audit_rollouts(
+            &[data],
+            data.len() as u64,
+            20,
+            AuditWindow {
+                start: Some(at(start)),
+                end: Some(at(end)),
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn adjacent_windows_and_appends_preserve_totals_for_both_native_sources() {
+        for native in [false, true] {
+            let mut records = vec![json!({"type":"session_meta","payload":{"id":"owner"}})];
+            let mut sum = 0;
+            for n in 1..=20 {
+                sum += n;
+                records.push(if native {
+                    response(n as i64, &format!("r-{n}"), n, Some(sum))
+                } else {
+                    cumulative(n as i64, sum)
+                });
+            }
+            let data = lines(&records);
+            for boundary in 1..20 {
+                let a = total_in(&data, 0, boundary);
+                let b = total_in(&data, boundary, 20);
+                assert_eq!(a["status"], "PASS");
+                assert_eq!(b["status"], "PASS");
+                assert_eq!(
+                    a["provider_reported_usage"]["total_tokens"]
+                        .as_u64()
+                        .unwrap()
+                        + b["provider_reported_usage"]["total_tokens"]
+                            .as_u64()
+                            .unwrap(),
+                    210
+                );
+            }
+            let old = total_in(&data, 0, 10);
+            records.push(cumulative(21, 999));
+            assert_eq!(
+                old["provider_reported_usage"],
+                total_in(&lines(&records), 0, 10)["provider_reported_usage"]
+            );
+        }
+    }
+
+    #[test]
+    fn mixed_checkpoints_include_new_responses_without_double_counting() {
+        let mut records = vec![
+            json!({"type":"session_meta","payload":{"id":"owner"}}),
+            cumulative(5, 10),
+            response(6, "r", 7, Some(17)),
+        ];
+        for extra in [
+            None,
+            Some(response(6, "r", 7, Some(17))),
+            Some(cumulative(7, 17)),
+        ] {
+            let mut current = records.clone();
+            current.extend(extra);
+            let audit = total_in(&lines(&current), 0, 10);
+            assert_eq!(audit["status"], "PASS");
+            assert_eq!(audit["provider_reported_usage"]["total_tokens"], 17);
+            assert_eq!(
+                total_in(&lines(&current), 5, 10)["provider_reported_usage"]["total_tokens"],
+                7
+            );
+        }
+        records.push(cumulative(8, 3));
+        assert_eq!(
+            total_in(&lines(&records), 0, 10)["status"],
+            "PARTIAL",
+            "counter reset is not a verified zero delta"
+        );
+    }
+
+    #[test]
+    fn unanchored_mixed_response_suffix_is_not_a_false_pass() {
+        let data = lines(&[
+            json!({"type":"session_meta","payload":{"id":"owner"}}),
+            cumulative(5, 10),
+            response(6, "r", 7, None),
+        ]);
+        assert_eq!(total_in(&data, 0, 10)["status"], "PARTIAL");
+    }
+
+    #[test]
+    fn diagnostics_have_bounded_examples_and_exact_omitted_count() {
+        let malformed = "!\n".repeat(100_000);
+        let result = audit_rollouts(
+            &[&malformed],
+            malformed.len() as u64,
+            20,
+            AuditWindow::default(),
+        )
+        .unwrap();
+        assert_eq!(result["status"], "PARTIAL");
+        assert_eq!(result["error_count"], 100_000);
+        assert_eq!(
+            result["errors"].as_array().unwrap().len(),
+            MAX_ERROR_EXAMPLES
+        );
+        assert_eq!(
+            result["error_examples_omitted"],
+            100_000 - MAX_ERROR_EXAMPLES
+        );
+        assert!(serde_json::to_vec(&result).unwrap().len() < 16 * 1024);
+        let huge = "x".repeat(MAX_RECORD_BYTES + 1);
+        assert_eq!(
+            audit_rollouts(&[&huge], 0, 20, AuditWindow::default()).unwrap()["status"],
+            "PARTIAL"
+        );
+        let many = "{}\n".repeat(MAX_AUDIT_RECORDS + 1);
+        let result = audit_rollouts(&[&many], 0, 20, AuditWindow::default()).unwrap();
+        assert_eq!(result["status"], "PARTIAL");
+        assert_eq!(result["coverage"]["record_count"], MAX_AUDIT_RECORDS);
+    }
 
     #[test]
     fn rollout_audit_counts_without_emitting_content() {
@@ -668,5 +1045,260 @@ mod tests {
         let result = audit_rollouts(&["not-json"], 8, 10, AuditWindow::default()).expect("audit");
         assert_eq!(result["status"], "PARTIAL");
         assert_eq!(result["errors"].as_array().map(Vec::len), Some(1));
+    }
+
+    #[test]
+    fn unused_payloads_preserve_coverage_and_malformed_records_stay_partial() {
+        let data = lines(&[
+            json!({"timestamp":"2026-09-03T00:00:00Z","type":"world_state","payload":{"private":"not emitted".repeat(1000)}}),
+            json!({"timestamp":"2026-09-01T00:00:00Z","type":"future_record","payload":[1,2,3]}),
+            json!({"timestamp":"2026-09-02T00:00:00Z","type":"event_msg","payload":{"type":"task_complete","duration_ms":30}}),
+            json!({"timestamp":"2026-09-02T00:00:00Z","type":"event_msg","payload":{"type":"task_complete","duration_ms":10}}),
+            json!({"timestamp":"2026-09-02T00:00:00Z","type":"event_msg","payload":{"type":"task_complete","duration_ms":20}}),
+        ]);
+        let result = audit_rollouts(&[&data], 0, 20, AuditWindow::default()).unwrap();
+        assert_eq!(result["status"], "PASS");
+        assert_eq!(result["coverage"]["record_count"], 5);
+        assert_eq!(
+            result["coverage"]["time_window"]["start"],
+            "2026-09-01T00:00:00+00:00"
+        );
+        assert_eq!(
+            result["coverage"]["time_window"]["end"],
+            "2026-09-03T00:00:00+00:00"
+        );
+        assert_eq!(result["task_latency"]["median_ms"], 20);
+        assert_eq!(result["task_latency"]["p90_ms"], 30);
+        assert_eq!(result["task_latency"]["max_ms"], 30);
+        assert!(!result.to_string().contains("not emitted"));
+        let broken = format!("{data}\n{}", r#"{"type":"world_state","payload":[1,]}"#);
+        let result = audit_rollouts(&[&broken], 0, 20, AuditWindow::default()).unwrap();
+        assert_eq!(result["status"], "PARTIAL");
+        assert_eq!(result["coverage"]["record_count"], 5);
+        assert_eq!(result["errors"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn percentile_reads_sorted_data_without_changing_rounding() {
+        assert_eq!(percentile(&[], 0.5), None);
+        assert_eq!(percentile(&[7], 0.9), Some(7));
+        assert_eq!(percentile(&[10, 20], 0.5), Some(20));
+        assert_eq!(percentile(&[10, 20, 30, 40], 0.5), Some(30));
+        assert_eq!(percentile(&[10, 20, 30, 40], 0.9), Some(40));
+    }
+
+    fn lines(records: &[Value]) -> String {
+        records
+            .iter()
+            .map(Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn model_context_is_bounded_and_null_effort_uses_available_metadata() {
+        let data = lines(&[
+            json!({"type":"turn_context","payload":{"model":"gpt-6-astra","effort":null,"reasoning_effort":"high"}}),
+            json!({"type":"turn_context","payload":{"model":"secret-custom-model","effort":"secret-custom-effort"}}),
+        ]);
+        let result = audit_rollouts(&[&data], 0, 20, AuditWindow::default()).unwrap();
+        assert_eq!(
+            result["model_effort"]["counts"],
+            json!({"astra|high":1,"other|unknown":1})
+        );
+        assert_eq!(result["model_effort"]["transition_count"], 1);
+        assert!(!result.to_string().contains("secret-custom"));
+    }
+
+    #[test]
+    fn turn_call_and_model_state_do_not_cross_rollout_boundaries() {
+        let call = json!({"type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"same","arguments":"cargo test"}});
+        let output = json!({"type":"response_item","payload":{"type":"function_call_output","call_id":"same","output":{"exit_code":0}}});
+        let first = lines(&[
+            json!({"type":"turn_context","payload":{"model":"gpt-6-astra","effort":"high"}}),
+            call.clone(),
+            output.clone(),
+            json!({"timestamp":"2026-09-01T00:00:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"same"}}),
+        ]);
+        let second = lines(&[
+            json!({"type":"turn_context","payload":{"model":"gpt-5.6-sol","effort":"low"}}),
+            call,
+            output,
+            json!({"timestamp":"2026-09-01T01:00:00Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"same"}}),
+        ]);
+        let result = audit_rollouts(&[&first, &second], 0, 20, AuditWindow::default()).unwrap();
+        assert_eq!(result["model_effort"]["transition_count"], 0);
+        assert_eq!(result["tools"]["verification_success_count"], 2);
+        assert_eq!(result["task_latency"]["completed_count"], 0);
+    }
+
+    #[test]
+    fn paired_compaction_records_count_once_per_rollout() {
+        let compacted = json!({"type":"compacted","payload":{"message":"do not emit"}});
+        let event = json!({"type":"event_msg","payload":{"type":"context_compacted"}});
+        let paired = lines(&[compacted.clone(), event.clone()]);
+        let event_only = lines(&[event]);
+        let record_only = lines(&[compacted]);
+        let result = audit_rollouts(
+            &[&paired, &event_only, &record_only],
+            0,
+            20,
+            AuditWindow::default(),
+        )
+        .unwrap();
+        assert_eq!(result["activity"]["compactions"], 3);
+        assert_eq!(result["boundary_signals"]["long_lived_root_count"], 0);
+    }
+
+    #[test]
+    fn cumulative_window_usage_does_not_double_count_new_response_records() {
+        let data = lines(&[
+            json!({"timestamp":"2026-09-01T00:00:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":100}}}}),
+            json!({"timestamp":"2026-09-01T00:01:00Z","type":"token_usage_record","payload":{"usage":{"total_tokens":50},"thread_token_usage":{"total_tokens":150},"response_id":"private-response"}}),
+            json!({"timestamp":"2026-09-01T00:01:00Z","type":"event_msg","payload":{"type":"raw_response_completed","token_usage":{"total_tokens":50}}}),
+            json!({"timestamp":"2026-09-01T00:01:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":150},"last_token_usage":{"total_tokens":50}}}}),
+        ]);
+        let result = audit_rollouts(
+            &[&data],
+            0,
+            20,
+            AuditWindow {
+                start: Some("2026-09-01T00:00:00Z".parse().unwrap()),
+                end: Some("2026-09-01T00:02:00Z".parse().unwrap()),
+            },
+        )
+        .unwrap();
+        assert_eq!(result["provider_reported_usage"]["total_tokens"], 50);
+        assert!(!result.to_string().contains("private-response"));
+        let fallback = lines(&[
+            json!({"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{},"last_token_usage":{"total_tokens":7}}}}),
+        ]);
+        let result = audit_rollouts(&[&fallback], 0, 20, AuditWindow::default()).unwrap();
+        assert_eq!(result["provider_reported_usage"]["total_tokens"], 7);
+    }
+
+    #[test]
+    fn inherited_history_cannot_masquerade_as_new_child_usage() {
+        let data = lines(&[
+            json!({"type":"session_meta","payload":{"history_base":{"path":"private-parent"}}}),
+            json!({"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":500}}}}),
+        ]);
+        let result = audit_rollouts(&[&data], 0, 20, AuditWindow::default()).unwrap();
+        assert_eq!(result["status"], "PARTIAL");
+        assert_eq!(result["provider_reported_usage"]["total_tokens"], 0);
+        assert!(!result.to_string().contains("private-parent"));
+    }
+
+    #[test]
+    fn shared_suffix_counts_only_owned_unique_responses_in_window() {
+        let response = |ordinal, at, owner, id, total| {
+            json!({
+                "ordinal":ordinal,"timestamp":at,"type":"token_usage_record",
+                "payload":{"thread_id":owner,"response_id":id,"usage":{"total_tokens":total},
+                    "thread_token_usage":{"total_tokens":999999}}
+            })
+        };
+        let data = lines(&[
+            json!({"ordinal":10,"type":"session_meta","payload":{"id":"private-child","history_mode":"paginated","history_base":{"end_ordinal_exclusive":10},"forked_from_id":"private-parent","forked_from_ordinal_exclusive":12}}),
+            response(
+                11,
+                "2026-09-01T00:01:00Z",
+                "private-child",
+                "inherited",
+                400,
+            ),
+            response(
+                12,
+                "2026-09-01T00:00:00Z",
+                "private-child",
+                "before-window",
+                100,
+            ),
+            response(13, "2026-09-01T00:01:00Z", "private-parent", "foreign", 500),
+            response(14, "2026-09-01T00:01:00Z", "private-child", "own", 7),
+            response(15, "2026-09-01T00:01:01Z", "private-child", "own", 7),
+            response(
+                16,
+                "2026-09-01T00:03:00Z",
+                "private-child",
+                "after-window",
+                800,
+            ),
+            json!({"ordinal":17,"timestamp":"2026-09-01T00:01:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":999999}}}}),
+            json!({"ordinal":18,"timestamp":"2026-09-01T00:01:00Z","type":"turn_context","payload":{"model":"gpt-6-astra","effort":"high"}}),
+        ]);
+        let result = audit_rollouts(
+            &[&data],
+            0,
+            20,
+            AuditWindow {
+                start: Some("2026-09-01T00:00:00Z".parse().unwrap()),
+                end: Some("2026-09-01T00:02:00Z".parse().unwrap()),
+            },
+        )
+        .unwrap();
+        assert_eq!(result["status"], "PARTIAL");
+        assert_eq!(result["provider_reported_usage"]["total_tokens"], 7);
+        assert_eq!(
+            result["collection_complete"], true,
+            "known inherited prefix is outside the owned suffix, not a retryable gap"
+        );
+        assert_eq!(
+            result["provider_reported_usage"]["source"],
+            "codex-response-usage-records"
+        );
+        assert_eq!(result["provider_reported_usage"]["usage_event_count"], 1);
+        assert_eq!(
+            result["provider_reported_usage"]["fallback_rollout_count"],
+            1
+        );
+        assert_eq!(result["model_effort"]["counts"]["astra|high"], 1);
+        assert!(!result.to_string().contains("private-child"));
+    }
+
+    #[test]
+    fn response_fallback_does_not_add_to_cumulative_or_last_snapshots() {
+        let response_only = lines(&[
+            json!({"type":"session_meta","payload":{"id":"owner"}}),
+            json!({"type":"token_usage_record","payload":{"thread_id":"owner","response_id":"r","usage":{"total_tokens":7}}}),
+            json!({"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":7}}}}),
+        ]);
+        let cumulative = format!(
+            "{response_only}\n{}",
+            json!({"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":100}}}})
+        );
+        let result = audit_rollouts(
+            &[&response_only, &cumulative],
+            0,
+            20,
+            AuditWindow::default(),
+        )
+        .unwrap();
+        assert_eq!(result["provider_reported_usage"]["total_tokens"], 107);
+        assert_eq!(
+            result["provider_reported_usage"]["source"],
+            "codex-mixed-usage-sources"
+        );
+        assert_eq!(
+            result["provider_reported_usage"]["cumulative_rollout_count"],
+            1
+        );
+        assert_eq!(
+            result["provider_reported_usage"]["fallback_rollout_count"],
+            1
+        );
+    }
+
+    #[test]
+    fn invalid_or_missing_ordinals_cannot_attribute_inherited_usage() {
+        let data = lines(&[
+            json!({"ordinal":10,"type":"session_meta","payload":{"id":"owner","history_mode":"paginated","history_base":{"end_ordinal_exclusive":10}}}),
+            json!({"type":"token_usage_record","payload":{"thread_id":"owner","response_id":"missing","usage":{"total_tokens":50}}}),
+            json!({"ordinal":9,"type":"token_usage_record","payload":{"thread_id":"owner","response_id":"old","usage":{"total_tokens":50}}}),
+        ]);
+        let result = audit_rollouts(&[&data], 0, 20, AuditWindow::default()).unwrap();
+        assert_eq!(result["status"], "PARTIAL");
+        assert_eq!(result["provider_reported_usage"]["total_tokens"], 0);
+        assert_eq!(result["errors"].as_array().unwrap().len(), 3);
     }
 }

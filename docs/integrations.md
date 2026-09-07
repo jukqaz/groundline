@@ -25,6 +25,30 @@ user into an uninstalled sibling plugin.
 
 ## Current Insights integrations
 
+Insights uses this direct path:
+
+```text
+Native Codex App / CLI -> trusted plugin hooks + read-only native activity
+                      -> private aggregate outbox -> Tailnet Insights API
+                      -> ClickHouse -> Grafana / owner JSON reports
+```
+
+No inference proxy, generated model catalog, custom provider, or Core plugin is
+required. Insights does not read or repair Codex `config.toml`, model catalogs,
+inference credentials, or proxy configuration. Removing an inference wrapper
+does not require changing the Insights API, ClickHouse, or Grafana integration.
+Restore native Codex startup separately if the wrapper left provider overrides;
+do not reset Insights identity, consent, cursors, or pending events as a shortcut.
+Use the same native `CODEX_HOME`; an explicitly different home is a different
+source, not an automatic state migration.
+
+`doctor` and `worker status` discover the highest numeric `state_<n>.sqlite`
+through the same native reader, rather than requiring `state_5.sqlite`.
+An unavailable source is reported as `native_activity_unavailable`, with
+`ready_to_collect: false`. Presence is not schema validation, API acceptance,
+or dashboard freshness. Existing pending delivery and operator-action reasons
+retain priority; a missing source must not delete or prevent draining the outbox.
+
 | Surface | Status | Contract |
 | --- | --- | --- |
 | Codex App | Built in | Four fail-open lifecycle checkpoints after explicit activation |
@@ -50,6 +74,31 @@ TLS/Tailnet authentication check for that operator deployment.
 Every operator supplies their own private endpoint, enrollment credential,
 storage, retention, and access control. Installing the public plugin does not
 connect a user to the maintainer's ClickHouse, Grafana, or Tailnet.
+
+## Private-owner deployment boundary
+
+The supported model is bring-your-own service, not registration for a shared
+maintainer service. Each independent owner runs a separate Insights instance
+with their own storage and credentials, and configures only the Codex homes they
+intend to collect. Collector UUIDs distinguish installations within that owner
+instance; they are not a multi-tenant account or tenant-isolation boundary.
+There is no public signup, automatic service discovery, or default maintainer
+endpoint. Keep a personal deployment's configuration and data outside the public
+repository and release packages.
+
+| Credential | Where it belongs | Purpose |
+| --- | --- | --- |
+| TrueNAS management API key, when used | Private operator credential store | Inspect and deploy NAS apps; never install it on collector-only hosts |
+| Insights enrollment credential | Private server configuration and authorized collector setup | Register a collector with the chosen owner service |
+| Per-collector token | That collector's private local state | Authenticated collector-scoped delivery and operations |
+| Insights admin token and Grafana login | Private owner operations and dashboard access | Owner-wide reports and dashboard administration, not collector enrollment |
+
+A person and an LLM use the same documented `worker configure`, `enable`,
+`run-once`, and `status` commands. The owner supplies the service address and
+enrollment credential; neither installation nor configuration is collection
+consent. Enable collection explicitly after reviewing its scope. Server
+deployment is a separate operator step, and upgrading a public plugin does not
+upgrade or reconfigure anyone's private service.
 
 ## User-selectable operations
 

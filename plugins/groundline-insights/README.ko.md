@@ -12,6 +12,11 @@ self-hosted 데이터 플러그인입니다. Core와 독립적으로 설치할 �
 GroundLine skill을 중복 설치하거나 global Codex 설정을 바꾸지 않으며 daemon,
 scheduler, model router를 만들지 않습니다.
 
+수집 원본은 네이티브 Codex App/CLI입니다. 추론 프록시, 생성된 모델 카탈로그,
+custom provider 설정, Core 설치가 필요하지 않습니다. 네이티브 활동을 비공개
+집계 outbox에 저장하고 Tailnet Insights API로 직접 전송하며, ClickHouse와
+Grafana는 이 API에 연결됩니다. 모델 설정이나 추론 인증 정보는 읽지 않습니다.
+
 ## 설치와 업그레이드
 
 모노레포를 한 번 등록하고 Insights를 설치합니다. 이 명령은 Core를 자동으로
@@ -63,17 +68,25 @@ groundline-insights insights fetch-report \
 
 이 파일은 collector 전용 호스트에 복사하거나 Git에 commit·출력하면 안 됩니다.
 
-`worker enable`은 owner-service upload에 대한 명시적 동의 경계입니다. 네트워크
-업로드를 금지했던 레거시 receipt는 자동 확대하지 않고
-`reconsent_required`로 표시합니다. 사용자가 다시 `worker enable`을 실행하면 새
-receipt를 발급하며, 이전 receipt의 pending event는 업로드·삭제하지 않고
-owner-private quarantine으로 이동합니다.
+`worker enable`은 owner-service upload에 대한 명시적 동의 경계입니다. 동의서,
+정책, 상태 파일은 현재 형식만 지원합니다. 구형·알 수 없는 형식은 변환하거나
+삭제하지 않고 `unsupported_local_state`로 거부하며, `worker enable`도 이를
+마이그레이션하지 않습니다. 수집을 중지하고 원본 상태와 pending event를 보존한 뒤,
+명시적으로 승인받아 새로 설정해야 합니다. 동의서가 없는 경우에만 enable이 새
+receipt를 만들고 미동의 pending event를 quarantine으로 격리합니다. 유효한
+동의서는 다시 활성화해도 유지합니다.
 
 `worker status`는 `collection_state`, `ready_to_collect`, 제한된
 `blocking_reason_codes`로 의도적인 비활성, 설정 누락/오류, Tailnet 미확인/끊김,
 첫 수집 대기, 7일 이상 수집 정체, 시계 오차, 정상 수집 상태를 구분합니다.
 `tailnet_connected: null`은 연결 끊김이 아니라 현재 실행 경계에서 확인하지
 못했다는 뜻입니다.
+
+`doctor`와 수집기는 가장 높은 번호의 `state_<n>.sqlite`를 같은 규칙으로 찾습니다.
+`codex_state_store_present`는 파일 존재 검사이며 스키마·전송 성공 증거가 아닙니다.
+원본이 없거나 안전하게 열리지 않으면 `native_activity_unavailable`과 준비 미완료를
+표시합니다. 기존 전송 대기·운영 조치 사유는 우선 표시하며 pending event는 보존합니다.
+추론 wrapper를 제거해도 기존 Codex 홈, identity, 동의와 outbox를 유지해야 합니다.
 
 지원 collector runtime은 Codex App과 Codex CLI입니다. worker endpoint는 Tailnet
 IPv4 또는 `*.ts.net`만 허용하며, 각 운영자가 자신의 비공개 서비스와 credential을

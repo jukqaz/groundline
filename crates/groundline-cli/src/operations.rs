@@ -155,7 +155,7 @@ pub fn provider_smoke(root: &Path, require_installed: bool) -> Result<Value, Con
 
 pub fn doctor(plugin_root: Option<&Path>, codex_home: &Path) -> Result<Value, ContractError> {
     let platform = current_target()?;
-    let state_store_present = regular_file(&codex_home.join("state_5.sqlite"));
+    let state_store_present = groundline_runtime::audit_store::state_store_present(codex_home);
     let plugin = plugin_root
         .map(|root| provider_smoke(root, false))
         .transpose()?;

@@ -7,17 +7,31 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::ContractError;
+use crate::model::{EFFORTS, MAX_MODEL_CONTEXTS, MODEL_FAMILIES};
 
 pub const MAX_WEEKLY_REPORT_BYTES: usize = 128 * 1024;
 pub const MAX_BASIC_EVENT_BYTES: usize = 64 * 1024;
+/// Semantic allowlist revision, independent of the envelope schema version.
+pub const BASIC_CONTRACT_REVISION: u64 = 2;
+
+pub fn ingest_capabilities() -> Value {
+    serde_json::json!({"basic_schema_versions":[5], "basic_contract_revision":BASIC_CONTRACT_REVISION})
+}
+
+pub fn supports_current_ingest(capabilities: &Value) -> bool {
+    capabilities
+        .get("basic_contract_revision")
+        .and_then(Value::as_u64)
+        .is_some_and(|revision| revision >= BASIC_CONTRACT_REVISION)
+        && capabilities
+            .get("basic_schema_versions")
+            .and_then(Value::as_array)
+            .is_some_and(|versions| versions.iter().any(|version| version.as_u64() == Some(5)))
+}
 const VALID_DAYS: &[u16] = &[7, 30, 90];
 const OS_FAMILIES: &[&str] = &["linux", "macos", "unknown", "windows"];
 const RUNTIME_FAMILIES: &[&str] = &["codex_app", "codex_cli", "unknown"];
 const EXECUTION_MODES: &[&str] = &["desktop", "local_headless", "remote_headless", "unknown"];
-const MODEL_FAMILIES: &[&str] = &["gpt-5", "luna", "other", "sol", "terra", "unknown"];
-const EFFORTS: &[&str] = &[
-    "high", "low", "max", "medium", "minimal", "none", "ultra", "unknown", "unset", "xhigh",
-];
 const BASIC_TOP_LEVEL_KEYS: &[&str] = &[
     "capabilities",
     "collector",
@@ -981,19 +995,7 @@ fn validate_usage(value: &Value, include_non_cached: bool) -> bool {
     }
     let object = value.as_object().expect("validated object");
     let source = object.get("source").and_then(Value::as_str);
-    let valid_source = matches!(
-        source,
-        Some(
-            "codex-cumulative-total-snapshots"
-                | "codex-cumulative-and-last-usage-fallback"
-                | "codex-last-usage-events-summed-fallback"
-                | "codex-cumulative-window-delta"
-                | "codex-window-delta-and-last-usage-fallback"
-                | "codex-last-usage-events-summed-window"
-                | "unavailable"
-                | "unknown"
-        )
-    );
+    let valid_source = source.is_some_and(|source| crate::usage::SOURCES.contains(&source));
     valid_source
         && keys
             .iter()
@@ -1099,7 +1101,7 @@ fn validate_session_metrics(value: &Value) -> bool {
     let Some(model_effort) = object.get("model_effort").and_then(Value::as_array) else {
         return false;
     };
-    if model_effort.len() > 16
+    if model_effort.len() > MAX_MODEL_CONTEXTS
         || !model_effort.iter().all(|item| {
             exact_object_keys(item, &["count", "effort", "model_family"])
                 && item.get("count").is_some_and(non_negative_u32)

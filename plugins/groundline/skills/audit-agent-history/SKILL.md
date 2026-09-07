@@ -21,8 +21,9 @@ it.
 
 ## Workflow
 
-Resolve the installed GroundLine binary and references from this skill's plugin
-root. Never assume the user's current repository contains them.
+For CLI evidence, read
+[installed command resolution](../../references/platform-commands.md).
+Never assume the user's current repository contains the installed binary.
 
 1. Identify Codex/project storage roots and the requested time/task scope.
 2. Inventory counts, sizes, time range, layout, and trustworthy model/effort/compaction/verification metadata.
@@ -34,26 +35,29 @@ root. Never assume the user's current repository contains them.
    or a bounded `groundline audit activity --start <RFC3339> --json`. Both
    include root, delegated-agent, and canonical Guardian aggregates without raw
    content.
-8. For a scheduled weekly audit, read
+7. For a scheduled weekly audit, read
    [the weekly usage audit contract](../../references/weekly-usage-audit.md)
    fully and run its bounded aggregator. Pass the redacted result to
    `groundline efficiency recommend --audit <weekly.json> --json`. Present
    its single candidate for review; never apply it without the user's decision.
-9. When the user explicitly permits Chronicle evidence, verify Chronicle is
+8. When the user explicitly permits Chronicle evidence, verify Chronicle is
    running through its native skill and read only the minimum recent surface.
    Create the numeric aggregate defined in
-   `references/chronicle-evidence-contract.md`, then fuse it with the Codex
+   [the Chronicle contract](../../references/chronicle-evidence-contract.md), then fuse it with the Codex
    audit using `groundline efficiency fuse --audit <weekly.json> --chronicle
    <chronicle.json> --json`. Never use
    Chronicle observation counts as tokens or change Chronicle state or its
    experiment ledger.
-10. For an efficiency counterfactual, use
+9. For an efficiency counterfactual, use
    `groundline efficiency simulate --audit <weekly.json> --json`. Label the
    result as a simulation, not measured savings or billing.
-11. GroundLine does not maintain a mutable experiment ledger. Record an
+10. GroundLine does not maintain a mutable experiment ledger. Record an
    accepted experiment only in a user-selected repository artifact.
 
-Repeated allowed reviews for temporary/external paths are workspace-boundary signals. Keep Auto-review for remote or destructive mutations and ordinary work inside the active workspace.
+Repeated permission reviews may indicate a workspace-boundary mismatch. Inspect
+the active host and preserve its user-selected permissions; do not prescribe
+Auto-review, disable safeguards, or add broad allows. Existing approval applies
+within its stated scope, not to unrelated cleanup or external writes.
 
 ## Candidate Test
 

@@ -40,10 +40,11 @@ private file, and enablement is rejected until both the sanitized profile and
 enrollment credential are valid. Disabled lifecycle checkpoints exit without
 spawning a detached worker. Worker status reports readiness and bounded blockers;
 it never converts an unobservable Tailnet probe into a false disconnected state.
-The exact previously shipped private policy-v1 and status-v3 records have one
-bounded import path that preserves explicit enablement and watermarks without
-making historical formats part of the public interface. Unknown state fails
-closed, and the next explicit mutation writes the current compact format.
+Only the current compact policy schema 1, status schema 4, and consent schema 2
+are accepted. The former private policy shape and status schema 3 are not
+imported. Unsupported versions, kinds, or shapes fail closed with
+`unsupported_local_state`; reading or enabling never converts them or discards
+their watermarks. Explicit disable remains available to revoke collection.
 
 Configuration writes a sanitized profile without the token and a separate
 private enrollment-credential file. Identity, consent, policy, status,
@@ -54,12 +55,48 @@ secret values.
 
 Consent schema 2 states the network boundary directly: upload to the configured
 owner service is enabled only while the separate owner policy is active, and
-third-party upload remains disabled. An exact schema-1 consent created by the
-previous public release is migrated without changing its receipt, acceptance
-time, collection scope, or diagnostic setting; unknown consent shapes fail
-closed.
+third-party upload remains disabled. Consent schema 1 is unsupported and is not
+converted or archived automatically, including by `worker enable`. With no
+existing consent, explicit enable creates a receipt and quarantines unconsented
+pending events. Re-enabling an existing valid receipt preserves it. Invalid
+current consent requires operator review and is never silently broadened.
+Before replacing unsupported state, stop collection, preserve the original
+state/outbox, and obtain explicit approval for a fresh setup. Do not restore old
+pending events into a newly consented outbox or reset collection watermarks
+without a separate data-authorization decision.
 
 ## Enrollment and authentication
+
+Every due worker cycle checks `/healthz` before enrollment or upload, even when
+a collector token is already cached. The API advertises Basic envelope schema
+versions and a semantic allowlist revision in `ingest_capabilities`. Collectors
+require schema 5 and revision 2 or newer, not an exact package version. Missing
+or incompatible capabilities require an API upgrade and explicit operator retry;
+unready storage remains a retryable service failure. Credentials are not sent
+by this preflight, and the existing bounded readiness cache and rate limit apply.
+
+## Collection transactions
+
+The first collection covers the preceding seven days. Existing valid cursors
+are preserved; `history_sync` retries the current window, not all historical
+data. Task modification times only prune old candidates; they never exclude a
+thread because it continued after the requested end. Records decide event time.
+
+A private `collection-window.json` (at most 128 KiB) freezes the start/end and
+counts attempts before reading. Only complete owned-scope reads prepare an
+aggregate. Statistical sample insufficiency and a known inherited prefix remain
+quality caveats, not failed owned-scope reads. Missing files, unknown ownership,
+invalid metrics, and exhausted bounds stop the window without advancing it.
+After three attempts, automatic reading stops until explicit operator retry.
+
+The exact prepared event is persisted before enqueue, then the durable outbox
+is written before committing the collection cursor. ACK status is persisted
+before deleting delivered entries. Restarting reuses the prepared event, never a
+new content hash from changed inputs. No partial aggregate is uploaded or later
+added again. Old already-published windows are not replayed or corrected by this
+update; retrospective repair needs a separate generation/activation decision.
+
+## Enrollment requirements
 
 The `/v1/enroll` route requires all of the following:
 
@@ -96,6 +133,20 @@ It opens Codex SQLite read-only and produces schema-5
 `groundline-insights-basic-weekly` events. The event contract contains aggregate
 usage, lifecycle, latency, verification, and boundary counters plus
 low-cardinality platform/runtime fields.
+
+Model/effort dimensions are shared Rust allowlists used by normalization,
+ingestion, weekly reports, and comparisons. Astra has its own family label;
+unknown model IDs remain `other`. These labels do not route models or prove
+account availability. Usage provenance is also a shared bounded allowlist;
+native response-only usage and mixed-source aggregates have distinct labels.
+An API must support newly introduced labels before updated collectors are
+enabled; rejected events stay operator-visible.
+
+Activity samples count selected ongoing or completed roots with
+`completed_root_coverage=false`; weekly samples require a final completed turn.
+Compressed Codex rollouts are read within decoded-byte limits. Read failures and
+unread shared-history prefixes remain partial evidence, never a
+claim that all provider history was collected.
 
 The contract rejects raw prompts, responses, transcripts, commands, patches,
 paths, repository names, task IDs, rollout IDs, account identifiers, hostnames,

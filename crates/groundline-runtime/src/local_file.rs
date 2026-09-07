@@ -13,7 +13,9 @@ fn open_no_follow(path: &Path) -> io::Result<File> {
 
     rustix::fs::open(
         path,
-        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        // Reject special files via fstat without first blocking on a FIFO open.
+        // NONBLOCK has no effect on ordinary files; NOFOLLOW remains mandatory.
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
         Mode::empty(),
     )
     .map(File::from)
@@ -391,6 +393,43 @@ mod tests {
         assert!(open_bounded_regular_file(&file, 8, 16).is_err());
         assert!(open_bounded_regular_file(&file, 1, 6).is_err());
         assert!(open_bounded_regular_file(root.path(), 0, 16).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_fifo_before_waiting_for_a_writer() {
+        use rustix::fs::{Mode, OFlags, open};
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let root = tempdir().unwrap();
+        let path = root.path().join("state.fifo");
+        // rustix does not expose mkfifoat on Apple targets. The POSIX utility
+        // creates this test fixture on both macOS and Linux, without unsafe FFI.
+        assert!(
+            std::process::Command::new("mkfifo")
+                .args(["-m", "600"])
+                .arg(&path)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let input = path.clone();
+        let (sender, receiver) = mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            sender
+                .send(open_bounded_regular_file(&input, 0, 16).is_err())
+                .unwrap();
+        });
+        let result = receiver.recv_timeout(Duration::from_secs(2));
+        // Release a regressed blocking reader before failing, rather than
+        // leaving a detached thread or hanging the test suite.
+        let rescue = result
+            .is_err()
+            .then(|| open(&path, OFlags::RDWR | OFlags::NONBLOCK, Mode::empty()).unwrap());
+        reader.join().unwrap();
+        drop(rescue);
+        assert!(result.unwrap(), "FIFO must be rejected without a writer");
     }
 
     #[test]
