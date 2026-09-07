@@ -10,5 +10,7 @@ pub mod insights;
 pub mod insights_state;
 pub mod local_file;
 pub mod platform;
+#[cfg(feature = "audit-store")]
+mod rollout;
 #[cfg(feature = "tailnet-probe")]
 pub mod tailnet;

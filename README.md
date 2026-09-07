@@ -17,6 +17,10 @@ The Compose template has no baked-in infrastructure versions: a strict
 compatibility profile selects a release-tested or newer candidate dependency
 set, and the newer set must pass the same live stack verifier.
 
+Insights is bring-your-own service: independent owners use separate private
+instances, storage, and credentials. Public installation does not enroll a user
+in the maintainer's service. See the [private-owner boundary](docs/integrations.md#private-owner-deployment-boundary).
+
 ## Install and upgrade
 
 Register this repository once on the moving `stable` branch, then choose a
@@ -53,6 +57,22 @@ frozen installation. Marketplace refresh, installed package checksums, hook
 trust, collector upload, ClickHouse visibility, Grafana frames, image
 publication, deployment, and stable promotion are separate evidence lanes.
 
+## Maintain personal skills
+
+For Codex configuration/model posture, use `groundline config-audit --config
+<config.toml> --catalog <native-models.json> --json` (or `--catalog -` for stdin).
+It checks selected fields against the supplied native catalog without printing
+values or changing settings; native strict doctor validates effective config.
+See [configuration review](plugins/groundline/references/codex-configuration.md).
+
+Ask `$groundline:align-agent-home` to review or update imported skills. Core
+handles local source tracking, drift/metadata checks, and private fingerprint
+receipts with `groundline guidance audit|snapshot`. A host-local profile selects
+roots; a separate path-free baseline records comparisons. Codex reviews upstream
+changes, applies the authorized patch, and runs affected behavior tests. User
+skills, settings, and provenance stay outside this public repository; plugin
+upgrades never overwrite them. See [skill maintenance](plugins/groundline/references/skill-maintenance.md).
+
 ## Privacy and security
 
 Core never installs lifecycle hooks or performs network requests. Insights owns
@@ -73,6 +93,7 @@ Use the fast lane while editing:
 ```console
 cargo fmt --all -- --check
 cargo test --locked -p xtask --all-targets
+cargo test --locked -p groundline-contracts -p groundline-runtime --lib --all-features
 cargo test --locked -p groundline-cli --test cli_contract
 cargo test --locked -p groundline-insights-cli --test cli_contract
 actionlint
@@ -94,7 +115,16 @@ six-platform two-product artifact matrix run only for a manual request or a
 release tag, with cancellation, timeouts, and bounded retention. No self-hosted
 runner or production credential is required by public CI.
 
+For an opt-in parsing/statistics benchmark, run
+`cargo run --locked -p groundline-contracts --example audit_benchmark`.
+It generates synthetic records, runs five measurements, and emits timing plus
+an aggregate fingerprint without reading private data or using the network.
+Compare the same build profile and machine, and require an identical fingerprint
+before accepting a speedup. This benchmark is not run automatically by CI and
+does not measure provider tokens, billing, or installed-plugin latency.
+
 See [integrations and installation profiles](docs/integrations.md),
+[Codex compatibility and update boundaries](docs/codex-compatibility.md),
 [Insights self-hosting](docs/self-hosting.md), [Privacy](docs/privacy.md),
 [Security](SECURITY.md), and the
 [release checklist](docs/release-checklist.md).

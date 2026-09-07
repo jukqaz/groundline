@@ -16,3 +16,13 @@ After refresh or upgrade, verify four distinct lanes:
 4. a new-task runtime smoke result.
 
 A result from one lane does not prove the others.
+
+Use the provider's current upgrade command or App action. Codex CLI 0.153.0
+added remote-marketplace operations and merged-configuration Git marketplace
+upgrades; a remote marketplace and GroundLine's Git `stable` channel remain
+different sources. Inspect the actual installed source before troubleshooting.
+GroundLine does not maintain a parallel updater or rewrite Codex plugin state.
+
+For an Insights release that expands a validated event dimension, update the
+owner API before enabling updated collectors. A previous API can reject a new
+family label even though Core itself remains usable offline.

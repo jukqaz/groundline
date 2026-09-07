@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "guidance")]
+pub mod skill;
+
 #[cfg(feature = "audit")]
 pub mod audit;
 #[cfg(feature = "batch")]
@@ -12,6 +15,12 @@ pub mod event;
 pub mod insights;
 #[cfg(feature = "integrity")]
 pub mod integrity;
+#[cfg(any(feature = "audit", feature = "efficiency", feature = "insights"))]
+pub mod model;
+#[cfg(feature = "audit")]
+pub mod rollout;
+#[cfg(feature = "insights")]
+mod usage;
 #[cfg(feature = "version")]
 pub mod version;
 

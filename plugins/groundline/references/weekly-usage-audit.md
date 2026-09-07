@@ -7,3 +7,40 @@ behavior as separate evidence lanes.
 
 The command is read-only, performs no network request, and does not emit raw
 task content or private paths.
+
+Codex's latest numeric `state_<n>.sqlite` is selected read-only and its thread
+columns are checked before use. Plain `.jsonl` and compressed `.jsonl.zst`
+representations share one logical identity; audit never materializes or rewrites
+them. Decoded input is limited to 64 MiB per rollout and 512 MiB per invocation.
+These are read budgets, not estimates of disk occupancy or model tokens.
+
+A weekly sample requires the latest lifecycle event to complete the turn.
+Previous completed turns do not make a resumed or interrupted task complete.
+Activity audits include ongoing work, with `completed_root_coverage=false` on
+export. Unreadable or unclassified inputs make the result `PARTIAL` and remain
+visible as aggregate counts. `selection_coverage` describes selection among
+known eligible roots; it does not mean every stored task was readable.
+
+Standalone histories prefer cumulative window deltas, then matching-thread
+response records, then last-usage events. These sources never add on top of
+one another. Native paginated shared histories use explicit ordinal boundaries
+and unique response IDs to count only locally owned suffix usage, never parent
+cumulative totals. The unread parent prefix remains `PARTIAL`; legacy copied
+histories without a known ownership boundary remain excluded. Do not claim full
+fork or subagent coverage. Response records count as fallback rollouts and have
+an explicit bounded provenance label, separate from last-usage-only evidence.
+
+Model contexts use bounded family and effort labels, including Astra. They do
+not attribute token totals to individual models or estimate billing.
+
+Candidate recency has no upper bound: continuing a task after the audit end
+must not remove its earlier events. Record timestamps define the requested
+window. Standalone native thread totals update the cumulative checkpoint;
+unanchored trailing response usage and counter resets remain incomplete rather
+than silently reporting a stale total as PASS.
+
+Diagnostics keep at most 32 examples with exact total/omitted counts. Parser
+budgets are one million records and 4 MiB per record. Windowed metric records
+without usable timestamps are incomplete. Known inherited prefixes remain a
+scope caveat while complete owned suffixes may be collected; unknown boundaries
+are a true collection blocker. No raw diagnostic input is exported.

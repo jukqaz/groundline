@@ -6,6 +6,20 @@ GroundLine은 하나의 marketplace에서 서로 독립적인 Codex 플러그인
 
 ## 설치 프로필 선택
 
+Insights 연결 경로는 네이티브 Codex App/CLI의 hook·읽기 전용 활동 데이터에서
+비공개 집계 outbox, Tailnet Insights API, ClickHouse, Grafana/JSON report로
+이어집니다. 추론 프록시, 생성된 모델 카탈로그, custom provider, Core 설치는
+필요하지 않습니다. Insights는 Codex `config.toml`이나 추론 인증 정보를 읽거나
+고치지 않습니다. 프록시 제거 후 남은 Codex provider 설정은 네이티브 Codex
+시작 문제로 별도 처리하고 Insights의 identity·동의·cursor·outbox는 보존합니다.
+
+동일한 네이티브 `CODEX_HOME`을 유지합니다. 다른 홈은 자동 마이그레이션 대상이
+아닙니다. `doctor`와 `worker status`는 수집기와 같은 규칙으로 가장 높은 번호의
+`state_<n>.sqlite`를 찾습니다. 데이터 원본이 없거나 안전하게 열리지 않으면
+`native_activity_unavailable`, `ready_to_collect: false`로 표시합니다. 파일 존재는
+스키마·서버 저장·Grafana 검증이 아닙니다. 기존 전송 대기나 운영 조치 사유가 있으면
+그 사유가 우선하며, 원본 누락 때문에 pending event를 삭제하거나 전송을 막지 않습니다.
+
 | 프로필 | 설치 대상 | 외부 서비스 | 용도 |
 | --- | --- | --- | --- |
 | Core만 | `groundline` | 없음 | 로컬 가이드, 감사, 증거 계약 |
@@ -49,6 +63,28 @@ collector와 API 계약은 공개 Compose preview와 분리해 release qualifica
 각 사용자는 자신의 Tailnet endpoint, enrollment credential, 저장소, retention,
 접근 제어를 제공합니다. 공개 플러그인을 설치해도 maintainer의 ClickHouse,
 Grafana, Tailnet에 연결되지 않습니다.
+
+## 개인 운영 경계
+
+지원 구조는 공용 서비스 가입이 아니라 자기 서비스 연결입니다. 서로 다른 운영자는
+각자 별도의 Insights 인스턴스, 저장소, credential을 사용하고, 수집하려는 자신의
+Codex 홈만 설정합니다. collector UUID는 한 운영자의 설치본을 구분하는 값이지
+다중 사용자 계정이나 tenant 격리 경계가 아닙니다. 공개 회원가입, 서비스 자동 검색,
+maintainer 기본 endpoint는 없습니다. 개인 배포 설정과 데이터는 공개 저장소와
+배포 package 밖에 둡니다.
+
+| 자격 증명 | 보관 위치 | 용도 |
+| --- | --- | --- |
+| TrueNAS 관리 API 키, 사용하는 경우 | 비공개 운영자 자격 증명 저장소 | NAS 앱 조회·배포. 수집 전용 호스트에는 설치하지 않음 |
+| Insights enrollment credential | 비공개 서버 설정과 승인된 수집기 설정 | 선택한 운영자 서비스에 수집기 등록 |
+| collector별 token | 해당 수집기의 비공개 로컬 상태 | 해당 수집기 범위의 전송·작업 인증 |
+| Insights admin token과 Grafana 로그인 | 비공개 운영 도구와 dashboard 접근 | 운영자 전체 report와 dashboard 관리. 수집기 등록에는 사용하지 않음 |
+
+사람과 LLM 모두 문서의 `worker configure`, `enable`, `run-once`, `status`를
+사용합니다. 서비스 주소와 enrollment credential은 운영자가 제공해야 하며, 설치나
+설정만으로 수집에 동의한 것이 아닙니다. 수집 범위를 확인하고 명시적으로 활성화합니다.
+서버 배포는 별도 운영 단계이며 공개 플러그인 업그레이드가 개인 서비스를 자동으로
+업그레이드하거나 재설정하지 않습니다.
 
 ## 사용자가 선택할 수 있는 것
 

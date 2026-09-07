@@ -1,5 +1,61 @@
 # Changelog
 
+## Unreleased
+
+## 0.21.0
+
+- Clarify bring-your-own Insights instances, separate operator and collector
+  credentials, and explicit enablement. Add regression coverage for independent
+  owner configuration and rejection of management credentials in collector profiles.
+
+- Exclude raw GitHub event payloads from Docker builder provenance and disable
+  automatic build-record uploads while retaining maximum build provenance,
+  SBOMs, and signatures. Add workflow regression guards and independent public
+  log, artifact, and image-metadata privacy gates to the release checklist.
+
+- Qualify Insights' direct native-Codex collection path without inference proxy,
+  generated catalog, or Core dependencies. Unify source discovery and readiness,
+  reject blocking FIFO inputs, and add isolated native-state/outbox regression tests.
+
+- Add offline native-catalog configuration checks without pinning models or
+  rewriting settings. Share skill frontmatter validation between Core and
+  packaging, and simplify the alignment skill with focused Astra guidance.
+
+- Remove the old Insights consent, private policy, and private status import
+  paths. Reject unsupported local state before enablement writes; keep current
+  consent, bounded retries, and pending-data protections without auto-migration.
+
+- Integrate personal skill maintenance into Core with strict host profiles,
+  portable baselines, fresh inventory, upstream comparison, and new private
+  receipts. Remove the unreleased personal-registry adapter and init command. Reuse
+  align-agent-home for reviewed updates and scoped behavior tests without
+  overwriting personal skills, adding hooks, or uploading private state.
+
+- Harden current-model guidance, optional Goal handling, permission boundaries,
+  and bounded verification. Add structured skill metadata and reference checks;
+  see [guidance validation](docs/guidance-validation.md) for behavior acceptance.
+
+- Preserve event-time windows after later task updates; initialize collection
+  with an explicit seven-day lookback rather than thread modification times.
+- Persist one frozen collection window and exact prepared event, publish only
+  complete owned-scope aggregates, and stop automatic reads after three failed
+  attempts. Keep partial windows, outbox durability, and delivery state distinct.
+- Reconcile native and legacy cumulative checkpoints without summing duplicate
+  sources; surface unanchored mixed usage and counter resets as incomplete.
+- Bound diagnostic examples, record count, and record bytes; retry only a
+  missing plain/compressed representation once and normalize consent timestamps.
+- Check API ingest capabilities before cached-token enrollment or upload;
+  preserve pending data and report `api_upgrade_required` on incompatible APIs.
+- Reduce audit parsing and statistics allocations without changing aggregate
+  output; add a private-data-free, opt-in repeatable performance benchmark.
+- Follow the active Codex model catalog without pinning model or effort;
+  centralize bounded Astra-aware telemetry dimensions and usage provenance.
+- Support bounded Zstandard rollouts and native shared-history suffix usage,
+  numeric state-store discovery, and explicit incomplete-read coverage.
+- Correct resumed-task selection, activity export, cross-task attribution, and
+  paired compaction counts, with regression and isolated Insights query tests.
+- Document Codex-owned permissions, context management, and API-first rollout.
+
 ## 0.20.2
 
 - Restrict weekly reports to the owner admin credential and require the Insights

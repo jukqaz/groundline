@@ -49,6 +49,8 @@ plugin installation does not by itself promise a user-shell `PATH` entry.
 ```console
 groundline platform --json
 groundline project-audit --repo . --json
+groundline config-audit --config /private/config.toml --catalog /private/models.json --json
+groundline guidance audit --profile /private/review/profile.json --baseline /private/review/baseline.json --json
 groundline audit weekly --days 7 --json
 groundline efficiency batch --input batch.json --json
 groundline efficiency compare --input comparison.json --json
@@ -58,6 +60,16 @@ groundline efficiency compare --input comparison.json --json
 and `.worktreeinclude` without reading or returning their values. Audit commands
 read the local Codex state store without modifying it. Efficiency commands accept
 explicit JSON files and never transmit them.
+
+The existing `align-agent-home` skill handles requested imported-skill maintenance.
+`guidance snapshot` creates a new path-free private baseline without overwriting
+skills or existing files. `guidance audit` freshly inventories profile-selected
+roots, reports additions/removals, and optionally compares upstream checkouts.
+The host-local profile and portable baseline use strict GroundLine contracts;
+there is no personal-registry adapter or duplicate initialization command.
+See [skill maintenance](references/skill-maintenance.md) for source review,
+local-change preservation, and behavior-test routing. No language-specific SDK
+or user-home verification script is required by the native commands.
 
 The state database must be an owner-owned, non-symlinked regular file no larger
 than 8 GiB. Audits read at most 100,000 thread metadata rows and accept rollout

@@ -7,7 +7,8 @@ description: Use when resuming stale work or before broad, ambiguous, current-fa
 
 ## Purpose
 
-Prove checkout, runtime, Goal, and task boundary. Prior reports are hints.
+Prove the relevant current state and task boundary. Prior reports are hints;
+reuse current evidence unless the checkout, host, input, or scope changed.
 
 ## Selective Pre-implementation Gate
 
@@ -20,41 +21,40 @@ full gate before broad, ambiguous, current-fact-dependent, or high-impact work:
    and stop condition.
 
 Do not broaden research when it cannot change the decision. After `FREEZE`,
-defer new non-blocking observations.
+defer unsolicited non-blocking observations. Explicit user steering may revise
+the same scope without creating a new task.
 
 ## Workflow
 
 1. Identify the App task, worktree, branch, target, source, and request.
 2. Read durable context; avoid broad transcript loading.
-3. Prove repo root, status, targeted diff, worktree attachment, and history.
+3. Inspect the affected state and targeted diff before editing. Check history,
+   worktree attachment, or live systems only if relevant to this decision;
+   do not require a full repository audit for a bounded change.
 4. If explicitly requested, view or create the native Goal. Do not infer one
-   from a broad prompt.
+   from a broad prompt. Without a requested Goal, continue the ordinary task.
 5. Classify the batch as `COLLECT`, `SYNTHESIZE`, `FREEZE`, `IMPLEMENT`,
-   `VERIFY`, or `RELEASE`. Apply only a user-accepted bounded change.
+   `VERIFY`, or `RELEASE` when phase tracking helps. Reviews and diagnoses are
+   read-only unless a fix is requested. Continue routine implementation within
+   existing approval; ask only for a material missing choice or new authority.
 6. Keep the task while outcome, repository, and permission match. Otherwise use
-   a side question, fork, packet, or new task.
-7. Verify the required live process, endpoint, CI/PR, release, queue, or flow.
+   propose a handoff. Do not create, fork, or move tasks without a user request.
+7. Verify the affected boundary. Require live evidence only for a live outcome.
+   Repeat passed checks only for relevant changes or unresolved risk. Diagnose
+   unchanged failures before retrying; infrastructure failure is not a code defect.
 8. Mark prior claims `confirmed`, `stale`, `contradicted`, or `unverified`.
    Continue only when the next safe action and mutation boundary are clear.
 
-Use `groundline efficiency batch --input <packet.json> --json` for a
-deterministic boundary. It is read-only; Codex owns execution and verification.
+When a structured batch decision is useful, read
+[installed command resolution](../../references/platform-commands.md) and run
+`groundline efficiency batch --input <packet.json> --json`. This optional,
+read-only helper does not own execution or authorize mutations.
 
 ## Output Contract
 
-```text
-Current conclusion: continue / pause / repair first / blocked
-Goal and phase:
-Task boundary:
-Preflight: light / full and why
-Confirmed:
-- ...
-Drift or contradiction:
-- ...
-Unverified:
-- ...
-Next safe action:
-- ...
-```
+Give the current conclusion, decisive evidence or contradiction, any actionable
+gap, and next safe action. Include phase, preflight depth, or Goal status only
+when relevant. Skill guidelines do not override user intent or higher-priority
+permissions; identify the exact instruction if it causes a pause.
 
 Never claim completion solely because another agent did.

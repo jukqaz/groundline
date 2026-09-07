@@ -236,6 +236,7 @@ fn verify_core(root: &Path) -> Result<(), XtaskError> {
     {
         return Err(XtaskError::InvalidSource);
     }
+    super::guidance::verify(&package, &names)?;
     Ok(())
 }
 
@@ -376,6 +377,8 @@ pub fn verify_source(root: &Path) -> Result<Value, XtaskError> {
         "canonical_plugin_roots":true,
         "plugin_count":2,
         "core_hook_count":0,
+        "skill_metadata_and_links":true,
+        "skill_behavior_evaluation":"not_run",
         "insights_hook_count":4,
         "python_source_count":0,
         "private_marker_count":0,

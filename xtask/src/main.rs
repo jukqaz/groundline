@@ -21,6 +21,7 @@ use self::package::contains_private_marker;
 
 mod arm64_verify;
 mod compose;
+mod guidance;
 mod history;
 mod local_verify;
 mod package;

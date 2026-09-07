@@ -21,12 +21,14 @@ use url::Url;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
-use crate::audit_store::{collect_audit, earliest_recency};
+use crate::audit_store::collect_audit;
 use crate::insights::{default_codex_home, discover_plugin_root, report_url, state_directory};
 use crate::local_file::{
     atomic_write_private, create_private_new, open_bounded_regular_file, private_for_current_user,
 };
 use crate::tailnet;
+
+mod collection;
 
 const PROFILE_PATH: &str = "groundline/insights/owner-profile.json";
 const ENROLLMENT_TOKEN_PATH: &str = "groundline/insights/enrollment-token";
@@ -60,6 +62,8 @@ pub enum StateError {
     InvalidProfile,
     #[error("local_state_failed")]
     LocalState,
+    #[error("unsupported_local_state")]
+    UnsupportedState,
     #[error("already_running")]
     AlreadyRunning,
     #[error("disabled")]
@@ -68,6 +72,12 @@ pub enum StateError {
     TailnetDisconnected,
     #[error("audit_failed")]
     AuditFailed,
+    #[error("collection_incomplete")]
+    AuditIncomplete,
+    #[error("collection_operator_action_required")]
+    CollectionPaused,
+    #[error("api_upgrade_required")]
+    ApiUpgradeRequired,
     #[error("collector_enrollment_failed")]
     EnrollmentFailed,
     #[error("event_upload_failed")]
@@ -84,7 +94,10 @@ impl StateError {
     pub fn network_performed(&self) -> bool {
         matches!(
             self,
-            Self::EnrollmentFailed | Self::UploadFailed | Self::RemoteRejected
+            Self::EnrollmentFailed
+                | Self::UploadFailed
+                | Self::RemoteRejected
+                | Self::ApiUpgradeRequired
         )
     }
 
@@ -96,7 +109,11 @@ impl StateError {
             | Self::ReconsentRequired => Some(false),
             Self::TailnetDisconnected => Some(true),
             Self::LocalState
+            | Self::UnsupportedState
             | Self::AuditFailed
+            | Self::AuditIncomplete
+            | Self::CollectionPaused
+            | Self::ApiUpgradeRequired
             | Self::EnrollmentFailed
             | Self::UploadFailed
             | Self::RemoteRejected
@@ -147,19 +164,6 @@ struct Consent {
     third_party_upload_enabled: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ImportedConsentV1 {
-    schema_version: u8,
-    kind: String,
-    scope: String,
-    status: String,
-    receipt_id: Uuid,
-    accepted_at_utc: String,
-    diagnostic_enabled: bool,
-    network_upload_enabled: bool,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct OwnerPolicy {
@@ -171,27 +175,6 @@ struct OwnerPolicy {
     diagnostic_enabled: bool,
     trigger_mode: String,
     updated_at_utc: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ImportedPrivatePolicyV1 {
-    schema_version: u8,
-    kind: String,
-    status: String,
-    automatic_activity_checkpoints: bool,
-    collection_scope: String,
-    diagnostic_enabled: bool,
-    trigger_mode: String,
-    accepted_at_utc: String,
-    basic_receipt_id: Uuid,
-    chronicle_access_enabled: bool,
-    collection_generation: u64,
-    cron_or_timer_created: bool,
-    global_hook_created: bool,
-    grant_source: String,
-    mcp_lifecycle_enabled: bool,
-    policy_id: Uuid,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -232,39 +215,6 @@ struct UploadReceipt {
     uploaded_count: u64,
     acknowledged_paths: Vec<PathBuf>,
     collected_through_utc: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ImportedPrivateStatusV3 {
-    schema_version: u8,
-    kind: String,
-    cron_or_timer_created: bool,
-    global_hook_created: bool,
-    last_attempt_result_code: String,
-    last_attempt_utc: String,
-    last_check_result_code: String,
-    last_check_utc: String,
-    last_collected_through_utc: String,
-    last_native_lifecycle_receipt: Value,
-    last_network_failure: String,
-    last_staged_through_utc: Option<String>,
-    last_success_utc: String,
-    last_tailnet_check_utc: String,
-    last_tailnet_notification_utc: Option<String>,
-    mcp_lifecycle_enabled: bool,
-    next_attempt_after_utc: Option<String>,
-    private_paths_recorded: bool,
-    raw_content_recorded: bool,
-    retry_reason_code: Option<String>,
-    secret_value_recorded: bool,
-    tailnet_cli_available: bool,
-    tailnet_connected: Option<bool>,
-    tailnet_health: String,
-    tailnet_notification_result: Option<String>,
-    tailnet_status: String,
-    trigger: String,
-    uploaded_count: u64,
 }
 
 struct CycleLock {
@@ -453,15 +403,14 @@ fn valid_active_consent(value: &Consent) -> bool {
         && parse_timestamp(&value.accepted_at_utc).is_ok()
 }
 
-fn valid_legacy_consent(value: &ImportedConsentV1) -> bool {
-    value.schema_version == 1
-        && value.kind == "groundline-insights-consent"
-        && value.scope == "basic_weekly"
-        && value.status == "active"
-        && !value.receipt_id.is_nil()
-        && !value.diagnostic_enabled
-        && !value.network_upload_enabled
-        && parse_timestamp(&value.accepted_at_utc).is_ok()
+fn read_consent(path: &Path) -> Result<Consent, StateError> {
+    let bytes = read_bytes(path, MAX_STATE_BYTES, true)?;
+    let value: Consent =
+        serde_json::from_slice(&bytes).map_err(|_| StateError::UnsupportedState)?;
+    if value.schema_version != 2 || value.kind != "groundline-insights-consent" {
+        return Err(StateError::UnsupportedState);
+    }
+    Ok(value)
 }
 
 fn active_consent(directory: &Path) -> Result<Consent, StateError> {
@@ -469,20 +418,11 @@ fn active_consent(directory: &Path) -> Result<Consent, StateError> {
     if !path.exists() {
         return Err(StateError::ReconsentRequired);
     }
-    let bytes = read_bytes(&path, MAX_STATE_BYTES, true)?;
-    if let Ok(value) = serde_json::from_slice::<Consent>(&bytes) {
-        return if valid_active_consent(&value) {
-            Ok(value)
-        } else {
-            Err(StateError::ReconsentRequired)
-        };
-    }
-    let imported: ImportedConsentV1 =
-        serde_json::from_slice(&bytes).map_err(|_| StateError::Disabled)?;
-    if valid_legacy_consent(&imported) {
-        Err(StateError::ReconsentRequired)
+    let value = read_consent(&path)?;
+    if valid_active_consent(&value) {
+        Ok(value)
     } else {
-        Err(StateError::Disabled)
+        Err(StateError::ReconsentRequired)
     }
 }
 
@@ -491,46 +431,20 @@ fn consent_status(directory: &Path) -> Result<&'static str, StateError> {
     if !path.exists() {
         return Ok("missing");
     }
-    let bytes = read_bytes(&path, MAX_STATE_BYTES, true)?;
-    if let Ok(value) = serde_json::from_slice::<Consent>(&bytes) {
-        return Ok(if valid_active_consent(&value) {
-            "active"
-        } else {
-            "reconsent_required"
-        });
-    }
-    let imported: ImportedConsentV1 =
-        serde_json::from_slice(&bytes).map_err(|_| StateError::LocalState)?;
-    if valid_legacy_consent(&imported) {
-        Ok("reconsent_required")
+    let value = read_consent(&path)?;
+    Ok(if valid_active_consent(&value) {
+        "active"
     } else {
-        Err(StateError::LocalState)
-    }
+        "reconsent_required"
+    })
 }
 
 fn grant_consent(directory: &Path, now: DateTime<Utc>) -> Result<Consent, StateError> {
     let path = directory.join(CONSENT_FILE);
     if path.exists() {
-        let bytes = read_bytes(&path, MAX_STATE_BYTES, true)?;
-        if let Ok(value) = serde_json::from_slice::<Consent>(&bytes)
-            && valid_active_consent(&value)
-        {
-            return Ok(value);
-        }
-        let legacy: ImportedConsentV1 =
-            serde_json::from_slice(&bytes).map_err(|_| StateError::Disabled)?;
-        if !valid_legacy_consent(&legacy) {
-            return Err(StateError::Disabled);
-        }
-        let archive = directory.join("consent.legacy-v1.json");
-        if archive.exists() {
-            return Err(StateError::LocalState);
-        }
-        quarantine_pending_events(directory)?;
-        std::fs::rename(&path, archive).map_err(|_| StateError::LocalState)?;
-    } else {
-        quarantine_pending_events(directory)?;
+        return active_consent(directory);
     }
+    quarantine_pending_events(directory)?;
     let value = Consent {
         schema_version: 2,
         kind: "groundline-insights-consent".to_owned(),
@@ -587,35 +501,12 @@ fn initialize(directory: &Path, now: DateTime<Utc>) -> Result<(Identity, Consent
 
 fn read_owner_policy(path: &Path) -> Result<OwnerPolicy, StateError> {
     let bytes = read_bytes(path, MAX_STATE_BYTES, true)?;
-    if let Ok(policy) = serde_json::from_slice::<OwnerPolicy>(&bytes) {
-        return Ok(policy);
+    let policy: OwnerPolicy =
+        serde_json::from_slice(&bytes).map_err(|_| StateError::UnsupportedState)?;
+    if policy.schema_version != 1 || policy.kind != "groundline-insights-owner-auto-policy" {
+        return Err(StateError::UnsupportedState);
     }
-    let imported: ImportedPrivatePolicyV1 =
-        serde_json::from_slice(&bytes).map_err(|_| StateError::LocalState)?;
-    if imported.schema_version != 1
-        || imported.kind != "groundline-insights-owner-auto-policy"
-        || parse_timestamp(&imported.accepted_at_utc).is_err()
-        || imported.basic_receipt_id.is_nil()
-        || imported.policy_id.is_nil()
-        || imported.chronicle_access_enabled
-        || imported.collection_generation != 1
-        || imported.cron_or_timer_created
-        || imported.global_hook_created
-        || imported.mcp_lifecycle_enabled
-        || imported.grant_source != "private_plugin_install"
-    {
-        return Err(StateError::LocalState);
-    }
-    Ok(OwnerPolicy {
-        schema_version: imported.schema_version,
-        kind: imported.kind,
-        status: imported.status,
-        automatic_activity_checkpoints: imported.automatic_activity_checkpoints,
-        collection_scope: imported.collection_scope,
-        diagnostic_enabled: imported.diagnostic_enabled,
-        trigger_mode: imported.trigger_mode,
-        updated_at_utc: imported.accepted_at_utc,
-    })
+    Ok(policy)
 }
 
 fn policy_enabled(directory: &Path) -> Result<bool, StateError> {
@@ -629,9 +520,7 @@ fn policy_enabled(directory: &Path) -> Result<bool, StateError> {
         "revoked" if !policy.automatic_activity_checkpoints => false,
         _ => return Err(StateError::LocalState),
     };
-    if policy.schema_version != 1
-        || policy.kind != "groundline-insights-owner-auto-policy"
-        || policy.collection_scope != "all_activity"
+    if policy.collection_scope != "all_activity"
         || policy.diagnostic_enabled
         || policy.trigger_mode != "native_hook_checkpoints"
         || parse_timestamp(&policy.updated_at_utc).is_err()
@@ -777,12 +666,48 @@ fn enrollment_token(codex_home: &Path) -> Result<SecretString, StateError> {
     Ok(SecretString::from(token))
 }
 
+fn validate_api_capabilities(status: reqwest::StatusCode, value: &Value) -> Result<(), StateError> {
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return Err(StateError::ApiUpgradeRequired);
+    }
+    classify_response_status(status)?;
+    if !status.is_success() || value.get("storage_ready").and_then(Value::as_bool) != Some(true) {
+        return Err(StateError::UploadFailed);
+    }
+    if !groundline_contracts::insights::supports_current_ingest(&value["ingest_capabilities"]) {
+        return Err(StateError::ApiUpgradeRequired);
+    }
+    Ok(())
+}
+
+async fn check_api_capabilities(profile: &Profile) -> Result<(), StateError> {
+    check_api_capabilities_url(endpoint(profile, "/healthz")?).await
+}
+
+async fn check_api_capabilities_url(url: Url) -> Result<(), StateError> {
+    let response = client()?
+        .get(url)
+        .send()
+        .await
+        .map_err(|_| StateError::UploadFailed)?;
+    // Older routing layers may return an HTML 404 rather than a JSON body.
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err(StateError::ApiUpgradeRequired);
+    }
+    classify_response_status(response.status())?;
+    let (status, value) = bounded_response(response).await?;
+    validate_api_capabilities(status, &value)
+}
+
 async fn enroll(
     profile: &Profile,
     codex_home: &Path,
     directory: &Path,
     identity: &Identity,
 ) -> Result<SecretString, StateError> {
+    // Cached authentication is not evidence of compatibility after an upgrade.
+    // Check once per due cycle, including cycles that only drain an old outbox.
+    check_api_capabilities(profile).await?;
     if directory.join(TOKEN_METADATA_FILE).is_file()
         && let Some(token) = token_value(directory)?
     {
@@ -1155,7 +1080,10 @@ fn record_delivery_retry(
         .unwrap_or(0)
         .saturating_add(1)
         .min(32);
-    let operator_required = matches!(error, StateError::RemoteRejected);
+    let operator_required = matches!(
+        error,
+        StateError::RemoteRejected | StateError::ApiUpgradeRequired
+    );
     let next_attempt_utc = if operator_required {
         None
     } else {
@@ -1296,103 +1224,16 @@ fn valid_current_status(status: &Status) -> bool {
 
 fn read_stored_status(path: &Path) -> Result<Status, StateError> {
     let bytes = read_bytes(path, MAX_STATE_BYTES, true)?;
-    if let Ok(status) = serde_json::from_slice::<Status>(&bytes) {
-        return if valid_current_status(&status) {
-            Ok(status)
-        } else {
-            Err(StateError::LocalState)
-        };
+    let status: Status =
+        serde_json::from_slice(&bytes).map_err(|_| StateError::UnsupportedState)?;
+    if status.schema_version != 4 || status.kind != "groundline-insights-owner-auto-status" {
+        return Err(StateError::UnsupportedState);
     }
-    let imported: ImportedPrivateStatusV3 =
-        serde_json::from_slice(&bytes).map_err(|_| StateError::LocalState)?;
-    let ImportedPrivateStatusV3 {
-        schema_version,
-        kind,
-        cron_or_timer_created,
-        global_hook_created,
-        last_attempt_result_code,
-        last_attempt_utc,
-        last_check_result_code,
-        last_check_utc,
-        last_collected_through_utc,
-        last_native_lifecycle_receipt,
-        last_network_failure,
-        last_staged_through_utc,
-        last_success_utc,
-        last_tailnet_check_utc,
-        last_tailnet_notification_utc,
-        mcp_lifecycle_enabled,
-        next_attempt_after_utc,
-        private_paths_recorded,
-        raw_content_recorded,
-        retry_reason_code,
-        secret_value_recorded,
-        tailnet_cli_available,
-        tailnet_connected,
-        tailnet_health,
-        tailnet_notification_result,
-        tailnet_status,
-        trigger,
-        uploaded_count,
-    } = imported;
-    let optional_timestamps_valid = [
-        last_staged_through_utc.as_deref(),
-        last_tailnet_notification_utc.as_deref(),
-        next_attempt_after_utc.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    .all(|value| parse_timestamp(value).is_ok());
-    let optional_codes_valid = [
-        retry_reason_code.as_deref(),
-        tailnet_notification_result.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    .all(|value| !value.is_empty());
-    if schema_version != 3
-        || kind != "groundline-insights-owner-auto-status"
-        || cron_or_timer_created
-        || global_hook_created
-        || mcp_lifecycle_enabled
-        || private_paths_recorded
-        || raw_content_recorded
-        || secret_value_recorded
-        || last_attempt_result_code.is_empty()
-        || last_check_result_code.is_empty()
-        || last_network_failure.is_empty()
-        || !last_native_lifecycle_receipt.is_object()
-        || parse_timestamp(&last_attempt_utc).is_err()
-        || parse_timestamp(&last_check_utc).is_err()
-        || parse_timestamp(&last_collected_through_utc).is_err()
-        || parse_timestamp(&last_success_utc).is_err()
-        || parse_timestamp(&last_tailnet_check_utc).is_err()
-        || !optional_timestamps_valid
-        || !optional_codes_valid
-        || !matches!(tailnet_health.as_str(), "ok" | "degraded" | "unknown")
-        || !valid_tailnet_status(&tailnet_status)
-        || !valid_status_trigger(&trigger)
-    {
-        return Err(StateError::LocalState);
+    if valid_current_status(&status) {
+        Ok(status)
+    } else {
+        Err(StateError::LocalState)
     }
-    let _bounded_probe_state = (tailnet_cli_available, tailnet_connected);
-    Ok(Status {
-        schema_version: 4,
-        kind,
-        enabled: true,
-        last_result_code: last_attempt_result_code,
-        last_check_utc,
-        last_success_utc: Some(last_success_utc),
-        last_collected_through_utc: Some(last_collected_through_utc),
-        uploaded_count,
-        pending_event_count: 0,
-        tailnet_status,
-        last_trigger: trigger,
-    })
-}
-
-fn previous_status(directory: &Path) -> Option<Status> {
-    read_stored_status(&directory.join(STATUS_FILE)).ok()
 }
 
 fn write_status(directory: &Path, status: &Status) -> Result<(), StateError> {
@@ -1404,6 +1245,9 @@ pub fn enable(codex_home: &Path) -> Result<Value, StateError> {
     let now = Utc::now();
     load_profile(codex_home)?;
     enrollment_token(codex_home).map_err(|_| StateError::InvalidProfile)?;
+    // Refuse unsupported state before creating consent or replacing a policy.
+    policy_enabled(&directory)?;
+    current_status(&directory)?;
     grant_consent(&directory, now)?;
     initialize(&directory, now)?;
     set_policy(&directory, true, now)?;
@@ -1421,8 +1265,10 @@ pub fn disable(codex_home: &Path) -> Result<Value, StateError> {
 
 fn current_status(directory: &Path) -> Result<Option<Status>, StateError> {
     let path = directory.join(STATUS_FILE);
-    if !path.exists() {
-        return Ok(None);
+    match std::fs::symlink_metadata(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err(StateError::LocalState),
+        Ok(_) => (),
     }
     read_stored_status(&path).map(Some)
 }
@@ -1441,6 +1287,10 @@ fn status_with_tailnet_at(
     let consent_status = consent_status(&directory)?;
     let (quarantined, quarantine_capacity_exceeded) = quarantined_event_count(&directory)?;
     let previous = current_status(&directory)?;
+    let collection_window = collection::read(&directory)?;
+    let collection_paused = collection_window
+        .as_ref()
+        .is_some_and(|window| window.blocked("activity_checkpoint"));
     let profile_present = tailnet::is_regular_file(&codex_home.join(PROFILE_PATH));
     let profile_configured = load_profile(codex_home).is_ok();
     let credential_present = tailnet::is_regular_file(&codex_home.join(ENROLLMENT_TOKEN_PATH));
@@ -1456,11 +1306,16 @@ fn status_with_tailnet_at(
     let collection_stale =
         last_success_at.is_some_and(|value| now - value > COLLECTION_STALE_AFTER);
     let collection_clock_skew = last_success_at.is_some_and(|value| value - now > MAX_CLOCK_SKEW);
+    // Native activity is the only collection input. Model/provider configuration
+    // and inference proxies are not consulted, even after one is removed.
+    let state_store_present = crate::audit_store::state_store_present(codex_home);
     let ready_to_collect = enabled
+        && state_store_present
         && profile_configured
         && credential_valid
         && consent_status == "active"
         && tailnet_connected == Some(true)
+        && !collection_paused
         && retry.as_ref().is_none_or(|value| !value.operator_required);
     let mut blocking_reason_codes = Vec::new();
     let (overall_status, collection_state) = if !enabled {
@@ -1492,11 +1347,30 @@ fn status_with_tailnet_at(
         blocking_reason_codes.push("outbox_capacity_exceeded");
         ("WARN", "outbox_capacity_exceeded")
     } else if retry.as_ref().is_some_and(|value| value.operator_required) {
-        blocking_reason_codes.push("delivery_operator_action_required");
-        ("WARN", "delivery_operator_action_required")
+        let reason = if retry
+            .as_ref()
+            .is_some_and(|value| value.last_error_code == "api_upgrade_required")
+        {
+            "api_upgrade_required"
+        } else {
+            "delivery_operator_action_required"
+        };
+        blocking_reason_codes.push(reason);
+        ("WARN", reason)
+    } else if collection_window.is_some() {
+        let reason = if collection_paused {
+            "collection_operator_action_required"
+        } else {
+            "collection_incomplete"
+        };
+        blocking_reason_codes.push(reason);
+        ("WARN", reason)
     } else if pending > 0 {
         blocking_reason_codes.push("delivery_pending");
         ("WARN", "delivery_pending")
+    } else if !state_store_present {
+        blocking_reason_codes.push("codex_state_store_unavailable");
+        ("WARN", "native_activity_unavailable")
     } else if collection_clock_skew {
         blocking_reason_codes.push("collection_clock_skew");
         ("WARN", "clock_skew")
@@ -1515,6 +1389,8 @@ fn status_with_tailnet_at(
     Ok(json!({
         "kind":"groundline-insights-worker-status","schema":2,"status":overall_status,
         "collection_state":collection_state,"ready_to_collect":ready_to_collect,"collection_stale":collection_stale,"blocking_reason_codes":blocking_reason_codes,
+        "collection_source":"native_codex_state","codex_state_store_present":state_store_present,
+        "inference_proxy_required":false,"model_catalog_required":false,"core_plugin_required":false,
         "policy_configured":policy_configured,"collection_enabled":enabled,
         "owner_profile_present":profile_present,"owner_profile_configured":profile_configured,
         "enrollment_credential_present":credential_present,"enrollment_credential_valid":credential_valid,
@@ -1527,6 +1403,7 @@ fn status_with_tailnet_at(
         "delivery_attempt_count":retry.as_ref().map(|value| value.attempt_count).unwrap_or(0),
         "delivery_next_attempt_utc":retry.as_ref().and_then(|value| value.next_attempt_utc.as_deref()),
         "delivery_operator_required":retry.as_ref().is_some_and(|value| value.operator_required),
+        "collection_window_pending":collection_window.is_some(),"collection_operator_required":collection_paused,
         "last_check_result_code":last_result_code,
         "last_check_utc":previous.as_ref().map(|value| value.last_check_utc.as_str()),"last_success_utc":last_success_utc,
         "last_collected_through_utc":previous.as_ref().and_then(|value| value.last_collected_through_utc.as_deref()),
@@ -1600,7 +1477,22 @@ pub async fn run_once(
     let _lock = CycleLock::acquire(&directory)?;
     crate::checkpoint::claim_triggers(codex_home).map_err(|_| StateError::LocalState)?;
     let now = Utc::now();
-    let previous = previous_status(&directory);
+    let previous = current_status(&directory)?;
+    collection::finish_committed(
+        &directory,
+        previous
+            .as_ref()
+            .and_then(|s| s.last_collected_through_utc.as_deref()),
+    )?;
+    let pending_collection = collection::read(&directory)?;
+    if pending_collection
+        .as_ref()
+        .is_some_and(|window| window.blocked(trigger))
+    {
+        crate::checkpoint::acknowledge_claimed_triggers(codex_home)
+            .map_err(|_| StateError::LocalState)?;
+        return Err(StateError::CollectionPaused);
+    }
     let mut outbox = pending_events(&directory, UPLOAD_BATCH_EVENTS)?;
     let retry = read_delivery_retry(&directory)?;
     let collection_due = collection_is_due(
@@ -1625,7 +1517,7 @@ pub async fn run_once(
         crate::checkpoint::acknowledge_claimed_triggers(codex_home)
             .map_err(|_| StateError::LocalState)?;
         return Ok(json!({
-            "status":"PASS","result_code":"not_due","uploaded_count":0,
+            "status":if pending_collection.is_some() {"WARN"} else {"PASS"},"result_code":"not_due","uploaded_count":0,
             "pending_event_count":outbox.observed_count,
             "delivery_next_attempt_utc":retry.as_ref().and_then(|value| value.next_attempt_utc.as_deref()),
             "last_collected_through_utc":previous.as_ref().and_then(|value| value.last_collected_through_utc.as_deref()),
@@ -1696,29 +1588,35 @@ pub async fn run_once(
         || outbox.observed_count >= OUTBOX_HIGH_WATERMARK_EVENTS
         || retry.as_ref().is_some_and(|value| value.operator_required);
     if collection_due && !collection_deferred {
-        let start = collected_through
-            .as_deref()
-            .and_then(|value| parse_timestamp(value).ok())
-            .or_else(|| earliest_recency(codex_home).ok().flatten())
-            .unwrap_or_else(|| now - chrono::Duration::days(7));
-        let start = start.min(now - chrono::Duration::seconds(1));
-        let audit = match collect_audit(
-            codex_home,
-            start,
+        match collection::stage(
+            &directory,
+            collected_through.as_deref(),
             now,
-            Some(identity.runtime_family.as_str()),
-            false,
+            &identity,
+            &consent,
+            trigger,
+            |start, end| {
+                collect_audit(
+                    codex_home,
+                    start,
+                    end,
+                    Some(identity.runtime_family.as_str()),
+                    false,
+                )
+                .map_err(|_| StateError::AuditFailed)
+            },
         ) {
-            Ok(audit) => audit,
-            Err(_) => {
-                let error = StateError::AuditFailed;
+            Ok(end) => {
+                collected_through = Some(end);
+            }
+            Err(error) => {
                 record_delivery_retry(&directory, now, &error)?;
                 persist_cycle_status(
                     &directory,
                     previous.as_ref(),
                     now,
                     StatusUpdate {
-                        result_code: "audit_failed",
+                        result_code: &error.to_string(),
                         collected_through_utc: collected_through.clone(),
                         uploaded_count: 0,
                         pending_event_count: outbox.observed_count as u64,
@@ -1729,34 +1627,23 @@ pub async fn run_once(
                 )?;
                 return Err(error);
             }
-        };
-        if audit
-            .pointer("/scope/observed_root_sample_count")
-            .and_then(Value::as_u64)
-            .unwrap_or(0)
-            > 0
-        {
-            let event = build_basic_event(
-                &audit,
-                EventIdentity {
-                    instance_id: identity.collector_instance_id,
-                    os_family: &identity.os_family,
-                    runtime_family: &identity.runtime_family,
-                    execution_mode: &identity.execution_mode,
-                },
-                EventConsent {
-                    receipt_id: consent.receipt_id,
-                    accepted_at_utc: &consent.accepted_at_utc,
-                },
-                env!("CARGO_PKG_VERSION"),
-                0,
-                trigger,
-            )
-            .map_err(|_| StateError::AuditFailed)?;
-            enqueue(&directory, &event)?;
         }
-        collected_through = Some(now.to_rfc3339_opts(SecondsFormat::Millis, true));
         outbox = pending_events(&directory, UPLOAD_BATCH_EVENTS)?;
+        persist_cycle_status(
+            &directory,
+            previous.as_ref(),
+            now,
+            StatusUpdate {
+                result_code: "collection_staged",
+                collected_through_utc: collected_through.clone(),
+                uploaded_count: 0,
+                pending_event_count: outbox.observed_count as u64,
+                tailnet_status: tailnet_status.clone(),
+                trigger,
+                successful: false,
+            },
+        )?;
+        collection::finish_committed(&directory, collected_through.as_deref())?;
     }
     let uploaded = if outbox.observed_count > 0 && delivery_is_due(trigger, retry.as_ref(), now) {
         let result = tokio::time::timeout(
@@ -1783,6 +1670,7 @@ pub async fn run_once(
                         successful: false,
                     },
                 )?;
+                collection::finish_committed(&directory, collected_through.as_deref())?;
                 remove_acknowledged_events(&receipt)?;
                 receipt.uploaded_count
             }
@@ -1865,17 +1753,18 @@ pub fn resolve_roots(
 #[cfg(test)]
 mod tests {
     use chrono::{DateTime, Utc};
-    use serde_json::json;
+    use serde_json::{Value, json};
     use tempfile::tempdir;
 
     use crate::local_file::{open_bounded_regular_file, private_for_current_user};
 
     use super::{
-        CONSENT_FILE, DeliveryRetry, ENROLLMENT_TOKEN_PATH, MAX_OUTBOX_EVENTS, OUTBOX_DIR,
-        POLICY_FILE, PROFILE_PATH, QUARANTINE_DIR, STATUS_FILE, StateError, Status,
-        classify_response_status, collection_is_due, configure_profile, delivery_is_due, enable,
-        explicit_operator_retry, initialize, latest_timestamp, operator_retry_blocked,
-        pending_events, policy_enabled, record_delivery_retry, set_policy, state_directory,
+        CONSENT_FILE, DeliveryRetry, ENROLLMENT_TOKEN_PATH, IDENTITY_FILE, MAX_OUTBOX_EVENTS,
+        OUTBOX_DIR, POLICY_FILE, PROFILE_PATH, QUARANTINE_DIR, STATUS_FILE, StateError, Status,
+        active_consent, checkpoint_enabled, classify_response_status, collection_is_due,
+        configure_profile, current_status, delivery_is_due, disable, enable,
+        explicit_operator_retry, latest_timestamp, operator_retry_blocked, pending_events,
+        policy_enabled, read_json, record_delivery_retry, set_policy, state_directory,
         status_with_tailnet, status_with_tailnet_at, validate_upload_response, write_json,
         write_status,
     };
@@ -1938,6 +1827,64 @@ mod tests {
     }
 
     #[test]
+    fn independent_owner_profiles_do_not_share_credentials_or_enable_collection() {
+        let first = tempdir().expect("first owner home");
+        let second = tempdir().expect("second owner home");
+        let mut second_input: Value = serde_json::from_slice(&profile("")).unwrap();
+        second_input["endpoint"] = json!("http://100.64.0.2:18080");
+        second_input["enrollment_token"] = json!("second-owner-enrollment-fixture-0001");
+
+        configure_profile(first.path(), &profile("")).expect("first owner profile");
+        let first_profile = std::fs::read(first.path().join(PROFILE_PATH)).unwrap();
+        let first_token = std::fs::read(first.path().join(ENROLLMENT_TOKEN_PATH)).unwrap();
+        let receipt = configure_profile(second.path(), &serde_json::to_vec(&second_input).unwrap())
+            .expect("second owner profile");
+
+        assert_eq!(
+            std::fs::read(first.path().join(PROFILE_PATH)).unwrap(),
+            first_profile
+        );
+        assert_eq!(
+            std::fs::read(first.path().join(ENROLLMENT_TOKEN_PATH)).unwrap(),
+            first_token
+        );
+        let second_profile = super::load_profile(second.path()).unwrap();
+        assert_eq!(second_profile.endpoint, "http://100.64.0.2:18080");
+        assert_eq!(
+            std::fs::read_to_string(second.path().join(ENROLLMENT_TOKEN_PATH)).unwrap(),
+            "second-owner-enrollment-fixture-0001\n"
+        );
+        let output = receipt.to_string();
+        assert!(!output.contains("100.64.0.2"));
+        assert!(!output.contains("second-owner-enrollment"));
+        for home in [&first, &second] {
+            assert!(!checkpoint_enabled(home.path()).expect("read collection policy"));
+            assert!(!state_directory(home.path()).exists());
+        }
+    }
+
+    #[test]
+    fn collector_profiles_reject_management_credentials_and_shared_service_modes() {
+        for (field, value) in [
+            ("truenas_api_key", "management-key-fixture"),
+            ("admin_token", "owner-admin-fixture"),
+            ("grafana_password", "dashboard-login-fixture"),
+            ("mode", "shared_service"),
+            ("endpoint", "https://example.com"),
+        ] {
+            let home = tempdir().expect("isolated owner home");
+            let mut input: Value = serde_json::from_slice(&profile("")).unwrap();
+            input[field] = json!(value);
+            assert!(matches!(
+                configure_profile(home.path(), &serde_json::to_vec(&input).unwrap()),
+                Err(StateError::InvalidProfile)
+            ));
+            assert!(!home.path().join(PROFILE_PATH).exists());
+            assert!(!home.path().join(ENROLLMENT_TOKEN_PATH).exists());
+        }
+    }
+
+    #[test]
     fn rejects_missing_or_short_enrollment_credentials() {
         let home = tempdir().expect("temporary Codex home");
         let without = String::from_utf8(profile("")).unwrap().replace(
@@ -1975,6 +1922,7 @@ mod tests {
         let home = tempdir().expect("temporary Codex home");
         configure_profile(home.path(), &profile("")).expect("configure profile");
         enable(home.path()).expect("enable collection");
+        native_store(home.path());
         let result = status_with_tailnet(
             home.path(),
             json!({"tailnet_connected":true,"tailnet_status":"connected"}),
@@ -1987,6 +1935,56 @@ mod tests {
             result["blocking_reason_codes"],
             json!(["first_collection_pending"])
         );
+    }
+
+    fn native_store(home: &std::path::Path) {
+        let db = rusqlite::Connection::open(home.join("state_42.sqlite")).unwrap();
+        db.execute_batch("CREATE TABLE threads (rollout_path TEXT, source TEXT, has_user_event INTEGER, updated_at INTEGER)").unwrap();
+    }
+
+    #[test]
+    fn native_activity_is_required_without_reading_model_or_proxy_configuration() {
+        let home = tempdir().unwrap();
+        configure_profile(home.path(), &profile("")).unwrap();
+        enable(home.path()).unwrap();
+        let connected = json!({"tailnet_connected":true,"tailnet_status":"connected"});
+        let missing = status_with_tailnet(home.path(), connected.clone()).unwrap();
+        assert_eq!(missing["collection_state"], "native_activity_unavailable");
+        assert_eq!(
+            missing["blocking_reason_codes"],
+            json!(["codex_state_store_unavailable"])
+        );
+        assert_eq!(missing["ready_to_collect"], false);
+
+        native_store(home.path());
+        // Removing an inference proxy may leave malformed config or a missing
+        // generated catalog. Neither file belongs to the collector's input.
+        let untouched = b"INVALID TOML [ PRIVATE_CONFIG_SENTINEL";
+        std::fs::write(home.path().join("config.toml"), untouched).unwrap();
+        let ready = status_with_tailnet(home.path(), connected.clone()).unwrap();
+        assert_eq!(ready["ready_to_collect"], true);
+        assert_eq!(ready["collection_source"], "native_codex_state");
+        assert_eq!(ready["codex_state_store_present"], true);
+        for field in [
+            "inference_proxy_required",
+            "model_catalog_required",
+            "core_plugin_required",
+        ] {
+            assert_eq!(ready[field], false);
+        }
+        assert!(!ready.to_string().contains("PRIVATE_CONFIG_SENTINEL"));
+        assert_eq!(
+            std::fs::read(home.path().join("config.toml")).unwrap(),
+            untouched
+        );
+        // Do not fall back to an older store after a failed native upgrade.
+        std::fs::write(home.path().join("state_43.sqlite"), []).unwrap();
+        let unavailable = status_with_tailnet(home.path(), connected).unwrap();
+        assert_eq!(
+            unavailable["collection_state"],
+            "native_activity_unavailable"
+        );
+        assert_eq!(unavailable["ready_to_collect"], false);
     }
 
     #[test]
@@ -2042,12 +2040,54 @@ mod tests {
         );
     }
 
-    #[test]
-    fn imports_only_the_exact_previous_private_policy_and_status_contracts() {
+    fn assert_unsupported_state_is_preserved(file_name: &str, value: &Value) {
         let home = tempdir().expect("temporary Codex home");
         let directory = state_directory(home.path());
+        configure_profile(home.path(), &profile("")).expect("configure profile");
+        write_json(&directory.join(file_name), value).expect("unsupported state fixture");
         write_json(
-            &directory.join(POLICY_FILE),
+            &directory.join(OUTBOX_DIR).join("pending.json"),
+            &json!({"pending":"preserve"}),
+        )
+        .expect("pending fixture");
+        let files = [
+            CONSENT_FILE,
+            POLICY_FILE,
+            STATUS_FILE,
+            IDENTITY_FILE,
+            "outbox/pending.json",
+        ];
+        let before = files.map(|file| std::fs::read(directory.join(file)).ok());
+        let read_error = match file_name {
+            CONSENT_FILE => active_consent(&directory).unwrap_err(),
+            POLICY_FILE => checkpoint_enabled(home.path()).unwrap_err(),
+            STATUS_FILE => current_status(&directory).unwrap_err(),
+            _ => panic!("unsupported fixture target"),
+        };
+        for error in [
+            read_error,
+            enable(home.path()).unwrap_err(),
+            status_with_tailnet(
+                home.path(),
+                json!({"tailnet_connected":true,"tailnet_status":"connected"}),
+            )
+            .unwrap_err(),
+        ] {
+            assert_eq!(error.to_string(), "unsupported_local_state");
+            assert!(!error.network_performed());
+        }
+        assert_eq!(
+            files.map(|file| std::fs::read(directory.join(file)).ok()),
+            before
+        );
+        assert!(!directory.join(QUARANTINE_DIR).exists());
+        assert!(!directory.join("consent.legacy-v1.json").exists());
+    }
+
+    #[test]
+    fn rejects_previous_private_policy_without_conversion() {
+        assert_unsupported_state_is_preserved(
+            POLICY_FILE,
             &json!({
                 "schema_version":1,
                 "kind":"groundline-insights-owner-auto-policy",
@@ -2066,10 +2106,13 @@ mod tests {
                 "mcp_lifecycle_enabled":false,
                 "policy_id":"20000000-0000-4000-8000-000000000002",
             }),
-        )
-        .expect("write imported policy");
-        write_json(
-            &directory.join(STATUS_FILE),
+        );
+    }
+
+    #[test]
+    fn rejects_previous_private_status_without_conversion() {
+        assert_unsupported_state_is_preserved(
+            STATUS_FILE,
             &json!({
                 "schema_version":3,
                 "kind":"groundline-insights-owner-auto-status",
@@ -2100,18 +2143,7 @@ mod tests {
                 "trigger":"session_end_hook",
                 "uploaded_count":1,
             }),
-        )
-        .expect("write imported status");
-        let result = status_with_tailnet(
-            home.path(),
-            json!({"tailnet_connected":true,"tailnet_status":"connected"}),
-        )
-        .expect("imported status");
-        assert_eq!(result["collection_enabled"], true);
-        assert_eq!(result["status"], "WARN");
-        assert_eq!(result["collection_state"], "configuration_required");
-        assert_eq!(result["last_check_result_code"], "pass");
-        assert_eq!(result["last_success_utc"], "2026-08-28T00:00:00Z");
+        );
     }
 
     #[test]
@@ -2119,6 +2151,7 @@ mod tests {
         let home = tempdir().expect("temporary Codex home");
         configure_profile(home.path(), &profile("")).expect("configure profile");
         enable(home.path()).expect("enable collection");
+        native_store(home.path());
         let directory = state_directory(home.path());
         let now = DateTime::parse_from_rfc3339("2026-08-31T00:00:00Z")
             .expect("fixed now")
@@ -2220,71 +2253,99 @@ mod tests {
     }
 
     #[test]
-    fn legacy_no_network_consent_requires_explicit_reconsent_and_quarantines_pending_work() {
-        let home = tempdir().expect("temporary Codex home");
-        let directory = state_directory(home.path());
-        let receipt = "10000000-0000-4000-8000-000000000001";
-        configure_profile(home.path(), &profile("")).expect("configure profile");
-        write_json(
-            &directory.join(CONSENT_FILE),
+    fn rejects_previous_no_network_consent_without_conversion() {
+        assert_unsupported_state_is_preserved(
+            CONSENT_FILE,
             &json!({
                 "schema_version":1,
                 "kind":"groundline-insights-consent",
                 "scope":"basic_weekly",
                 "status":"active",
-                "receipt_id":receipt,
+                "receipt_id":"10000000-0000-4000-8000-000000000001",
                 "accepted_at_utc":"2026-08-31T00:00:00Z",
                 "diagnostic_enabled":false,
                 "network_upload_enabled":false
             }),
-        )
-        .expect("legacy consent");
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_versions_kinds_and_fields_without_rewriting_state() {
+        let home = tempdir().expect("temporary Codex home");
+        configure_profile(home.path(), &profile("")).unwrap();
+        enable(home.path()).unwrap();
+        let directory = state_directory(home.path());
+        let status = Status {
+            schema_version: 4,
+            kind: "groundline-insights-owner-auto-status".to_owned(),
+            enabled: true,
+            last_result_code: "pass".to_owned(),
+            last_check_utc: "2026-08-31T00:00:00Z".to_owned(),
+            last_success_utc: None,
+            last_collected_through_utc: None,
+            uploaded_count: 0,
+            pending_event_count: 0,
+            tailnet_status: "connected".to_owned(),
+            last_trigger: "manual".to_owned(),
+        };
+        write_status(&directory, &status).unwrap();
+        for file in [CONSENT_FILE, POLICY_FILE, STATUS_FILE] {
+            let current: Value = read_json(&directory.join(file), true).unwrap();
+            for (key, value) in [
+                ("schema_version", json!(255)),
+                ("kind", json!("unsupported-kind")),
+                ("unexpected_field", json!(true)),
+            ] {
+                let mut unsupported = current.clone();
+                unsupported[key] = value;
+                assert_unsupported_state_is_preserved(file, &unsupported);
+            }
+            assert_unsupported_state_is_preserved(file, &json!({}));
+        }
+    }
+
+    #[test]
+    fn current_consent_is_reused_and_unconsented_pending_events_are_quarantined() {
+        let home = tempdir().expect("temporary Codex home");
+        let directory = state_directory(home.path());
+        configure_profile(home.path(), &profile("")).unwrap();
         write_json(
-            &directory.join(OUTBOX_DIR).join("legacy.json"),
-            &json!({"legacy":"pending"}),
+            &directory.join(OUTBOX_DIR).join("pending.json"),
+            &json!({"pending":"unconsented"}),
         )
-        .expect("legacy pending event");
-        let original = std::fs::read(directory.join(CONSENT_FILE)).expect("legacy consent bytes");
-
-        assert_eq!(
-            initialize(
-                &directory,
-                DateTime::parse_from_rfc3339("2026-08-31T00:10:00Z")
-                    .expect("fixed now")
-                    .with_timezone(&Utc),
-            )
-            .unwrap_err()
-            .to_string(),
-            "reconsent_required"
-        );
-        assert_eq!(
-            std::fs::read(directory.join(CONSENT_FILE)).expect("unchanged legacy consent"),
-            original
-        );
-        assert!(!directory.join("identity.json").exists());
-
-        enable(home.path()).expect("explicit reconsent");
-        let (_, consent) = initialize(
-            &directory,
-            DateTime::parse_from_rfc3339("2026-08-31T00:10:00Z")
-                .expect("fixed now")
-                .with_timezone(&Utc),
-        )
-        .expect("active consent");
+        .unwrap();
+        enable(home.path()).unwrap();
+        let consent = active_consent(&directory).unwrap();
         assert_eq!(consent.schema_version, 2);
         assert!(consent.owner_service_upload_enabled);
         assert!(!consent.third_party_upload_enabled);
-        assert_ne!(consent.receipt_id.to_string(), receipt);
-        let stored: serde_json::Value = serde_json::from_slice(
-            &std::fs::read(directory.join(CONSENT_FILE)).expect("stored consent"),
-        )
-        .expect("stored JSON");
-        assert_eq!(stored["owner_service_upload_enabled"], true);
-        assert_eq!(stored["third_party_upload_enabled"], false);
-        assert!(stored.get("network_upload_enabled").is_none());
-        assert!(directory.join("consent.legacy-v1.json").is_file());
-        assert!(directory.join(QUARANTINE_DIR).join("legacy.json").is_file());
-        assert!(!directory.join(OUTBOX_DIR).join("legacy.json").exists());
+        assert!(
+            directory
+                .join(QUARANTINE_DIR)
+                .join("pending.json")
+                .is_file()
+        );
+        assert!(!directory.join(OUTBOX_DIR).join("pending.json").exists());
+        let original = std::fs::read(directory.join(CONSENT_FILE)).unwrap();
+        disable(home.path()).unwrap();
+        enable(home.path()).unwrap();
+        assert_eq!(
+            std::fs::read(directory.join(CONSENT_FILE)).unwrap(),
+            original
+        );
+
+        let mut invalid = consent;
+        invalid.owner_service_upload_enabled = false;
+        write_json(&directory.join(CONSENT_FILE), &invalid).unwrap();
+        let original = std::fs::read(directory.join(CONSENT_FILE)).unwrap();
+        assert_eq!(
+            enable(home.path()).unwrap_err().to_string(),
+            "reconsent_required"
+        );
+        assert_eq!(
+            std::fs::read(directory.join(CONSENT_FILE)).unwrap(),
+            original
+        );
     }
 
     #[test]
@@ -2394,5 +2455,65 @@ mod tests {
         );
         assert_eq!(StateError::UploadFailed.mutation_performed(), None);
         assert_eq!(StateError::LocalState.mutation_performed(), None);
+    }
+}
+#[test]
+fn api_capability_matrix_requires_semantic_contract_without_version_pinning() {
+    let status = reqwest::StatusCode::OK;
+    let good = json!({"storage_ready":true,"ingest_capabilities":groundline_contracts::insights::ingest_capabilities()});
+    assert!(validate_api_capabilities(status, &good).is_ok());
+    let mut future = good.clone();
+    future["ingest_capabilities"]["basic_contract_revision"] = json!(99);
+    assert!(validate_api_capabilities(status, &future).is_ok());
+    for capabilities in [
+        Value::Null,
+        json!({"basic_schema_versions":[5],"basic_contract_revision":1}),
+        json!({"basic_schema_versions":[6],"basic_contract_revision":99}),
+    ] {
+        let value = json!({"storage_ready":true,"ingest_capabilities":capabilities});
+        assert!(matches!(
+            validate_api_capabilities(status, &value),
+            Err(StateError::ApiUpgradeRequired)
+        ));
+    }
+    assert!(matches!(
+        validate_api_capabilities(reqwest::StatusCode::NOT_FOUND, &Value::Null),
+        Err(StateError::ApiUpgradeRequired)
+    ));
+    assert!(matches!(
+        validate_api_capabilities(reqwest::StatusCode::SERVICE_UNAVAILABLE, &good),
+        Err(StateError::UploadFailed)
+    ));
+    let home = tempfile::tempdir().unwrap();
+    let retry =
+        record_delivery_retry(home.path(), Utc::now(), &StateError::ApiUpgradeRequired).unwrap();
+    assert!(retry.operator_required);
+    assert!(retry.next_attempt_utc.is_none());
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn capability_preflight_handles_real_http_new_old_and_unready_servers() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    for (status, body, expected) in [
+        (200,json!({"storage_ready":true,"ingest_capabilities":groundline_contracts::insights::ingest_capabilities()}).to_string(),"ok"),
+        (200,json!({"storage_ready":true}).to_string(),"api_upgrade_required"),
+        (404,"old api html".to_owned(),"api_upgrade_required"),
+        (503,json!({"storage_ready":false}).to_string(),"event_upload_failed"),
+        (403,"not json".to_owned(),"remote_request_rejected"),
+    ] {
+        let listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url=Url::parse(&format!("http://{}/healthz",listener.local_addr().unwrap())).unwrap();
+        let server=tokio::spawn(async move {
+            let (mut stream,_)=listener.accept().await.unwrap();
+            let mut request=[0;4096]; let size=stream.read(&mut request).await.unwrap();
+            let request=String::from_utf8_lossy(&request[..size]).to_ascii_lowercase();
+            assert!(request.starts_with("get /healthz")); assert!(!request.contains("authorization:"));
+            let response=format!("HTTP/1.1 {status} Test\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len());
+            stream.write_all(response.as_bytes()).await.unwrap();
+        });
+        let result=check_api_capabilities_url(url).await;
+        assert_eq!(result.err().map(|e|e.to_string()).as_deref().unwrap_or("ok"),expected);
+        server.await.unwrap();
     }
 }
