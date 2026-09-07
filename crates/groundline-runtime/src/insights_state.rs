@@ -699,20 +699,25 @@ async fn check_api_capabilities_url(url: Url) -> Result<(), StateError> {
     validate_api_capabilities(status, &value)
 }
 
+fn enrollment_generation(value: &Value) -> Result<u32, StateError> {
+    value
+        .get("current_generation")
+        .and_then(Value::as_u64)
+        .and_then(|generation| u32::try_from(generation).ok())
+        .ok_or(StateError::EnrollmentFailed)
+}
+
 async fn enroll(
     profile: &Profile,
     codex_home: &Path,
     directory: &Path,
     identity: &Identity,
-) -> Result<SecretString, StateError> {
+) -> Result<(SecretString, u32), StateError> {
     // Cached authentication is not evidence of compatibility after an upgrade.
     // Check once per due cycle, including cycles that only drain an old outbox.
     check_api_capabilities(profile).await?;
-    if directory.join(TOKEN_METADATA_FILE).is_file()
-        && let Some(token) = token_value(directory)?
-    {
-        return Ok(token);
-    }
+    // Re-enroll with the same identity and token once per due cycle. The server
+    // owns the active generation; cached metadata cannot establish its value.
     let token = token_value(directory)?.unwrap_or_else(|| {
         SecretString::from(format!(
             "{}{}{}",
@@ -757,6 +762,7 @@ async fn enroll(
     {
         return Err(StateError::EnrollmentFailed);
     }
+    let generation = enrollment_generation(&value)?;
     write_json(
         &directory.join(TOKEN_METADATA_FILE),
         &json!({
@@ -765,7 +771,7 @@ async fn enroll(
             "runtime_family":identity.runtime_family,"execution_mode":identity.execution_mode,"groundline_version":env!("CARGO_PKG_VERSION"),
         }),
     )?;
-    Ok(token)
+    Ok((token, generation))
 }
 
 fn pending_events(directory: &Path, batch_limit: usize) -> Result<OutboxInventory, StateError> {
@@ -1557,7 +1563,7 @@ pub async fn run_once(
         )?;
         return Err(StateError::TailnetDisconnected);
     }
-    let token = match enroll(&profile, codex_home, &directory, &identity).await {
+    let (token, generation) = match enroll(&profile, codex_home, &directory, &identity).await {
         Ok(token) => token,
         Err(error) => {
             record_delivery_retry(&directory, now, &error)?;
@@ -1594,7 +1600,10 @@ pub async fn run_once(
             now,
             &identity,
             &consent,
-            trigger,
+            collection::Source {
+                generation,
+                trigger,
+            },
             |start, end| {
                 collect_audit(
                     codex_home,
@@ -2458,6 +2467,29 @@ mod tests {
     }
 }
 #[test]
+fn enrollment_requires_an_explicit_bounded_server_generation() {
+    for generation in [0, 7, u32::MAX] {
+        assert_eq!(
+            enrollment_generation(&json!({"current_generation":generation})).unwrap(),
+            generation
+        );
+    }
+    for value in [
+        json!({}),
+        json!({"current_generation":null}),
+        json!({"current_generation":-1}),
+        json!({"current_generation":"7"}),
+        json!({"current_generation":u64::from(u32::MAX)+1}),
+    ] {
+        assert!(matches!(
+            enrollment_generation(&value),
+            Err(StateError::EnrollmentFailed)
+        ));
+    }
+}
+
+#[cfg(test)]
+#[test]
 fn api_capability_matrix_requires_semantic_contract_without_version_pinning() {
     let status = reqwest::StatusCode::OK;
     let good = json!({"storage_ready":true,"ingest_capabilities":groundline_contracts::insights::ingest_capabilities()});
@@ -2468,6 +2500,7 @@ fn api_capability_matrix_requires_semantic_contract_without_version_pinning() {
     for capabilities in [
         Value::Null,
         json!({"basic_schema_versions":[5],"basic_contract_revision":1}),
+        json!({"basic_schema_versions":[5],"basic_contract_revision":2}),
         json!({"basic_schema_versions":[6],"basic_contract_revision":99}),
     ] {
         let value = json!({"storage_ready":true,"ingest_capabilities":capabilities});

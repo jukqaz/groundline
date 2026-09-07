@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.21.1
+
+- Preserve an existing collector's active history generation by retrieving it
+  during authenticated enrollment. Reuse the same identity and token, refresh
+  enrollment metadata, and require ingest contract revision 3 before collection.
+- Qualify nonzero-generation collection, immutable retries, and API reporting.
+
 ## 0.21.0
 
 - Clarify bring-your-own Insights instances, separate operator and collector

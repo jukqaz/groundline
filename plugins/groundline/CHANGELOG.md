@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.21.1
+
+- Publish alongside the Insights fix for existing nonzero-generation collectors.
+
 ## 0.21.0
 
 - Add `config-audit` for private, offline model/effort posture checks against a

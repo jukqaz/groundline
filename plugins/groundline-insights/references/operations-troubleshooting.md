@@ -51,7 +51,7 @@ Interpret the lanes independently:
   Known native shared prefixes are an intentional scope exclusion, not a retry
   failure. Unknown ownership, malformed metrics, and read limits are blockers.
 - `api_upgrade_required`: update the owner API first and confirm `/healthz`
-  advertises Basic schema 5 and ingest contract revision 2 or newer. Then run
+  advertises Basic schema 5 and ingest contract revision 3 or newer. Then run
   `worker run-once` explicitly. Cached credentials do not bypass this check;
   pending aggregates remain local and are not silently downgraded.
 - `invalid_owner_profile`: install the reviewed owner-local schema-7 input with

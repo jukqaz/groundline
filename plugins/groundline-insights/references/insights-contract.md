@@ -70,7 +70,11 @@ without a separate data-authorization decision.
 Every due worker cycle checks `/healthz` before enrollment or upload, even when
 a collector token is already cached. The API advertises Basic envelope schema
 versions and a semantic allowlist revision in `ingest_capabilities`. Collectors
-require schema 5 and revision 2 or newer, not an exact package version. Missing
+require schema 5 and revision 3 or newer, not an exact package version. Revision 3
+includes the authoritative `current_generation` in the enrollment response.
+Re-enroll once per due cycle with the existing identity and token, and use that
+generation when staging new events. Never infer zero from a cached credential
+or overwrite a prepared event after a generation changes. Missing
 or incompatible capabilities require an API upgrade and explicit operator retry;
 unready storage remains a retryable service failure. Credentials are not sent
 by this preflight, and the existing bounded readiness cache and rate limit apply.
