@@ -13,8 +13,8 @@ path = "src/main.rs"
 chrono.workspace = true
 clap.workspace = true
 dirs.workspace = true
-groundline-contracts = { version = "0.21.1", path = "../groundline-contracts", features = ["guidance"] }
-groundline-runtime = { version = "0.21.1", path = "../groundline-runtime" }
+groundline-contracts = { version = "0.21.2", path = "../groundline-contracts", features = ["guidance"] }
+groundline-runtime = { version = "0.21.2", path = "../groundline-runtime" }
 serde.workspace = true
 serde_json.workspace = true
 serde-saphyr.workspace = true

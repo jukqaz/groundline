@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.21.2
+
+- Keep native response and UI usage totals on independent baselines, preserving
+  reset and trailing-response checks for the selected source. Accept Codex's
+  explicit subagent ownership boundary for paginated fork metadata.
+- Stream large native histories into bounded audit projections, retain metric
+  semantics, and reject other runtimes after metadata without reading their bodies.
+- Include active turns whose sidebar recency predates their latest update.
+  Preserve explicit incomplete results for unreadable or unattributed history.
+
 ## 0.21.1
 
 - Preserve an existing collector's active history generation by retrieving it

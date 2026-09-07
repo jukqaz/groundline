@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.21.2
+
+- Stream native audit inputs with separate I/O and retained-record budgets.
+  Preserve compaction and tool-result metrics while discarding unused bodies.
+- Separate native and UI usage baselines and include long-running turns even
+  when their sidebar recency is stale. Keep unknown history ownership incomplete.
+
 ## 0.21.1
 
 - Publish alongside the Insights fix for existing nonzero-generation collectors.

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v0.21.2 - 2026-09-07
+
+- Collect active native tasks using the newest update clock and independent
+  native/UI usage baselines, without double-counting their totals.
+- Stream large histories into bounded audit projections and exclude other
+  runtimes after metadata. Preserve unknown ownership and genuine in-window
+  resets as incomplete; never advance or rewrite existing cursors implicitly.
+
 ## v0.21.1 - 2026-09-07
 
 - Read the server's active collection generation instead of assuming zero.
