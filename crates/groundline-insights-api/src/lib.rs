@@ -1092,6 +1092,7 @@ async fn enroll(
             "status":"PASS",
             "collector_instance_id":input.collector_instance_id,
             "outcome":outcome,
+            "current_generation":generation,
         }),
         outcome,
     ))
@@ -2057,7 +2058,7 @@ mod tests {
         serde_json::from_slice(&bytes).expect("response JSON")
     }
 
-    fn integration_event(collector_id: Uuid) -> Value {
+    fn integration_event(collector_id: Uuid, generation: u32) -> Value {
         let end = Utc::now();
         let start = end - ChronoDuration::minutes(1);
         let start = start.to_rfc3339_opts(SecondsFormat::Secs, true);
@@ -2106,7 +2107,7 @@ mod tests {
                 accepted_at_utc: &start,
             },
             env!("CARGO_PKG_VERSION"),
-            0,
+            generation,
             "manual",
         )
         .expect("valid integration event")
@@ -2510,9 +2511,35 @@ mod tests {
             .await
             .expect("enroll response");
         assert_eq!(response.status(), StatusCode::CREATED);
-        assert_eq!(response_json(response).await["outcome"], "accepted");
+        let initial_enrollment = response_json(response).await;
+        assert_eq!(initial_enrollment["outcome"], "accepted");
+        assert_eq!(initial_enrollment["current_generation"], 0);
 
-        let event = integration_event(collector_id);
+        // An existing installation can already have activated a later history
+        // generation. Re-enrollment must preserve its token and active history.
+        let mut existing = clickhouse.collector(collector_id).await.unwrap().unwrap();
+        let token_hash = existing.token_hash.clone();
+        existing.current_generation = 7;
+        clickhouse.write_collector(&existing).await.unwrap();
+        let response = router
+            .clone()
+            .oneshot(local_request(
+                Method::POST,
+                "/v1/enroll",
+                &"e".repeat(32),
+                Some(&enrollment),
+                &[],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let resumed = response_json(response).await;
+        assert_eq!(resumed["current_generation"], 7);
+        let preserved = clickhouse.collector(collector_id).await.unwrap().unwrap();
+        assert_eq!(preserved.current_generation, 7);
+        assert_eq!(preserved.token_hash, token_hash);
+
+        let event = integration_event(collector_id, 7);
         let event_id = event["event_id"].as_str().expect("event id");
         let event_headers = [
             ("x-groundline-collector-id", collector_id.to_string()),
@@ -2553,7 +2580,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response_json(response).await["outcome"], "duplicate");
 
-        let second_event = integration_event(collector_id);
+        let second_event = integration_event(collector_id, 7);
         let second_headers = [
             ("x-groundline-collector-id", collector_id.to_string()),
             (

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v0.21.1 - 2026-09-07
+
+- Read the server's active collection generation instead of assuming zero.
+  Preserve collector identity, token, and prior data during upgrades; require
+  API contract revision 3 and refresh enrollment metadata on each due cycle.
+- Resolve capability preflight through the configured owner health endpoint;
+  retain rejection of unrelated collector routes.
+
 ## v0.21.0 - 2026-09-07
 
 - Make native Codex-only collection an explicit contract, independent of Core,

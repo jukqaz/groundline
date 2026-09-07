@@ -72,15 +72,24 @@ pub(super) fn finish_committed(directory: &Path, cursor: Option<&str>) -> Result
     Ok(())
 }
 
+pub(super) struct Source<'a> {
+    pub generation: u32,
+    pub trigger: &'a str,
+}
+
 pub(super) fn stage(
     directory: &Path,
     cursor: Option<&str>,
     now: DateTime<Utc>,
     identity: &Identity,
     consent: &Consent,
-    trigger: &str,
+    source: Source<'_>,
     audit: impl FnOnce(DateTime<Utc>, DateTime<Utc>) -> Result<Value, StateError>,
 ) -> Result<String, StateError> {
+    let Source {
+        generation,
+        trigger,
+    } = source;
     finish_committed(directory, cursor)?;
     let mut window = match read(directory)? {
         Some(window) => window,
@@ -151,7 +160,7 @@ pub(super) fn stage(
                         accepted_at_utc: &consent.accepted_at_utc,
                     },
                     env!("CARGO_PKG_VERSION"),
-                    0,
+                    generation,
                     trigger,
                 )
                 .map_err(|_| StateError::AuditFailed)?,
@@ -236,7 +245,10 @@ mod tests {
                 at(10),
                 &identity,
                 &consent,
-                "manual",
+                Source {
+                    generation: 7,
+                    trigger: "manual"
+                },
                 |s, e| audit(&root, s, e)
             ),
             Err(StateError::AuditIncomplete)
@@ -253,7 +265,10 @@ mod tests {
             at(30),
             &identity,
             &consent,
-            "manual",
+            Source {
+                generation: 7,
+                trigger: "manual",
+            },
             |s, e| audit(&root, s, e),
         )
         .unwrap();
@@ -261,6 +276,7 @@ mod tests {
         let events = pending_events(&dir, 16).unwrap();
         assert_eq!(events.observed_count, 1);
         let original = events.batch[0].1.clone();
+        assert_eq!(original["source"]["collection_generation"], 7);
         assert_eq!(original["metrics"]["root"]["usage"]["total_tokens"], 9);
         // Crash after preparing/enqueue, before committing the cursor.
         std::fs::remove_file(&events.batch[0].0).unwrap();
@@ -272,7 +288,10 @@ mod tests {
                 at(40),
                 &identity,
                 &consent,
-                "manual",
+                Source {
+                    generation: 7,
+                    trigger: "manual"
+                },
                 |_, _| panic!("must reuse prepared event")
             )
             .unwrap(),
@@ -285,7 +304,10 @@ mod tests {
             at(40),
             &identity,
             &consent,
-            "manual",
+            Source {
+                generation: 7,
+                trigger: "manual",
+            },
             |_, _| panic!(),
         )
         .unwrap();
@@ -308,10 +330,21 @@ mod tests {
         let (_temp, root, rollout, identity, consent) = fixture();
         let dir = state_directory(&root);
         write_usage(&rollout, 5, 12);
-        stage(&dir, None, at(30), &identity, &consent, "manual", |s, e| {
-            assert_eq!(s, at(30) - INITIAL_LOOKBACK);
-            audit(&root, s, e)
-        })
+        stage(
+            &dir,
+            None,
+            at(30),
+            &identity,
+            &consent,
+            Source {
+                generation: 7,
+                trigger: "manual",
+            },
+            |s, e| {
+                assert_eq!(s, at(30) - INITIAL_LOOKBACK);
+                audit(&root, s, e)
+            },
+        )
         .unwrap();
         let events = pending_events(&dir, 16).unwrap();
         assert_eq!(
@@ -341,12 +374,16 @@ mod tests {
             at(10),
             &identity,
             &consent,
-            "manual",
+            Source {
+                generation: 7,
+                trigger: "manual",
+            },
             |s, e| audit(&root, s, e),
         )
         .unwrap();
         let events = pending_events(&dir, 16).unwrap();
         assert_eq!(events.observed_count, 1);
+        assert_eq!(events.batch[0].1["source"]["collection_generation"], 7);
         assert_eq!(
             events.batch[0].1["metrics"]["root"]["usage"]["total_tokens"],
             27
@@ -370,7 +407,10 @@ mod tests {
                     at(10),
                     &identity,
                     &consent,
-                    "activity_checkpoint",
+                    Source {
+                        generation: 7,
+                        trigger: "activity_checkpoint"
+                    },
                     |s, e| audit(&root, s, e)
                 )
                 .is_err()
@@ -383,7 +423,10 @@ mod tests {
                 at(20),
                 &identity,
                 &consent,
-                "activity_checkpoint",
+                Source {
+                    generation: 7,
+                    trigger: "activity_checkpoint"
+                },
                 |_, _| panic!("bounded retry")
             ),
             Err(StateError::CollectionPaused)
@@ -396,7 +439,10 @@ mod tests {
             at(30),
             &identity,
             &consent,
-            "manual",
+            Source {
+                generation: 7,
+                trigger: "manual",
+            },
             |s, e| audit(&root, s, e),
         )
         .unwrap();
@@ -407,9 +453,18 @@ mod tests {
     fn empty_complete_window_can_commit_but_invalid_state_cannot_restart_history() {
         let (_temp, root, _, identity, consent) = fixture();
         let dir = state_directory(&root);
-        let end = stage(&dir, None, at(30), &identity, &consent, "manual", |_, _| {
-            Ok(json!({"collection_complete":true,"scope":{}}))
-        })
+        let end = stage(
+            &dir,
+            None,
+            at(30),
+            &identity,
+            &consent,
+            Source {
+                generation: 7,
+                trigger: "manual",
+            },
+            |_, _| Ok(json!({"collection_complete":true,"scope":{}})),
+        )
         .unwrap();
         assert_eq!(pending_events(&dir, 0).unwrap().observed_count, 0);
         finish_committed(&dir, Some(&end)).unwrap();
