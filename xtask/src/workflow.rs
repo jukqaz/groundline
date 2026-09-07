@@ -36,6 +36,56 @@ fn actions_are_pinned(workflow: &str) -> bool {
         .all(external_action_is_pinned)
 }
 
+fn public_build_metadata_is_bounded(workflow: &str) -> bool {
+    let Ok(document) = serde_saphyr::from_str::<serde_json::Value>(workflow) else {
+        return false;
+    };
+    let Some(jobs) = document.get("jobs").and_then(serde_json::Value::as_object) else {
+        return false;
+    };
+    let mut builds = 0;
+    for job in jobs.values() {
+        let Some(steps) = job.get("steps").and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        let mut private_builder = false;
+        for step in steps {
+            let action = step
+                .get("uses")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            if action.starts_with("docker/setup-buildx-action@") {
+                let options = step["with"]["driver-opts"].as_str().unwrap_or("");
+                let privacy_options: Vec<_> = options
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| line.starts_with("provenance-add-gha"))
+                    .collect();
+                if step["with"]["driver"] != "docker-container"
+                    || privacy_options != ["provenance-add-gha=false"]
+                    || step["with"].get("endpoint").is_some()
+                {
+                    return false;
+                }
+                private_builder = true;
+            }
+            if action.starts_with("docker/build-push-action@") {
+                builds += 1;
+                // A different builder could bypass the preceding privacy setup.
+                if !private_builder
+                    || step["with"].get("builder").is_some()
+                    || step["env"]["DOCKER_BUILD_RECORD_UPLOAD"] != "false"
+                    || step["with"]["provenance"] != "mode=max"
+                    || step["with"]["sbom"] != true
+                {
+                    return false;
+                }
+            }
+        }
+    }
+    builds > 0
+}
+
 pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
     let workflows = root.join(".github/workflows");
     let entries = std::fs::read_dir(&workflows)
@@ -161,6 +211,7 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
         || rust.matches("runs-on:").count() != rust.matches("timeout-minutes:").count()
         || !stable_promotion_cleans_staging
         || !actions_are_pinned(&rust)
+        || !public_build_metadata_is_bounded(&rust)
         || !setup.contains("using: composite")
         || !setup.contains("rustup toolchain install")
         || setup.contains("curl ")
@@ -193,7 +244,49 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{actions_are_pinned, external_action_is_pinned, verify_ci_cost_contract};
+    use super::{
+        actions_are_pinned, external_action_is_pinned, public_build_metadata_is_bounded,
+        verify_ci_cost_contract,
+    };
+
+    #[test]
+    fn public_builds_exclude_raw_events_without_dropping_attestations() {
+        let workflow = include_str!("../../.github/workflows/rust.yml");
+        assert!(public_build_metadata_is_bounded(workflow));
+        for (before, after) in [
+            (
+                "driver-opts: provenance-add-gha=false",
+                "driver-opts: provenance-add-gha=true",
+            ),
+            (
+                "driver-opts: provenance-add-gha=false",
+                "# missing privacy option",
+            ),
+            (
+                "DOCKER_BUILD_RECORD_UPLOAD: \"false\"",
+                "DOCKER_BUILD_RECORD_UPLOAD: \"true\"",
+            ),
+            ("provenance: mode=max", "provenance: false"),
+            ("sbom: true", "sbom: false"),
+            ("driver: docker-container", "driver: remote"),
+            (
+                "driver: docker-container",
+                "driver: docker-container\n          endpoint: remote-builder",
+            ),
+            (
+                "provenance: mode=max",
+                "provenance: mode=max\n          builder: unreviewed-builder",
+            ),
+        ] {
+            assert_ne!(workflow.replace(before, after), workflow);
+            assert!(
+                !public_build_metadata_is_bounded(&workflow.replace(before, after)),
+                "accepted {after}"
+            );
+        }
+        assert!(!public_build_metadata_is_bounded("jobs: {}"));
+        assert!(!public_build_metadata_is_bounded("invalid: ["));
+    }
 
     #[test]
     fn repository_ci_cost_contract_is_current() {

@@ -5,6 +5,10 @@
 2. Run formatting and targeted CLI/xtask tests while editing. On final source,
    run workspace tests, Clippy, dependency policy, source verification, and
    `git diff --check` once.
+   Include window partition, partial-read recovery, prepared-event restart,
+   bounded retries/diagnostics, and real loopback capability preflight tests.
+   Confirm owner APIs advertise the new ingest contract before collector
+   upgrades; public stable promotion alone cannot prove private API readiness.
 3. In the isolated qualification ClickHouse, run the explicit mutation-enabled
    integration lane. It must exercise API-owned schema migration, enrollment,
    accepted upload, duplicate retry, weekly reporting, every Grafana query, and
@@ -19,6 +23,14 @@
    refs, and tags contain no production endpoint, credential, personal path,
    infrastructure inventory, deployment receipt, Python runtime dependency, or
    duplicate root package. A later deletion does not repair public history.
+   Audit public Actions logs, artifacts, release assets, and image attestations
+   separately: clean Git history does not prove these surfaces are clean.
+   The Docker builder must use `provenance-add-gha=false` to exclude raw GitHub
+   event payloads (which may contain private email addresses). Keep maximum
+   build provenance, SBOMs, and signed attestations enabled; disable automatic
+   Docker build-record uploads. Existing published records are not repaired by
+   a workflow change. Inventory and privately back up affected objects before
+   requesting owner approval for cleanup or replacement.
 6. On the release tag, boot the rendered ClickHouse, API, and Grafana stack once.
    Require API storage readiness, every provisioned dashboard query, and semantic
    fleet/roster/storage frames to pass through Grafana itself. Confirm the
