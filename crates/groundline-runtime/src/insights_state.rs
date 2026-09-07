@@ -544,7 +544,7 @@ fn set_policy(directory: &Path, enabled: bool, now: DateTime<Utc>) -> Result<(),
 }
 
 fn endpoint(profile: &Profile, path: &str) -> Result<Url, StateError> {
-    if !matches!(path, "/v1/enroll" | "/v1/events") {
+    if !matches!(path, "/healthz" | "/v1/enroll" | "/v1/events") {
         return Err(StateError::InvalidProfile);
     }
     let mut url = report_url(&profile.endpoint, 7).map_err(|_| StateError::InvalidProfile)?;
@@ -1821,6 +1821,18 @@ mod tests {
         let token = open_bounded_regular_file(&home.path().join(ENROLLMENT_TOKEN_PATH), 32, 4096)
             .expect("enrollment token file");
         assert!(private_for_current_user(&token));
+    }
+
+    #[test]
+    fn owner_profile_resolves_the_capability_preflight_endpoint() {
+        let home = tempdir().expect("temporary Codex home");
+        configure_profile(home.path(), &profile("")).unwrap();
+        let owner = super::load_profile(home.path()).unwrap();
+        let health = super::endpoint(&owner, "/healthz").unwrap();
+        assert_eq!(health.as_str(), "http://100.64.0.1:18080/healthz");
+        assert!(super::endpoint(&owner, "/v1/enroll").is_ok());
+        assert!(super::endpoint(&owner, "/v1/events").is_ok());
+        assert!(super::endpoint(&owner, "/v1/collectors").is_err());
     }
 
     #[test]
