@@ -46,6 +46,19 @@ manifest와 SHA-256 checksum을 포함합니다.
 실행 파일은 설치된 plugin의 `bin/<target>`에서 찾습니다. plugin 설치가 사용자
 shell의 `PATH` 등록까지 보장하는 것은 아닙니다.
 
+## 사용 패턴에 따른 개인 개선
+
+`$groundline:improve-personal-workflow`로 Insights·로컬 감사·현재 공식 모델 지침을
+검토하고, 직접 확인한 작업 결과를 기준으로 개선 후보를 평가합니다.
+`personal review`는 기본 읽기 전용이며, 근거와 기존 권한이 충분할 때만 `--apply`로
+전용 개인 지침을 시험합니다. `personal evaluate`는 서로 겹치지 않는 동일 조건의
+작업을 비교하고, 결과가 나빠지면 복구합니다. `personal rollback`으로 직접 복구할
+수도 있으며 사용자 편집은 덮어쓰지 않습니다.
+
+데이터가 부족하면 관찰 상태를 유지합니다. 모델·추론 수준·전역 설정·권한은 바꾸지
+않으며 자동 주기 실행은 사용자가 요청한 Codex 네이티브 자동화로만 구성합니다.
+[개인 개선 계약](references/personal-improvement.md)에 입력과 적용·복구 조건을 정리했습니다.
+
 ## 주요 명령
 
 ```console

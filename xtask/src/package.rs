@@ -46,6 +46,7 @@ const CORE_SKILLS: &[&str] = &[
     "audit-agent-history",
     "close-live-work",
     "evaluate-ai-usage-maturity",
+    "improve-personal-workflow",
     "package-agent-task",
     "reconcile-current-state",
 ];

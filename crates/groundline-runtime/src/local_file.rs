@@ -115,6 +115,31 @@ pub fn open_bounded_regular_file(path: &Path, minimum: u64, maximum: u64) -> io:
     Ok(file)
 }
 
+/// Open an owner-private directory without following its final link or reparse point.
+pub fn open_private_directory(path: &Path) -> io::Result<File> {
+    #[cfg(windows)]
+    let file = {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+        };
+        OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)?
+    };
+    #[cfg(not(windows))]
+    let file = open_no_follow(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_dir() || is_reparse_point(&metadata) || !private_for_current_user(&file) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "private directory required",
+        ));
+    }
+    Ok(file)
+}
+
 fn private_temporary_path(path: &Path) -> io::Result<PathBuf> {
     let parent = path
         .parent()

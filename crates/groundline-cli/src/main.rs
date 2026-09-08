@@ -14,6 +14,7 @@ use serde_json::{Value, json};
 mod config_audit;
 mod guidance;
 mod operations;
+mod personal;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -28,6 +29,11 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Review, trial, and evaluate bounded personal guidance from explicit evidence.
+    Personal {
+        #[command(subcommand)]
+        command: personal::Command,
+    },
     /// Compare one configuration layer to an explicit native model catalog, offline.
     ConfigAudit {
         #[arg(long)]
@@ -276,13 +282,18 @@ fn emit(value: &Value, json_output: bool) {
 }
 
 fn failure(error: ContractError) -> Value {
+    let mutation = if error.0.starts_with("personal_") {
+        Value::Null
+    } else {
+        json!(false)
+    };
     json!({
         "kind": "groundline-runtime-error",
         "schema": 1,
         "status": "FAIL",
         "error": error.0,
         "network_performed": false,
-        "mutation_performed": false,
+        "mutation_performed": mutation,
         "raw_content_emitted": false,
         "private_paths_emitted": false,
     })
@@ -290,6 +301,7 @@ fn failure(error: ContractError) -> Value {
 
 fn run(cli: Cli) -> Result<(), ExitCode> {
     let result: Result<(Value, bool), ContractError> = match cli.command {
+        Command::Personal { command } => personal::run(command).map(|value| (value, true)),
         Command::ConfigAudit {
             config,
             catalog,

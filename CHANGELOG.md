@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.22.0
+
+- Add offline personal workflow review, one-rule guidance trials, comparable
+  outcome evaluation, and rollback that preserves user edits. Require fresh
+  native model/catalog and official guidance evidence; preserve selected models,
+  effort, permissions, and non-trial instruction surfaces.
+- Add an explicit personal improvement skill and English/Korean documentation.
+  Partial reports or unavailable direct outcomes remain observation-only; tokens
+  and repeated-call aggregates alone cannot authorize an automatic change.
+- Correct report fleet counts for unmatched ClickHouse joins. Return an explicit
+  report-contract rejection for unsupported stored history instead of a storage
+  outage, preserving the records and strict current report contract.
+
 ## 0.21.4
 
 - Confirm actual rollout records intersect the requested audit window before

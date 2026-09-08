@@ -5,6 +5,13 @@ Its audit commands open Codex state read-only and return aggregate counts withou
 prompt text, response text, task titles, repository names, filesystem paths,
 configuration values, credentials, or database rows.
 
+The optional personal workflow commands accept an explicit private outcome sample
+and current model evidence. Only an authorized trial writes generated guidance
+and a bounded local journal outside Git. Local delivery hashes, document hashes,
+and outcome records are not included in Insights uploads or public summaries.
+The commands perform no model calls, change no Codex settings, and preserve user
+edits. See the [personal improvement contract](../plugins/groundline/references/personal-improvement.md).
+
 GroundLine Insights is separately installed, does not require Core, and remains
 inactive until the owner configures and enables it. It writes only bounded
 owner-private state under the Codex home and sends strict aggregate events to an

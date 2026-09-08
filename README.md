@@ -134,3 +134,10 @@ See [integrations and installation profiles](docs/integrations.md),
 [Insights self-hosting](docs/self-hosting.md), [Privacy](docs/privacy.md),
 [Security](SECURITY.md), [changes](CHANGELOG.md), and the
 [release checklist](docs/release-checklist.md).
+
+## Personal workflow improvement
+
+Use `$groundline:improve-personal-workflow` to combine Insights reports, native
+audits, current model guidance, and private completion evidence. Core personal
+commands review, trial, evaluate, and restore dedicated guidance while preserving
+user edits. Missing evidence never authorizes a change. See [the contract](plugins/groundline/references/personal-improvement.md).

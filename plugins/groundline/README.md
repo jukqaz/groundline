@@ -99,3 +99,10 @@ See the repository [integration profiles](https://github.com/jukqaz/groundline/b
 [Privacy](https://github.com/jukqaz/groundline/blob/main/docs/privacy.md),
 [Security](SECURITY.md), and
 [release checklist](https://github.com/jukqaz/groundline/blob/main/docs/release-checklist.md).
+
+## Personal workflow improvement
+
+Use `$groundline:improve-personal-workflow` to combine Insights reports, native
+audits, current model guidance, and private completion evidence. Core personal
+commands review, trial, evaluate, and restore dedicated guidance while preserving
+user edits. Missing evidence never authorizes a change. See [the contract](references/personal-improvement.md).

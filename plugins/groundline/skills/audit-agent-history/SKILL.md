@@ -51,8 +51,10 @@ Never assume the user's current repository contains the installed binary.
 9. For an efficiency counterfactual, use
    `groundline efficiency simulate --audit <weekly.json> --json`. Label the
    result as a simulation, not measured savings or billing.
-10. GroundLine does not maintain a mutable experiment ledger. Record an
-   accepted experiment only in a user-selected repository artifact.
+10. For a user-requested personal improvement trial, use
+    `$groundline:improve-personal-workflow`. Its explicit private state contains
+    only that trial and outcome evidence. Do not modify Chronicle records or
+    publish personal outcomes. Ordinary audits remain read-only.
 
 Repeated permission reviews may indicate a workspace-boundary mismatch. Inspect
 the active host and preserve its user-selected permissions; do not prescribe

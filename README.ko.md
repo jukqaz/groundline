@@ -78,6 +78,19 @@ GroundLine은 `guidance audit|snapshot`으로 스킬의 추가·삭제·변경, 
 공개 저장소 밖에 남으며 플러그인 업그레이드가 이를 덮어쓰지 않습니다.
 자세한 절차는 [스킬 관리](plugins/groundline/references/skill-maintenance.md)를 참고하세요.
 
+## 사용 패턴에 따른 개인 개선
+
+`$groundline:improve-personal-workflow`는 Insights 보고서, 로컬 감사, 현재 모델의
+공식 지침과 직접 확인한 완료 결과를 함께 검토합니다. `groundline personal
+review|evaluate|rollback`은 승인된 전용 개인 지침에 한 가지 변경만 시험하고,
+동일한 조건의 별도 작업 결과를 비교해 유지하거나 복구합니다.
+
+근거가 부족하면 `OBSERVE`, 비교 조건이 달라지면 `INCONCLUSIVE`로 남습니다.
+선택한 모델·추론 수준·권한·프로젝트 지침은 자동으로 바꾸지 않습니다. 최신 모델
+지침은 실행 시 Codex가 공식 문서와 실제 네이티브 카탈로그를 확인하며, 모델 이름을
+고정된 목록으로 판정하지 않습니다. 파일 생성과 실제 지침 적용은 따로 검증합니다.
+자세한 입력·개인정보·복구 조건은 [개인 개선 계약](plugins/groundline/references/personal-improvement.md)에 있습니다.
+
 ## 개인정보와 보안
 
 Core는 lifecycle hook을 설치하거나 네트워크 요청을 하지 않습니다. Insights만

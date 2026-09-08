@@ -1,0 +1,556 @@
+use super::*;
+use tempfile::TempDir;
+
+fn model() -> (ModelEvidence, Vec<u8>) {
+    let catalog=serde_json::to_vec(&json!({"models":[{"slug":"future-model-2030","supported_reasoning_levels":[{"effort":"adaptive"}]}]})).unwrap();
+    let e = ModelEvidence {
+        kind: "groundline-model-evidence".into(),
+        schema: 1,
+        checked_at_utc: Utc::now().to_rfc3339(),
+        runtime_version: "0.153.4".into(),
+        runtime_family: "codex_app".into(),
+        selected_model: "future-model-2030".into(),
+        selected_effort: "adaptive".into(),
+        latest_reference_model: "future-model-2030".into(),
+        catalog_sha256: hash(&catalog),
+        official_sources: vec![Source {
+            applies_to_model: "future-model-2030".into(),
+            url: "https://developers.openai.com/api/docs/guides/latest-model".into(),
+            sha256: "a".repeat(64),
+            checked_at_utc: Utc::now().to_rfc3339(),
+        }],
+        behavior_focus: vec![Rule::ApprovalContinuity, Rule::DiagnoseBeforeRetry],
+    };
+    (e, catalog)
+}
+fn sample(context: &str, offset: i64, key: &str) -> Sample {
+    let start = Utc::now() - Duration::days(offset);
+    Sample {
+        kind: "groundline-outcome-sample".into(),
+        schema: 1,
+        period_start_utc: start.to_rfc3339(),
+        period_end_utc: (start + Duration::hours(1)).to_rfc3339(),
+        model_context_sha256: context.into(),
+        guidance_sha256: hash(b""),
+        comparison_context_sha256: hash(
+            b"same non-trial instructions, tools, permissions and service tier",
+        ),
+        task_kind: "implementation".into(),
+        scope_size: "medium".into(),
+        activation_verified: false,
+        units: (0..10)
+            .map(|i| Unit {
+                unit_hash: hash(format!("{key}{i}").as_bytes()),
+                started_at_utc: (start + Duration::minutes(i * 2)).to_rfc3339(),
+                completed_at_utc: (start + Duration::minutes(i * 2 + 1)).to_rfc3339(),
+                outcome: Outcome::Verified,
+                evidence: Evidence::RuntimeCheck,
+                rework: false,
+                redundant_approval_count: 1,
+                continuation_prompt_count: 1,
+                repeated_call_count: 3,
+                tool_call_count: 10,
+                total_tokens: Some(1000),
+            })
+            .collect(),
+    }
+}
+fn trial() -> (TempDir, ModelEvidence, Vec<u8>, Sample) {
+    let root = tempdir().unwrap();
+    let (e, c) = model();
+    let context = model_context(&e, &c, Utc::now()).unwrap();
+    let baseline = sample(&context, 4, "before");
+    apply(
+        root.path(),
+        Rule::ApprovalContinuity,
+        &baseline,
+        &context,
+        Utc::now() - Duration::days(3),
+    )
+    .unwrap();
+    let mut candidate = sample(&context, 2, "after");
+    candidate.guidance_sha256 = hash(render(&[Rule::ApprovalContinuity]).as_bytes());
+    candidate.activation_verified = true;
+    for unit in &mut candidate.units {
+        unit.redundant_approval_count = 0;
+        unit.continuation_prompt_count = 0;
+    }
+    (root, e, c, candidate)
+}
+fn put(path: &Path, value: &Value) {
+    fs::write(path, serde_json::to_vec(value).unwrap()).unwrap();
+}
+fn audit() -> Value {
+    json!({"kind":"groundline-codex-weekly-audit","schema":1,"status":"PASS",
+        "raw_content_emitted":false,"private_paths_emitted":false,"thread_ids_emitted":false,"rollout_paths_emitted":false,"secret_value_printed":false,
+        "scope":{"generated_at":Utc::now().to_rfc3339(),"sample_sufficient":true,"completed_root_sample_count":10},
+        "root":{"activity":{"user_messages_with_text":20},"model_effort":{"counts":{}},"task_latency":{},"prompt_shape":{"short_message_count":20,"broad_scope_message_count":20},
+        "tools":{"call_count":100,"calls_in_exact_repeated_groups":20},"boundary_signals":{}}})
+}
+#[test]
+fn current_native_catalog_accepts_future_models_but_rejects_stale_or_unofficial_evidence() {
+    let (mut e, c) = model();
+    assert!(model_context(&e, &c, Utc::now()).is_ok());
+    e.selected_effort = "unknown".into();
+    assert!(model_context(&e, &c, Utc::now()).is_err());
+    e.selected_effort = "adaptive".into();
+    e.checked_at_utc = (Utc::now() - Duration::days(2)).to_rfc3339();
+    assert!(model_context(&e, &c, Utc::now()).is_err());
+    e.checked_at_utc = Utc::now().to_rfc3339();
+    e.official_sources[0].url = "https://developers.openai.com.evil.test/private".into();
+    assert!(model_context(&e, &c, Utc::now()).is_err());
+    e.official_sources[0].url = "https://user:secret@developers.openai.com/docs".into();
+    assert!(model_context(&e, &c, Utc::now()).is_err());
+    let (e, c) = model();
+    assert!(model_context(&e, &[c, b" ".to_vec()].concat(), Utc::now()).is_err());
+}
+#[test]
+fn duplicate_unknown_and_misattributed_outcomes_cannot_become_verified_samples() {
+    let mut s = sample(&"a".repeat(64), 4, "unit");
+    validate_sample(&s, &"a".repeat(64), Utc::now()).unwrap();
+    s.units.push(s.units[0].clone());
+    assert!(validate_sample(&s, &"a".repeat(64), Utc::now()).is_err());
+    s.units.pop();
+    s.units[0].outcome = Outcome::Unknown;
+    assert!(validate_sample(&s, &"a".repeat(64), Utc::now()).is_err());
+    s.units[0].evidence = Evidence::Unobserved;
+    validate_sample(&s, &"a".repeat(64), Utc::now()).unwrap();
+    assert!(!sufficient(&s));
+    assert!(validate_sample(&s, &"b".repeat(64), Utc::now()).is_err());
+    let mut raw = serde_json::to_value(s).unwrap();
+    raw["raw_prompt"] = json!("PRIVATE_SENTINEL");
+    assert!(serde_json::from_value::<Sample>(raw).is_err());
+}
+#[test]
+fn insufficient_outcomes_never_write_guidance_and_short_followups_do_not_trigger_a_rule() {
+    let root = tempdir().unwrap();
+    let (e, c) = model();
+    let context = model_context(&e, &c, Utc::now()).unwrap();
+    let mut report = report_fixture();
+    report["generated_at_utc"] =
+        json!(Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+    let report_path = root.path().join("report.json");
+    put(&report_path, &report);
+    let audit_path = root.path().join("audit.json");
+    put(&audit_path, &audit());
+    let out = review(
+        ReviewInputs {
+            report: &report_path,
+            audit: &audit_path,
+            outcomes: None,
+            state_dir: Some(root.path()),
+            apply: true,
+        },
+        &e,
+        &c,
+    )
+    .unwrap();
+    assert_eq!(out["status"], "OBSERVE");
+    assert_eq!(out["mutation_performed"], false);
+    assert!(!root.path().join("trial.json").exists());
+    let mut only_short = audit();
+    only_short["root"]["tools"] = json!({});
+    assert_eq!(select_rule(&e, None, &only_short), None);
+    let s = sample(&context, 4, "unit");
+    let outcomes = root.path().join("outcomes.json");
+    put(&outcomes, &serde_json::to_value(&s).unwrap());
+    let out = review(
+        ReviewInputs {
+            report: &report_path,
+            audit: &audit_path,
+            outcomes: Some(&outcomes),
+            state_dir: Some(root.path()),
+            apply: true,
+        },
+        &e,
+        &c,
+    )
+    .unwrap();
+    assert_eq!(out["status"], "READY");
+    assert_eq!(out["mutation_performed"], true);
+    assert_eq!(out["trial"]["native_activation"], "UNVERIFIED");
+    assert!(!out.to_string().contains(&s.units[0].unit_hash));
+}
+#[test]
+fn comparable_observed_improvement_can_be_retained_without_claiming_causation() {
+    let (root, e, c, s) = trial();
+    let out = evaluate(root.path(), s, &e, &c).unwrap();
+    assert_eq!(out["status"], "RETAINED");
+    assert_eq!(out["causal_improvement_claimed"], false);
+    assert_eq!(load_trial(root.path()).unwrap().status, "retained");
+    run(Command::Rollback {
+        state_dir: root.path().to_owned(),
+        json: true,
+    })
+    .unwrap();
+    assert_eq!(
+        fs::read(root.path().join("personal-guidance.md")).unwrap(),
+        b""
+    );
+}
+#[test]
+fn lower_token_use_does_not_override_quality_regression() {
+    let (root, e, c, mut s) = trial();
+    s.units[0].outcome = Outcome::Failed;
+    for u in &mut s.units {
+        u.total_tokens = Some(10);
+    }
+    let out = evaluate(root.path(), s, &e, &c).unwrap();
+    assert_eq!(out["status"], "ROLLED_BACK");
+    assert_eq!(out["reason_codes"], json!(["quality_regression"]));
+    assert!(
+        fs::read(root.path().join("personal-guidance.md"))
+            .unwrap()
+            .is_empty()
+    );
+}
+#[test]
+fn absent_activation_overlapping_periods_reused_ids_and_cohort_changes_are_inconclusive() {
+    for case in 0..5 {
+        let (root, e, c, mut s) = trial();
+        let baseline = load_trial(root.path()).unwrap().baseline;
+        match case {
+            0 => s.activation_verified = false,
+            1 => s.period_start_utc = baseline.period_start_utc.clone(),
+            2 => s.units[0].unit_hash = baseline.units[0].unit_hash.clone(),
+            3 => s.task_kind = "review".into(),
+            _ => {
+                s.units.pop();
+            }
+        }
+        let before = fs::read(root.path().join("personal-guidance.md")).unwrap();
+        let out = evaluate(root.path(), s, &e, &c).unwrap();
+        assert_eq!(out["status"], "INCONCLUSIVE");
+        assert_eq!(
+            fs::read(root.path().join("personal-guidance.md")).unwrap(),
+            before
+        );
+        assert_eq!(load_trial(root.path()).unwrap().status, "pending");
+    }
+}
+#[test]
+fn user_edits_are_preserved_and_a_failed_candidate_is_not_repeated_on_the_same_units() {
+    let (root, e, c, s) = trial();
+    fs::write(root.path().join("personal-guidance.md"), "USER_EDIT").unwrap();
+    assert!(evaluate(root.path(), s, &e, &c).is_err());
+    assert!(
+        run(Command::Rollback {
+            state_dir: root.path().to_owned(),
+            json: true
+        })
+        .is_err()
+    );
+    assert_eq!(
+        fs::read_to_string(root.path().join("personal-guidance.md")).unwrap(),
+        "USER_EDIT"
+    );
+    let (root, e, c, _) = trial();
+    let t = load_trial(root.path()).unwrap();
+    run(Command::Rollback {
+        state_dir: root.path().to_owned(),
+        json: true,
+    })
+    .unwrap();
+    assert!(
+        apply(
+            root.path(),
+            t.rule,
+            &t.baseline,
+            &model_context(&e, &c, Utc::now()).unwrap(),
+            Utc::now()
+        )
+        .is_err()
+    );
+}
+#[test]
+fn interrupted_prepared_trial_can_be_restored_before_or_after_the_guidance_write() {
+    for written in [false, true] {
+        let (root, _, _, _) = trial();
+        let mut t = load_trial(root.path()).unwrap();
+        t.status = "prepared".into();
+        save_trial(root.path(), &t).unwrap();
+        if !written {
+            atomic_write_private(&root.path().join("personal-guidance.md"), b"").unwrap();
+        }
+        run(Command::Rollback {
+            state_dir: root.path().to_owned(),
+            json: true,
+        })
+        .unwrap();
+        assert!(
+            fs::read(root.path().join("personal-guidance.md"))
+                .unwrap()
+                .is_empty()
+        );
+    }
+}
+#[cfg(unix)]
+#[test]
+fn symlink_hardlink_public_directory_and_concurrent_trial_writes_are_rejected() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    let (root, _, _, _) = trial();
+    let guidance = root.path().join("personal-guidance.md");
+    let target = root.path().join("target.md");
+    fs::rename(&guidance, &target).unwrap();
+    symlink(&target, &guidance).unwrap();
+    assert!(current_rules(root.path()).is_err());
+    fs::remove_file(&guidance).unwrap();
+    fs::hard_link(&target, &guidance).unwrap();
+    assert!(current_rules(root.path()).is_err());
+    fs::remove_file(&guidance).unwrap();
+    fs::rename(&target, &guidance).unwrap();
+    let _lock = lock(root.path()).unwrap();
+    assert!(lock(root.path()).is_err());
+    fs::set_permissions(root.path(), fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(state_root(root.path()).is_err());
+}
+
+fn report_fixture() -> Value {
+    json!({
+        "schema_version": 3,
+        "kind": "groundline-insights-weekly-report",
+        "status": "PASS",
+        "reason_code": "accepted",
+        "generated_at_utc": "2026-08-27T00:00:00Z",
+        "requested_days": 7,
+        "source_contract": {
+            "dataset": "basic_active",
+            "time_basis": "utc",
+            "metric_time_field": "period_end_or_generated_at",
+            "freshness_time_field": "received_at",
+            "roster_source": "enrolled_installation_registry",
+            "analysis_mode": "descriptive_single_period",
+            "query_set_version": 3,
+            "basic_aggregate_only": true
+        },
+        "collection_health": {
+            "enrolled_installation_count": 1,
+            "metadata_known_installation_count": 1,
+            "metadata_unknown_installation_count": 0,
+            "observed_installation_count": 1,
+            "reporting_installation_count": 1,
+            "recent_installation_count": 1,
+            "never_reported_installation_count": 0,
+            "pending_initial_report_installation_count": 0,
+            "overdue_never_reported_installation_count": 0,
+            "stale_observed_installation_count": 0,
+            "current_package_claim_installation_count": 1,
+            "current_package_claim_unobserved_installation_count": 0,
+            "current_observed_installation_count": 1,
+            "current_reporting_installation_count": 1,
+            "current_recent_installation_count": 1,
+            "policy_latest_version": "0.18.0",
+            "roster_status": "AVAILABLE",
+            "latest_received_at_utc": "2026-08-27T00:00:00Z",
+            "freshness_status": "FRESH",
+            "freshness_threshold_hours": 48,
+            "initial_report_grace_hours": 24,
+            "stored_event_row_count": 2,
+            "deduplicated_event_count": 2,
+            "duplicate_event_row_count": 0,
+            "ttl_expired_event_row_count": 0,
+            "delayed_delivery_event_count": 0,
+            "overdue_delivery_event_count": 0,
+            "clock_skew_event_count": 0,
+            "delivery_delay_threshold_hours": 6,
+            "delivery_overdue_threshold_hours": 24,
+            "clock_skew_tolerance_minutes": 5
+        },
+        "coverage": {
+            "event_count": 2,
+            "eligible_root_count": 5,
+            "selected_root_count": 5,
+            "observed_root_count": 5,
+            "completed_turn_count": 5,
+            "unreadable_root_count": 0,
+            "root_truncated_count": 0,
+            "non_root_truncated_count": 0,
+            "originator_unclassified_count": 0,
+            "originator_source_fallback_count": 0,
+            "root_usage_applicable_event_count": 2,
+            "root_usage_missing_event_count": 0,
+            "root_usage_fallback_event_count": 0,
+            "delegated_usage_applicable_event_count": 0,
+            "delegated_usage_missing_event_count": 0,
+            "delegated_usage_fallback_event_count": 0,
+            "guardian_usage_applicable_event_count": 0,
+            "guardian_usage_missing_event_count": 0,
+            "guardian_usage_fallback_event_count": 0,
+            "guardian_incomplete_excluded_count": 0,
+            "completed_root_coverage_applicable_event_count": 2,
+            "completed_root_coverage_capable_event_count": 2,
+            "completed_root_selection_coverage": 1.0,
+            "latency_capable_event_count": 2,
+            "boundary_count_capable_event_count": 2,
+            "guardian_attribution_applicable_event_count": 0,
+            "guardian_attribution_capable_event_count": 0,
+            "component_nonpass_event_count": 0
+        },
+        "weekly_metrics": {
+            "tokens": {
+                "input": 100,
+                "cached_input": 80,
+                "non_cached_input": 20,
+                "output": 10,
+                "reasoning_output": 2,
+                "total": 110,
+                "delegated_total": 0,
+                "guardian_total": 0
+            },
+            "workflow": {
+                "compactions": 0,
+                "compactions_per_observed_root": 0.0,
+                "long_turn_count": 0,
+                "long_turn_rate": 0.0,
+                "exact_repeated_call_groups": 0,
+                "calls_in_exact_repeated_groups": 0,
+                "repeated_call_rate": null,
+                "failure_signal_count": 0,
+                "failure_signal_rate": null,
+                "tool_call_count": 0,
+                "user_messages_with_text": 0,
+                "short_message_count": 0,
+                "short_message_rate": null,
+                "broad_scope_message_count": 0,
+                "broad_scope_message_rate": null,
+                "boundary_review_root_count": 0,
+                "long_lived_root_count": 0
+            },
+            "verification": {
+                "tool_call_count": 0,
+                "success_count": 0,
+                "failure_count": 0,
+                "unresolved_count": 0,
+                "outcome_coverage": null
+            },
+            "guardian": {
+                "review_count": 0,
+                "workspace_attributed_review_count": 0,
+                "workspace_attribution_coverage": null
+            }
+        },
+        "cohorts": {
+            "event_distributions": {
+                "schema_version": [{"value": "5", "event_count": 2}],
+                "groundline_version": [{"value": "0.18.0", "event_count": 2}],
+                "os_family": [{"value": "macos", "event_count": 2}],
+                "runtime_family": [{"value": "codex_app", "event_count": 2}],
+                "execution_mode": [{"value": "desktop", "event_count": 2}]
+            },
+            "installation_distributions": {
+                "groundline_version": [{"value": "0.18.0", "installation_count": 1}],
+                "os_family": [{"value": "macos", "installation_count": 1}],
+                "runtime_family": [{"value": "codex_app", "installation_count": 1}],
+                "execution_mode": [{"value": "desktop", "installation_count": 1}]
+            },
+            "model_effort_context_distribution": [],
+            "model_effort_token_efficiency": {
+                "status": "UNAVAILABLE",
+                "reason_code": "token_usage_not_attributed_to_model_effort",
+                "context_distribution_only": true
+            }
+        },
+        "data_quality": {
+            "status": "PASS",
+            "reason_codes": [],
+            "sample_sufficient_event_count": 2,
+            "sample_insufficient_event_count": 0
+        },
+        "comparison_readiness": {
+            "status": "INSUFFICIENT",
+            "reason_codes": ["comparison_baseline_not_included"],
+            "minimum_event_count": 2,
+            "minimum_observed_root_count": 5
+        }
+    })
+}
+
+fn tempdir() -> std::io::Result<TempDir> {
+    let root = tempfile::tempdir()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(root.path(), fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(root)
+}
+
+#[test]
+fn a_known_model_cannot_borrow_another_models_guidance() {
+    let (mut e, c) = model();
+    e.official_sources[0].applies_to_model = "different-model".into();
+    assert!(model_context(&e, &c, Utc::now()).is_err());
+}
+#[test]
+fn lower_intervention_does_not_hide_higher_resource_use() {
+    let (root, e, c, mut s) = trial();
+    for u in &mut s.units {
+        u.total_tokens = Some(2000);
+    }
+    let out = evaluate(root.path(), s, &e, &c).unwrap();
+    assert_eq!(out["status"], "ROLLED_BACK");
+    assert_eq!(out["reason_codes"], json!(["resource_regression"]));
+}
+
+#[test]
+fn changed_nontrial_settings_cannot_be_retained_as_guidance_improvement() {
+    let (root, e, c, mut s) = trial();
+    s.comparison_context_sha256 = hash(b"changed tools or tier");
+    let out = evaluate(root.path(), s, &e, &c).unwrap();
+    assert_eq!(out["status"], "INCONCLUSIVE");
+    assert_eq!(out["reason_codes"], json!(["cohort_mismatch"]));
+    assert_eq!(load_trial(root.path()).unwrap().status, "pending");
+}
+
+#[test]
+fn aggregate_repetition_alone_cannot_authorize_a_trial() {
+    let root = tempdir().unwrap();
+    let (e, c) = model();
+    let context = model_context(&e, &c, Utc::now()).unwrap();
+    let mut report = report_fixture();
+    report["generated_at_utc"] =
+        json!(Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+    put(&root.path().join("report.json"), &report);
+    put(&root.path().join("audit.json"), &audit());
+    let mut s = sample(&context, 4, "baseline");
+    for u in &mut s.units {
+        u.redundant_approval_count = 0;
+        u.continuation_prompt_count = 0;
+        u.repeated_call_count = 0;
+    }
+    put(
+        &root.path().join("outcomes.json"),
+        &serde_json::to_value(s).unwrap(),
+    );
+    let out = review(
+        ReviewInputs {
+            report: &root.path().join("report.json"),
+            audit: &root.path().join("audit.json"),
+            outcomes: Some(&root.path().join("outcomes.json")),
+            state_dir: Some(root.path()),
+            apply: true,
+        },
+        &e,
+        &c,
+    )
+    .unwrap();
+    assert_eq!(out["status"], "OBSERVE");
+    assert_eq!(
+        out["reason_codes"],
+        json!(["candidate_signal_missing_in_outcomes"])
+    );
+    assert_eq!(out["mutation_performed"], false);
+    assert!(!root.path().join("trial.json").exists());
+}
+
+#[test]
+#[cfg(unix)]
+fn dangling_archive_links_are_preserved_and_rejected() {
+    use std::os::unix::fs::symlink;
+    let root = tempdir().unwrap();
+    let data = b"private archive";
+    let path = root.path().join(format!("trial-{}.json", hash(data)));
+    symlink(root.path().join("missing"), &path).unwrap();
+    assert!(archive(root.path(), "trial", data).is_err());
+    assert!(fs::symlink_metadata(path).unwrap().file_type().is_symlink());
+}

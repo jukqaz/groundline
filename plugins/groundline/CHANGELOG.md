@@ -3,6 +3,14 @@
 This package summary covers the current release line. See the repository
 [changelog](https://github.com/jukqaz/groundline/blob/main/CHANGELOG.md) for shared release and packaging changes.
 
+## 0.22.0
+
+- Add `personal review|evaluate|rollback` and an explicit seventh skill for
+  current-model workflow improvement. Keep private trials outside Git and
+  require directly evidenced, disjoint, comparable outcomes before retention.
+- Preserve native settings and user edits; do not apply changes from incomplete
+  reports, short prompts, high effort, or aggregate repetition alone.
+
 ## 0.21.4
 
 - Verify record timestamps when selecting native audit activity; metadata-only

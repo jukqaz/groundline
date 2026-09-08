@@ -244,3 +244,38 @@ fn provider_smoke_rejects_an_owner_hook_manifest() {
     assert!(!output.status.success());
     assert_eq!(parse_stdout(&output)["error"], "owner_hook_not_allowed");
 }
+
+#[test]
+fn personal_cli_rejects_private_invalid_input_without_exposure_or_state_writes() {
+    let root = tempdir().unwrap();
+    let input = root.path().join("model.json");
+    fs::write(&input, b"PRIVATE_INPUT_SENTINEL").unwrap();
+    let output = run(&[
+        "personal",
+        "review",
+        "--report",
+        path_argument(&input),
+        "--audit",
+        path_argument(&input),
+        "--model-evidence",
+        path_argument(&input),
+        "--catalog",
+        path_argument(&input),
+        "--state-dir",
+        path_argument(root.path()),
+        "--apply",
+        "--json",
+    ]);
+    assert!(!output.status.success());
+    let result = parse_stdout(&output);
+    assert_eq!(result["error"], "personal_invalid_input");
+    assert_eq!(result["raw_content_emitted"], false);
+    let rendered = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!rendered.contains("PRIVATE_INPUT_SENTINEL"));
+    assert!(!rendered.contains(path_argument(root.path())));
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
+}
