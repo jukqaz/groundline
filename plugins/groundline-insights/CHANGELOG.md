@@ -4,6 +4,11 @@ This package summary covers the current release line. The repository
 [changelog](https://github.com/jukqaz/groundline/blob/main/CHANGELOG.md) records shared changes. A source version entry
 does not prove that its image or `stable` distribution has been published.
 
+## 0.22.2
+
+- Wait for authenticated API and Grafana readiness before the release stack
+  checks anonymous dashboard access. Preserve the redirect and semantic assertions.
+
 ## 0.22.1
 
 - Recover collection windows containing a directly proven fresh native usage

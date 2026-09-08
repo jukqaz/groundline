@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.22.2
+
+- Wait for authenticated API and Grafana readiness before the release stack
+  checks anonymous dashboard access. Preserve the redirect and semantic assertions.
+
 ## 0.22.1
 
 - Make personal rollback resumable across durable writes, preserve bounded

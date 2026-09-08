@@ -3,6 +3,11 @@
 This package summary covers the current release line. See the repository
 [changelog](https://github.com/jukqaz/groundline/blob/main/CHANGELOG.md) for shared release and packaging changes.
 
+## 0.22.2
+
+- Wait for authenticated API and Grafana readiness before the release stack
+  checks anonymous dashboard access. Preserve the redirect and semantic assertions.
+
 ## 0.22.1
 
 - Recover interrupted personal guidance restores and keep trial history,

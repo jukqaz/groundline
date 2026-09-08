@@ -299,6 +299,14 @@ jobs:
             --json
           docker compose --project-name "$project" -f "$compose_path" config --quiet
           docker compose --project-name "$project" -f "$compose_path" up --detach --wait --wait-timeout 240
+          # Compose can report a running Grafana before its HTTP listener is ready.
+          # Use the bounded semantic readiness probe before the one-shot access check.
+          cargo run --locked -p xtask --bin groundline-deploy -- verify-stack \
+            --api-url "http://$bind_ip:18080/healthz" \
+            --grafana-url "http://$bind_ip:13000/api/health" \
+            --access-url https://insights.example.invalid \
+            --secrets-file "$secrets_path" \
+            --json
           unauthenticated_headers="$stack_root/unauthenticated.headers"
           unauthenticated_status="$(curl --silent --show-error \
             --noproxy '*' \
@@ -311,12 +319,6 @@ jobs:
             "http://$bind_ip:13000/d/groundline-insights/groundline-insights")"
           test "$unauthenticated_status" = "302"
           grep --quiet --ignore-case '^location: .*/login' "$unauthenticated_headers"
-          cargo run --locked -p xtask --bin groundline-deploy -- verify-stack \
-            --api-url "http://$bind_ip:18080/healthz" \
-            --grafana-url "http://$bind_ip:13000/api/health" \
-            --access-url https://insights.example.invalid \
-            --secrets-file "$secrets_path" \
-            --json
       - name: Stop the selected ClickHouse integration service
         if: always() && steps.clickhouse.outputs.container != ''
         env:
