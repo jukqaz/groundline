@@ -15,6 +15,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_STATE_FILES: usize = 128;
 const MIN_UNITS: usize = 10;
 
 #[derive(Debug, Subcommand)]
@@ -423,17 +424,32 @@ fn state_root(path: &Path) -> Result<PathBuf, ContractError> {
         return Err(error("private_state_outside_git_required"));
     }
     open_private_directory(path).map_err(|_| error("private_state_required"))?;
-    if fs::read_dir(&root)
-        .map_err(|_| error("state_unavailable"))?
-        .take(129)
-        .count()
-        > 128
-    {
-        return Err(error("state_archive_limit"));
-    }
+    ensure_capacity(&root, &[])?;
     Ok(root)
 }
+fn ensure_capacity(root: &Path, additions: &[PathBuf]) -> Result<(), ContractError> {
+    let mut count = 0;
+    for entry in fs::read_dir(root)
+        .map_err(|_| error("state_unavailable"))?
+        .take(MAX_STATE_FILES + 1)
+    {
+        entry.map_err(|_| error("state_unavailable"))?;
+        count += 1;
+    }
+    for path in additions.iter().collect::<BTreeSet<_>>() {
+        match fs::symlink_metadata(path) {
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => count += 1,
+            Err(_) => return Err(error("state_unavailable")),
+        }
+    }
+    if count > MAX_STATE_FILES {
+        return Err(error("state_archive_limit"));
+    }
+    Ok(())
+}
 fn lock(root: &Path) -> Result<File, ContractError> {
+    ensure_capacity(root, &[root.join(".lock")])?;
     let file =
         open_or_create_private_lock(&root.join(".lock")).map_err(|_| error("invalid_lock"))?;
     file.try_lock().map_err(|_| error("state_busy"))?;
@@ -495,8 +511,10 @@ fn save_trial(root: &Path, t: &Trial) -> Result<(), ContractError> {
     .map_err(|_| error("state_write_failed"))
 }
 fn load_trial(root: &Path) -> Result<Trial, ContractError> {
-    let t: Trial = serde_json::from_slice(&private_bytes(&root.join("trial.json"))?)
-        .map_err(|_| error("invalid_trial"))?;
+    parse_trial(&private_bytes(&root.join("trial.json"))?)
+}
+fn parse_trial(data: &[u8]) -> Result<Trial, ContractError> {
+    let t: Trial = serde_json::from_slice(data).map_err(|_| error("invalid_trial"))?;
     if t.kind != "groundline-personal-trial"
         || t.schema != 1
         || !["prepared", "pending", "retained", "rolled_back"].contains(&t.status.as_str())
@@ -519,6 +537,52 @@ fn load_trial(root: &Path) -> Result<Trial, ContractError> {
     }
     Ok(t)
 }
+fn check_baseline_reuse(
+    trial: &Trial,
+    rule: Rule,
+    ids: &BTreeSet<&str>,
+) -> Result<(), ContractError> {
+    if trial.rule == rule
+        && trial
+            .baseline
+            .units
+            .iter()
+            .any(|u| ids.contains(u.unit_hash.as_str()))
+    {
+        return Err(error("candidate_already_reviewed"));
+    }
+    Ok(())
+}
+fn check_archived_baselines(
+    root: &Path,
+    rule: Rule,
+    ids: &BTreeSet<&str>,
+) -> Result<(), ContractError> {
+    for (index, entry) in fs::read_dir(root)
+        .map_err(|_| error("state_unavailable"))?
+        .take(MAX_STATE_FILES + 1)
+        .enumerate()
+    {
+        if index == MAX_STATE_FILES {
+            return Err(error("state_archive_limit"));
+        }
+        let entry = entry.map_err(|_| error("state_unavailable"))?;
+        let name = entry.file_name();
+        if !name.to_string_lossy().starts_with("trial-") {
+            continue;
+        }
+        let data = private_bytes(&entry.path())?;
+        if name != format!("trial-{}.json", hash(&data)).as_str() {
+            return Err(error("archive_mismatch"));
+        }
+        let trial = parse_trial(&data)?;
+        if !matches!(trial.status.as_str(), "retained" | "rolled_back") {
+            return Err(error("invalid_trial"));
+        }
+        check_baseline_reuse(&trial, rule, ids)?;
+    }
+    Ok(())
+}
 fn archive(root: &Path, name: &str, data: &[u8]) -> Result<(), ContractError> {
     let path = root.join(format!("{name}-{}.json", hash(data)));
     match fs::symlink_metadata(&path) {
@@ -528,6 +592,7 @@ fn archive(root: &Path, name: &str, data: &[u8]) -> Result<(), ContractError> {
             }
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            ensure_capacity(root, std::slice::from_ref(&path))?;
             atomic_write_private(&path, data).map_err(|_| error("archive_failed"))?;
         }
         Err(_) => return Err(error("archive_failed")),
@@ -543,23 +608,35 @@ fn apply(
 ) -> Result<Value, ContractError> {
     let root = state_root(root)?;
     let _lock = lock(&root)?;
-    if fs::symlink_metadata(root.join("trial.json")).is_ok() {
-        let old = load_trial(&root)?;
-        if matches!(old.status.as_str(), "prepared" | "pending") {
-            return Err(error("trial_already_active"));
+    let ids: BTreeSet<_> = s.units.iter().map(|u| u.unit_hash.as_str()).collect();
+    let previous = match fs::symlink_metadata(root.join("trial.json")) {
+        Ok(_) => {
+            let data = private_bytes(&root.join("trial.json"))?;
+            let old = parse_trial(&data)?;
+            if matches!(old.status.as_str(), "prepared" | "pending") {
+                return Err(error("trial_already_active"));
+            }
+            check_baseline_reuse(&old, rule, &ids)?;
+            Some(data)
         }
-        let ids: BTreeSet<_> = old.baseline.units.iter().map(|u| &u.unit_hash).collect();
-        if old.rule == rule && s.units.iter().any(|u| ids.contains(&u.unit_hash)) {
-            return Err(error("candidate_already_reviewed"));
-        }
-        archive(&root, "trial", &private_bytes(&root.join("trial.json"))?)?;
-    }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_) => return Err(error("state_unavailable")),
+    };
+    check_archived_baselines(&root, rule, &ids)?;
     let before = current_rules(&root)?;
     if before.contains(&rule) {
         return Err(error("candidate_already_applied"));
     }
     if s.guidance_sha256 != hash(render(&before).as_bytes()) {
         return Err(error("baseline_guidance_mismatch"));
+    }
+    let mut additions = vec![root.join("trial.json"), root.join("personal-guidance.md")];
+    if let Some(data) = &previous {
+        additions.push(root.join(format!("trial-{}.json", hash(data))));
+    }
+    ensure_capacity(&root, &additions)?;
+    if let Some(data) = previous {
+        archive(&root, "trial", &data)?;
     }
     let mut after = before.clone();
     after.push(rule);

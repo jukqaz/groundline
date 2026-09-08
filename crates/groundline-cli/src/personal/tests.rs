@@ -262,6 +262,290 @@ fn user_edits_are_preserved_and_a_failed_candidate_is_not_repeated_on_the_same_u
         .is_err()
     );
 }
+
+#[test]
+fn another_candidate_does_not_allow_reusing_an_archived_baseline() {
+    let (root, e, c, _) = trial();
+    let first = load_trial(root.path()).unwrap();
+    run(Command::Rollback {
+        state_dir: root.path().to_owned(),
+        json: true,
+    })
+    .unwrap();
+    let context = model_context(&e, &c, Utc::now()).unwrap();
+    let other = sample(&context, 2, "other-candidate");
+    apply(
+        root.path(),
+        Rule::DiagnoseBeforeRetry,
+        &other,
+        &context,
+        Utc::now(),
+    )
+    .unwrap();
+    run(Command::Rollback {
+        state_dir: root.path().to_owned(),
+        json: true,
+    })
+    .unwrap();
+    let before_trial = fs::read(root.path().join("trial.json")).unwrap();
+    let before_guidance = fs::read(root.path().join("personal-guidance.md")).unwrap();
+    let error = apply(
+        root.path(),
+        first.rule,
+        &first.baseline,
+        &context,
+        Utc::now(),
+    )
+    .unwrap_err();
+    assert_eq!(error.0, "personal_candidate_already_reviewed");
+    assert_eq!(
+        fs::read(root.path().join("trial.json")).unwrap(),
+        before_trial
+    );
+    assert_eq!(
+        fs::read(root.path().join("personal-guidance.md")).unwrap(),
+        before_guidance
+    );
+    let mut partial_reuse = sample(&context, 1, "fresh");
+    partial_reuse.units[9].unit_hash = first.baseline.units[0].unit_hash.clone();
+    assert_eq!(
+        apply(
+            root.path(),
+            first.rule,
+            &partial_reuse,
+            &context,
+            Utc::now()
+        )
+        .unwrap_err()
+        .0,
+        "personal_candidate_already_reviewed"
+    );
+    let fresh = sample(&context, 1, "fresh");
+    assert_eq!(
+        apply(root.path(), first.rule, &fresh, &context, Utc::now()).unwrap()["state"],
+        "pending"
+    );
+}
+#[test]
+fn invalid_archived_trials_are_preserved_and_rejected_before_any_state_write() {
+    for case in ["hash", "json", "schema", "active"] {
+        let (root, e, c, _) = trial();
+        run(Command::Rollback {
+            state_dir: root.path().to_owned(),
+            json: true,
+        })
+        .unwrap();
+        let before_trial = fs::read(root.path().join("trial.json")).unwrap();
+        let mut archived: Value = serde_json::from_slice(&before_trial).unwrap();
+        match case {
+            "schema" => archived["schema"] = json!(2),
+            "active" => archived["status"] = json!("pending"),
+            _ => {}
+        }
+        let data = if case == "json" {
+            b"PRIVATE_INVALID_ARCHIVE".to_vec()
+        } else {
+            serde_json::to_vec(&archived).unwrap()
+        };
+        let name_hash = if case == "hash" {
+            hash(b"wrong")
+        } else {
+            hash(&data)
+        };
+        let path = root.path().join(format!("trial-{name_hash}.json"));
+        atomic_write_private(&path, &data).unwrap();
+        let before_count = fs::read_dir(root.path()).unwrap().count();
+        let context = model_context(&e, &c, Utc::now()).unwrap();
+        let fresh = sample(&context, 1, "fresh");
+        let err = apply(
+            root.path(),
+            Rule::DiagnoseBeforeRetry,
+            &fresh,
+            &context,
+            Utc::now(),
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.0,
+            if case == "hash" {
+                "personal_archive_mismatch"
+            } else {
+                "personal_invalid_trial"
+            }
+        );
+        assert_eq!(fs::read(&path).unwrap(), data);
+        assert_eq!(
+            fs::read(root.path().join("trial.json")).unwrap(),
+            before_trial
+        );
+        assert!(
+            fs::read(root.path().join("personal-guidance.md"))
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), before_count);
+    }
+}
+#[cfg(unix)]
+#[test]
+fn archived_trial_links_and_public_files_cannot_bypass_history_validation() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    for case in ["symlink", "hardlink", "public"] {
+        let (root, e, c, _) = trial();
+        run(Command::Rollback {
+            state_dir: root.path().to_owned(),
+            json: true,
+        })
+        .unwrap();
+        let path = root.path().join("trial.json");
+        let data = fs::read(&path).unwrap();
+        let archived = root.path().join(format!("trial-{}.json", hash(&data)));
+        match case {
+            "symlink" => symlink(&path, &archived).unwrap(),
+            "hardlink" => {
+                let target = root.path().join("external.json");
+                atomic_write_private(&target, &data).unwrap();
+                fs::hard_link(target, &archived).unwrap();
+            }
+            _ => {
+                atomic_write_private(&archived, &data).unwrap();
+                fs::set_permissions(&archived, fs::Permissions::from_mode(0o644)).unwrap();
+            }
+        }
+        let context = model_context(&e, &c, Utc::now()).unwrap();
+        let fresh = sample(&context, 1, "fresh");
+        assert!(
+            apply(
+                root.path(),
+                Rule::DiagnoseBeforeRetry,
+                &fresh,
+                &context,
+                Utc::now()
+            )
+            .is_err()
+        );
+        assert_eq!(fs::read(path).unwrap(), data);
+        assert!(
+            fs::read(root.path().join("personal-guidance.md"))
+                .unwrap()
+                .is_empty()
+        );
+    }
+}
+#[test]
+fn full_trial_history_rejects_new_writes_without_stranding_rollback() {
+    for evaluating in [false, true] {
+        let (root, e, c, s) = trial();
+        if !evaluating {
+            run(Command::Rollback {
+                state_dir: root.path().to_owned(),
+                json: true,
+            })
+            .unwrap();
+        }
+        let before_trial = fs::read(root.path().join("trial.json")).unwrap();
+        let before_guidance = fs::read(root.path().join("personal-guidance.md")).unwrap();
+        for i in fs::read_dir(root.path()).unwrap().count()..128 {
+            atomic_write_private(&root.path().join(format!("owner-record-{i}")), b"").unwrap();
+        }
+        let err = if evaluating {
+            evaluate(root.path(), s, &e, &c).unwrap_err()
+        } else {
+            let context = model_context(&e, &c, Utc::now()).unwrap();
+            apply(
+                root.path(),
+                Rule::DiagnoseBeforeRetry,
+                &sample(&context, 1, "fresh"),
+                &context,
+                Utc::now(),
+            )
+            .unwrap_err()
+        };
+        assert_eq!(err.0, "personal_state_archive_limit");
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 128);
+        assert_eq!(
+            fs::read(root.path().join("trial.json")).unwrap(),
+            before_trial
+        );
+        assert_eq!(
+            fs::read(root.path().join("personal-guidance.md")).unwrap(),
+            before_guidance
+        );
+        if evaluating {
+            run(Command::Rollback {
+                state_dir: root.path().to_owned(),
+                json: true,
+            })
+            .unwrap();
+            assert!(
+                fs::read(root.path().join("personal-guidance.md"))
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+    }
+}
+#[test]
+fn initial_trial_reserves_space_for_its_lock_journal_and_guidance() {
+    for entries in [125, 126, 128] {
+        let root = tempdir().unwrap();
+        for i in 0..entries {
+            atomic_write_private(&root.path().join(format!("owner-record-{i}")), b"").unwrap();
+        }
+        let (e, c) = model();
+        let context = model_context(&e, &c, Utc::now()).unwrap();
+        let result = apply(
+            root.path(),
+            Rule::ApprovalContinuity,
+            &sample(&context, 1, "fresh"),
+            &context,
+            Utc::now(),
+        );
+        if entries == 125 {
+            result.unwrap();
+            assert_eq!(fs::read_dir(root.path()).unwrap().count(), 128);
+            run(Command::Rollback {
+                state_dir: root.path().to_owned(),
+                json: true,
+            })
+            .unwrap();
+        } else {
+            assert_eq!(result.unwrap_err().0, "personal_state_archive_limit");
+            assert!(!root.path().join("trial.json").exists());
+            assert!(!root.path().join("personal-guidance.md").exists());
+            assert!(fs::read_dir(root.path()).unwrap().count() <= 128);
+        }
+    }
+}
+#[test]
+fn existing_archive_does_not_require_another_slot_in_full_history() {
+    let (root, e, c, _) = trial();
+    run(Command::Rollback {
+        state_dir: root.path().to_owned(),
+        json: true,
+    })
+    .unwrap();
+    let data = fs::read(root.path().join("trial.json")).unwrap();
+    archive(root.path(), "trial", &data).unwrap();
+    for i in fs::read_dir(root.path()).unwrap().count()..128 {
+        atomic_write_private(&root.path().join(format!("owner-record-{i}")), b"").unwrap();
+    }
+    let context = model_context(&e, &c, Utc::now()).unwrap();
+    apply(
+        root.path(),
+        Rule::DiagnoseBeforeRetry,
+        &sample(&context, 1, "fresh"),
+        &context,
+        Utc::now(),
+    )
+    .unwrap();
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 128);
+    run(Command::Rollback {
+        state_dir: root.path().to_owned(),
+        json: true,
+    })
+    .unwrap();
+}
 #[test]
 fn interrupted_prepared_trial_can_be_restored_before_or_after_the_guidance_write() {
     for written in [false, true] {

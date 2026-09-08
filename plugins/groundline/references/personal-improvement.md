@@ -148,8 +148,13 @@ trial/evaluation records are written there. No AGENTS.md or config.toml changes.
 Initial guidance is empty, so its initial fingerprint is SHA256 of empty bytes.
 Files are bounded/private, links are rejected, mutations are serialized, and a
 prepared journal precedes instruction writes. Preserve user edits. A repeated
-candidate cannot reuse its previous baseline units. The directory has a 128-entry
-bound; retention is an explicit owner operation, never automatic deletion.
+candidate cannot reuse baseline units from any prior trial, including archived
+trials separated by another candidate. Archived trials must pass the same
+contract and match their content-addressed names; invalid history is preserved
+and blocks application. The directory has a 128-entry bound. New writes must fit
+before a trial or evaluation changes guidance, so reaching the bound does not
+prevent rollback. Retention is an explicit owner operation, never automatic
+deletion.
 
 Native activation is separate: connect the file through the authorized native
 instruction surface and verify loading plus behavior before setting
