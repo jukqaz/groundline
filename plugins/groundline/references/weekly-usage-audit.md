@@ -43,9 +43,13 @@ totals and UI totals have independent checkpoints; valid native totals take
 precedence without adding the streams. Unanchored trailing response usage,
 missing cross-source baselines, and selected-source resets inside the window
 remain incomplete. Resets before the window do not invalidate later baselines.
+A first owned native response can anchor a new zero counter only when its total
+equals its own usage and no earlier in-window usage would be discarded.
 
 Diagnostics keep at most 32 examples with exact total/omitted counts. Parser
-budgets are one million records and 4 MiB per record. Windowed metric records
+budgets are one million records and 4 MiB per projected record. Raw native
+records allow 64 MiB, while unused nested bodies stay borrowed and each envelope
+or payload object is bounded to 128 fields. Windowed metric records
 without usable timestamps are incomplete. Known inherited prefixes remain a
 scope caveat while complete owned suffixes may be collected; unknown boundaries
 are a true collection blocker. No raw diagnostic input is exported.

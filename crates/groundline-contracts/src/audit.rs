@@ -399,6 +399,7 @@ pub fn audit_rollouts(
         let mut native_latest: Option<Usage> = None;
         let mut native_baseline: Option<Usage> = None;
         let mut native_anchor_matches = false;
+        let mut native_zero_anchor = false;
         let mut ui_usage_errors = 0_u64;
         let mut uncovered_response = false;
         let mut native_uncovered_response = false;
@@ -535,6 +536,15 @@ pub fn audit_rollouts(
                             native_anchor_matches = checkpoint_usage
                                 .as_ref()
                                 .is_some_and(|old| total.subtract(&usage).values == old.values);
+                            // A resumed native stream can start its own counter
+                            // at zero. Its first owned response proves that
+                            // anchor only when nothing earlier in this window
+                            // has usage that would otherwise be discarded.
+                            native_zero_anchor = record_in_window
+                                && total.values == usage.values
+                                && response_events == 1
+                                && latest_usage.is_none()
+                                && !has_fallback;
                         }
                         native_checkpoint = Some(total.clone());
                         if record_in_window {
@@ -744,6 +754,8 @@ pub fn audit_rollouts(
             uncovered_response = native_uncovered_response;
             baseline_usage = if native_baseline.is_some() {
                 native_baseline
+            } else if native_zero_anchor {
+                Some(Usage::default())
             } else if native_anchor_matches {
                 baseline_usage
             } else {
@@ -1084,6 +1096,48 @@ mod tests {
             total_in(&uncovered, 1, 4)["collection_complete"],
             false,
             "a UI checkpoint cannot cover a trailing response in the selected native stream"
+        );
+    }
+
+    #[test]
+    fn first_owned_native_response_can_prove_a_new_zero_baseline() {
+        let meta = json!({"type":"session_meta","payload":{"id":"owner"}});
+        let records = vec![
+            meta.clone(),
+            cumulative(1, 100),
+            response(3, "new", 7, Some(7)),
+            cumulative(3, 107),
+            response(4, "next", 5, Some(12)),
+        ];
+        let audit = total_in(&lines(&records), 2, 5);
+        assert_eq!(audit["collection_complete"], true);
+        assert_eq!(audit["provider_reported_usage"]["total_tokens"], 12);
+        assert_eq!(
+            total_in(&lines(&records), 2, 3)["provider_reported_usage"]["total_tokens"],
+            7
+        );
+        assert_eq!(
+            total_in(&lines(&records), 3, 5)["provider_reported_usage"]["total_tokens"],
+            5
+        );
+        for preceding in [cumulative(2, 101), response(2, "unanchored", 2, None)] {
+            let data = lines(&[
+                meta.clone(),
+                cumulative(1, 100),
+                preceding,
+                response(3, "new", 7, Some(7)),
+            ]);
+            assert_eq!(
+                total_in(&data, 1, 4)["collection_complete"],
+                false,
+                "a zero anchor cannot discard earlier in-window usage"
+            );
+        }
+        let unknown = lines(&[meta, cumulative(1, 100), response(3, "new", 7, Some(9))]);
+        assert_eq!(
+            total_in(&unknown, 2, 4)["collection_complete"],
+            false,
+            "an unexplained native prefix is still incomplete"
         );
     }
 

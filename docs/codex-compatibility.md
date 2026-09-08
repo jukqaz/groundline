@@ -64,12 +64,17 @@ checkpoints because their baselines can differ. Valid native thread totals take
 precedence; the two sources are never added. A decreasing selected-source total
 inside the requested window remains incomplete. A reset before that window does
 not invalidate its later baseline. Missing cross-source baseline continuity and
-uncovered response suffixes still fail closed.
+uncovered response suffixes still fail closed. A first owned native response
+may prove a new zero baseline only when its cumulative total equals its own
+usage and there is no earlier in-window usage to discard.
 Shared suffixes never use inherited cumulative totals. Collection completeness
 is separate from the intentionally partial view of an unread shared prefix.
 
-Parser work is capped at one million records and 4 MiB per record, in addition
-to reader limits. Diagnostics retain at most 32 bounded examples plus total and
+Parser work is capped at one million projected records and 4 MiB per projection.
+The reader accepts raw native records up to 64 MiB, borrowing unused payload
+bodies instead of expanding them. Envelope and payload objects each allow at
+most 128 fields; retained values share the 4 MiB budget. The scan and retained
+history budgets remain independent. Diagnostics retain at most 32 bounded examples plus total and
 omitted counts. A plain/compressed file disappearing during open is retried
 once; permission, symlink, ownership, and invalid-data failures never trigger
 representation fallback. Historical events stay eligible after later task updates.

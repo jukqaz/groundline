@@ -10,7 +10,9 @@ pub(crate) const MAX_AUDIT_BYTES: u64 = 512 * 1024 * 1024;
 // native logs contain large context-storage records that need no audit body.
 pub(crate) const MAX_AUDIT_SCAN_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 const MAX_AUDIT_ROLLOUT_BYTES: u64 = 1024 * 1024 * 1024;
-const MAX_AUDIT_RECORD_BYTES: u64 = 4 * 1024 * 1024;
+// Native compaction/context records can contain multi-megabyte unused blobs.
+// Their raw read is bounded separately from the 4 MiB retained projection.
+const MAX_AUDIT_RECORD_BYTES: u64 = 64 * 1024 * 1024;
 
 pub(crate) fn read_audit_rollout(
     path: &Path,
@@ -99,8 +101,11 @@ fn project_audit(
         let line = std::str::from_utf8(&line).map_err(|_| rejected())?;
         let record = groundline_contracts::rollout::Record::parse(line).map_err(|_| rejected())?;
         let projected = if let Some(record) = record {
+            let projected = record.audit_projection().map_err(|_| rejected())?;
             if !metadata_found && record.string("type").as_deref() == Some("session_meta") {
-                let metadata = record
+                let metadata = groundline_contracts::rollout::Record::parse(&projected)
+                    .map_err(|_| rejected())?
+                    .ok_or_else(rejected)?
                     .value("payload")
                     .map_err(|_| rejected())?
                     .ok_or_else(rejected)?;
@@ -109,7 +114,7 @@ fn project_audit(
                     return Ok(None);
                 }
             }
-            record.audit_projection().map_err(|_| rejected())?
+            projected
         } else {
             "null".to_owned()
         };
@@ -262,6 +267,66 @@ mod tests {
             );
             assert_eq!(calls, expected);
         }
+    }
+
+    #[test]
+    fn oversized_unused_native_records_work_in_plain_and_compressed_history() {
+        let root = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let raw = format!(
+            "{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"owner\",\"originator\":\"codex_app\"}}}}\n{{\"type\":\"compacted\",\"timestamp\":\"2026-09-08T00:00:00Z\",\"payload\":{{\"guardian_history\":[\"{}\"]}}}}\n",
+            "x".repeat(5 * 1024 * 1024)
+        );
+        for compressed in [false, true] {
+            let path = root.path().join(if compressed {
+                "compressed.jsonl.zst"
+            } else {
+                "plain.jsonl"
+            });
+            let bytes = if compressed {
+                zstd::stream::encode_all(raw.as_bytes(), 1).unwrap()
+            } else {
+                raw.as_bytes().to_vec()
+            };
+            std::fs::write(&path, bytes).unwrap();
+            let mut scanned = 0;
+            let mut retained = 0;
+            let projected = read_audit_rollout(
+                &path,
+                &[root.path().to_owned()],
+                &mut scanned,
+                &mut retained,
+                |meta| meta["originator"] == "codex_app",
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(scanned, raw.len() as u64);
+            assert!(retained < 300);
+            assert!(projected.contains("compacted"));
+            let broken = raw.replace("]}}\n", ",]}}\n");
+            let bytes = if compressed {
+                zstd::stream::encode_all(broken.as_bytes(), 1).unwrap()
+            } else {
+                broken.into_bytes()
+            };
+            std::fs::write(&path, bytes).unwrap();
+            assert!(
+                read_audit_rollout(&path, &[root.path().to_owned()], &mut 0, &mut 0, |_| true)
+                    .is_err()
+            );
+        }
+        let input = std::io::repeat(b'x').take(MAX_AUDIT_RECORD_BYTES + 1);
+        let mut scanned = 0;
+        assert!(
+            project_audit(
+                input,
+                MAX_AUDIT_RECORD_BYTES + 1,
+                &mut scanned,
+                &mut 0,
+                &mut |_| true
+            )
+            .is_err()
+        );
+        assert_eq!(scanned, MAX_AUDIT_RECORD_BYTES + 1);
     }
 
     #[test]
