@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.21.4
+
+- Confirm actual rollout records intersect the requested audit window before
+  including a candidate selected by thread metadata clocks. Archiving or resuming
+  inactive inherited history no longer blocks unrelated new activity. Preserve
+  ownership, syntax, and timestamp checks for records that may affect the window.
+
 ## 0.21.3
 
 - Set executable permissions inside the API image even when release artifact
