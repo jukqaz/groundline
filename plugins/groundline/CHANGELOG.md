@@ -3,6 +3,11 @@
 This package summary covers the current release line. See the repository
 [changelog](https://github.com/jukqaz/groundline/blob/main/CHANGELOG.md) for shared release and packaging changes.
 
+## 0.21.4
+
+- Verify record timestamps when selecting native audit activity; metadata-only
+  thread updates no longer reintroduce inactive inherited history.
+
 ## 0.21.3
 
 - Publish alongside the API image launch-permission correction.

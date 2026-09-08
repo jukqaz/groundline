@@ -231,6 +231,27 @@ fn latest_turn_completed(contents: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn has_window_records(contents: &str, start: DateTime<Utc>, end: DateTime<Utc>) -> bool {
+    // SQLite clocks also change when a thread is archived or resumed. Exclude
+    // an inactive candidate only after its entire readable log proves that all
+    // records are outside this window. Missing or invalid timestamps remain
+    // candidates so attribution and input errors cannot disappear here.
+    contents.lines().any(|line| {
+        let record = match Record::parse(line) {
+            Ok(Some(record)) => record,
+            Ok(None) => return false,
+            Err(_) => return true,
+        };
+        let Some(at) = record
+            .string("timestamp")
+            .and_then(|value| DateTime::parse_from_rfc3339(&value).ok())
+        else {
+            return true;
+        };
+        at > start && at <= end
+    })
+}
+
 fn runtime_family(originator: Option<&str>, source: &str) -> Option<&'static str> {
     if let Some(originator) = originator {
         let normalized = originator.trim().to_ascii_lowercase().replace('-', "_");
@@ -371,6 +392,9 @@ pub fn collect_audit(
                 continue;
             }
         };
+        if !has_window_records(&contents, start, end) {
+            continue;
+        }
         if completed_only && row.kind == ThreadKind::Root && !latest_turn_completed(&contents) {
             continue;
         }
@@ -558,6 +582,52 @@ mod tests {
             active["root"]["provider_reported_usage"]["total_tokens"], 7,
             "stale sidebar recency must not hide a still-running turn"
         );
+    }
+
+    #[test]
+    fn metadata_updates_do_not_reintroduce_inactive_inherited_history() {
+        let home = codex_home();
+        let sessions = home.path().join("sessions");
+        fs::create_dir(&sessions).unwrap();
+        let rollout = sessions.join("archived.jsonl");
+        let db = fixture_database(home.path(), &rollout, "cli");
+        let metadata = "{\"timestamp\":\"1970-01-01T00:00:01Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"child\",\"forked_from_id\":\"parent\"}}\n";
+        let usage = |at| {
+            format!(
+                "{{\"timestamp\":\"1970-01-01T00:00:{at:02}Z\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"token_count\",\"info\":{{\"total_token_usage\":{{\"total_tokens\":500}}}}}}}}\n"
+            )
+        };
+        let conn = Connection::open(db).unwrap();
+        conn.execute("UPDATE threads SET updated_at=30, archived=1", [])
+            .unwrap();
+        let time = |n| chrono::DateTime::from_timestamp(n, 0).unwrap();
+        // A metadata-only update and records after the requested window do not
+        // make old ambiguous history part of this window. Its start is exclusive.
+        fs::write(&rollout, format!("{metadata}{}{}", usage(10), usage(21))).unwrap();
+        let inactive = collect_audit(home.path(), time(10), time(20), None, false).unwrap();
+        assert_eq!(inactive["collection_complete"], true);
+        assert_eq!(inactive["scope"]["selected_root_count"], 0);
+        assert_eq!(
+            inactive["root"]["provider_reported_usage"]["total_tokens"],
+            0
+        );
+        // A real record at the inclusive end still requires ownership proof.
+        fs::write(&rollout, format!("{metadata}{}", usage(20))).unwrap();
+        let active = collect_audit(home.path(), time(10), time(20), None, false).unwrap();
+        assert_eq!(active["collection_complete"], false);
+        assert_eq!(active["scope"]["selected_root_count"], 1);
+        // Unreadable syntax and unknown timestamps cannot be filtered away.
+        for record in [
+            "{invalid JSON}\n",
+            "{\"type\":\"event_msg\",\"payload\":{}}\n",
+            "{\"timestamp\":\"invalid\",\"type\":\"event_msg\",\"payload\":{}}\n",
+        ] {
+            fs::write(&rollout, format!("{metadata}{record}")).unwrap();
+            assert_eq!(
+                collect_audit(home.path(), time(10), time(20), None, false).unwrap()["collection_complete"],
+                false
+            );
+        }
     }
 
     #[test]

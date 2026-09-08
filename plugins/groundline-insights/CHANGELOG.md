@@ -4,6 +4,12 @@ This package summary covers the current release line. The repository
 [changelog](https://github.com/jukqaz/groundline/blob/main/CHANGELOG.md) records shared changes. A source version entry
 does not prove that its image or `stable` distribution has been published.
 
+## 0.21.4
+
+- Keep immutable collection windows recoverable when an inactive old thread is
+  archived or resumed. Exclude it only after reading and checking every record's
+  timestamp; retain current-window ownership and malformed-input protections.
+
 ## 0.21.3
 
 - Preserve executable permissions in published API images and verify both
