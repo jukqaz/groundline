@@ -11,7 +11,9 @@ task content or private paths.
 Codex's latest numeric `state_<n>.sqlite` is selected read-only and its thread
 columns are checked before use. Plain `.jsonl` and compressed `.jsonl.zst`
 representations share one logical identity; audit never materializes or rewrites
-them. Decoded input is limited to 64 MiB per rollout and 512 MiB per invocation.
+them. Streaming projection retains only audit fields. Decoded input is limited
+to 1 GiB per rollout and 8 GiB per invocation, with at most 512 MiB of retained
+audit records. Other runtimes are excluded after reading their metadata.
 These are read budgets, not estimates of disk occupancy or model tokens.
 
 A weekly sample requires the latest lifecycle event to complete the turn.
@@ -35,9 +37,12 @@ not attribute token totals to individual models or estimate billing.
 
 Candidate recency has no upper bound: continuing a task after the audit end
 must not remove its earlier events. Record timestamps define the requested
-window. Standalone native thread totals update the cumulative checkpoint;
-unanchored trailing response usage and counter resets remain incomplete rather
-than silently reporting a stale total as PASS.
+window. Selection uses the newest available update or recency timestamp, so
+stale sidebar ordering does not hide active turns. Standalone native thread
+totals and UI totals have independent checkpoints; valid native totals take
+precedence without adding the streams. Unanchored trailing response usage,
+missing cross-source baselines, and selected-source resets inside the window
+remain incomplete. Resets before the window do not invalidate later baselines.
 
 Diagnostics keep at most 32 examples with exact total/omitted counts. Parser
 budgets are one million records and 4 MiB per record. Windowed metric records

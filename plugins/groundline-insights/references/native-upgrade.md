@@ -2,7 +2,8 @@
 
 GroundLine Insights uses the same Codex Git marketplace as GroundLine Core.
 Register the public monorepo over HTTPS with `--ref stable` for a moving upgrade
-channel. An exact release tag is an immutable freeze or rollback channel.
+channel. Version tags contain source, while `stable` contains the generated
+native binaries. Do not pin a collector installation to a source-only tag.
 Core and Insights remain separate install records: refreshing the shared
 marketplace never opts the user into an uninstalled sibling plugin.
 
@@ -26,11 +27,18 @@ Use Codex App **Refresh** or:
 
 ```bash
 codex plugin marketplace upgrade groundline --json
+codex plugin list --json
 ```
 
-If the marketplace was deliberately pinned to a tag, do not silently replace
-it. With explicit authorization, remove that registration and add the same
-public monorepo at `stable`, then install GroundLine Insights again.
+If the installed Insights version remains unchanged after refresh, use
+`codex plugin add groundline-insights@groundline --json` for that same ID and
+verify the installed checksum. Preserve any deliberately pinned source; a
+source-only tag needs an explicitly selected, verified binary distribution.
+
+Before collection, upgrade the owner API and check Basic schema 5 plus ingest
+contract revision 3 or newer. Enrollment must return the current generation;
+reuse the existing collector identity and token. A package upgrade does not
+convert unsupported local state or skip an incomplete collection window.
 
 ## Adoption proof
 

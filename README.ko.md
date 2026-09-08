@@ -1,5 +1,7 @@
 # GroundLine
 
+[English](README.md) · [한국어 문서](docs/ko/index.md)
+
 GroundLine은 공개 Rust 모노레포 하나에서 서로 독립적으로 설치할 수 있는 Codex
 플러그인 두 개를 제공합니다. Codex의 실행, 설정, 권한, 에이전트, worktree,
 리뷰, compaction, 업그레이드 기능을 대체하지 않습니다.
@@ -50,6 +52,12 @@ codex plugin marketplace upgrade groundline --json
 codex plugin list --json
 ```
 
+`main`과 버전 태그에는 소스가 있고, 설치에 필요한 실행 파일은 `stable`의
+`bin` 디렉터리에 포함됩니다. 설치 채널을 소스 태그로 바꾸면 실행 파일이
+없을 수 있습니다. 특정 버전으로 고정하려면 검증한 배포용 리비전이 필요합니다.
+갱신 후 설치 버전이 그대로라면 같은 플러그인 ID의 `plugin add`를 다시 실행하고
+설치 버전과 체크섬을 확인합니다.
+
 marketplace 갱신, 설치 package checksum, hook 신뢰, collector upload,
 ClickHouse 반영, Grafana frame, image 게시, 운영 배포, stable 승격은 서로 다른
 증거 lane입니다.
@@ -97,4 +105,4 @@ runner와 production credential을 요구하지 않습니다.
 자세한 선택지는 [연동과 설치 프로필](docs/ko/integrations.md),
 [Codex 업데이트 대응과 지원 범위](docs/ko/codex-compatibility.md),
 [Insights 셀프호스팅](docs/ko/self-hosting.md), 영문 README,
-[release checklist](docs/release-checklist.md)를 참조하세요.
+[변경 기록](CHANGELOG.md), [release checklist](docs/release-checklist.md)를 참조하세요.

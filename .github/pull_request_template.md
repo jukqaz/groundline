@@ -6,8 +6,9 @@
 
 - [ ] `cargo fmt --all -- --check`
 - [ ] Fast PR checks: xtask/CLI contracts and actionlint
-- [ ] Full qualification dispatched once after the change was frozen, if release-bound
-- [ ] Six-target artifact matrix dispatched once, if release-bound
+- [ ] Required source checks passed; documentation-only changes use scoped checks
+- [ ] Release qualification and six-target packages are linked, or explicitly
+  pending the release-tag workflow; avoid a duplicate manual release build
 - [ ] Skipped platform or live lanes are marked `UNVERIFIED` with the exact
   missing command or evidence.
 

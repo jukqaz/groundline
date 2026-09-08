@@ -39,6 +39,101 @@ impl<'a> Record<'a> {
             .map(|raw| serde_json::from_str(raw.get()))
             .transpose()
     }
+
+    /// Retain the audit envelope while dropping bodies the audit never reads.
+    /// Parsing the original record has already validated every JSON value.
+    pub fn audit_projection(&self) -> serde_json::Result<String> {
+        let kind = self.string("type");
+        let mut envelope = serde_json::Map::new();
+        for name in ["type", "timestamp", "ordinal"] {
+            if let Some(value) = self.value(name)? {
+                envelope.insert(name.to_owned(), value);
+            }
+        }
+        if matches!(
+            kind.as_deref(),
+            Some(
+                "session_meta"
+                    | "compacted"
+                    | "turn_context"
+                    | "event_msg"
+                    | "response_item"
+                    | "token_usage_record"
+            )
+        ) && let Some(mut payload) = self.value("payload")?
+        {
+            if let Some(fields) = payload.as_object_mut() {
+                let item = fields
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                if kind.as_deref() == Some("response_item")
+                    && matches!(
+                        item.as_str(),
+                        "function_call_output"
+                            | "custom_tool_call_output"
+                            | "local_shell_call_output"
+                    )
+                    && let Some(output) = fields.get("output")
+                {
+                    let output = crate::audit::project_tool_output(output, fields);
+                    fields.insert("output".to_owned(), output);
+                }
+                fields.retain(|name, _| match kind.as_deref() {
+                    Some("session_meta") => matches!(
+                        name.as_str(),
+                        "id" | "originator"
+                            | "timestamp"
+                            | "history_mode"
+                            | "history_base"
+                            | "forked_from_id"
+                            | "forked_from_ordinal_exclusive"
+                            | "subagent_history_start_ordinal"
+                    ),
+                    Some("turn_context") => matches!(
+                        name.as_str(),
+                        "turn_id" | "model" | "effort" | "reasoning_effort"
+                    ),
+                    Some("token_usage_record") => matches!(
+                        name.as_str(),
+                        "thread_id" | "turn_id" | "response_id" | "usage" | "thread_token_usage"
+                    ),
+                    Some("event_msg") => {
+                        name == "type"
+                            || match item.as_str() {
+                                "token_count" => name == "info",
+                                "task_started" | "task_complete" => {
+                                    matches!(name.as_str(), "turn_id" | "duration_ms")
+                                }
+                                "user_message" => name == "message",
+                                _ => false,
+                            }
+                    }
+                    Some("response_item") => {
+                        name == "type"
+                            || match item.as_str() {
+                                "function_call" | "custom_tool_call" | "local_shell_call"
+                                | "tool_search_call" => matches!(
+                                    name.as_str(),
+                                    "name" | "arguments" | "input" | "call_id"
+                                ),
+                                "function_call_output"
+                                | "custom_tool_call_output"
+                                | "local_shell_call_output" => matches!(
+                                    name.as_str(),
+                                    "output" | "call_id" | "is_error" | "status"
+                                ),
+                                _ => false,
+                            }
+                    }
+                    _ => false,
+                });
+            }
+            envelope.insert("payload".to_owned(), payload);
+        }
+        serde_json::to_string(&envelope)
+    }
 }
 
 #[cfg(test)]

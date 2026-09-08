@@ -1,5 +1,7 @@
 # GroundLine
 
+[한국어](README.ko.md)
+
 GroundLine is one public Rust monorepo with two independently installable Codex
 plugins. Codex remains responsible for execution, settings, permissions, agents,
 worktrees, review, compaction, and upgrades.
@@ -52,8 +54,12 @@ codex plugin marketplace upgrade groundline --json
 codex plugin list --json
 ```
 
-An immutable release tag can be used instead of `stable` for rollback or a
-frozen installation. Marketplace refresh, installed package checksums, hook
+`main` and version tags contain source; `stable` includes the verified native
+`bin` trees required for plugin installation. Do not substitute a source tag for
+the binary distribution. A frozen installation needs a verified packaged
+revision. If refresh leaves an installed version unchanged, run `plugin add`
+again for that same plugin ID, then verify its version and checksum.
+Marketplace refresh, installed package checksums, hook
 trust, collector upload, ClickHouse visibility, Grafana frames, image
 publication, deployment, and stable promotion are separate evidence lanes.
 
@@ -126,5 +132,5 @@ does not measure provider tokens, billing, or installed-plugin latency.
 See [integrations and installation profiles](docs/integrations.md),
 [Codex compatibility and update boundaries](docs/codex-compatibility.md),
 [Insights self-hosting](docs/self-hosting.md), [Privacy](docs/privacy.md),
-[Security](SECURITY.md), and the
+[Security](SECURITY.md), [changes](CHANGELOG.md), and the
 [release checklist](docs/release-checklist.md).

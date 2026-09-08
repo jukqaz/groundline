@@ -51,7 +51,7 @@ marketplace를 갱신해도 설치하지 않은 형제 플러그인이 자동 �
 | Docker Compose | 공개 self-hosting preview | placeholder만 포함한 범용 topology, 인증 필수 Grafana, 비공개 secret 렌더링 |
 | TrueNAS | 선택형 운영 overlay | 범용 배포 계약 위에서 owner가 실행하는 preflight/apply controller, private inventory는 미포함 |
 
-immutable checkout, private render, 실제 stack, Grafana semantic 검증,
+버전이 지정된 소스 checkout, 비공개 설정 렌더링, 실제 stack, Grafana semantic 검증,
 collector enrollment 순서는 [GroundLine Insights 셀프호스팅](self-hosting.md)을
 참조합니다. 서버 배포는 source checkout에서 실행하며 Codex 플러그인만 설치해도
 Docker service가 설치되지는 않습니다.
@@ -88,9 +88,15 @@ maintainer 기본 endpoint는 없습니다. 개인 배포 설정과 데이터는
 
 ## 사용자가 선택할 수 있는 것
 
-Insights 설치 여부, enable/disable 시점, 개인 Tailnet endpoint, 최초 backfill
-실행 여부, CLI JSON report와 Grafana dashboard 사용 여부를 선택할 수 있습니다.
+Insights 설치 여부, enable/disable 시점, 개인 Tailnet endpoint, 수집 재시도
+시점, CLI JSON report와 Grafana dashboard 사용 여부를 선택할 수 있습니다.
 report 기간은 7일, 30일, 90일입니다.
+
+최초 수집은 최근 7일이며 이후에는 저장된 커서를 사용합니다.
+`worker backfill-history --confirm-rebuild`는 같은 수집 경로를 재시도합니다.
+커서를 되돌리거나 전체 과거 이력·기존 서버 집계를 다시 만드는 명령이 아닙니다.
+복구할 수 없는 과거 구간은 원본과 누락 구간 기록을 보존하고 운영자의 명시적
+결정이 있을 때만 수집 시작 경계를 바꿉니다.
 
 집계 데이터만 수집, native hook checkpoint, 최소 900초 간격, diagnostics 비활성,
 ambient proxy와 redirect 금지, ClickHouse 저장은 현재 개인정보·보안 불변식입니다.

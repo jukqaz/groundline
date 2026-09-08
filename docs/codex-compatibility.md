@@ -54,13 +54,17 @@ is present; user steering retains the original task outcome and constraints.
 - Symlinked state databases and session roots remain rejected by the local
   reader. Codex supporting a symlinked layout does not establish GroundLine
   support for that layout.
-- Read budgets are 64 MiB decoded per rollout and 512 MiB per invocation.
+- Streaming reads retain only fields used by the audit. Source I/O is bounded
+  to 1 GiB decoded per rollout and 8 GiB per invocation; retained audit records
+  remain capped at 512 MiB. Other runtimes are rejected after their metadata.
   Unreadable inputs remain visible; successful reads do not prove full coverage.
 
-Native `thread_token_usage` and legacy cumulative totals share an owned-history
-checkpoint sequence. New responses with a verified thread total update that
-sequence; duplicate sources are not added. A response after the last checkpoint
-without a new total, or a decreasing total, marks mixed coverage incomplete.
+Native `thread_token_usage` and UI `token_count` totals use independent
+checkpoints because their baselines can differ. Valid native thread totals take
+precedence; the two sources are never added. A decreasing selected-source total
+inside the requested window remains incomplete. A reset before that window does
+not invalidate its later baseline. Missing cross-source baseline continuity and
+uncovered response suffixes still fail closed.
 Shared suffixes never use inherited cumulative totals. Collection completeness
 is separate from the intentionally partial view of an unread shared prefix.
 
@@ -69,6 +73,8 @@ to reader limits. Diagnostics retain at most 32 bounded examples plus total and
 omitted counts. A plain/compressed file disappearing during open is retried
 once; permission, symlink, ownership, and invalid-data failures never trigger
 representation fallback. Historical events stay eligible after later task updates.
+Candidate selection uses the newest available update or recency timestamp;
+sidebar recency alone cannot exclude a long-running turn.
 
 When a release adds accepted labels or increases a bounded dimension, upgrade
 the Insights API before its collectors. Existing strict APIs can reject the new

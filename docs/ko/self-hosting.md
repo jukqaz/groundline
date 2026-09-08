@@ -15,7 +15,7 @@ release를 fresh host에서 검증하고 외부 TLS/Tailnet gate를 별도로 �
 - 고정 Tailnet IPv4를 가진 Tailscale 연결 host
 - source checkout 배포 도구를 실행할 Rust stable
 - Tailscale Serve 또는 owner reverse proxy가 제공하는 Grafana HTTPS origin
-- 운영 배포에 사용할 immutable GroundLine release tag와 Insights API image digest
+- 운영 배포에 사용할 검토한 GroundLine 소스 태그와 Insights API 이미지 digest
 - 인프라 compatibility profile 하나. 저장소의
   `infrastructure/compatibility.json`은 해당 release에서 검증한 기본 조합이며
   영구적인 최대 지원 버전이 아닙니다.
@@ -24,7 +24,7 @@ Linux, macOS, Windows Docker host에서 절대 dataset path를 렌더링할 수 
 Docker Desktop에서는 VM과 공유되는 경로를 사용합니다. collector 플러그인은 세
 운영체제의 ARM64·x86-64 binary로 별도 배포됩니다.
 
-## 1. immutable release checkout
+## 1. 버전이 지정된 소스 checkout
 
 ```console
 RELEASE_TAG="vMAJOR.MINOR.PATCH"
@@ -45,7 +45,11 @@ binary checksum은 GitHub Release에서 확인하고,
 `ghcr.io/jukqaz/groundline-insights-api@sha256:...` 형식의 immutable image
 reference로 복사합니다. 운영에는 moving image tag를 사용하지 않습니다.
 
-PowerShell도 같은 immutable 입력을 사용합니다.
+소스 태그에는 설치용 플러그인 실행 파일이 없습니다. 수집기는 검증한 `stable`
+배포본으로 별도 설치합니다. 태그·릴리스 이름만으로 GitHub의 변경 잠금이
+입증되지는 않으므로 정확한 커밋, 자산 체크섬, 서명된 빌드 출처를 확인합니다.
+
+PowerShell도 같은 소스 버전과 digest가 지정된 이미지를 사용합니다.
 
 ```powershell
 $ReleaseTag = "vMAJOR.MINOR.PATCH"
@@ -227,9 +231,16 @@ case "$http_status" in 302|401) ;; *) echo "unexpected unauthenticated status: $
 
 ## 5. collector별 설정
 
-설치된 플러그인의 `references/owner-profile.example.json`을 플러그인 밖으로
-복사하고 endpoint와 enrollment placeholder를 owner-private 값으로 바꾼 뒤
-실행합니다.
+새 수집기를 설치하거나 켜기 전에 API를 먼저 올립니다. `/healthz`는 Basic
+schema 5와 ingest contract revision 3 이상을 제공해야 하며, 등록 응답에서
+현재 수집 generation을 받습니다. 기존 identity와 token은 재사용합니다.
+지원하지 않는 로컬 상태는 삭제해서 새 등록을 강제하지 않고 운영자 검토를 위해
+보존합니다.
+
+설치된 플러그인의 `references/owner-profile.example.json`을 플러그인·저장소
+밖으로 복사하고 소유자만 읽을 수 있게 제한합니다. Unix는 `0600`, Windows는
+동등한 비공개 ACL을 사용합니다. endpoint와 enrollment placeholder를 채운 뒤
+그 비공개 디렉터리에서 실행합니다.
 
 ```console
 groundline-insights worker configure --input owner-profile.json
@@ -241,6 +252,11 @@ groundline-insights worker status
 Codex가 shell `PATH`를 만들지 않았다면 설치된 plugin의 `bin/<target>`에서
 `groundline-insights`를 실행합니다. accepted upload, ClickHouse 반영, Grafana
 frame은 각각 따로 확인합니다.
+
+최초 수집은 최근 7일이며 이후에는 저장된 커서부터 이어갑니다. 소유 경계,
+읽기 실패, 누적값 오류로 불완전한 구간은 보존하고 자동 읽기는 3회 뒤 중단합니다.
+상태 변경이나 과거 구간 재시도 전 [문제 해결](../../plugins/groundline-insights/references/operations-troubleshooting.md)을
+확인하세요.
 
 ## 실패 경계
 

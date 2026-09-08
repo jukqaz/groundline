@@ -132,18 +132,21 @@ fn thread_rows(database: &Path) -> Result<Vec<ThreadRow>, AuditStoreError> {
     {
         return Err(AuditStoreError::UnsupportedDatabase);
     }
-    let recency = if ["recency_at_ms", "updated_at_ms", "updated_at"]
-        .iter()
-        .all(|column| columns.contains(*column))
-    {
-        "COALESCE(NULLIF(recency_at_ms, 0), NULLIF(updated_at_ms, 0), CASE WHEN updated_at > 0 THEN updated_at * 1000 + 999 ELSE 0 END)"
-    } else if columns.contains("updated_at_ms") {
-        "updated_at_ms"
-    } else if columns.contains("updated_at") {
-        // A seconds-resolution timestamp is an upper bound within that second.
-        "CASE WHEN updated_at > 0 THEN updated_at * 1000 + 999 ELSE 0 END"
-    } else {
-        "0"
+    // Sidebar recency can remain at the last user prompt while a long-running
+    // turn keeps updating its rollout. Use the newest available activity clock.
+    let mut clocks = ["recency_at_ms", "updated_at_ms"]
+        .into_iter()
+        .filter(|column| columns.contains(*column))
+        .map(|column| format!("COALESCE({column}, 0)"))
+        .collect::<Vec<_>>();
+    if columns.contains("updated_at") {
+        // Seconds-resolution values are conservative upper bounds.
+        clocks.push("CASE WHEN updated_at > 0 THEN updated_at * 1000 + 999 ELSE 0 END".to_owned());
+    }
+    let recency = match clocks.len() {
+        0 => "0".to_owned(),
+        1 => clocks.remove(0),
+        _ => format!("MAX({})", clocks.join(", ")),
     };
     let visible = if columns.contains("preview") {
         "(has_user_event != 0 OR preview != '')"
@@ -208,15 +211,6 @@ fn rollout_roots(codex_home: &Path) -> Result<Vec<PathBuf>, AuditStoreError> {
     Ok(roots)
 }
 
-fn read_rollout(
-    path: &Path,
-    allowed_roots: &[PathBuf],
-    total: &mut u64,
-) -> Result<String, AuditStoreError> {
-    crate::rollout::read_rollout(path, allowed_roots, total)
-        .map_err(|_| AuditStoreError::InputUnavailable)
-}
-
 fn latest_turn_completed(contents: &str) -> bool {
     // A completion belongs to a turn, not the lifetime of a reusable thread.
     contents
@@ -235,21 +229,6 @@ fn latest_turn_completed(contents: &str) -> bool {
             }
         })
         .unwrap_or(false)
-}
-
-fn originator(contents: &str) -> Option<String> {
-    contents.lines().find_map(|line| {
-        let record = Record::parse(line).ok()??;
-        if record.string("type").as_deref() != Some("session_meta") {
-            return None;
-        }
-        record
-            .value("payload")
-            .ok()??
-            .get("originator")
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-    })
 }
 
 fn runtime_family(originator: Option<&str>, source: &str) -> Option<&'static str> {
@@ -302,12 +281,12 @@ fn guardian_from_session(session: Value, rollout_count: usize) -> Value {
     })
 }
 
-fn audit_component(rollouts: &[String], window: AuditWindow) -> Result<Value, AuditStoreError> {
+fn audit_component(
+    rollouts: &[String],
+    storage_bytes: u64,
+    window: AuditWindow,
+) -> Result<Value, AuditStoreError> {
     let references = rollouts.iter().map(String::as_str).collect::<Vec<_>>();
-    let storage_bytes = rollouts
-        .iter()
-        .try_fold(0_u64, |total, value| total.checked_add(value.len() as u64))
-        .ok_or(AuditStoreError::AuditFailed)?;
     let mut result = audit_rollouts(&references, storage_bytes, 20, window)
         .map_err(|_| AuditStoreError::AuditFailed)?;
     if rollouts.is_empty() {
@@ -342,6 +321,8 @@ pub fn collect_audit(
     let mut source_fallback = 0_u64;
     let mut duplicates = 0_u64;
     let mut total_bytes = 0_u64;
+    let mut retained_bytes = 0_u64;
+    let mut component_bytes = [0_u64; 3];
     for row in rows {
         if (row.recency_ms > 0 && row.recency_ms <= start_ms)
             || (row.kind == ThreadKind::Root && !row.visible)
@@ -354,8 +335,29 @@ pub fn collect_audit(
             duplicates = duplicates.saturating_add(1);
             continue;
         }
-        let contents = match read_rollout(&row.rollout, &allowed_roots, &mut total_bytes) {
-            Ok(contents) => contents,
+        let before_read = total_bytes;
+        let mut originator_missing = false;
+        let mut classified = None;
+        let contents = match crate::rollout::read_audit_rollout(
+            &row.rollout,
+            &allowed_roots,
+            &mut total_bytes,
+            &mut retained_bytes,
+            |metadata| {
+                let originator = metadata.get("originator").and_then(Value::as_str);
+                originator_missing = originator.is_none();
+                classified = runtime_family(originator, &row.source);
+                classified
+                    .is_some_and(|family| runtime_filter.is_none_or(|expected| family == expected))
+            },
+        ) {
+            Ok(Some(contents)) => contents,
+            Ok(None) => {
+                if classified.is_none() {
+                    unclassified = unclassified.saturating_add(1);
+                }
+                continue;
+            }
             Err(_) => {
                 match row.kind {
                     ThreadKind::Root => unreadable = unreadable.saturating_add(1),
@@ -372,29 +374,31 @@ pub fn collect_audit(
         if completed_only && row.kind == ThreadKind::Root && !latest_turn_completed(&contents) {
             continue;
         }
-        let originator = originator(&contents);
-        match runtime_family(originator.as_deref(), &row.source) {
-            Some(value) if runtime_filter.is_some_and(|expected| expected != value) => continue,
-            Some(_) if originator.is_none() => source_fallback = source_fallback.saturating_add(1),
-            None => {
-                unclassified = unclassified.saturating_add(1);
-                continue;
-            }
-            _ => {}
+        if originator_missing {
+            source_fallback = source_fallback.saturating_add(1);
         }
         match row.kind {
-            ThreadKind::Root => root.push(contents),
-            ThreadKind::Delegated => delegated.push(contents),
-            ThreadKind::Guardian => guardian.push(contents),
+            ThreadKind::Root => {
+                component_bytes[0] += total_bytes - before_read;
+                root.push(contents);
+            }
+            ThreadKind::Delegated => {
+                component_bytes[1] += total_bytes - before_read;
+                delegated.push(contents);
+            }
+            ThreadKind::Guardian => {
+                component_bytes[2] += total_bytes - before_read;
+                guardian.push(contents);
+            }
         }
     }
     let window = AuditWindow {
         start: Some(start),
         end: Some(end),
     };
-    let mut root_audit = audit_component(&root, window)?;
-    let mut delegated_audit = audit_component(&delegated, window)?;
-    let mut guardian_session = audit_component(&guardian, window)?;
+    let mut root_audit = audit_component(&root, component_bytes[0], window)?;
+    let mut delegated_audit = audit_component(&delegated, component_bytes[1], window)?;
+    let mut guardian_session = audit_component(&guardian, component_bytes[2], window)?;
     for (audit, missing) in [
         (&mut root_audit, unreadable + unclassified),
         (&mut delegated_audit, unreadable_delegated),
@@ -462,7 +466,8 @@ pub fn collect_audit(
             "guardian_rollout_count":guardian.len(),"guardian_incomplete_excluded_count":0,"duplicate_rollout_reference_excluded_count":duplicates,
             "unreadable_completed_root_count":unreadable,"originator_unclassified_excluded_root_count":unclassified,
             "unreadable_delegated_count":unreadable_delegated,"unreadable_guardian_count":unreadable_guardian,
-            "read_budget_exhausted":total_bytes>=crate::rollout::MAX_AUDIT_BYTES,
+            "read_budget_exhausted":total_bytes>=crate::rollout::MAX_AUDIT_SCAN_BYTES || retained_bytes>=crate::rollout::MAX_AUDIT_BYTES,
+            "source_read_bytes":total_bytes,"retained_audit_bytes":retained_bytes,
             "originator_source_fallback_root_count":source_fallback,"delegated_truncated_count":0,"guardian_truncated_count":0,
         },
         "root":root_audit,"delegated":delegated_audit,"guardian":guardian_audit,
@@ -477,15 +482,14 @@ pub fn contract_error(error: AuditStoreError) -> ContractError {
 
 #[cfg(test)]
 mod tests {
+    use crate::rollout::read_audit_rollout;
+    use serde_json::Value;
     use std::fs;
 
     use rusqlite::{Connection, params};
     use tempfile::{TempDir, tempdir, tempdir_in};
 
-    use super::{
-        collect_audit, latest_turn_completed, read_rollout, rollout_roots, state_database,
-        thread_rows,
-    };
+    use super::{collect_audit, latest_turn_completed, rollout_roots, state_database, thread_rows};
 
     fn fixture_database(home: &Path, rollout: &Path, source: &str) -> PathBuf {
         let database = home.join("state_5.sqlite");
@@ -547,6 +551,13 @@ mod tests {
                 ["total_tokens"],
             5
         );
+        conn.execute_batch("ALTER TABLE threads ADD recency_at_ms INTEGER; ALTER TABLE threads ADD updated_at_ms INTEGER; UPDATE threads SET recency_at_ms=5000, updated_at_ms=15000;").unwrap();
+        let active = collect_audit(home.path(), time(10), time(20), None, false).unwrap();
+        assert_eq!(active["collection_complete"], true);
+        assert_eq!(
+            active["root"]["provider_reported_usage"]["total_tokens"], 7,
+            "stale sidebar recency must not hide a still-running turn"
+        );
     }
 
     #[test]
@@ -569,7 +580,25 @@ mod tests {
             "{\"type\":\"world_state\",\"payload\":{\"originator\":\"ignored\"}}\n",
             "{\"type\":\"session_meta\",\"payload\":{\"originator\":\"codex_app\"}}\n"
         );
-        assert_eq!(super::originator(content).as_deref(), Some("codex_app"));
+        let home = codex_home();
+        let path = home.path().join("metadata.jsonl");
+        fs::write(&path, content).unwrap();
+        let mut observed = None;
+        crate::rollout::read_audit_rollout(
+            &path,
+            &[home.path().to_path_buf()],
+            &mut 0,
+            &mut 0,
+            |metadata| {
+                observed = metadata
+                    .get("originator")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                true
+            },
+        )
+        .unwrap();
+        assert_eq!(observed.as_deref(), Some("codex_app"));
     }
 
     #[test]
@@ -588,7 +617,7 @@ mod tests {
         assert_eq!(thread_rows(&database).unwrap().len(), 1);
         let roots = rollout_roots(home.path()).unwrap();
         let mut total = 0;
-        assert!(read_rollout(&rollout, &roots, &mut total).is_ok());
+        assert!(read_audit_rollout(&rollout, &roots, &mut total, &mut 0, |_| true).is_ok());
         assert!(total > 0);
     }
 
@@ -607,7 +636,7 @@ mod tests {
         fs::write(&outside, b"{}\n").expect("outside rollout");
         let roots = rollout_roots(home.path()).unwrap();
         let mut total = 0;
-        assert!(read_rollout(&outside, &roots, &mut total).is_err());
+        assert!(read_audit_rollout(&outside, &roots, &mut total, &mut 0, |_| true).is_err());
     }
 
     #[test]

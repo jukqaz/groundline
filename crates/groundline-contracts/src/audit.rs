@@ -250,6 +250,23 @@ fn failure_signals(output: &Value, payload: &Map<String, Value>) -> BTreeSet<&'s
     signals
 }
 
+pub(crate) fn project_tool_output(output: &Value, payload: &Map<String, Value>) -> Value {
+    if output.is_null() {
+        return Value::Null;
+    }
+    let signals = failure_signals(output, payload);
+    json!({
+        "exit_code": if signals.contains("nonzero_exit") {1} else {0},
+        "markers": signals.iter().filter_map(|signal| match *signal {
+            "timeout" => Some("timed out"),
+            "yielded_for_wait" => Some("script running with cell id"),
+            "invalid_arguments" => Some("invalid argument"),
+            "rejected" => Some("permission denied"),
+            _ => None,
+        }).collect::<Vec<_>>()
+    })
+}
+
 fn is_tool_call(item_type: &str) -> bool {
     matches!(
         item_type,
@@ -349,7 +366,8 @@ pub fn audit_rollouts(
             && boundary.is_some()
             && (metadata.get("history_base").is_none_or(Value::is_null) || history_base.is_some())
             && (metadata.get("forked_from_id").is_none_or(Value::is_null)
-                || fork_boundary.is_some());
+                || fork_boundary.is_some()
+                || child_boundary.is_some());
         if inherited && !known_boundary {
             errors.push(format!(
                 "rollout[{rollout_index}] inherited history attribution unavailable"
@@ -377,7 +395,13 @@ pub fn audit_rollouts(
         let mut latest_usage: Option<Usage> = None;
         let mut baseline_usage: Option<Usage> = None;
         let mut checkpoint_usage: Option<Usage> = None;
+        let mut native_checkpoint: Option<Usage> = None;
+        let mut native_latest: Option<Usage> = None;
+        let mut native_baseline: Option<Usage> = None;
+        let mut native_anchor_matches = false;
+        let mut ui_usage_errors = 0_u64;
         let mut uncovered_response = false;
+        let mut native_uncovered_response = false;
         let mut fallback_usage = Usage::default();
         let mut has_fallback = false;
         let mut rollout_compactions = 0_u64;
@@ -484,6 +508,7 @@ pub fn audit_rollouts(
                     response_usage.add_checked(&usage)?;
                     response_events = response_events.saturating_add(1);
                     uncovered_response = true;
+                    native_uncovered_response = true;
                 }
                 // Native thread totals are safe only for an unshared owner.
                 // Shared/forked logs continue to use owned response deltas.
@@ -496,22 +521,29 @@ pub fn audit_rollouts(
                             .start
                             .is_some_and(|start| observed_at.is_some_and(|at| at <= start)))
                 {
-                    if !total.covers(&usage)
-                        || checkpoint_usage
-                            .as_ref()
-                            .is_some_and(|old| !total.covers(old))
+                    if record_in_window
+                        && (!total.covers(&usage)
+                            || native_checkpoint
+                                .as_ref()
+                                .is_some_and(|old| !total.covers(old)))
                     {
                         errors.push(format!(
                             "rollout[{rollout_index}] inconsistent cumulative usage"
                         ));
                     } else {
-                        checkpoint_usage = Some(total.clone());
+                        if native_checkpoint.is_none() {
+                            native_anchor_matches = checkpoint_usage
+                                .as_ref()
+                                .is_some_and(|old| total.subtract(&usage).values == old.values);
+                        }
+                        native_checkpoint = Some(total.clone());
                         if record_in_window {
-                            latest_usage = Some(total);
+                            native_latest = Some(total);
                         } else {
-                            baseline_usage = Some(total);
+                            native_baseline = Some(total);
                         }
                         uncovered_response = false;
+                        native_uncovered_response = false;
                     }
                 }
             }
@@ -618,13 +650,12 @@ pub fn audit_rollouts(
                                 .start
                                 .is_some_and(|start| observed_at.is_some_and(|at| at <= start))
                         {
-                            if checkpoint_usage
-                                .as_ref()
-                                .is_some_and(|old| !cumulative.covers(old))
+                            if record_in_window
+                                && checkpoint_usage
+                                    .as_ref()
+                                    .is_some_and(|old| !cumulative.covers(old))
                             {
-                                errors.push(format!(
-                                    "rollout[{rollout_index}] inconsistent cumulative usage"
-                                ));
+                                ui_usage_errors = ui_usage_errors.saturating_add(1);
                             } else {
                                 checkpoint_usage = Some(cumulative.clone());
                                 if record_in_window {
@@ -704,6 +735,31 @@ pub fn audit_rollouts(
         }
         if rollout_compactions >= 2 || rollout_broad_scope >= 3 {
             boundary_review_rollouts = boundary_review_rollouts.saturating_add(1);
+        }
+        // UI token-count notifications and persisted native response totals can
+        // have different baselines. Validate each stream independently; never
+        // interpret their alternating records as a counter reset.
+        if native_latest.is_some() {
+            latest_usage = native_latest;
+            uncovered_response = native_uncovered_response;
+            baseline_usage = if native_baseline.is_some() {
+                native_baseline
+            } else if native_anchor_matches {
+                baseline_usage
+            } else {
+                if baseline_usage.is_some() {
+                    errors.push(format!(
+                        "rollout[{rollout_index}] native cumulative baseline unavailable"
+                    ));
+                }
+                None
+            };
+        } else {
+            for _ in 0..ui_usage_errors {
+                errors.push(format!(
+                    "rollout[{rollout_index}] inconsistent cumulative usage"
+                ));
+            }
         }
         if let Some(latest) = latest_usage {
             if uncovered_response {
@@ -974,7 +1030,8 @@ mod tests {
                 7
             );
         }
-        records.push(cumulative(8, 3));
+        // The selected native stream must still reject its own reset.
+        records.push(response(8, "reset", 3, Some(3)));
         assert_eq!(
             total_in(&lines(&records), 0, 10)["status"],
             "PARTIAL",
@@ -990,6 +1047,137 @@ mod tests {
             response(6, "r", 7, None),
         ]);
         assert_eq!(total_in(&data, 0, 10)["status"], "PARTIAL");
+    }
+
+    #[test]
+    fn native_and_ui_totals_have_independent_monotonic_baselines() {
+        let data = lines(&[
+            json!({"type":"session_meta","payload":{"id":"owner"}}),
+            response(1, "before", 20, Some(120)),
+            cumulative(1, 90),
+            response(2, "one", 7, Some(127)),
+            cumulative(2, 97),
+            response(3, "two", 5, Some(132)),
+            cumulative(3, 102),
+        ]);
+        let audit = total_in(&data, 1, 3);
+        assert_eq!(audit["collection_complete"], true);
+        assert_eq!(audit["provider_reported_usage"]["total_tokens"], 12);
+        assert_eq!(
+            total_in(&data, 0, 3)["provider_reported_usage"]["total_tokens"],
+            132
+        );
+        let reset = format!("{data}\n{}", cumulative(4, 2));
+        assert_eq!(
+            total_in(&reset, 1, 4)["collection_complete"],
+            true,
+            "a UI counter reset cannot invalidate independent native usage"
+        );
+        let native_reset = format!("{data}\n{}", response(4, "reset", 2, Some(2)));
+        assert_eq!(total_in(&native_reset, 1, 4)["collection_complete"], false);
+        let uncovered = format!(
+            "{data}\n{}\n{}",
+            response(4, "unanchored", 2, None),
+            cumulative(4, 104)
+        );
+        assert_eq!(
+            total_in(&uncovered, 1, 4)["collection_complete"],
+            false,
+            "a UI checkpoint cannot cover a trailing response in the selected native stream"
+        );
+    }
+
+    #[test]
+    fn counter_resets_before_the_window_do_not_poison_a_later_baseline() {
+        for native in [false, true] {
+            let records = lines(&[
+                json!({"type":"session_meta","payload":{"id":"owner"}}),
+                if native {
+                    response(1, "a", 100, Some(100))
+                } else {
+                    cumulative(1, 100)
+                },
+                if native {
+                    response(2, "b", 5, Some(5))
+                } else {
+                    cumulative(2, 5)
+                },
+                if native {
+                    response(3, "c", 7, Some(12))
+                } else {
+                    cumulative(3, 12)
+                },
+            ]);
+            assert_eq!(total_in(&records, 0, 3)["collection_complete"], false);
+            let later = total_in(&records, 2, 3);
+            assert_eq!(later["collection_complete"], true);
+            assert_eq!(later["provider_reported_usage"]["total_tokens"], 7);
+        }
+    }
+
+    #[test]
+    fn audit_projection_preserves_metrics_and_failure_signal_combinations() {
+        let mut records = vec![
+            json!({"type":"session_meta","payload":{"id":"owner","base_instructions":"not emitted"}}),
+            json!({"type":"world_state","payload":{"large":"not emitted".repeat(1000)}}),
+            json!({"type":"compacted","payload":{"message":"not emitted"}}),
+            json!({"type":"turn_context","payload":{"model":"gpt-6-astra","effort":"high","cwd":"not emitted"}}),
+            json!({"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"text":"not emitted"}]}}),
+        ];
+        for (index, output) in [
+            Value::Null,
+            json!(""),
+            json!({"exit_code":0}),
+            json!({"exit_code":4}),
+            json!("timed out: permission denied; invalid argument"),
+            json!("script running with cell id"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            records.push(json!({"type":"response_item","payload":{"type":"function_call","name":"exec","arguments":"cargo test","call_id":index.to_string()}}));
+            records.push(json!({"type":"response_item","payload":{"type":"function_call_output","output":output,"call_id":index.to_string()}}));
+        }
+        let original = lines(&records);
+        let projected = original
+            .lines()
+            .map(|line| {
+                Record::parse(line)
+                    .unwrap()
+                    .unwrap()
+                    .audit_projection()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let expected = audit_rollouts(
+            &[&original],
+            original.len() as u64,
+            20,
+            AuditWindow::default(),
+        )
+        .unwrap();
+        let actual = audit_rollouts(
+            &[&projected],
+            original.len() as u64,
+            20,
+            AuditWindow::default(),
+        )
+        .unwrap();
+        assert_eq!(actual, expected);
+        assert!(!projected.contains("not emitted"));
+    }
+
+    #[test]
+    fn child_owned_suffix_boundary_also_anchors_its_fork_metadata() {
+        let data = lines(&[
+            json!({"ordinal":0,"type":"session_meta","payload":{"id":"owner","history_mode":"paginated","forked_from_id":"parent","subagent_history_start_ordinal":2}}),
+            json!({"ordinal":1,"timestamp":at(1).to_rfc3339(),"type":"token_usage_record","payload":{"thread_id":"owner","response_id":"old","usage":{"total_tokens":100}}}),
+            json!({"ordinal":2,"timestamp":at(2).to_rfc3339(),"type":"token_usage_record","payload":{"thread_id":"owner","response_id":"new","usage":{"total_tokens":7}}}),
+        ]);
+        let result = total_in(&data, 0, 3);
+        assert_eq!(result["collection_complete"], true);
+        assert_eq!(result["provider_reported_usage"]["total_tokens"], 7);
     }
 
     #[test]

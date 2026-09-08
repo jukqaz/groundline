@@ -14,10 +14,10 @@ read-only with SQLite `NOFOLLOW`, owner, 8 GiB, and 100,000-row ceilings, and
 accepts rollout files only from canonical non-symlinked Codex session roots. It
 emits aggregates or reason codes instead of raw records and paths.
 
-The source qualification gate checks both canonical plugin packages directly,
-the Core zero-hook invariant, the Insights four-hook invariant, all six native
-targets, pinned external CI actions, and the absence of private or personal
-markers. These checks reduce accidental exposure but do not replace review.
+Source qualification checks both canonical plugin packages, the Core zero-hook
+and Insights four-hook invariants, pinned external CI actions, and private
+markers. Release qualification separately builds and verifies all six native
+targets. Neither source validation nor package integrity proves live dispatch.
 
 ## Reporting
 
