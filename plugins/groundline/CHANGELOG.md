@@ -3,6 +3,13 @@
 This package summary covers the current release line. See the repository
 [changelog](https://github.com/jukqaz/groundline/blob/main/CHANGELOG.md) for shared release and packaging changes.
 
+## 0.22.1
+
+- Recover interrupted personal guidance restores and keep trial history,
+  temporary files, candidate selection, and PR regression checks bounded.
+- Audit larger native records without expanding unused history bodies, and
+  recognize a directly proven fresh native usage baseline.
+
 ## 0.22.0
 
 - Add `personal review|evaluate|rollback` and an explicit seventh skill for

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.22.1
+
+- Make personal rollback resumable across durable writes, preserve bounded
+  interrupted-write files, and validate archived baselines and file capacity.
+  Review current state before selecting eligible guidance, and run personal
+  regression tests in PR qualification.
+- Accept a proven zero baseline for a resumed native usage stream without
+  dropping preceding window usage or weakening ownership/reset checks.
+- Read larger native compaction and completion records using borrowed unused
+  payloads, separate raw/projection byte limits, and bounded object fields.
+  Preserve malformed-record rejection and plain/compressed history parity.
+
 ## 0.22.0
 
 - Add offline personal workflow review, one-rule guidance trials, comparable

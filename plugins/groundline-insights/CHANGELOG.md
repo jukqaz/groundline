@@ -4,6 +4,13 @@ This package summary covers the current release line. The repository
 [changelog](https://github.com/jukqaz/groundline/blob/main/CHANGELOG.md) records shared changes. A source version entry
 does not prove that its image or `stable` distribution has been published.
 
+## 0.22.1
+
+- Recover collection windows containing a directly proven fresh native usage
+  baseline. Preserve ambiguous earlier usage as incomplete.
+- Accept larger native compaction/completion records with borrowed unused
+  bodies and separate raw/projection bounds; preserve strict input validation.
+
 ## 0.22.0
 
 - Count absent/current reporters correctly with explicit join-presence markers. Keep
