@@ -45,8 +45,11 @@
    each product's target set, executable name, manifest, size, and SHA-256. Remap
    GitHub runner workspace and home paths before compiling release binaries.
 9. Publish one versioned GitHub release without replacing an existing release,
-   and publish the Insights API image. Record the
-   multi-platform image index digest, verify every binary asset with
+   and publish the Insights API image. Record the launch smoke for both API
+   artifacts after downloading them from Actions:
+   the image must restore executable permissions lost during artifact transport,
+   and its real entrypoint must reach the API configuration check without secrets.
+   Record the multi-platform image index digest, and verify every binary asset with
    `gh attestation verify --repo jukqaz/groundline --source-digest <commit> --source-ref refs/tags/<tag> --signer-workflow jukqaz/groundline/.github/workflows/rust.yml --deny-self-hosted-runners <asset>`.
    Apply the same source/workflow checks to `oci://<image>@sha256:<digest>`.
    Record GitHub's `isImmutable` result separately: the workflow's no-overwrite

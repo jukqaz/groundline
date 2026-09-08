@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.21.3
+
+- Set executable permissions inside the API image even when release artifact
+  downloads reset file modes. Launch both downloaded architecture artifacts
+  through the image entrypoint before publishing.
+
 ## 0.21.2
 
 - Keep native response and UI usage totals on independent baselines, preserving
