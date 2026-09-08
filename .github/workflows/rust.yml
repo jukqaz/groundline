@@ -89,6 +89,7 @@ jobs:
         run: |
           cargo test --locked -p xtask --all-targets
           cargo test --locked -p groundline-contracts -p groundline-runtime --lib --all-features
+          cargo test --locked -p groundline-cli --bin groundline
           cargo test --locked -p groundline-cli --test cli_contract
           cargo test --locked -p groundline-insights-cli --test cli_contract
       - name: Install and run actionlint

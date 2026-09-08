@@ -132,6 +132,7 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
         "if: github.event_name == 'workflow_dispatch'",
         "needs: fast",
         "cargo test --locked -p xtask --all-targets",
+        "cargo test --locked -p groundline-cli --bin groundline",
         "cargo test --locked -p groundline-cli --test cli_contract",
         "cargo test --locked -p groundline-insights-cli --test cli_contract",
         "cargo test --workspace --all-features --locked",

@@ -838,3 +838,292 @@ fn dangling_archive_links_are_preserved_and_rejected() {
     assert!(archive(root.path(), "trial", data).is_err());
     assert!(fs::symlink_metadata(path).unwrap().file_type().is_symlink());
 }
+
+#[test]
+fn rollback_recovers_every_durable_write_boundary_and_repeats_without_mutation() {
+    for fail_at in 1..=3 {
+        for after_write in [false, true] {
+            let (root, _, _, _) = trial();
+            let mut t = load_trial(root.path()).unwrap();
+            let mut writes = 0;
+            let err = restore_with_writer(root.path(), &mut t, |path, contents| {
+                writes += 1;
+                if writes == fail_at && !after_write {
+                    return Err(error("injected_interruption"));
+                }
+                atomic_write_private(path, contents).unwrap();
+                if writes == fail_at {
+                    return Err(error("injected_interruption"));
+                }
+                Ok(())
+            })
+            .unwrap_err();
+            assert_eq!(err.0, "personal_injected_interruption");
+            let rollback = || {
+                run(Command::Rollback {
+                    state_dir: root.path().to_owned(),
+                    json: true,
+                })
+                .unwrap()
+            };
+            assert_eq!(rollback()["status"], "ROLLED_BACK");
+            assert_eq!(load_trial(root.path()).unwrap().status, "rolled_back");
+            assert_eq!(current_rules(root.path()).unwrap(), Vec::<Rule>::new());
+            let before = fs::read(root.path().join("trial.json")).unwrap();
+            assert_eq!(rollback()["mutation_performed"], false);
+            assert_eq!(fs::read(root.path().join("trial.json")).unwrap(), before);
+        }
+    }
+}
+
+#[test]
+fn recovery_intent_is_required_and_owner_edits_still_block_restore() {
+    for phase in ["pending", "restoring", "rolled_back"] {
+        let (root, _, _, _) = trial();
+        let mut t = load_trial(root.path()).unwrap();
+        t.status = phase.into();
+        save_trial(root.path(), &t).unwrap();
+        // Even exact generated before-guidance is not proof of an interrupted
+        // rollback when the durable journal has no recovery intent.
+        let owner = if phase == "pending" {
+            b"".as_slice()
+        } else {
+            b"OWNER_EDIT".as_slice()
+        };
+        atomic_write_private(&root.path().join("personal-guidance.md"), owner).unwrap();
+        let before = fs::read(root.path().join("trial.json")).unwrap();
+        assert_eq!(
+            run(Command::Rollback {
+                state_dir: root.path().to_owned(),
+                json: true
+            })
+            .unwrap_err()
+            .0,
+            "personal_user_edited_guidance_preserved"
+        );
+        assert_eq!(
+            fs::read(root.path().join("personal-guidance.md")).unwrap(),
+            owner
+        );
+        assert_eq!(fs::read(root.path().join("trial.json")).unwrap(), before);
+    }
+    let (root, _, _, _) = trial();
+    let mut t = load_trial(root.path()).unwrap();
+    let err = restore_with_writer(root.path(), &mut t, |path, contents| {
+        atomic_write_private(path, contents).unwrap();
+        atomic_write_private(&root.path().join("personal-guidance.md"), b"OWNER_EDIT").unwrap();
+        Ok(())
+    })
+    .unwrap_err();
+    assert_eq!(err.0, "personal_user_edited_guidance_preserved");
+    assert_eq!(load_trial(root.path()).unwrap().status, "restoring");
+}
+
+#[test]
+fn interrupted_private_replacements_do_not_strand_a_full_history() {
+    for name in [
+        ".trial.json.99999.0.tmp".to_owned(),
+        ".personal-guidance.md.99999.1.tmp".into(),
+        format!(".evaluation-{}.json.99999.2.tmp", "a".repeat(64)),
+    ] {
+        let (root, _, _, _) = trial();
+        for i in fs::read_dir(root.path()).unwrap().count()..MAX_STATE_FILES {
+            atomic_write_private(&root.path().join(format!("owner-record-{i}")), b"").unwrap();
+        }
+        let temporary = root.path().join(name);
+        atomic_write_private(&temporary, b"partial interrupted bytes").unwrap();
+        run(Command::Rollback {
+            state_dir: root.path().to_owned(),
+            json: true,
+        })
+        .unwrap();
+        assert_eq!(load_trial(root.path()).unwrap().status, "rolled_back");
+        assert_eq!(fs::read(temporary).unwrap(), b"partial interrupted bytes");
+        assert_eq!(
+            fs::read_dir(root.path()).unwrap().count(),
+            MAX_STATE_FILES + 1
+        );
+    }
+}
+
+#[test]
+fn temporary_allowance_is_bounded_and_does_not_hide_unknown_files() {
+    for name in [
+        ".unrelated.99999.0.tmp",
+        ".trial.json.invalid.0.tmp",
+        ".trial.json.0.0.tmp",
+        ".trial.json.99999.00.tmp",
+        ".trial-invalid.json.99999.0.tmp",
+    ] {
+        let root = tempdir().unwrap();
+        for i in 0..MAX_STATE_FILES {
+            atomic_write_private(&root.path().join(format!("owner-record-{i}")), b"").unwrap();
+        }
+        let path = root.path().join(name);
+        atomic_write_private(&path, b"owner file").unwrap();
+        assert_eq!(
+            state_root(root.path()).unwrap_err().0,
+            "personal_state_archive_limit"
+        );
+        assert_eq!(fs::read(path).unwrap(), b"owner file");
+    }
+    let root = tempdir().unwrap();
+    for i in 0..=MAX_INTERRUPTED_WRITES {
+        atomic_write_private(&root.path().join(format!(".trial.json.99999.{i}.tmp")), b"").unwrap();
+    }
+    assert_eq!(
+        state_root(root.path()).unwrap_err().0,
+        "personal_interrupted_write_limit"
+    );
+    assert_eq!(
+        fs::read_dir(root.path()).unwrap().count(),
+        MAX_INTERRUPTED_WRITES + 1
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn temporary_allowance_rejects_links_and_public_files_without_deleting_them() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    for kind in ["symlink", "hardlink", "public"] {
+        let root = tempdir().unwrap();
+        let target = root.path().join("owner-file");
+        atomic_write_private(&target, b"owner bytes").unwrap();
+        let temporary = root.path().join(".trial.json.99999.0.tmp");
+        match kind {
+            "symlink" => symlink(&target, &temporary).unwrap(),
+            "hardlink" => fs::hard_link(&target, &temporary).unwrap(),
+            _ => {
+                atomic_write_private(&temporary, b"owner bytes").unwrap();
+                fs::set_permissions(&temporary, fs::Permissions::from_mode(0o644)).unwrap();
+            }
+        }
+        assert!(state_root(root.path()).is_err());
+        assert!(fs::symlink_metadata(temporary).is_ok());
+        assert_eq!(fs::read(target).unwrap(), b"owner bytes");
+    }
+}
+
+fn review_sample(
+    root: &Path,
+    s: &Sample,
+    e: &ModelEvidence,
+    c: &[u8],
+    state: Option<&Path>,
+    apply: bool,
+) -> Value {
+    let mut report = report_fixture();
+    report["generated_at_utc"] =
+        json!(Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+    put(&root.join("report.json"), &report);
+    put(&root.join("audit.json"), &audit());
+    put(
+        &root.join("outcomes.json"),
+        &serde_json::to_value(s).unwrap(),
+    );
+    review(
+        ReviewInputs {
+            report: &root.join("report.json"),
+            audit: &root.join("audit.json"),
+            outcomes: Some(&root.join("outcomes.json")),
+            state_dir: state,
+            apply,
+        },
+        e,
+        c,
+    )
+    .unwrap()
+}
+
+#[test]
+fn review_selects_the_next_eligible_rule_and_matches_locked_application() {
+    let (root, e, c, s) = trial();
+    evaluate(root.path(), s, &e, &c).unwrap();
+    let inputs = tempdir().unwrap();
+    let context = model_context(&e, &c, Utc::now()).unwrap();
+    let mut fresh = sample(&context, 1, "fresh");
+    fresh.guidance_sha256 = hash(render(&[Rule::ApprovalContinuity]).as_bytes());
+    fresh.activation_verified = true;
+    let before = fs::read(root.path().join("trial.json")).unwrap();
+    let out = review_sample(inputs.path(), &fresh, &e, &c, Some(root.path()), false);
+    assert_eq!(out["status"], "READY");
+    assert_eq!(out["candidate"]["rule"], "diagnose_before_retry");
+    assert_eq!(out["state_preflight_checked"], true);
+    assert_eq!(out["automatic_application_eligible"], true);
+    assert_eq!(fs::read(root.path().join("trial.json")).unwrap(), before);
+    assert_eq!(
+        review_sample(inputs.path(), &fresh, &e, &c, Some(root.path()), true)["mutation_performed"],
+        true
+    );
+    // A changed state between review and application cannot bypass the lock's
+    // second eligibility check.
+    assert_eq!(
+        apply(
+            root.path(),
+            Rule::DiagnoseBeforeRetry,
+            &fresh,
+            &context,
+            Utc::now()
+        )
+        .unwrap_err()
+        .0,
+        "personal_trial_already_active"
+    );
+    let mut both = load_trial(root.path()).unwrap();
+    both.status = "retained".into();
+    save_trial(root.path(), &both).unwrap();
+    fresh.guidance_sha256 = hash(render(&both.after_rules).as_bytes());
+    for unit in &mut fresh.units {
+        unit.unit_hash = hash(unit.unit_hash.as_bytes());
+    }
+    let out = review_sample(inputs.path(), &fresh, &e, &c, Some(root.path()), false);
+    assert_eq!(out["status"], "OBSERVE");
+    assert_eq!(out["automatic_application_eligible"], false);
+    assert_eq!(out["candidate"], Value::Null);
+}
+
+#[test]
+fn review_reports_blocked_state_and_never_authorizes_an_unchecked_directory() {
+    for phase in ["pending", "restoring", "retained", "rolled_back"] {
+        let (root, e, c, _) = trial();
+        let mut t = load_trial(root.path()).unwrap();
+        t.status = phase.into();
+        save_trial(root.path(), &t).unwrap();
+        let mut sample = t.baseline.clone();
+        let mut e = e.clone();
+        e.behavior_focus = vec![Rule::ApprovalContinuity];
+        if phase == "rolled_back" {
+            atomic_write_private(&root.path().join("personal-guidance.md"), b"").unwrap();
+        } else {
+            sample.guidance_sha256 = hash(render(&t.after_rules).as_bytes());
+            sample.activation_verified = true;
+            if phase == "retained" {
+                for unit in &mut sample.units {
+                    unit.unit_hash = hash(unit.unit_hash.as_bytes());
+                }
+            }
+        }
+        let inputs = tempdir().unwrap();
+        let out = review_sample(inputs.path(), &sample, &e, &c, Some(root.path()), false);
+        assert_eq!(out["status"], "OBSERVE");
+        assert_eq!(out["automatic_application_eligible"], false);
+        let expected = match phase {
+            "retained" => "candidate_already_applied",
+            "rolled_back" => "candidate_already_reviewed",
+            _ => "trial_already_active",
+        };
+        assert!(
+            out["reason_codes"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(expected))
+        );
+    }
+    let (e, c) = model();
+    let s = sample(&model_context(&e, &c, Utc::now()).unwrap(), 1, "fresh");
+    let inputs = tempdir().unwrap();
+    let out = review_sample(inputs.path(), &s, &e, &c, None, false);
+    assert_eq!(out["status"], "OBSERVE");
+    assert_eq!(out["state_preflight_checked"], false);
+    assert_eq!(out["automatic_application_eligible"], false);
+}

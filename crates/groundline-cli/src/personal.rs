@@ -16,6 +16,10 @@ use std::path::{Path, PathBuf};
 
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_STATE_FILES: usize = 128;
+// Interrupted atomic replacements do not consume durable history slots. Keep
+// them private and bounded, and preserve them for explicit owner inspection.
+const MAX_INTERRUPTED_WRITES: usize = 8;
+const MAX_DIRECTORY_ENTRIES: usize = MAX_STATE_FILES + MAX_INTERRUPTED_WRITES;
 const MIN_UNITS: usize = 10;
 
 #[derive(Debug, Subcommand)]
@@ -429,12 +433,23 @@ fn state_root(path: &Path) -> Result<PathBuf, ContractError> {
 }
 fn ensure_capacity(root: &Path, additions: &[PathBuf]) -> Result<(), ContractError> {
     let mut count = 0;
+    let mut interrupted = 0;
     for entry in fs::read_dir(root)
         .map_err(|_| error("state_unavailable"))?
-        .take(MAX_STATE_FILES + 1)
+        .take(MAX_DIRECTORY_ENTRIES + 1)
     {
-        entry.map_err(|_| error("state_unavailable"))?;
-        count += 1;
+        let entry = entry.map_err(|_| error("state_unavailable"))?;
+        if is_interrupted_write(&entry.path())? {
+            interrupted += 1;
+        } else {
+            count += 1;
+        }
+        if interrupted > MAX_INTERRUPTED_WRITES {
+            return Err(error("interrupted_write_limit"));
+        }
+        if count > MAX_STATE_FILES {
+            return Err(error("state_archive_limit"));
+        }
     }
     for path in additions.iter().collect::<BTreeSet<_>>() {
         match fs::symlink_metadata(path) {
@@ -447,6 +462,44 @@ fn ensure_capacity(root: &Path, additions: &[PathBuf]) -> Result<(), ContractErr
         return Err(error("state_archive_limit"));
     }
     Ok(())
+}
+fn is_interrupted_write(path: &Path) -> Result<bool, ContractError> {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return Ok(false);
+    };
+    let Some(name) = name
+        .strip_prefix('.')
+        .and_then(|name| name.strip_suffix(".tmp"))
+    else {
+        return Ok(false);
+    };
+    let mut parts = name.rsplitn(3, '.');
+    let (Some(sequence), Some(pid), Some(target)) = (parts.next(), parts.next(), parts.next())
+    else {
+        return Ok(false);
+    };
+    let archive = ["trial-", "evaluation-"].iter().any(|prefix| {
+        target
+            .strip_prefix(prefix)
+            .and_then(|name| name.strip_suffix(".json"))
+            .is_some_and(valid_hash)
+    });
+    if !["trial.json", "personal-guidance.md"].contains(&target) && !archive
+        || sequence
+            .parse::<u64>()
+            .ok()
+            .is_none_or(|n| n.to_string() != sequence)
+        || pid
+            .parse::<u32>()
+            .ok()
+            .is_none_or(|n| n == 0 || n.to_string() != pid)
+    {
+        return Ok(false);
+    }
+    // Never follow links, relax permissions, delete, or interpret a leftover as
+    // committed state. A partially written file is still an interrupted write.
+    private_bytes(path)?;
+    Ok(true)
 }
 fn lock(root: &Path) -> Result<File, ContractError> {
     ensure_capacity(root, &[root.join(".lock")])?;
@@ -517,7 +570,14 @@ fn parse_trial(data: &[u8]) -> Result<Trial, ContractError> {
     let t: Trial = serde_json::from_slice(data).map_err(|_| error("invalid_trial"))?;
     if t.kind != "groundline-personal-trial"
         || t.schema != 1
-        || !["prepared", "pending", "retained", "rolled_back"].contains(&t.status.as_str())
+        || ![
+            "prepared",
+            "pending",
+            "restoring",
+            "retained",
+            "rolled_back",
+        ]
+        .contains(&t.status.as_str())
         || t.before_rules.len() > 1
         || t.after_rules.len() != t.before_rules.len() + 1
         || t.before_rules.contains(&t.rule)
@@ -560,10 +620,10 @@ fn check_archived_baselines(
 ) -> Result<(), ContractError> {
     for (index, entry) in fs::read_dir(root)
         .map_err(|_| error("state_unavailable"))?
-        .take(MAX_STATE_FILES + 1)
+        .take(MAX_DIRECTORY_ENTRIES + 1)
         .enumerate()
     {
-        if index == MAX_STATE_FILES {
+        if index == MAX_DIRECTORY_ENTRIES {
             return Err(error("state_archive_limit"));
         }
         let entry = entry.map_err(|_| error("state_unavailable"))?;
@@ -599,6 +659,46 @@ fn archive(root: &Path, name: &str, data: &[u8]) -> Result<(), ContractError> {
     }
     Ok(())
 }
+struct ApplyPlan {
+    before: Vec<Rule>,
+    previous: Option<Vec<u8>>,
+}
+// Shared by read-only review and locked application. A READY snapshot is not a
+// reservation: apply always repeats these checks after acquiring the lock.
+fn prepare_apply(root: &Path, rule: Rule, s: &Sample) -> Result<ApplyPlan, ContractError> {
+    let ids: BTreeSet<_> = s.units.iter().map(|u| u.unit_hash.as_str()).collect();
+    let previous = match fs::symlink_metadata(root.join("trial.json")) {
+        Ok(_) => {
+            let data = private_bytes(&root.join("trial.json"))?;
+            let old = parse_trial(&data)?;
+            if matches!(old.status.as_str(), "prepared" | "pending" | "restoring") {
+                return Err(error("trial_already_active"));
+            }
+            check_baseline_reuse(&old, rule, &ids)?;
+            Some(data)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_) => return Err(error("state_unavailable")),
+    };
+    check_archived_baselines(root, rule, &ids)?;
+    let before = current_rules(root)?;
+    if before.contains(&rule) {
+        return Err(error("candidate_already_applied"));
+    }
+    if s.guidance_sha256 != hash(render(&before).as_bytes()) {
+        return Err(error("baseline_guidance_mismatch"));
+    }
+    let mut additions = vec![
+        root.join(".lock"),
+        root.join("trial.json"),
+        root.join("personal-guidance.md"),
+    ];
+    if let Some(data) = &previous {
+        additions.push(root.join(format!("trial-{}.json", hash(data))));
+    }
+    ensure_capacity(root, &additions)?;
+    Ok(ApplyPlan { before, previous })
+}
 fn apply(
     root: &Path,
     rule: Rule,
@@ -608,33 +708,7 @@ fn apply(
 ) -> Result<Value, ContractError> {
     let root = state_root(root)?;
     let _lock = lock(&root)?;
-    let ids: BTreeSet<_> = s.units.iter().map(|u| u.unit_hash.as_str()).collect();
-    let previous = match fs::symlink_metadata(root.join("trial.json")) {
-        Ok(_) => {
-            let data = private_bytes(&root.join("trial.json"))?;
-            let old = parse_trial(&data)?;
-            if matches!(old.status.as_str(), "prepared" | "pending") {
-                return Err(error("trial_already_active"));
-            }
-            check_baseline_reuse(&old, rule, &ids)?;
-            Some(data)
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(_) => return Err(error("state_unavailable")),
-    };
-    check_archived_baselines(&root, rule, &ids)?;
-    let before = current_rules(&root)?;
-    if before.contains(&rule) {
-        return Err(error("candidate_already_applied"));
-    }
-    if s.guidance_sha256 != hash(render(&before).as_bytes()) {
-        return Err(error("baseline_guidance_mismatch"));
-    }
-    let mut additions = vec![root.join("trial.json"), root.join("personal-guidance.md")];
-    if let Some(data) = &previous {
-        additions.push(root.join(format!("trial-{}.json", hash(data))));
-    }
-    ensure_capacity(&root, &additions)?;
+    let ApplyPlan { before, previous } = prepare_apply(&root, rule, s)?;
     if let Some(data) = previous {
         archive(&root, "trial", &data)?;
     }
@@ -674,6 +748,16 @@ struct ReviewInputs<'a> {
     state_dir: Option<&'a Path>,
     apply: bool,
 }
+fn eligibility_reason(error: &ContractError) -> Option<&'static str> {
+    match error.0.as_str() {
+        "personal_trial_already_active" => Some("trial_already_active"),
+        "personal_candidate_already_applied" => Some("candidate_already_applied"),
+        "personal_candidate_already_reviewed" => Some("candidate_already_reviewed"),
+        "personal_baseline_guidance_mismatch" => Some("baseline_guidance_mismatch"),
+        "personal_state_archive_limit" => Some("state_archive_limit"),
+        _ => None,
+    }
+}
 fn review(
     input: ReviewInputs<'_>,
     e: &ModelEvidence,
@@ -689,12 +773,34 @@ fn review(
     if let Some(s) = &sample {
         validate_sample(s, &context, now)?;
     }
-    let rule = select_rule(e, sample.as_ref(), &audit).or_else(|| {
-        let workflow = &report.weekly_metrics.workflow;
-        (workflow.repeated_call_rate.is_some_and(|rate| rate >= 0.10)
-            && e.behavior_focus.contains(&Rule::DiagnoseBeforeRetry))
-        .then_some(Rule::DiagnoseBeforeRetry)
-    });
+    let root = input.state_dir.map(state_root).transpose()?;
+    let mut remaining = e.clone();
+    let mut state_reasons = Vec::new();
+    let mut state_checked = false;
+    let rule = loop {
+        let candidate = select_rule(&remaining, sample.as_ref(), &audit).or_else(|| {
+            let workflow = &report.weekly_metrics.workflow;
+            (workflow.repeated_call_rate.is_some_and(|rate| rate >= 0.10)
+                && remaining
+                    .behavior_focus
+                    .contains(&Rule::DiagnoseBeforeRetry))
+            .then_some(Rule::DiagnoseBeforeRetry)
+        });
+        if let (Some(root), Some(s), Some(rule)) = (&root, &sample, candidate) {
+            state_checked = true;
+            if let Err(err) = prepare_apply(root, rule, s) {
+                let reason = eligibility_reason(&err).ok_or(err)?;
+                if !state_reasons.contains(&reason) {
+                    state_reasons.push(reason);
+                }
+                remaining
+                    .behavior_focus
+                    .retain(|candidate| *candidate != rule);
+                continue;
+            }
+        }
+        break candidate;
+    };
     let mut reasons = Vec::new();
     if report.data_quality.status != "PASS" || report.collection_health.freshness_status != "FRESH"
     {
@@ -732,7 +838,11 @@ fn review(
         }
     }
     if rule.is_none() {
+        reasons.extend(state_reasons);
         reasons.push("no_supported_candidate");
+    }
+    if input.state_dir.is_none() {
+        reasons.push("state_directory_required");
     }
     let mut out = output("review");
     out["status"] = json!(if reasons.is_empty() {
@@ -753,6 +863,7 @@ fn review(
         .map(|r| json!({"rule":r,"instruction":r.instruction()}))
         .unwrap_or(Value::Null);
     out["automatic_application_eligible"] = json!(reasons.is_empty());
+    out["state_preflight_checked"] = json!(state_checked);
     if input.apply && reasons.is_empty() {
         out["trial"] = apply(
             input
@@ -768,17 +879,42 @@ fn review(
     Ok(out)
 }
 fn restore(root: &Path, t: &mut Trial) -> Result<(), ContractError> {
+    restore_with_writer(root, t, |path, contents| {
+        atomic_write_private(path, contents).map_err(|_| error("restore_write_failed"))
+    })
+}
+fn restore_with_writer(
+    root: &Path,
+    t: &mut Trial,
+    mut write: impl FnMut(&Path, &[u8]) -> Result<(), ContractError>,
+) -> Result<(), ContractError> {
     let current = current_rules(root)?;
-    if current != t.after_rules && !(t.status == "prepared" && current == t.before_rules) {
+    if current != t.after_rules
+        && !(matches!(t.status.as_str(), "prepared" | "restoring") && current == t.before_rules)
+    {
         return Err(error("user_edited_guidance_preserved"));
     }
-    atomic_write_private(
+    if t.status != "restoring" {
+        t.status = "restoring".into();
+        write(
+            &root.join("trial.json"),
+            &serde_json::to_vec_pretty(t).map_err(|_| error("serialization_failed"))?,
+        )?;
+    }
+    // Check again after persisting intent; owner edits must still win.
+    let current = current_rules(root)?;
+    if current != t.after_rules && current != t.before_rules {
+        return Err(error("user_edited_guidance_preserved"));
+    }
+    write(
         &root.join("personal-guidance.md"),
         render(&t.before_rules).as_bytes(),
-    )
-    .map_err(|_| error("guidance_write_failed"))?;
+    )?;
     t.status = "rolled_back".into();
-    save_trial(root, t)
+    write(
+        &root.join("trial.json"),
+        &serde_json::to_vec_pretty(t).map_err(|_| error("serialization_failed"))?,
+    )
 }
 fn evaluate(
     root: &Path,
@@ -917,7 +1053,12 @@ pub fn run(command: Command) -> Result<Value, ContractError> {
             let _lock = lock(&root)?;
             let mut t = load_trial(&root)?;
             if t.status == "rolled_back" {
-                return Err(error("trial_already_rolled_back"));
+                if current_rules(&root)? != t.before_rules {
+                    return Err(error("user_edited_guidance_preserved"));
+                }
+                let mut out = output("rollback");
+                out["status"] = json!("ROLLED_BACK");
+                return Ok(out);
             }
             restore(&root, &mut t)?;
             let mut out = output("rollback");

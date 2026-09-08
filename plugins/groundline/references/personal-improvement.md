@@ -65,6 +65,15 @@ The review returns model_context_sha256, which identifies the selected model,
 effort, runtime family, and client version. Refreshed timestamps and unrelated
 catalog entries do not change that cohort.
 
+Supply --state-dir to check actual application eligibility. Review is read-only:
+it checks the current trial, generated guidance, all archived baselines, and the
+required durable file slots without creating a lock or writing state. It selects
+the next eligible built-in candidate rather than returning an already applied
+rule. Blocked state or a missing state directory remains OBSERVE; the output
+includes state_preflight_checked. READY is a snapshot, not a reservation: apply
+repeats the same checks under the mutation lock. Invalid or unsafe state is
+preserved and rejected explicitly.
+
 ## Private direct outcomes
 
 Add --outcomes only when directly observed work supports the following input:
@@ -151,10 +160,15 @@ prepared journal precedes instruction writes. Preserve user edits. A repeated
 candidate cannot reuse baseline units from any prior trial, including archived
 trials separated by another candidate. Archived trials must pass the same
 contract and match their content-addressed names; invalid history is preserved
-and blocks application. The directory has a 128-entry bound. New writes must fit
-before a trial or evaluation changes guidance, so reaching the bound does not
-prevent rollback. Retention is an explicit owner operation, never automatic
-deletion.
+and blocks application. The directory allows 128 durable entries and at most
+eight interrupted atomic-write files in a separate recovery allowance. Only
+bounded, owner-private regular files with the writer's exact generated target,
+PID, and sequence name qualify; links, unknown names, and unsafe permissions do
+not bypass the bound. Partial temporary bytes are never committed, interpreted
+as trial state, or automatically deleted. New durable writes must fit before a
+trial or evaluation changes guidance. A full durable history with interrupted
+replacements can still be rolled back; more than eight leftovers explicitly
+blocks operations for owner inspection. Retention is an explicit owner operation.
 
 Native activation is separate: connect the file through the authorized native
 instruction surface and verify loading plus behavior before setting
@@ -174,8 +188,13 @@ known token use. Otherwise restore prior generated guidance. These are
 conservative observational gates, not a causal or statistical confidence claim.
 Unknown token usage is never a savings estimate. User edits prevent replacement
 and rollback. Interrupted prepared trials can be rolled back before or after the
-guidance write. Mutation-path errors report an unknown mutation state; inspect
-the journal instead of assuming nothing changed.
+guidance write. Rollback persists restoring intent before replacing guidance,
+then commits rolled_back. An interrupted restoration can be retried using that
+intent; an already completed rollback returns ROLLED_BACK without mutation when
+the prior guidance is still intact. A pending journal whose guidance was changed
+back without recorded recovery intent is ambiguous and remains protected as an
+owner edit. Mutation-path errors report an unknown mutation state; inspect the
+journal instead of assuming nothing changed.
 
 ## Native recurring operation
 
