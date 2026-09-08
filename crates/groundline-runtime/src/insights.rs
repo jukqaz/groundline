@@ -31,6 +31,8 @@ pub enum InsightsRuntimeError {
     InvalidReportResponse,
     #[error("report_request_failed")]
     ReportRequestFailed,
+    #[error("report_contract_rejected")]
+    ReportContractRejected,
 }
 
 impl InsightsRuntimeError {
@@ -264,10 +266,13 @@ pub async fn fetch_weekly_report(
         .send()
         .await
         .map_err(|_| InsightsRuntimeError::ReportRequestFailed)?;
-    if response.status() != reqwest::StatusCode::OK
-        || response
-            .content_length()
-            .is_some_and(|length| length > MAX_WEEKLY_REPORT_BYTES as u64)
+    let status = response.status();
+    if !matches!(
+        status,
+        reqwest::StatusCode::OK | reqwest::StatusCode::UNPROCESSABLE_ENTITY
+    ) || response
+        .content_length()
+        .is_some_and(|length| length > MAX_WEEKLY_REPORT_BYTES as u64)
     {
         return Err(InsightsRuntimeError::ReportRequestFailed);
     }
@@ -291,8 +296,27 @@ pub async fn fetch_weekly_report(
         }
         body.extend_from_slice(&chunk);
     }
+    decode_report_body(status, &body, days)
+}
+
+fn decode_report_body(
+    status: reqwest::StatusCode,
+    body: &[u8],
+    days: u16,
+) -> Result<WeeklyReport, InsightsRuntimeError> {
+    if status == reqwest::StatusCode::UNPROCESSABLE_ENTITY {
+        return match serde_json::from_slice::<serde_json::Value>(body) {
+            Ok(value)
+                if value
+                    == serde_json::json!({"status":"FAIL","reason_code":"report_contract_rejected"}) =>
+            {
+                Err(InsightsRuntimeError::ReportContractRejected)
+            }
+            _ => Err(InsightsRuntimeError::InvalidReportResponse),
+        };
+    }
     let report =
-        WeeklyReport::from_slice(&body).map_err(|_| InsightsRuntimeError::InvalidReportResponse)?;
+        WeeklyReport::from_slice(body).map_err(|_| InsightsRuntimeError::InvalidReportResponse)?;
     if report.requested_days != days {
         return Err(InsightsRuntimeError::InvalidReportResponse);
     }
@@ -308,6 +332,23 @@ mod tests {
     use crate::local_file::atomic_write_private;
 
     use super::{InsightsRuntimeError, ensure_crypto_provider, read_token_file, report_url};
+
+    #[test]
+    fn report_contract_rejection_never_forwards_arbitrary_server_errors() {
+        let code = reqwest::StatusCode::UNPROCESSABLE_ENTITY;
+        let expected = br#"{"status":"FAIL","reason_code":"report_contract_rejected"}"#;
+        assert!(matches!(
+            super::decode_report_body(code, expected, 90),
+            Err(InsightsRuntimeError::ReportContractRejected)
+        ));
+        for body in [
+            b"PRIVATE_SENTINEL".as_slice(),
+            br#"{"status":"FAIL","reason_code":"PRIVATE_SENTINEL"}"#,
+        ] {
+            let error = super::decode_report_body(code, body, 90).unwrap_err();
+            assert_eq!(error.to_string(), "invalid_report_response");
+        }
+    }
 
     #[test]
     fn ring_crypto_provider_is_installed_once_without_panicking() {

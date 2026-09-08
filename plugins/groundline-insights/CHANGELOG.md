@@ -4,6 +4,12 @@ This package summary covers the current release line. The repository
 [changelog](https://github.com/jukqaz/groundline/blob/main/CHANGELOG.md) records shared changes. A source version entry
 does not prove that its image or `stable` distribution has been published.
 
+## 0.22.0
+
+- Count absent/current reporters correctly with explicit join-presence markers. Keep
+  unsupported stored history intact and distinguish report-contract rejection
+  from transport/storage failure in the API and report client.
+
 ## 0.21.4
 
 - Keep immutable collection windows recoverable when an inactive old thread is
