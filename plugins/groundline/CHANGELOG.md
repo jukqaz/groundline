@@ -3,6 +3,10 @@
 This package summary covers the current release line. See the repository
 [changelog](https://github.com/jukqaz/groundline/blob/main/CHANGELOG.md) for shared release and packaging changes.
 
+## 0.21.3
+
+- Publish alongside the API image launch-permission correction.
+
 ## 0.21.2
 
 - Stream native audit inputs with separate I/O and retained-record budgets,

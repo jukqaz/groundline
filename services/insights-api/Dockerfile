@@ -1,6 +1,6 @@
 FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
 
-ARG GROUNDLINE_VERSION=0.20.2
+ARG GROUNDLINE_VERSION=0.21.3
 ARG GROUNDLINE_RUSTC_VERSION=unknown
 ARG GROUNDLINE_BUILD_PACKAGES=unknown
 ARG TARGETARCH
@@ -15,7 +15,8 @@ LABEL org.opencontainers.image.title="GroundLine Insights API" \
 RUN addgroup -S -g 65532 groundline \
     && adduser -S -D -H -u 65532 -G groundline groundline
 
-COPY image-context/groundline-insights-api-${TARGETARCH} /usr/local/bin/groundline-insights-api
+# Actions artifact downloads do not preserve the source executable bit.
+COPY --chmod=0755 image-context/groundline-insights-api-${TARGETARCH} /usr/local/bin/groundline-insights-api
 
 USER 65532:65532
 EXPOSE 8080

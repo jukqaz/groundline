@@ -230,7 +230,10 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
         || !api_dockerfile.starts_with("FROM alpine:3.23@sha256:")
         || api_dockerfile.contains("FROM rust:")
         || api_dockerfile.contains("apk add")
-        || !api_dockerfile.contains("COPY image-context/groundline-insights-api-${TARGETARCH}")
+        || !api_dockerfile
+            .contains("COPY --chmod=0755 image-context/groundline-insights-api-${TARGETARCH}")
+        || !rust.contains("Launch both downloaded API artifacts before publishing")
+        || !rust.contains("groundline_insights_api_failed: configuration_rejected")
         || !dockerignore.starts_with("**\n")
         || !dockerignore.contains("!image-context/groundline-insights-api-amd64")
         || !dockerignore.contains("!image-context/groundline-insights-api-arm64")

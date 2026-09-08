@@ -4,6 +4,11 @@ This package summary covers the current release line. The repository
 [changelog](https://github.com/jukqaz/groundline/blob/main/CHANGELOG.md) records shared changes. A source version entry
 does not prove that its image or `stable` distribution has been published.
 
+## 0.21.3
+
+- Preserve executable permissions in published API images and verify both
+  downloaded architecture artifacts through the image entrypoint before publish.
+
 ## 0.21.2
 
 - Collect active native tasks using their newest update clock and independent
