@@ -36,6 +36,8 @@ on:
       - "deny.toml"
       - "docs/**"
       - "infrastructure/**"
+      - "install.sh"
+      - "install.ps1"
       - "plugins/**"
       - "rust-toolchain.toml"
       - "services/**"
@@ -89,8 +91,7 @@ jobs:
         run: |
           cargo test --locked -p xtask --all-targets
           cargo test --locked -p groundline-contracts -p groundline-runtime --lib --all-features
-          cargo test --locked -p groundline-cli --bin groundline
-          cargo test --locked -p groundline-cli --test cli_contract
+          cargo test --locked -p groundline-cli
           cargo test --locked -p groundline-insights-cli --test cli_contract
       - name: Install and run actionlint
         env:
@@ -391,6 +392,8 @@ jobs:
         run: |
           cargo test --locked -p groundline-runtime local_file
           cargo test --locked -p xtask dataset_roots_are_portable_absolute_and_injection_safe
+      - name: Verify setup and installer behavior on each native target
+        run: cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --test setup_cli --test config_repair_cli --test install_cli
       - name: Build both release binaries and the host packager
         run: |
           cargo build --locked -p xtask

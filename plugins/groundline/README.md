@@ -26,6 +26,20 @@ the `groundline` plugin. This installs Core only; it does not install or activat
 `groundline-insights`. Codex owns refresh and upgrade. GroundLine does not
 self-update or change plugin trust.
 
+To apply GroundLine after installation, ask `$groundline:align-agent-home` to
+inspect and repair evidenced mistakes in existing settings and active guidance,
+with private backups and verification. Follow
+[installation alignment](references/installation-alignment.md). Native package
+installation alone does not execute this workflow or rewrite personal settings.
+
+The repository's reviewed stable distribution includes `install.sh` and
+`install.ps1` for installation and setup in one invocation. Its common baseline
+is **gpt-6-astra / xhigh / Fast off**. The installed `groundline setup --catalog
+<native-models.json> --apply` command applies it with private backups, native
+context restoration, and bounded retired Core hook trust cleanup. Without
+`--apply`, it previews without writes. Unsupported host catalog choices fail
+explicitly. Other user settings and Insights state are preserved.
+
 ```console
 codex plugin marketplace add https://github.com/jukqaz/groundline.git --ref stable --json
 codex plugin add groundline@groundline --json
@@ -54,6 +68,8 @@ plugin installation does not by itself promise a user-shell `PATH` entry.
 groundline platform --json
 groundline project-audit --repo . --json
 groundline config-audit --config /private/config.toml --catalog /private/models.json --json
+groundline setup --catalog /private/models.json --apply
+groundline config-repair --config /private/config.toml --catalog /private/models.json
 groundline guidance audit --profile /private/review/profile.json --baseline /private/review/baseline.json --json
 groundline audit weekly --days 7 --json
 groundline efficiency batch --input batch.json --json
@@ -65,7 +81,11 @@ and `.worktreeinclude` without reading or returning their values. Audit commands
 read the local Codex state store without modifying it. Efficiency commands accept
 explicit JSON files and never transmit them.
 
-The existing `align-agent-home` skill handles requested imported-skill maintenance.
+`config-repair` previews bounded context-limit repairs and writes only with a
+matching plan hash, `--apply`, and a new private backup. See
+[configuration review](references/codex-configuration.md) for scope and recovery.
+The existing `align-agent-home` skill handles installation alignment and
+requested imported-skill maintenance.
 `guidance snapshot` creates a new path-free private baseline without overwriting
 skills or existing files. `guidance audit` freshly inventories profile-selected
 roots, reports additions/removals, and optionally compares upstream checkouts.

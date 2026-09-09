@@ -25,6 +25,28 @@ in the maintainer's service. See the [private-owner boundary](docs/integrations.
 
 ## Install and upgrade
 
+For installation **with configuration repair**, use a reviewed `stable`
+distribution. This applies `gpt-6-astra`, `xhigh`, and Fast off, restores native
+context limits, removes four retired Core hook approval entries, and runs native
+strict doctor. Existing configuration is privately backed up; unrelated settings
+remain intact. Git and Codex are required; no Python or Rust toolchain is needed.
+
+```console
+git clone --branch stable --single-branch https://github.com/jukqaz/groundline.git groundline-install
+bash groundline-install/install.sh
+```
+
+On Windows, run `powershell -File groundline-install/install.ps1` instead.
+Pass the actual App-bundled Codex executable as the shell script's first argument
+or PowerShell's `-Codex` argument when it differs from the detected CLI. Repeating
+setup with unchanged settings creates no extra backup or configuration write.
+Use a newly fetched reviewed stable distribution for an upgrade; stale or
+mismatched native artifacts are rejected. The scripts use Codex's native
+marketplace commands and finish setup in the same invocation.
+
+For **package delivery only**, use the native commands below; they do not run
+setup or change personal defaults.
+
 Register this repository once on the moving `stable` branch, then choose a
 profile. The plugin IDs are independent; installing one never installs or
 activates the other.
@@ -64,6 +86,23 @@ trust, collector upload, ClickHouse visibility, Grafana frames, image
 publication, deployment, and stable promotion are separate evidence lanes.
 
 ## Maintain personal skills
+
+For broader guidance alignment, ask `$groundline:align-agent-home` to apply GroundLine and
+repair evidenced mistakes in existing Codex settings and active guidance, with
+private backups and focused verification. A bare `plugin add` only installs the
+package; it does not run a personal-setting repair hook. See
+[installation alignment](plugins/groundline/references/installation-alignment.md)
+and the [Astra research report](docs/research/install-alignment-astra.ko.md).
+
+The installed `groundline setup --catalog <native-models.json> --apply` command
+also applies the packaged baseline directly, resolving `CODEX_HOME` automatically.
+Omit `--apply` for a write-free preview. Unsupported models, efforts, or unresolved
+profile/provider/catalog overrides fail without changing the configuration.
+
+`groundline config-repair --config <config.toml> --catalog <native-models.json>`
+previews invalid-context repairs. Apply the same reviewed inputs with
+`--apply --expect-plan <hash> --backup <new-file>`. Restoring otherwise positive
+context overrides requires the explicit `--restore-native-context` option.
 
 For Codex configuration/model posture, use `groundline config-audit --config
 <config.toml> --catalog <native-models.json> --json` (or `--catalog -` for stdin).

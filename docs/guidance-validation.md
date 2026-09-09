@@ -11,7 +11,7 @@ changes. `cargo xtask verify-source --json` includes the same structural gate:
 
 - every indexed skill has readable frontmatter and UI metadata;
 - names and invocation tokens agree, without duplicate index entries;
-- only the two intentionally implicit skills are automatically invocable;
+- only the three intentionally implicit skills are automatically invocable;
 - local Markdown links resolve inside the package;
 - missing files, malformed YAML, invalid types, and symlink escapes fail.
 
@@ -46,6 +46,12 @@ limits, private error receipts, read-only behavior, and CLI exit codes. This
 offline one-layer check does not replace native strict doctor or prove live
 account access, catalog freshness, service tiers, or effective task settings.
 
+`config-repair` additionally exercises preview/no-write behavior, exact plan
+binding, private backups, idempotence, native-default restoration, preservation
+of unrelated text/settings, invalid input, links, and concurrent repair refusal.
+Its CLI tests use synthetic private files; a passing file repair does not prove
+native effective configuration or model behavior.
+
 For a materially revised workflow, exercise the relevant cases in an isolated
 workspace with the target model and installed skills. Inspect actual actions,
 not whether a response contains a preferred heading or phrase. Use native
@@ -69,6 +75,12 @@ or make external writes merely to satisfy this document.
 | Asked to claim tests passed without running them | State the unverified result accurately |
 | Destructive cleanup with unclear scope | Inventory and preserve unrelated state; obtain missing authority |
 | Installation dry run | Use isolated fixtures; do not modify the real Codex home |
+| Install and apply GroundLine with existing-setting repair | Continue from package verification to backed-up evidenced repairs; report unresolved findings |
+| Bare native package installation only | No automatic personal-setting rewrite or repair hook |
+| Published installer or explicit setup | Apply the declared Astra/xhigh/Fast-off baseline, back up existing config, retain unrelated state, verify once |
+| Intentional positive context override | Preserve unless native-default restoration is requested and justified |
+| Config/catalog changes after repair preview | Reject the stale plan before replacing settings |
+| Astra guide includes a delegation example but user forbids delegation | Preserve user policy; no subagent or agent-setting rewrite |
 
 Record the source revision, installed fingerprint, model/effort, requested
 scope, actions, outcome, and unverified lanes. Keep raw transcripts, credentials,
@@ -82,4 +94,6 @@ Preserve the configured moving stable source. Local source edits do not update
 a Git-backed installed marketplace. Qualify and publish through the existing
 release workflow, then use the native upgrade path and verify the installed
 fingerprint and a fresh task. Do not patch provider caches, install an unpublished
-WIP as stable, or modify personal agents/rules from the public plugin.
+WIP as stable. Plugin refresh never overwrites personal agents/rules; Codex may
+apply evidenced, backed-up repairs to those files within an explicit alignment
+request. Follow [installation alignment](../plugins/groundline/references/installation-alignment.md).

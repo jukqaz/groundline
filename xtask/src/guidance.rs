@@ -9,7 +9,11 @@ use serde::Deserialize;
 use super::XtaskError;
 use super::package::regular_bytes;
 
-const IMPLICIT_SKILLS: &[&str] = &["close-live-work", "reconcile-current-state"];
+const IMPLICIT_SKILLS: &[&str] = &[
+    "align-agent-home",
+    "close-live-work",
+    "reconcile-current-state",
+];
 
 #[derive(Deserialize)]
 struct SkillIndex {

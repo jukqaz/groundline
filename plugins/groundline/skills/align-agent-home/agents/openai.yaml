@@ -1,9 +1,9 @@
 interface:
   display_name: "Align Agent Home"
-  short_description: "Audit Codex guidance and maintain skill sources"
-  default_prompt: "Use $align-agent-home to audit Codex guidance and maintain imported skills with source comparison and relevant tests; preserve local changes, official capabilities, and user settings."
+  short_description: "Apply GroundLine and repair evidenced setup mistakes"
+  default_prompt: "Use $align-agent-home to apply GroundLine, inspect existing Codex settings and active guidance against current official model instructions, back up and repair evidenced mistakes within this request, and verify the result while preserving intentional user choices."
 policy:
-  allow_implicit_invocation: false
+  allow_implicit_invocation: true
 dependencies:
   tools:
     - type: "mcp"

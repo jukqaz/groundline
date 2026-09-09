@@ -28,6 +28,9 @@ the same scope without creating a new task.
 
 1. Identify the App task, worktree, branch, target, source, and request.
 2. Read durable context; avoid broad transcript loading.
+   For GroundLine installation/application with existing-setting repair, follow
+   [installation alignment](../../references/installation-alignment.md) as part
+   of this task. Ordinary project work does not trigger a home-wide audit.
 3. Inspect the affected state and targeted diff before editing. Check history,
    worktree attachment, or live systems only if relevant to this decision;
    do not require a full repository audit for a bounded change.
