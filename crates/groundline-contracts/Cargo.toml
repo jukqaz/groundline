@@ -11,7 +11,7 @@ required-features = ["audit"]
 
 [features]
 default = ["audit", "batch", "efficiency", "version"]
-audit = ["dep:chrono", "dep:regex", "dep:serde", "dep:serde_json", "serde_json/raw_value", "dep:sha2"]
+audit = ["dep:chrono", "dep:serde", "dep:serde_json", "serde_json/raw_value", "dep:sha2"]
 batch = ["dep:serde_json"]
 efficiency = ["dep:chrono", "dep:serde_json", "version"]
 insights = ["dep:chrono", "dep:serde", "dep:serde_json", "dep:sha2", "dep:uuid", "version"]
@@ -22,7 +22,6 @@ version = ["dep:semver"]
 [dependencies]
 chrono = { workspace = true, optional = true }
 hmac = { workspace = true, optional = true }
-regex = { workspace = true, optional = true }
 semver = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde-saphyr = { workspace = true, optional = true }

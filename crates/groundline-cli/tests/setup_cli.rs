@@ -5,6 +5,7 @@ use std::process::Command;
 use tempfile::{TempDir, tempdir};
 
 mod common;
+use proptest::prelude::*;
 
 struct Fixture {
     root: TempDir,
@@ -62,6 +63,55 @@ impl Fixture {
     }
 }
 
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 32, failure_persistence: None, .. ProptestConfig::default() })]
+    #[test]
+    fn generated_settings_keep_user_data_exact_backups_and_repeat_without_writes(
+        text in ".{0,96}", nested in any::<i64>(), window in any::<i64>(),
+        compact in any::<i64>(), crlf in any::<bool>(), quoted in any::<bool>()
+    ) {
+        let model_key = if quoted { "\"model\"" } else { "model" };
+        let encoded = toml::Value::String(text.clone()).to_string();
+        let mut input = format!(
+            "# preserved comment\n{model_key}='previous-model'\nmodel_reasoning_effort='low'\nservice_tier='fast'\nmodel_context_window={window}\nmodel_auto_compact_token_limit={compact}\n[unrelated]\nsecret={encoded}\nmodel_context_window={nested}\n"
+        );
+        if crlf { input = input.replace('\n', "\r\n"); }
+        let original: toml::Table = toml::from_str(&input).unwrap();
+        let f = Fixture::new(Some(&input));
+        let (code, report) = f.run(true);
+        prop_assert_eq!(code, 0, "{}", report);
+        let backup = f.home.join(report["backup_file"].as_str().unwrap());
+        prop_assert_eq!(fs::read(&backup).unwrap(), input.as_bytes());
+        let updated = f.bytes();
+        let actual: toml::Table = toml::from_str(std::str::from_utf8(&updated).unwrap()).unwrap();
+        prop_assert_eq!(&actual["unrelated"], &original["unrelated"]);
+        prop_assert_eq!(actual["model"].as_str(), Some("gpt-6-astra"));
+        prop_assert_eq!(actual["model_reasoning_effort"].as_str(), Some("xhigh"));
+        prop_assert_eq!(actual["service_tier"].as_str(), Some("default"));
+        prop_assert!(!actual.contains_key("model_context_window"));
+        prop_assert!(!actual.contains_key("model_auto_compact_token_limit"));
+        prop_assert!(std::str::from_utf8(&updated).unwrap().contains("# preserved comment"));
+        let files = fs::read_dir(&f.home).unwrap().count();
+        let (code, repeat) = f.run(true);
+        prop_assert_eq!(code, 0);
+        prop_assert_eq!(&repeat["mutation_performed"], &json!(false));
+        prop_assert_eq!(f.bytes(), updated);
+        prop_assert_eq!(fs::read_dir(&f.home).unwrap().count(), files);
+    }
+
+    #[test]
+    fn generated_unsupported_layers_preserve_the_file_and_create_nothing(value in ".{0,96}") {
+        let input = format!("model_context_window=0\nprofile={}\n", toml::Value::String(value));
+        let f = Fixture::new(Some(&input));
+        let files = fs::read_dir(&f.home).unwrap().count();
+        let (code, report) = f.run(true);
+        prop_assert_eq!(code, 1);
+        prop_assert_eq!(&report["mutation_performed"], &json!(false));
+        prop_assert_eq!(f.bytes(), input.as_bytes());
+        prop_assert_eq!(fs::read_dir(&f.home).unwrap().count(), files);
+    }
+}
+
 #[test]
 fn fresh_home_installs_requested_defaults_and_repeat_writes_nothing() {
     let f = Fixture::new(None);
@@ -82,6 +132,16 @@ fn fresh_home_installs_requested_defaults_and_repeat_writes_nothing() {
     assert_eq!(f.run(true).1["mutation_performed"], false);
     assert_eq!(before, f.bytes());
     assert_eq!(fs::read_dir(&f.home).unwrap().count(), count);
+}
+
+#[test]
+fn quoted_model_key_keeps_its_leading_comment_and_crlf() {
+    let f = Fixture::new(Some(
+        "# preserved comment\r\n\"model\" = 'previous-model'\r\nmodel_reasoning_effort='low'\r\nservice_tier='fast'\r\n",
+    ));
+    assert_eq!(f.run(true).0, 0);
+    let text = String::from_utf8(f.bytes()).unwrap();
+    assert!(text.starts_with("# preserved comment\r\n\"model\" = \"gpt-6-astra\"\r\n"));
 }
 
 #[test]

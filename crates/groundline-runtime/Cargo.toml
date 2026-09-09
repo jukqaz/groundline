@@ -15,7 +15,6 @@ audit-store = [
   "dep:serde",
   "dep:serde_json",
   "dep:thiserror",
-  "dep:walkdir",
   "dep:zstd",
 ]
 insights-client = [
@@ -39,7 +38,6 @@ insights-state = [
   "insights-client",
   "tailnet-probe",
   "groundline-contracts/audit",
-  "dep:sha2",
   "dep:tokio",
 ]
 
@@ -47,7 +45,7 @@ insights-state = [
 chrono = { workspace = true, optional = true }
 command-group = { workspace = true, optional = true }
 dirs = { workspace = true, optional = true }
-groundline-contracts = { version = "0.23.1", path = "../groundline-contracts", default-features = false }
+groundline-contracts = { version = "0.23.2", path = "../groundline-contracts", default-features = false }
 ipnet = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 rusqlite = { workspace = true, optional = true }
@@ -55,13 +53,11 @@ rustls = { workspace = true, optional = true }
 secrecy = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
-sha2 = { workspace = true, optional = true }
 tempfile.workspace = true
 thiserror = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
-walkdir = { workspace = true, optional = true }
 zeroize = { workspace = true, optional = true }
 zstd = { workspace = true, optional = true }
 

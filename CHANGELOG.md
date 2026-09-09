@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.23.2
+
+- Reuse validated native catalogs for repair audits and binary-search model
+  lookups. Collect safe schema-field diagnostics only on decode failure.
+- Add property-based configuration and catalog checks with proptest, and
+  compare parsing time and allocation counts with Divan benchmarks.
+- Preserve quoted TOML keys and leading comments when applying setup values,
+  fixing a regression found by generated settings. Qualify generated file
+  preservation and catalog checks on all six native platforms.
+- Remove ten unused direct dependencies across six workspace crates, share
+  catalog validation, and parse the setup policy once per invocation.
+
 ## 0.23.1
 
 - Create user-owned Windows configuration fixtures and verify default-owner
