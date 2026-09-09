@@ -6,6 +6,15 @@ function Invoke-Checked([string]$Executable, [string[]]$Arguments) {
     & $Executable @Arguments
     if ($LASTEXITCODE -ne 0) { throw "Installation step failed." }
 }
+function Get-ArtifactSha256([string]$Path) {
+    $hash = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        try { return [System.BitConverter]::ToString($hash.ComputeHash($stream)) }
+        finally { $stream.Dispose() }
+    }
+    finally { $hash.Dispose() }
+}
 $installHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME ".codex" }
 $architecture = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
 $target = switch ($architecture) {
@@ -27,7 +36,7 @@ Invoke-Checked $Codex @("plugin", "marketplace", "upgrade", "groundline", "--jso
 Invoke-Checked $Codex @("plugin", "add", "groundline@groundline", "--json")
 $cache = Join-Path $installHome "plugins/cache/groundline/groundline/$version"
 $installed = Join-Path $cache "bin/$target/groundline.exe"
-if ((Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash) {
+if ((Get-ArtifactSha256 $binary) -ne (Get-ArtifactSha256 $installed)) {
     throw "Installed artifact differs from this distribution."
 }
 Invoke-Checked $installed @("provider-smoke", "--plugin-root", $cache, "--require-installed", "--json")

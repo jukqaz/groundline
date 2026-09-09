@@ -4,6 +4,8 @@ use std::path::PathBuf;
 use std::process::Command;
 use tempfile::{TempDir, tempdir};
 
+mod common;
+
 struct Fixture {
     root: TempDir,
     config: PathBuf,
@@ -17,7 +19,7 @@ impl Fixture {
         let config = root.path().join("config.toml");
         let catalog = root.path().join("models.json");
         let backup = root.path().join("before.toml");
-        fs::write(&config, config_text).unwrap();
+        common::write_owned_config(&config, config_text.as_bytes());
         fs::write(
             &catalog,
             serde_json::to_vec(&json!({"models":[{
@@ -61,7 +63,9 @@ impl Fixture {
         let mut args = vec![
             "--apply",
             "--expect-plan",
-            preview["plan_sha256"].as_str().unwrap(),
+            preview["plan_sha256"]
+                .as_str()
+                .unwrap_or_else(|| panic!("preview did not produce a plan: {preview}")),
             "--backup",
             self.backup.to_str().unwrap(),
         ];
@@ -75,7 +79,7 @@ fn preview_apply_backup_and_second_application_are_bounded_and_private() {
     let original = "# preserve\nmodel='gpt-6-astra'\nmodel_reasoning_effort='ultra'\nservice_tier='fast'\nmodel_context_window=0\n[unrelated]\nsecret='PRIVATE_SENTINEL'\n";
     let fixture = Fixture::new(original);
     let (code, preview) = fixture.run(&[]);
-    assert_eq!(code, 0);
+    assert_eq!(code, 0, "{preview}");
     assert_eq!(preview["status"], "READY");
     assert_eq!(preview["mutation_performed"], false);
     assert_eq!(fs::read_dir(fixture.root.path()).unwrap().count(), 2);
@@ -125,7 +129,7 @@ fn edits_catalog_and_option_changes_invalidate_the_plan_before_writes() {
             }
             "target" => {
                 fixture.config = fixture.root.path().join("different.toml");
-                fs::write(&fixture.config, "model_context_window=0\n").unwrap();
+                common::write_owned_config(&fixture.config, b"model_context_window=0\n");
             }
             _ => (),
         }
@@ -206,6 +210,33 @@ fn existing_backup_and_busy_repair_preserve_config() {
     let (code, result) = fixture.apply(&preview, &[]);
     assert_eq!(code, 1);
     assert_eq!(result["error"], "config_repair_config_busy");
+    assert!(!fixture.backup.exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn native_default_owner_is_checked_without_weakening_user_ownership() {
+    let mut fixture = Fixture::new("model_context_window=0");
+    fixture.config = fixture.root.path().join("native-default-owner.toml");
+    fs::write(&fixture.config, "model_context_window=0").unwrap();
+    let file =
+        groundline_runtime::local_file::open_bounded_regular_file(&fixture.config, 0, 512).unwrap();
+    let user_owned = groundline_runtime::local_file::owned_by_current_user(&file);
+    drop(file);
+    let (code, report) = fixture.run(&[]);
+    println!("native_default_owner_matches_process_user={user_owned}");
+    if user_owned {
+        assert_eq!(code, 0, "{report}");
+        assert_eq!(report["status"], "READY");
+    } else {
+        assert_eq!(code, 1, "{report}");
+        assert_eq!(report["error"], "config_repair_config_owner_mismatch");
+    }
+    assert_eq!(report["mutation_performed"], false);
+    assert_eq!(
+        fs::read_to_string(&fixture.config).unwrap(),
+        "model_context_window=0"
+    );
     assert!(!fixture.backup.exists());
 }
 

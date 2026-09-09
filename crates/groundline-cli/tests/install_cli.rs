@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use tempfile::{TempDir, tempdir};
 
+mod common;
+
 struct Fixture {
     _temp: TempDir,
     root: PathBuf,
@@ -119,22 +121,48 @@ impl Fixture {
             .output()
             .unwrap()
     }
+    fn failure_diagnostics(&self) -> String {
+        let calls = fs::read_to_string(&self.calls).unwrap_or_default();
+        #[cfg(windows)]
+        {
+            let probe = Command::new("powershell.exe")
+                .args([
+                    "-NoProfile",
+                    "-Command",
+                    "& $env:GROUNDLINE_TEST_CODEX debug models",
+                ])
+                .env("GROUNDLINE_TEST_CODEX", &self.codex)
+                .env("GROUNDLINE_TEST_CATALOG", &self.catalog)
+                .env("GROUNDLINE_TEST_CALLS", &self.calls)
+                .output()
+                .unwrap();
+            return format!(
+                "calls={calls}; synthetic_catalog_exit={}; valid_json={}; byte_count={}; prefix={:x?}",
+                probe.status,
+                serde_json::from_slice::<Value>(&probe.stdout).is_ok(),
+                probe.stdout.len(),
+                &probe.stdout[..probe.stdout.len().min(16)]
+            );
+        }
+        #[cfg(not(windows))]
+        calls
+    }
 }
 
 #[test]
 fn installer_applies_and_checks_without_another_manual_setup_request() {
     let f = Fixture::new();
-    fs::write(
-        f.home.join("config.toml"),
-        "model_context_window=0\nservice_tier='fast'\n",
-    )
-    .unwrap();
+    common::write_owned_config(
+        &f.home.join("config.toml"),
+        b"model_context_window=0\nservice_tier='fast'\n",
+    );
     let output = f.run(false);
     assert!(
         output.status.success(),
-        "{}\n{}",
+        "{}\n{}\n{}",
         String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        String::from_utf8_lossy(&output.stderr),
+        f.failure_diagnostics()
     );
     let config: toml::Table =
         toml::from_str(&fs::read_to_string(f.home.join("config.toml")).unwrap()).unwrap();
