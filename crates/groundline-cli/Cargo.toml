@@ -13,13 +13,13 @@ path = "src/main.rs"
 chrono.workspace = true
 clap.workspace = true
 dirs.workspace = true
-groundline-contracts = { version = "0.23.1", path = "../groundline-contracts", features = ["guidance", "insights"] }
-groundline-runtime = { version = "0.23.1", path = "../groundline-runtime" }
+groundline-contracts = { version = "0.23.2", path = "../groundline-contracts", features = ["guidance", "insights"] }
+groundline-runtime = { version = "0.23.2", path = "../groundline-runtime" }
 serde.workspace = true
 serde_json.workspace = true
+serde_path_to_error.workspace = true
 serde-saphyr.workspace = true
 sha2.workspace = true
-thiserror.workspace = true
 toml.workspace = true
 toml_edit.workspace = true
 uuid.workspace = true
@@ -27,4 +27,10 @@ walkdir.workspace = true
 url.workspace = true
 
 [dev-dependencies]
+divan.workspace = true
+proptest.workspace = true
 tempfile.workspace = true
+
+[[bench]]
+name = "config_catalog"
+harness = false

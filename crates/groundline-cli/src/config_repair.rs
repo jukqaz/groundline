@@ -6,6 +6,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use clap::Args;
+use groundline_cli::config_catalog::Catalog;
 use groundline_contracts::ContractError;
 use groundline_runtime::local_file::{
     atomic_write_private, create_private_new, open_bounded_regular_file,
@@ -15,7 +16,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::config_audit::{MAX_CONFIG_BYTES, inspect, load_catalog};
+use crate::config_audit::{MAX_CONFIG_BYTES, inspect_catalog, load_catalog};
 
 #[derive(Debug, Args)]
 pub struct Options {
@@ -213,9 +214,10 @@ pub fn run(options: Options) -> Result<Value, ContractError> {
     let original = read_config(&config_path)?;
     let text = std::str::from_utf8(&original).map_err(|_| error("invalid_config"))?;
     let catalog = load_catalog(&options.catalog)?;
-    let before = inspect(text, &catalog)?;
+    let parsed_catalog = Catalog::parse(&catalog)?;
+    let before = inspect_catalog(text, &parsed_catalog)?;
     let (updated, removed) = candidate(text, options.restore_native_context)?;
-    let after = inspect(&updated, &catalog)?;
+    let after = inspect_catalog(&updated, &parsed_catalog)?;
     let unresolved = before["findings"].as_array().is_some_and(|findings| {
         findings.iter().any(|f| {
             matches!(

@@ -1,14 +1,13 @@
 //! Offline posture checks against an explicit native catalog, not a Codex schema.
-use std::collections::BTreeSet;
 use std::io::Read;
 use std::path::Path;
 
+use groundline_cli::config_catalog::{Catalog, MAX_CATALOG_BYTES};
 use groundline_contracts::ContractError;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 pub(crate) const MAX_CONFIG_BYTES: u64 = 512 * 1024;
-const MAX_CATALOG_BYTES: u64 = 8 * 1024 * 1024;
 
 // Native configuration is additive. Read only these relevant fields and let
 // native strict doctor validate the complete effective configuration/schema.
@@ -26,24 +25,6 @@ struct Settings {
     profile: Option<String>,
 }
 
-#[derive(Deserialize)]
-struct Catalog {
-    models: Vec<Model>,
-}
-
-#[derive(Deserialize)]
-struct Model {
-    slug: String,
-    default_reasoning_level: String,
-    supported_reasoning_levels: Vec<Effort>,
-    support_verbosity: Option<bool>,
-}
-
-#[derive(Deserialize)]
-struct Effort {
-    effort: String,
-}
-
 #[derive(Serialize)]
 struct Finding {
     code: &'static str,
@@ -54,56 +35,28 @@ fn error(code: &str) -> ContractError {
     ContractError(format!("config_audit_{code}"))
 }
 
-fn valid_label(value: &str) -> bool {
-    !value.is_empty() && value.len() <= 256 && !value.chars().any(char::is_control)
+pub(crate) fn inspect(config: &str, catalog: &[u8]) -> Result<Value, ContractError> {
+    inspect_catalog(config, &Catalog::parse(catalog)?)
 }
 
-pub(crate) fn inspect(config: &str, catalog: &[u8]) -> Result<Value, ContractError> {
+pub(crate) fn inspect_catalog(config: &str, catalog: &Catalog) -> Result<Value, ContractError> {
     let settings: Settings = toml::from_str(config).map_err(|_| error("invalid_config"))?;
-    // Native Windows pipelines may prepend one UTF-8 BOM. RFC 8259 permits
-    // parsers to ignore it; keep the remaining JSON and catalog checks strict.
-    let catalog = catalog.strip_prefix(b"\xef\xbb\xbf").unwrap_or(catalog);
-    let catalog: Catalog = serde_json::from_slice(catalog).map_err(|_| error("invalid_catalog"))?;
-    if catalog.models.is_empty() || catalog.models.len() > 512 {
-        return Err(error("invalid_catalog"));
-    }
-    let mut models = BTreeSet::new();
-    for model in &catalog.models {
-        let efforts = model
-            .supported_reasoning_levels
-            .iter()
-            .map(|level| level.effort.as_str())
-            .collect::<BTreeSet<_>>();
-        if !valid_label(&model.slug)
-            || !models.insert(model.slug.as_str())
-            || efforts.is_empty()
-            || efforts.len() > 16
-            || efforts.len() != model.supported_reasoning_levels.len()
-            || efforts.iter().any(|e| !valid_label(e))
-            || !efforts.contains(model.default_reasoning_level.as_str())
-        {
-            return Err(error("invalid_catalog"));
-        }
-    }
-    let model = settings
+    let model_exists = settings
         .model
         .as_ref()
-        .and_then(|slug| catalog.models.iter().find(|m| &m.slug == slug));
+        .is_some_and(|slug| catalog.supports_model(slug));
     let mut findings = Vec::new();
     let mut add = |code, severity| findings.push(Finding { code, severity });
-    if settings.model.is_some() && model.is_none() {
+    if settings.model.is_some() && !model_exists {
         add("model_not_in_supplied_catalog", "error");
     }
     if let Some(effort) = &settings.model_reasoning_effort {
-        match model {
-            Some(model)
-                if !model
-                    .supported_reasoning_levels
-                    .iter()
-                    .any(|e| &e.effort == effort) =>
-            {
-                add("unsupported_reasoning_effort", "error")
-            }
+        match settings
+            .model
+            .as_ref()
+            .and_then(|slug| catalog.supports_effort(slug, effort))
+        {
+            Some(false) => add("unsupported_reasoning_effort", "error"),
             None => add("effort_requires_resolved_model", "review"),
             _ => (),
         }
@@ -111,7 +64,7 @@ pub(crate) fn inspect(config: &str, catalog: &[u8]) -> Result<Value, ContractErr
     if settings
         .review_model
         .as_ref()
-        .is_some_and(|m| !models.contains(m.as_str()))
+        .is_some_and(|m| !catalog.supports_model(m))
     {
         add("review_model_not_in_supplied_catalog", "error");
     }
@@ -150,7 +103,13 @@ pub(crate) fn inspect(config: &str, catalog: &[u8]) -> Result<Value, ContractErr
     {
         add("compaction_threshold_exceeds_context_window", "error");
     }
-    if settings.model_verbosity.is_some() && model.and_then(|m| m.support_verbosity) != Some(true) {
+    if settings.model_verbosity.is_some()
+        && settings
+            .model
+            .as_ref()
+            .and_then(|slug| catalog.supports_verbosity(slug))
+            != Some(true)
+    {
         add("verbosity_support_unverified", "review");
     }
     let status = if findings.iter().any(|f| f.severity == "error") {
@@ -164,10 +123,10 @@ pub(crate) fn inspect(config: &str, catalog: &[u8]) -> Result<Value, ContractErr
         "kind":"groundline-config-audit", "schema":1, "status":status,
         "scope":"single_config_layer", "findings":findings,
         "model_explicit":settings.model.is_some(),
-        "selected_model_in_catalog":settings.model.as_ref().map(|_| model.is_some()),
+        "selected_model_in_catalog":settings.model.as_ref().map(|_| model_exists),
         "effort_explicit":settings.model_reasoning_effort.is_some(),
         "service_tier_explicit":settings.service_tier.is_some(),
-        "catalog_model_count":catalog.models.len(),
+        "catalog_model_count":catalog.model_count(),
         "native_schema_validation":"not_run", "effective_runtime_verified":false,
         "catalog_freshness_verified":false, "account_access_verified":false,
         "service_tier_verified":false,
@@ -213,23 +172,6 @@ mod tests {
     }
     fn run(config: &str) -> Value {
         inspect(config, &serde_json::to_vec(&catalog()).unwrap()).unwrap()
-    }
-
-    #[test]
-    fn accepts_one_native_utf8_bom_but_rejects_other_encoding_prefixes() {
-        let bytes = serde_json::to_vec(&catalog()).unwrap();
-        let prefixed = [b"\xef\xbb\xbf".as_slice(), &bytes].concat();
-        assert_eq!(
-            inspect("", &prefixed).unwrap(),
-            inspect("", &bytes).unwrap()
-        );
-        for prefix in [
-            b"\xff\xfe".as_slice(),
-            b"\xfe\xff",
-            b"\xef\xbb\xbf\xef\xbb\xbf",
-        ] {
-            assert!(inspect("", &[prefix, &bytes].concat()).is_err());
-        }
     }
 
     #[test]

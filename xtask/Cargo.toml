@@ -13,8 +13,8 @@ chrono.workspace = true
 clap.workspace = true
 command-group.workspace = true
 futures-util.workspace = true
-groundline-contracts = { version = "0.23.1", path = "../crates/groundline-contracts", default-features = false, features = ["guidance"] }
-groundline-runtime = { version = "0.23.1", path = "../crates/groundline-runtime", default-features = false }
+groundline-contracts = { version = "0.23.2", path = "../crates/groundline-contracts", default-features = false, features = ["guidance"] }
+groundline-runtime = { version = "0.23.2", path = "../crates/groundline-runtime", default-features = false }
 regex.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
@@ -24,12 +24,10 @@ serde.workspace = true
 serde_json.workspace = true
 serde-saphyr.workspace = true
 sha2.workspace = true
-subtle.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-tungstenite.workspace = true
-toml.workspace = true
 url.workspace = true
 uuid.workspace = true
 walkdir.workspace = true

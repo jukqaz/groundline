@@ -368,7 +368,7 @@ jobs:
         with:
           shared-key: windows-setup-${{ matrix.target }}
       - name: Verify user ownership, repair, setup, and installer behavior
-        run: cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --test config_repair_cli --test setup_cli --test install_cli -- --show-output
+        run: cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --lib --test config_repair_cli --test setup_cli --test install_cli -- --show-output
 
   artifacts:
     name: package both products for ${{ matrix.target }}
@@ -431,7 +431,7 @@ jobs:
           cargo test --locked -p groundline-runtime local_file
           cargo test --locked -p xtask dataset_roots_are_portable_absolute_and_injection_safe
       - name: Verify setup and installer behavior on each native target
-        run: cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --test setup_cli --test config_repair_cli --test install_cli
+        run: cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --lib --test setup_cli --test config_repair_cli --test install_cli
       - name: Build both release binaries and the host packager
         run: |
           cargo build --locked -p xtask

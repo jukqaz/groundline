@@ -237,6 +237,7 @@ dependencies = [
  "anstyle",
  "clap_lex",
  "strsim",
+ "terminal_size",
 ]
 
 [[package]]
@@ -282,6 +283,12 @@ dependencies = [
  "nix",
  "winapi",
 ]
+
+[[package]]
+name = "condtype"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "baf0a07a401f374238ab8e2f11a104d2851bf9ce711ec69804834de8af45c7af"
 
 [[package]]
 name = "core-foundation"
@@ -365,6 +372,31 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.4",
+]
+
+[[package]]
+name = "divan"
+version = "0.1.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a405457ec78b8fe08b0e32b4a3570ab5dff6dd16eb9e76a5ee0a9d9cbd898933"
+dependencies = [
+ "cfg-if",
+ "clap",
+ "condtype",
+ "divan-macros",
+ "libc",
+ "regex-lite",
+]
+
+[[package]]
+name = "divan-macros"
+version = "0.1.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9556bc800956545d6420a640173e5ba7dfa82f38d3ea5a167eb555bc69ac3323"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -548,19 +580,21 @@ dependencies = [
 
 [[package]]
 name = "groundline-cli"
-version = "0.23.1"
+version = "0.23.2"
 dependencies = [
  "chrono",
  "clap",
  "dirs",
+ "divan",
  "groundline-contracts",
  "groundline-runtime",
+ "proptest",
  "serde",
  "serde-saphyr",
  "serde_json",
+ "serde_path_to_error",
  "sha2",
  "tempfile",
- "thiserror",
  "toml",
  "toml_edit",
  "url",
@@ -570,11 +604,10 @@ dependencies = [
 
 [[package]]
 name = "groundline-contracts"
-version = "0.23.1"
+version = "0.23.2"
 dependencies = [
  "chrono",
  "hmac",
- "regex",
  "semver",
  "serde",
  "serde-saphyr",
@@ -586,13 +619,12 @@ dependencies = [
 
 [[package]]
 name = "groundline-insights-api"
-version = "0.23.1"
+version = "0.23.2"
 dependencies = [
  "axum",
  "base64",
  "chrono",
  "groundline-contracts",
- "hmac",
  "ipnet",
  "reqwest",
  "rustls",
@@ -601,7 +633,6 @@ dependencies = [
  "serde_json",
  "sha2",
  "subtle",
- "tempfile",
  "thiserror",
  "tokio",
  "tower",
@@ -609,12 +640,11 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
- "zeroize",
 ]
 
 [[package]]
 name = "groundline-insights-cli"
-version = "0.23.1"
+version = "0.23.2"
 dependencies = [
  "clap",
  "groundline-contracts",
@@ -623,13 +653,12 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
- "thiserror",
  "tokio",
 ]
 
 [[package]]
 name = "groundline-runtime"
-version = "0.23.1"
+version = "0.23.2"
 dependencies = [
  "chrono",
  "command-group",
@@ -643,13 +672,11 @@ dependencies = [
  "secrecy",
  "serde",
  "serde_json",
- "sha2",
  "tempfile",
  "thiserror",
  "tokio",
  "url",
  "uuid",
- "walkdir",
  "windows-permissions",
  "windows-sys 0.61.2",
  "zeroize",
@@ -1194,6 +1221,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "proptest"
+version = "1.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b45fcc2344c680f5025fe57779faef368840d0bd1f42f216291f0dc4ace4744"
+dependencies = [
+ "bitflags 2.13.1",
+ "num-traits",
+ "rand",
+ "rand_chacha",
+ "rand_xorshift",
+ "regex-syntax",
+ "unarray",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1244,6 +1286,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rand_xorshift"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "513962919efc330f829edb2535844d1b912b0fbe2ca165d613e4e8788bb05a5a"
+dependencies = [
+ "rand_core",
+]
+
+[[package]]
 name = "redox_users"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1276,6 +1327,12 @@ dependencies = [
  "memchr",
  "regex-syntax",
 ]
+
+[[package]]
+name = "regex-lite"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cab834c73d247e67f4fae452806d17d3c7501756d98c8808d7c9c7aa7d18f973"
 
 [[package]]
 name = "regex-syntax"
@@ -1785,6 +1842,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "terminal_size"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
+dependencies = [
+ "rustix",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "thiserror"
 version = "2.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2074,6 +2141,12 @@ name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
+
+[[package]]
+name = "unarray"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eaea85b334db583fe3274d12b4cd1880032beab409c0d774be044d4480ab9a94"
 
 [[package]]
 name = "unicode-ident"
@@ -2473,7 +2546,7 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
 name = "xtask"
-version = "0.23.1"
+version = "0.23.2"
 dependencies = [
  "aho-corasick",
  "chrono",
@@ -2491,12 +2564,10 @@ dependencies = [
  "serde-saphyr",
  "serde_json",
  "sha2",
- "subtle",
  "tempfile",
  "thiserror",
  "tokio",
  "tokio-tungstenite",
- "toml",
  "url",
  "uuid",
  "walkdir",

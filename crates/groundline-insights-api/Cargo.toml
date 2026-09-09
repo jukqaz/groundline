@@ -13,8 +13,7 @@ path = "src/main.rs"
 axum.workspace = true
 base64.workspace = true
 chrono.workspace = true
-groundline-contracts = { version = "0.23.1", path = "../groundline-contracts", features = ["insights", "integrity", "version"] }
-hmac.workspace = true
+groundline-contracts = { version = "0.23.2", path = "../groundline-contracts", features = ["insights", "integrity", "version"] }
 ipnet.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
@@ -30,7 +29,3 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 url.workspace = true
 uuid.workspace = true
-zeroize.workspace = true
-
-[dev-dependencies]
-tempfile.workspace = true

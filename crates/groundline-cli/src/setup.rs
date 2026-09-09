@@ -37,7 +37,7 @@ fn error(code: &str) -> ContractError {
     ContractError(format!("setup_{code}"))
 }
 
-fn candidate(config: &str) -> Result<(String, Vec<String>), ContractError> {
+fn candidate(config: &str, defaults: &toml::Table) -> Result<(String, Vec<String>), ContractError> {
     let mut doc: DocumentMut = config.parse().map_err(|_| error("invalid_config"))?;
     let mut expected: toml::Table = toml::from_str(config).map_err(|_| error("invalid_config"))?;
     // A profile/custom provider/catalog can change the meaning of this baseline.
@@ -50,22 +50,27 @@ fn candidate(config: &str) -> Result<(String, Vec<String>), ContractError> {
     {
         return Err(error("effective_layer_requires_review"));
     }
-    let defaults: toml::Table = toml::from_str(DEFAULTS).map_err(|_| error("invalid_policy"))?;
     let mut changes = Vec::new();
     for (key, value) in defaults {
-        if expected.get(&key) == Some(&value) {
+        if expected.get(key) == Some(value) {
             continue;
         }
-        if expected.get(&key).is_some_and(|v| !v.is_str()) {
+        if expected.get(key).is_some_and(|v| !v.is_str()) {
             return Err(error("unsupported_setting_type"));
         }
         let mut replacement =
             toml_edit::Value::from(value.as_str().ok_or_else(|| error("invalid_policy"))?);
-        if let Some(old) = doc.get(&key).and_then(Item::as_value) {
+        if let Some(old) = doc.get(key).and_then(Item::as_value) {
             *replacement.decor_mut() = old.decor().clone();
         }
-        doc.as_table_mut().insert(&key, Item::Value(replacement));
-        expected.insert(key.clone(), value);
+        if let Some(item) = doc.get_mut(key) {
+            // Replacing the map entry would discard the key's quoted spelling
+            // and leading comments. Keep the key and update only its value.
+            *item = Item::Value(replacement);
+        } else {
+            doc.as_table_mut().insert(key, Item::Value(replacement));
+        }
+        expected.insert(key.clone(), value.clone());
         changes.push(format!("set_{key}"));
     }
     for key in ["model_context_window", "model_auto_compact_token_limit"] {
@@ -174,14 +179,15 @@ pub fn run(options: Options) -> Result<Value, ContractError> {
         Vec::new()
     };
     let config = std::str::from_utf8(&original).map_err(|_| error("invalid_config"))?;
-    let (updated, changes) = candidate(config)?;
+    let defaults: toml::Table = toml::from_str(DEFAULTS).map_err(|_| error("invalid_policy"))?;
+    let (updated, changes) = candidate(config, &defaults)?;
     let after = inspect(&updated, &load_catalog(&options.catalog)?)?;
     let blocked = after["status"] == "FAIL";
     let mut report = json!({
         "kind":"groundline-setup", "schema":1,
         "status":if blocked { "FAIL" } else if changes.is_empty() { after["status"].as_str().unwrap_or("FAIL") } else { "READY" },
         "mode":if options.apply { "apply" } else { "preview" },
-        "defaults":toml::from_str::<toml::Table>(DEFAULTS).map_err(|_| error("invalid_policy"))?,
+        "defaults":defaults,
         "changes":changes, "audit_after":after,
         "configuration_existed":exists, "configuration_changed":false,
         "backup_written":false, "backup_file":null, "file_verified":false,

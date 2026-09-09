@@ -73,6 +73,38 @@ fn invalid_catalog_files_do_not_fall_back_to_native_or_bundled_models() {
     }
 }
 
+#[test]
+fn catalog_type_errors_report_only_public_schema_fields() {
+    let root = tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    let models = root.path().join("models.json");
+    fs::write(&config, "").unwrap();
+    let mut native: Value = serde_json::from_slice(&catalog()).unwrap();
+    native["models"][0]["slug"] = json!({"PRIVATE_SENTINEL":"PRIVATE_VALUE"});
+    fs::write(&models, serde_json::to_vec(&native).unwrap()).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_groundline"))
+        .args(["config-audit", "--config"])
+        .arg(&config)
+        .arg("--catalog")
+        .arg(&models)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["error"], "config_audit_invalid_catalog_model_slug");
+    assert_eq!(report["mutation_performed"], false);
+    for private in [
+        "PRIVATE_SENTINEL",
+        "PRIVATE_VALUE",
+        root.path().to_str().unwrap(),
+    ] {
+        assert!(!String::from_utf8_lossy(&output.stdout).contains(private));
+        assert!(!String::from_utf8_lossy(&output.stderr).contains(private));
+    }
+    assert!(fs::read(&config).unwrap().is_empty());
+}
+
 #[cfg(unix)]
 #[test]
 fn config_symlinks_are_not_followed() {
