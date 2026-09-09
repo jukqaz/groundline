@@ -60,6 +60,9 @@ fn valid_label(value: &str) -> bool {
 
 pub(crate) fn inspect(config: &str, catalog: &[u8]) -> Result<Value, ContractError> {
     let settings: Settings = toml::from_str(config).map_err(|_| error("invalid_config"))?;
+    // Native Windows pipelines may prepend one UTF-8 BOM. RFC 8259 permits
+    // parsers to ignore it; keep the remaining JSON and catalog checks strict.
+    let catalog = catalog.strip_prefix(b"\xef\xbb\xbf").unwrap_or(catalog);
     let catalog: Catalog = serde_json::from_slice(catalog).map_err(|_| error("invalid_catalog"))?;
     if catalog.models.is_empty() || catalog.models.len() > 512 {
         return Err(error("invalid_catalog"));
@@ -210,6 +213,23 @@ mod tests {
     }
     fn run(config: &str) -> Value {
         inspect(config, &serde_json::to_vec(&catalog()).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn accepts_one_native_utf8_bom_but_rejects_other_encoding_prefixes() {
+        let bytes = serde_json::to_vec(&catalog()).unwrap();
+        let prefixed = [b"\xef\xbb\xbf".as_slice(), &bytes].concat();
+        assert_eq!(
+            inspect("", &prefixed).unwrap(),
+            inspect("", &bytes).unwrap()
+        );
+        for prefix in [
+            b"\xff\xfe".as_slice(),
+            b"\xfe\xff",
+            b"\xef\xbb\xbf\xef\xbb\xbf",
+        ] {
+            assert!(inspect("", &[prefix, &bytes].concat()).is_err());
+        }
     }
 
     #[test]
