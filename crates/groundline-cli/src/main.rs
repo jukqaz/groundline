@@ -12,9 +12,11 @@ use groundline_runtime::{audit_store, platform};
 use serde_json::{Value, json};
 
 mod config_audit;
+mod config_repair;
 mod guidance;
 mod operations;
 mod personal;
+mod setup;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -44,6 +46,10 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Preview or apply a backed-up repair of invalid context limits; emits JSON.
+    ConfigRepair(config_repair::Options),
+    /// Preview or apply the packaged installation defaults with private backups.
+    Setup(setup::Options),
     /// Inspect and track user-owned skill sources without executing or uploading them.
     Guidance {
         #[command(subcommand)]
@@ -302,6 +308,8 @@ fn failure(error: ContractError) -> Value {
 fn run(cli: Cli) -> Result<(), ExitCode> {
     let result: Result<(Value, bool), ContractError> = match cli.command {
         Command::Personal { command } => personal::run(command).map(|value| (value, true)),
+        Command::ConfigRepair(options) => config_repair::run(options).map(|value| (value, true)),
+        Command::Setup(options) => setup::run(options).map(|value| (value, true)),
         Command::ConfigAudit {
             config,
             catalog,
@@ -478,7 +486,12 @@ fn run(cli: Cli) -> Result<(), ExitCode> {
             emit(&value, json_output);
             if matches!(
                 value.get("kind").and_then(Value::as_str),
-                Some("groundline-guidance" | "groundline-config-audit")
+                Some(
+                    "groundline-guidance"
+                        | "groundline-config-audit"
+                        | "groundline-config-repair"
+                        | "groundline-setup"
+                )
             ) && value.get("status").and_then(Value::as_str) == Some("FAIL")
             {
                 Err(ExitCode::FAILURE)

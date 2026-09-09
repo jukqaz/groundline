@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.23.0
+
+- Add explicit cross-platform installation and setup with the declared
+  GPT-6 Astra / xhigh / Fast-off baseline, private configuration backups,
+  native context restoration, and bounded retired Core hook trust cleanup.
+  Preserve unrelated settings and reject unsupported host/layer state.
+- Carry install-and-apply requests through existing-setting and active-guidance
+  repair. Add reviewed-plan context repair and exercise setup/installer failure
+  boundaries in CLI and native-platform CI checks.
+
 ## 0.22.2
 
 - Wait for authenticated API and Grafana readiness before the release stack

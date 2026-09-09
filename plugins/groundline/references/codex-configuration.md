@@ -49,6 +49,57 @@ when validating native settings. Distinguish its configuration row from
 terminal, WebSocket, desktop, and task-store failures. Do not change permissions,
 remove task state, or disable safety checks to make every row green.
 
+## Applying a bounded repair
+
+For installation/application requests, follow
+[installation alignment](installation-alignment.md), including active guidance
+review and the declared `setup` defaults. `setup --catalog <native-models.json>
+--apply` resolves the current home and applies the installation policy; omitting
+`--apply` previews it. The separate `config-repair` command always emits JSON and previews
+without writes by default:
+
+```console
+groundline config-repair --config /private/config.toml --catalog /private/models.json
+```
+
+It removes nonpositive root context limits. If an explicit compaction limit
+exceeds the explicit context window, it removes both conflicting overrides so
+Codex can resolve defaults. Positive overrides otherwise stay for review. Add
+`--restore-native-context` only when restoring native context defaults is the
+reviewed intent. No model, effort, service tier, permissions, or other keys are
+changed. Comments and bytes outside removed assignment lines are preserved.
+
+Use the returned `plan_sha256` for the exact target, config bytes, catalog bytes,
+repair policy, and options. Apply with a new backup path in an existing private
+location outside the repository:
+
+```console
+groundline config-repair --config /private/config.toml --catalog /private/models.json --apply --expect-plan PLAN_SHA256 --backup /private/backups/config-before.toml
+```
+
+Repeat any preview options on apply. A hash is an input-consistency check, not
+authorization; the user's request provides authority. Existing scoped approval
+does not require another confirmation between preview and apply.
+
+`READY` means a candidate exists; it is not a runtime pass. Malformed TOML,
+unresolved profile/provider/catalog overrides, remaining catalog errors,
+symlinked inputs, and changed plans prevent application. Resolve the evidence
+or use a reviewed native patch rather than force a rewrite. A completed write
+returns the candidate audit status, `configuration_changed`, `backup_written`,
+and `file_verified`; any remaining review findings remain visible.
+
+The command uses a private backup, a sibling advisory lock, a fresh byte check,
+and atomic replacement with owner-only permissions. It never replaces an existing
+backup. The lock serializes GroundLine repairs; Codex and other editors do not
+share it. Pause other writers during application. A narrow external-writer race
+remains; `external_writers_locked` is false. A failed final sync can leave an
+uncertain write result, reported as `configuration_changed: null`. Inspect the
+file and backup before recovery. A no-change rerun writes no backup or lock.
+
+Only supplied files are checked. Effective layer resolution, full native schema,
+and fresh-task behavior still require native verification. No state is reset,
+no retired format is migrated, and no package or hook is installed by this command.
+
 ## Astra and context posture
 
 Follow [model and effort guidance](model-effort-routing.md) on demand. Use the

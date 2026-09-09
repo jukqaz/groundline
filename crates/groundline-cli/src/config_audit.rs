@@ -7,7 +7,7 @@ use groundline_contracts::ContractError;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-const MAX_CONFIG_BYTES: u64 = 512 * 1024;
+pub(crate) const MAX_CONFIG_BYTES: u64 = 512 * 1024;
 const MAX_CATALOG_BYTES: u64 = 8 * 1024 * 1024;
 
 // Native configuration is additive. Read only these relevant fields and let
@@ -58,7 +58,7 @@ fn valid_label(value: &str) -> bool {
     !value.is_empty() && value.len() <= 256 && !value.chars().any(char::is_control)
 }
 
-fn inspect(config: &str, catalog: &[u8]) -> Result<Value, ContractError> {
+pub(crate) fn inspect(config: &str, catalog: &[u8]) -> Result<Value, ContractError> {
     let settings: Settings = toml::from_str(config).map_err(|_| error("invalid_config"))?;
     let catalog: Catalog = serde_json::from_slice(catalog).map_err(|_| error("invalid_catalog"))?;
     if catalog.models.is_empty() || catalog.models.len() > 512 {
@@ -177,7 +177,11 @@ fn inspect(config: &str, catalog: &[u8]) -> Result<Value, ContractError> {
 pub fn audit(config: &Path, catalog: &Path) -> Result<Value, ContractError> {
     let config = crate::load_bounded_range(config, 0, MAX_CONFIG_BYTES)?;
     let config = std::str::from_utf8(&config).map_err(|_| error("invalid_config"))?;
-    let catalog = if catalog == Path::new("-") {
+    inspect(config, &load_catalog(catalog)?)
+}
+
+pub(crate) fn load_catalog(catalog: &Path) -> Result<Vec<u8>, ContractError> {
+    if catalog == Path::new("-") {
         let mut bytes = Vec::new();
         std::io::stdin()
             .lock()
@@ -187,11 +191,10 @@ pub fn audit(config: &Path, catalog: &Path) -> Result<Value, ContractError> {
         if bytes.len() as u64 > MAX_CATALOG_BYTES {
             return Err(error("invalid_catalog"));
         }
-        bytes
+        Ok(bytes)
     } else {
-        crate::load_bounded(catalog, MAX_CATALOG_BYTES)?
-    };
-    inspect(config, &catalog)
+        crate::load_bounded(catalog, MAX_CATALOG_BYTES)
+    }
 }
 
 #[cfg(test)]

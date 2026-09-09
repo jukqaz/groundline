@@ -24,6 +24,26 @@ Insights는 자기 서비스 연결 방식입니다. 서로 다른 운영자는 
 
 ## 설치와 업그레이드
 
+**설치와 기존 설정 보정을 함께** 하려면 검토한 `stable` 배포본의 설치 스크립트를
+실행합니다. `gpt-6-astra / xhigh / Fast 끔`을 적용하고, 수동 컨텍스트 제한을
+네이티브 기본값으로 되돌리고, 퇴역한 Core hook 승인 기록 4종을 정리합니다.
+기존 파일은 비공개 백업을 남기며 다른 설정은 보존합니다. Git과 Codex가 필요하고,
+Python이나 Rust 개발 도구는 필요하지 않습니다.
+
+```console
+git clone --branch stable --single-branch https://github.com/jukqaz/groundline.git groundline-install
+bash groundline-install/install.sh
+```
+
+Windows에서는 두 번째 줄 대신 `powershell -File groundline-install/install.ps1`을
+실행합니다. 자동 탐지한 CLI가 실제 App 런타임과 다르면 shell 스크립트의 첫 인자,
+PowerShell의 `-Codex` 인자로 실행 파일 경로를 전달합니다. 설치부터 설정 보정,
+네이티브 strict doctor까지 한 번에 실행하며, 같은 설정에 재적용하면 쓰기와
+추가 백업이 없습니다. 업그레이드에는 새로 받은 검토한 stable 배포본을 사용합니다.
+배포본과 설치된 실행 파일이 다르면 중단합니다.
+
+**개인 설정을 바꾸지 않고 package만 설치**하려면 아래 native 명령을 사용합니다.
+
 moving `stable` branch를 한 번 등록한 뒤 설치 프로필을 선택합니다. 두 플러그인은
 독립적이며 하나를 설치해도 다른 플러그인이 자동 설치·활성화되지 않습니다.
 
@@ -63,6 +83,27 @@ ClickHouse 반영, Grafana frame, image 게시, 운영 배포, stable 승격은 
 증거 lane입니다.
 
 ## 개인 스킬 관리
+
+설정 외에 지침까지 정리할 때는 다음 요청을 사용합니다.
+
+> `$groundline:align-agent-home`으로 GroundLine을 적용하고, 기존 Codex 설정과
+> 지침의 오류를 현재 모델의 공식 지침에 맞춰 백업·수정·검증해 줘.
+
+이 적용 과정은 잘못된 설정을 보고만 하고 끝내지 않습니다. 근거가 확인된
+오류는 요청 범위에서 수정하고, 의도적인 모델·추론·권한 선택은 보존합니다.
+단순 `plugin add`는 설치만 수행하며 개인 설정 수정 hook을 실행하지 않습니다.
+[설치·적용 절차](plugins/groundline/references/installation-alignment.md)와
+[Astra 기반 조사 보고서](docs/research/install-alignment-astra.ko.md)를 참고하세요.
+
+설치된 `groundline setup --catalog <native-models.json> --apply`로도 공통 기본값을
+적용할 수 있습니다. `CODEX_HOME`을 자동으로 찾고, `--apply`를 빼면 미리보기만
+수행합니다. 해당 PC에서 지원되지 않는 모델·추론 수준이나 해석되지 않은
+profile/provider/catalog override는 파일을 바꾸지 않고 명시적으로 거부합니다.
+
+`groundline config-repair --config <config.toml> --catalog <native-models.json>`은
+잘못된 컨텍스트 제한의 수정안을 미리 보여줍니다. `--apply --expect-plan <hash>
+--backup <new-file>`로 검토한 입력과 일치할 때만 백업 후 적용하며,
+정상적인 수동 제한을 해제하려면 `--restore-native-context`를 명시합니다.
 
 Codex 설정·모델 점검은 `groundline config-audit --config <config.toml>
 --catalog <native-models.json> --json`으로 실행합니다. `--catalog -`로 네이티브

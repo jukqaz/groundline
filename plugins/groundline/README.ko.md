@@ -25,6 +25,18 @@ Codex marketplace에 `https://github.com/jukqaz/groundline.git`을 추가하고
 `groundline-insights`를 설치하거나 활성화하지 않습니다. refresh와 upgrade는
 Codex가 담당하며, GroundLine은 자체 업데이트나 trust 변경을 수행하지 않습니다.
 
+설치 후 `$groundline:align-agent-home`으로 GroundLine 적용과 기존 설정·지침
+오류 수정을 요청하면, 근거 확인부터 비공개 백업·수정·검증까지 이어집니다.
+[설치·적용 절차](references/installation-alignment.md)를 참고하세요.
+
+저장소의 검토한 stable 배포본에 있는 `install.sh` 또는 `install.ps1`은 설치와
+설정 보정을 한 번에 실행합니다. 공통 기본값은 **gpt-6-astra / xhigh / Fast 끔**이며,
+설치된 `groundline setup --catalog <native-models.json> --apply`로도 적용할 수 있습니다.
+기존 설정 백업, 네이티브 컨텍스트 복원, 퇴역한 Core hook 승인 기록 정리를 수행하고
+다른 사용자 설정과 Insights 상태는 보존합니다. `--apply`를 빼면 미리보기이며,
+해당 PC의 카탈로그에서 지원하지 않는 선택은 명시적으로 거부합니다.
+단순 package 설치는 이 절차를 자동 실행하거나 개인 설정을 덮어쓰지 않습니다.
+
 ```console
 codex plugin marketplace add https://github.com/jukqaz/groundline.git --ref stable --json
 codex plugin add groundline@groundline --json
@@ -65,6 +77,8 @@ shell의 `PATH` 등록까지 보장하는 것은 아닙니다.
 groundline platform --json
 groundline project-audit --repo . --json
 groundline config-audit --config /private/config.toml --catalog /private/models.json --json
+groundline setup --catalog /private/models.json --apply
+groundline config-repair --config /private/config.toml --catalog /private/models.json
 groundline guidance audit --profile /private/review/profile.json --baseline /private/review/baseline.json --json
 groundline audit weekly --days 7 --json
 groundline efficiency batch --input batch.json --json
@@ -76,7 +90,10 @@ groundline efficiency compare --input comparison.json --json
 Codex state store를 수정하지 않으며, efficiency 입력은 외부로 전송하지 않습니다.
 
 `config-audit`는 제공한 네이티브 모델 카탈로그와 설정을 비교합니다.
-`align-agent-home`은 개인 스킬 점검을 담당하며, `guidance audit`는 추가·삭제·변경을
+`config-repair`는 컨텍스트 제한의 수정안을 미리 보여주며, 같은 입력의 계획 해시와
+`--apply`, 새 백업 파일이 있을 때만 적용합니다. 범위와 복구 조건은
+[설정 점검](references/codex-configuration.md)에 있습니다.
+`align-agent-home`은 설치 적용과 개인 스킬 점검을 담당하며, `guidance audit`는 추가·삭제·변경을
 확인하고 `guidance snapshot`은 기존 파일을 덮어쓰지 않는 비공개 기준 기록을
 만듭니다. 자세한 절차는 [스킬 관리](references/skill-maintenance.md)를 참고하세요.
 

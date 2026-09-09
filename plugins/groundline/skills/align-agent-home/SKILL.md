@@ -1,12 +1,27 @@
 ---
 name: align-agent-home
-description: Use when explicitly aligning Codex guidance, worktree readiness, plugins, skills, MCP, rules, hooks, model posture, or runtime state.
+description: Use when installing or applying GroundLine with existing-setting repair, or explicitly aligning Codex guidance, plugins, skills, rules, hooks, model posture, or runtime state.
 ---
 
 # Align Agent Home
 
 Audit the requested Codex project/home surfaces and apply authorized changes,
 preserving official components and user-owned settings.
+
+## Installation and application
+
+When asked to install and apply GroundLine, complete
+[installation alignment](../../references/installation-alignment.md) in the same
+task: inspect existing settings and active instructions, fix evidenced mistakes
+within the requested scope, and verify the affected behavior. Do not stop after
+package installation or give only recommendations when repair was requested.
+Apply the packaged `setup` baseline (`gpt-6-astra`, `xhigh`, Fast off) as part of
+the documented install-and-apply flow, unless the user explicitly selects a
+different posture. Use the active host's native catalog; unsupported choices
+require a clear report, never a silent downgrade. The distribution installer
+already runs setup; inspect its result instead of repeating a completed write.
+Installation alone is package delivery; it does not run a repair hook or grant
+authority to reset settings. A review-only request remains read-only.
 
 ## Select the relevant checks
 
