@@ -6,7 +6,8 @@
   rejection without weakening runtime ownership checks. Run the bounded
   Windows setup matrix for relevant PRs before release qualification.
 - Verify installed Windows artifacts through .NET SHA-256 without depending
-  on PowerShell module autoloading.
+  on PowerShell module autoloading, and send the native catalog through an
+  explicit UTF-8 process input stream.
 - Add explicit cross-platform installation and setup with the declared
   GPT-6 Astra / xhigh / Fast-off baseline, private configuration backups,
   native context restoration, and bounded retired Core hook trust cleanup.

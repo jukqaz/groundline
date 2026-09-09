@@ -15,6 +15,22 @@ function Get-ArtifactSha256([string]$Path) {
     }
     finally { $hash.Dispose() }
 }
+function Invoke-Setup([string]$Executable, [string]$Catalog) {
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo.FileName = $Executable
+    $process.StartInfo.Arguments = "setup --catalog - --apply"
+    $process.StartInfo.UseShellExecute = $false
+    $process.StartInfo.RedirectStandardInput = $true
+    $process.StartInfo.StandardInputEncoding = New-Object System.Text.UTF8Encoding($false)
+    try {
+        if (!$process.Start()) { throw "Setup process unavailable." }
+        $process.StandardInput.Write($Catalog)
+        $process.StandardInput.Close()
+        $process.WaitForExit()
+        if ($process.ExitCode -ne 0) { throw "Setup failed; inspect the report and retain its private backup." }
+    }
+    finally { $process.Dispose() }
+}
 $installHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME ".codex" }
 $architecture = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
 $target = switch ($architecture) {
@@ -42,6 +58,5 @@ if ((Get-ArtifactSha256 $binary) -ne (Get-ArtifactSha256 $installed)) {
 Invoke-Checked $installed @("provider-smoke", "--plugin-root", $cache, "--require-installed", "--json")
 $catalog = & $Codex debug models
 if ($LASTEXITCODE -ne 0) { throw "Native model catalog unavailable." }
-$catalog | & $installed setup --catalog - --apply
-if ($LASTEXITCODE -ne 0) { throw "Setup failed; inspect the report and retain its private backup." }
+Invoke-Setup $installed ($catalog -join [Environment]::NewLine)
 Invoke-Checked $Codex @("--strict-config", "doctor", "--summary", "--no-color", "--ascii")
