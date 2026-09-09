@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use tempfile::{TempDir, tempdir};
 
+mod common;
+
 struct Fixture {
     _temp: TempDir,
     root: PathBuf,
@@ -124,11 +126,10 @@ impl Fixture {
 #[test]
 fn installer_applies_and_checks_without_another_manual_setup_request() {
     let f = Fixture::new();
-    fs::write(
-        f.home.join("config.toml"),
-        "model_context_window=0\nservice_tier='fast'\n",
-    )
-    .unwrap();
+    common::write_owned_config(
+        &f.home.join("config.toml"),
+        b"model_context_window=0\nservice_tier='fast'\n",
+    );
     let output = f.run(false);
     assert!(
         output.status.success(),

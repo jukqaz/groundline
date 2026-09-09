@@ -128,6 +128,8 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
         "Reject an invalid or version-mismatched release tag before expensive work",
         "release tag must be strict vMAJOR.MINOR.PATCH",
         "name: fast source checks",
+        "Select bounded Windows setup checks for relevant PR changes",
+        "if: github.event_name == 'pull_request' && needs.fast.outputs.windows_setup == 'true'",
         "name: full source qualification",
         "if: github.event_name == 'workflow_dispatch'",
         "needs: fast",

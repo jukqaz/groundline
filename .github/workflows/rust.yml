@@ -64,8 +64,21 @@ jobs:
     name: fast source checks
     runs-on: ubuntu-latest
     timeout-minutes: 12
+    outputs:
+      windows_setup: ${{ steps.setup-changes.outputs.needed }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+      - name: Select bounded Windows setup checks for relevant PR changes
+        if: github.event_name == 'pull_request'
+        id: setup-changes
+        run: |
+          if git diff --quiet HEAD^ HEAD -- Cargo.toml Cargo.lock crates/groundline-cli crates/groundline-runtime/src/local_file.rs plugins/groundline/config install.ps1 .github/workflows/rust.yml .github/actions/setup-rust-stable; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Reject an invalid or version-mismatched release tag before expensive work
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
@@ -331,6 +344,31 @@ jobs:
           cargo run --locked --bin groundline -- doctor --plugin-root plugins/groundline --codex-home /tmp/groundline-empty-codex-home --json
           cargo run --locked --bin groundline -- project-audit --repo . --json
           cargo run --locked --bin groundline-insights -- doctor --plugin-root plugins/groundline-insights --codex-home /tmp/groundline-empty-codex-home --json
+
+  windows-setup:
+    name: setup on ${{ matrix.target }}
+    if: github.event_name == 'pull_request' && needs.fast.outputs.windows_setup == 'true'
+    needs: fast
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-rust-stable
+        with:
+          target: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: windows-setup-${{ matrix.target }}
+      - name: Verify user ownership, repair, setup, and installer behavior
+        run: cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --test config_repair_cli --test setup_cli --test install_cli -- --show-output
 
   artifacts:
     name: package both products for ${{ matrix.target }}

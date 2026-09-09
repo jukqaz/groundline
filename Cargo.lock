@@ -548,7 +548,7 @@ dependencies = [
 
 [[package]]
 name = "groundline-cli"
-version = "0.23.0"
+version = "0.23.1"
 dependencies = [
  "chrono",
  "clap",
@@ -570,7 +570,7 @@ dependencies = [
 
 [[package]]
 name = "groundline-contracts"
-version = "0.23.0"
+version = "0.23.1"
 dependencies = [
  "chrono",
  "hmac",
@@ -586,7 +586,7 @@ dependencies = [
 
 [[package]]
 name = "groundline-insights-api"
-version = "0.23.0"
+version = "0.23.1"
 dependencies = [
  "axum",
  "base64",
@@ -614,7 +614,7 @@ dependencies = [
 
 [[package]]
 name = "groundline-insights-cli"
-version = "0.23.0"
+version = "0.23.1"
 dependencies = [
  "clap",
  "groundline-contracts",
@@ -629,7 +629,7 @@ dependencies = [
 
 [[package]]
 name = "groundline-runtime"
-version = "0.23.0"
+version = "0.23.1"
 dependencies = [
  "chrono",
  "command-group",
@@ -2473,7 +2473,7 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
 name = "xtask"
-version = "0.23.0"
+version = "0.23.1"
 dependencies = [
  "aho-corasick",
  "chrono",

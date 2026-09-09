@@ -4,6 +4,8 @@ use std::path::PathBuf;
 use std::process::Command;
 use tempfile::{TempDir, tempdir};
 
+mod common;
+
 struct Fixture {
     root: TempDir,
     home: PathBuf,
@@ -15,7 +17,7 @@ impl Fixture {
         let home = root.path().join("another pc 한글 home");
         fs::create_dir(&home).unwrap();
         if let Some(text) = config {
-            fs::write(home.join("config.toml"), text).unwrap();
+            common::write_owned_config(&home.join("config.toml"), text.as_bytes());
         }
         let catalog = root.path().join("catalog.json");
         fs::write(

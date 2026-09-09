@@ -1,6 +1,10 @@
 # Changelog
 
-## 0.23.0
+## 0.23.1
+
+- Create user-owned Windows configuration fixtures and verify default-owner
+  rejection without weakening runtime ownership checks. Run the bounded
+  Windows setup matrix for relevant PRs before release qualification.
 
 - Add explicit cross-platform installation and setup with the declared
   GPT-6 Astra / xhigh / Fast-off baseline, private configuration backups,
@@ -9,6 +13,9 @@
 - Carry install-and-apply requests through existing-setting and active-guidance
   repair. Add reviewed-plan context repair and exercise setup/installer failure
   boundaries in CLI and native-platform CI checks.
+
+The v0.23.0 source tag failed Windows qualification before release publication
+or stable promotion. These installation features first ship in v0.23.1.
 
 ## 0.22.2
 
