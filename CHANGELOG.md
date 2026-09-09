@@ -5,7 +5,8 @@
 - Create user-owned Windows configuration fixtures and verify default-owner
   rejection without weakening runtime ownership checks. Run the bounded
   Windows setup matrix for relevant PRs before release qualification.
-
+- Verify installed Windows artifacts through .NET SHA-256 without depending
+  on PowerShell module autoloading.
 - Add explicit cross-platform installation and setup with the declared
   GPT-6 Astra / xhigh / Fast-off baseline, private configuration backups,
   native context restoration, and bounded retired Core hook trust cleanup.
