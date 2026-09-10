@@ -560,10 +560,14 @@ fn health_url_allowed(url: &Url) -> bool {
     }
     match url.scheme() {
         "https" => true,
-        "http" => matches!(url.host(), Some(Host::Ipv4(address)) if {
-            let octets = address.octets();
-            octets[0] == 100 && (64..=127).contains(&octets[1])
-        }),
+        "http" => match url.host() {
+            Some(Host::Ipv4(address)) => {
+                let octets = address.octets();
+                address.is_loopback() || (octets[0] == 100 && (64..=127).contains(&octets[1]))
+            }
+            Some(Host::Ipv6(address)) => address.is_loopback(),
+            _ => false,
+        },
         _ => false,
     }
 }
@@ -1818,13 +1822,23 @@ mod tests {
     }
 
     #[test]
-    fn health_urls_allow_https_and_tailnet_http_only() {
+    fn health_urls_allow_https_and_loopback_or_tailnet_http_only() {
         assert!(health_url_allowed(
             &Url::parse("https://groundline.example/health").unwrap()
         ));
         assert!(health_url_allowed(
             &Url::parse("http://100.64.0.1:18080/healthz").unwrap()
         ));
+        for endpoint in ["127.0.0.1", "[::1]"] {
+            assert!(health_url_allowed(
+                &Url::parse(&format!("http://{endpoint}:18080/healthz")).unwrap()
+            ));
+        }
+        for endpoint in ["localhost", "0.0.0.0", "[::]", "[::ffff:127.0.0.1]"] {
+            assert!(!health_url_allowed(
+                &Url::parse(&format!("http://{endpoint}:18080/healthz")).unwrap()
+            ));
+        }
         assert!(!health_url_allowed(
             &Url::parse("http://100.63.255.255/health").unwrap()
         ));

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.24.2
+
+- Support literal loopback HTTP endpoints for local Docker Compose verification,
+  while retaining HTTPS for public endpoints.
+- Read metric groups as object keys to avoid Linux string-pool concatenation
+  triggering the strict artifact privacy guard. Keep the guard unchanged and
+  verify the event-to-row mapping with a regression test.
+- The 0.24.1 tag passed source, Compose, and desktop qualification but published
+  no release assets because the Linux API artifact guard stopped publication.
+
 ## 0.24.1
 
 - Pin the dependency-checking tool and its checksum so desktop and workspace

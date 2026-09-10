@@ -1197,9 +1197,10 @@ pub fn event_row(event: &Value, received_at: DateTime<Utc>) -> Result<Value, Api
         .map_err(|_| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid_event"))?;
     validate_basic_event_bytes(&encoded)
         .map_err(|_| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid_event"))?;
-    let root = event.pointer("/metrics/root").unwrap_or(&Value::Null);
-    let delegated = event.pointer("/metrics/delegated").unwrap_or(&Value::Null);
-    let guardian = event.pointer("/metrics/guardian").unwrap_or(&Value::Null);
+    let metrics = event.get("metrics").unwrap_or(&Value::Null);
+    let root = metrics.get("root").unwrap_or(&Value::Null);
+    let delegated = metrics.get("delegated").unwrap_or(&Value::Null);
+    let guardian = metrics.get("guardian").unwrap_or(&Value::Null);
     let model_effort = root
         .get("model_effort")
         .and_then(Value::as_array)
@@ -2335,6 +2336,20 @@ mod tests {
             "manual",
         )
         .expect("valid integration event")
+    }
+
+    #[test]
+    fn event_row_preserves_all_metric_groups() {
+        let event = integration_event(Uuid::new_v4(), 7);
+        let row = event_row(&event, Utc::now()).unwrap();
+        assert_eq!(row["root_status"], "PASS");
+        assert_eq!(row["delegated_status"], "PASS");
+        assert_eq!(row["guardian_status"], "PASS");
+        assert_eq!(row["model_families"], json!(["astra"]));
+        assert_eq!(row["efforts"], json!(["high"]));
+        assert_eq!(row["model_effort_counts"], json!([1]));
+        assert_eq!(row["fallback_rollout_count"], 1);
+        assert_eq!(row["collection_generation"], 7);
     }
 
     fn expand_grafana_time_filter(query: &str) -> Option<String> {
