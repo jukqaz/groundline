@@ -14,8 +14,9 @@ pub fn validate_grafana(value: &str) -> Result<(), String> {
         return Ok(());
     }
     let url = url::Url::parse(value).map_err(|_| "invalid_grafana_url")?;
+    let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
     if value.len() > 2048
-        || url.scheme() != "https"
+        || !(url.scheme() == "https" || (url.scheme() == "http" && loopback))
         || url.host_str().is_none()
         || !url.username().is_empty()
         || url.password().is_some()
@@ -59,6 +60,28 @@ pub fn load(home: &Path) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn local_dashboard_allows_only_loopback_http() {
+        for url in [
+            "http://localhost:23100",
+            "http://127.0.0.1:23100",
+            "http://[::1]:23100",
+            "https://grafana.example.com",
+        ] {
+            assert!(validate_grafana(url).is_ok(), "{url}");
+        }
+        for url in [
+            "http://192.168.1.1",
+            "http://100.64.0.1",
+            "http://localhost.example.com",
+            "http://localhost@evil.example.com",
+            "http://localhost/path",
+            "http://localhost?token=value",
+            "http://localhost#fragment",
+        ] {
+            assert!(validate_grafana(url).is_err(), "{url}");
+        }
+    }
     #[test]
     fn dashboard_setting_is_private_and_rejects_executable_or_credential_urls() {
         let home = tempfile::tempdir().unwrap();

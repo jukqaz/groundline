@@ -64,6 +64,16 @@ export function nextStep(status: Status | null) {
       action: "settings",
     } as const;
   const code = status.collection_state;
+  if (
+    code === "active" &&
+    status.delivery_confirmation &&
+    status.pending_event_count === 0
+  )
+    return {
+      title: "서버 수신이 확인됐습니다",
+      detail: "현재 수집 동의에 따라 Codex 훅이 실행될 때 전송합니다.",
+      action: "connect",
+    } as const;
   if (code === "active")
     return {
       title: "최근 수집이 정상적으로 완료되었습니다",
@@ -171,6 +181,14 @@ export function validOrigin(value: string, httpsOnly = false): boolean {
   } catch {
     return false;
   }
+}
+export function validDashboardOrigin(value: string): boolean {
+  if (value.length > 2048 || !validOrigin(value)) return false;
+  const url = new URL(value);
+  return (
+    url.protocol === "https:" ||
+    ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
+  );
 }
 export function setupError(input: Setup): string | null {
   const addressIssue = setupStepError(input, 0);

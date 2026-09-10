@@ -97,19 +97,20 @@ describe("메뉴에서 끝내는 사용자 작업", () => {
   it("창 닫기는 트레이가 기본이며 저장 성공 뒤에만 종료 설정을 반영한다", async () => {
     await mount();
     nav("설정");
-    const tray = screen.getByRole("button", { name: /트레이로 숨기기/ });
-    const quit = screen.getByRole("button", { name: /앱 완전히 종료/ });
-    expect(tray.getAttribute("aria-pressed")).toBe("true");
-    fireEvent.click(quit);
+    const closeAction = screen.getByRole("combobox", {
+      name: "창 닫기",
+    }) as HTMLSelectElement;
+    expect(closeAction.value).toBe("tray");
+    fireEvent.change(closeAction, { target: { value: "quit" } });
     await screen.findByText("앱 실행 설정을 저장했습니다.");
-    expect(quit.getAttribute("aria-pressed")).toBe("true");
+    expect(closeAction.value).toBe("quit");
     expect(preferences.close_action).toBe("quit");
     rpc.mockImplementationOnce(async () => {
       throw "local_state_failed";
     });
-    fireEvent.click(tray);
+    fireEvent.change(closeAction, { target: { value: "tray" } });
     await screen.findByRole("alert");
-    expect(quit.getAttribute("aria-pressed")).toBe("true");
+    expect(closeAction.value).toBe("quit");
     expect(
       rpc.mock.calls.some(([name]) =>
         ["set_collection", "resume_collection", "connect"].includes(name),
@@ -142,9 +143,7 @@ describe("메뉴에서 끝내는 사용자 작업", () => {
   });
   it("개요를 기본으로 열고 설정된 연결은 등록 폼 대신 관리 화면을 보여준다", async () => {
     await mount();
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
-      "이 기기의 상태",
-    );
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("개요");
     expect(localStorage.getItem("groundline-theme")).toBe("system");
     expect(
       within(screen.getByRole("navigation", { name: "주 메뉴" }))
@@ -152,7 +151,7 @@ describe("메뉴에서 끝내는 사용자 작업", () => {
         .map((button) => button.textContent),
     ).toEqual(["개요", "서버", "설정"]);
     nav("서버");
-    expect(screen.getByText("저장된 연결")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "연결 관리" })).toBeTruthy();
     expect(screen.queryByPlaceholderText("등록키 입력")).toBeNull();
     expect(
       rpc.mock.calls.every(([name]) =>
@@ -262,7 +261,7 @@ describe("메뉴에서 끝내는 사용자 작업", () => {
     await mount();
     nav("서버");
     fireEvent.click(screen.getByRole("button", { name: "주소 수정" }));
-    fireEvent.change(screen.getByLabelText(/대시보드 HTTPS 주소/), {
+    fireEvent.change(screen.getByLabelText(/대시보드 주소/), {
       target: { value: "https://dashboard.example.com" },
     });
     fireEvent.click(screen.getByRole("button", { name: "주소 저장" }));
