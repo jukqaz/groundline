@@ -6,6 +6,23 @@ API dependencies for all six native targets. Linux GTK and its build-only
 `proc-macro-error`/`target-lexicon` dependencies are not part of this macOS
 artifact. A future desktop platform requires its own qualification before release.
 
+## Unshipped Linux dependency advisory
+
+The cross-platform lockfile includes Linux GTK3's `glib 0.18.5`, affected by
+[RUSTSEC-2024-0429 / GHSA-wrw7-89jp-8q8g](https://rustsec.org/advisories/RUSTSEC-2024-0429.html).
+Its VariantStrIter can violate Rust's pointer requirements and crash. The
+patched `glib >=0.20` is outside the GTK3 dependency range used by stable Tauri.
+This is a known unresolved dependency issue, not a maintenance-only notice.
+
+`cargo tree --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --target
+aarch64-apple-darwin --all-features -i glib` has no matching dependency;
+the Linux target shows the GTK3 path. No `glib` code is compiled into the shipped
+macOS preview, Core, Insights CLI, or the API. The desktop build script rejects
+every target other than macOS Apple Silicon until that platform is separately
+qualified. Do not distribute a Linux desktop build from this lockfile. Keep the
+repository alert open and require a compatible patched dependency before adding
+Linux support; this advisory is not added to the ignore list.
+
 ## Reviewed maintenance notices
 
 Checked 2026-09-10 against the registry's current stable Tauri 2.11.5,

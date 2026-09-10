@@ -83,6 +83,8 @@ Tauri의 Unicode 간접 의존성 5개에 유지보수 중단 공지가 있어, 
 예외를 [데스크톱 의존성 정책](SECURITY.md)에 공개했습니다. 새 취약점 검사는 유지합니다.
 릴리스의 `groundline-desktop-aarch64-apple-darwin.zip`에서 앱을 받을 수 있습니다.
 Windows·Linux 및 Intel Mac의 데스크톱 앱은 이번 배포에 포함하지 않습니다.
+데스크톱 빌드도 macOS Apple Silicon으로 제한합니다. Linux용 잠금 의존성에는
+미해결 `glib` 보안 공지가 있어, 호환 가능한 수정 버전을 적용한 뒤 별도로 검증해야 합니다.
 일반 HTTPS 자동 훅 수집에는 이 변경이 포함된 Insights CLI 패키지도 함께 설치되어야 합니다.
 기존에 설치된 0.23.2 바이너리나 운영 서버를 이 앱 빌드가 자동으로 교체하지 않습니다.
 실제 서버 등록, 수신 확인, Grafana 로그인, ClickHouse 저장은 배포 환경에서 별도 검증해야 합니다.

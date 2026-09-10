@@ -1,4 +1,9 @@
 fn main() {
+    assert!(
+        std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos")
+            && std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("aarch64"),
+        "GroundLine Desktop preview supports macOS Apple Silicon only; see apps/desktop/SECURITY.md before adding another platform"
+    );
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
             "snapshot",

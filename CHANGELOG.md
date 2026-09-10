@@ -4,6 +4,8 @@
 
 - Pin the dependency-checking tool and its checksum so desktop and workspace
   qualification use the same supported cargo-deny options.
+- Enforce the qualified macOS Apple Silicon desktop target and document the
+  unresolved Linux-only GLib advisory without suppressing it.
 - Include the desktop, HTTPS integration, and privacy fixes prepared in 0.24.0.
   The 0.24.0 tag did not publish release assets because qualification failed.
 
