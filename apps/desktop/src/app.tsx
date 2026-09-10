@@ -49,6 +49,7 @@ import {
 } from "./work-pages";
 import { ServerPage } from "./server-page";
 import { ConnectionImport } from "./operations";
+import { version } from "../package.json";
 import "./style.css";
 
 const native = isTauri();
@@ -423,7 +424,7 @@ export function App() {
                 </Button>
               ))}
             </div>
-            <p className="version">v0.24.3</p>
+            <p className="version">v{version}</p>
           </div>
         </aside>
         <main aria-busy={!!busy || loading}>
