@@ -24,4 +24,5 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
 
-ENTRYPOINT ["groundline-insights-api"]
+# Custom-app environments may replace PATH. Start the copied binary directly.
+ENTRYPOINT ["/usr/local/bin/groundline-insights-api"]

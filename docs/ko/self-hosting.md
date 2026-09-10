@@ -18,6 +18,19 @@ Tailscale을 선택할 때만 `--require-tailnet --bind-ip 100.64.0.1`을 지정
 
 API 자체는 TLS를 종료하지 않습니다. 외부에는 유효한 인증서를 가진 HTTPS 프록시를 제공하세요. 공개 인터넷에서 HTTP로 자격증명을 전송하지 마세요. 로컬 개발용 loopback HTTP와 선택형 Tailnet HTTP만 예외로 허용합니다.
 
+## 기기 연결에 사용할 등록키
+
+데스크톱의 기기 등록키에는 Insights API 컨테이너의
+`GROUNDLINE_ENROLLMENT_TOKEN` 값을 사용합니다. Compose 생성 도구가 만든
+비공개 `secrets.json`에서는 같은 값의 이름이 `ENROLLMENT_TOKEN`입니다.
+TrueNAS 관리 API 키는 NAS 앱 조회·배포용이고, Grafana 관리자 비밀번호는
+대시보드 로그인용입니다. 기기 등록에는 Insights 등록키를 전달하세요.
+
+연결 확인에서 `api_upgrade_required`가 나오면 `/v1/enroll/check`를 지원하는
+Insights API 배포본으로 서버를 먼저 업데이트해야 합니다. TrueNAS custom app의
+`1.0.0`이나 `최신` 표기만으로 API 제품 버전을 확인할 수는 없습니다.
+서버 기동, 등록키 확인, 실제 수신·저장을 각각 확인하세요.
+
 ## 요구 사항
 
 `GROUNDLINE_REQUIRE_TAILNET` 값이 없는 기존 배포는 이미지 업데이트 후에도

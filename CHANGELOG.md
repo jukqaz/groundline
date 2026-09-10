@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Insights API를 절대경로로 실행하여 custom app의 `PATH` 설정에 영향을 받지
+  않도록 한다. 두 Linux 아키텍처의 게시 전 실행 검사도 제한된 `PATH`를 사용한다.
+- 연결 화면에서 Insights 등록키의 서버 환경변수·생성 파일 이름을 정확히 안내하고
+  TrueNAS 관리용 API 키와 구분한다.
+
 ## 0.24.3
 
 - 데스크톱 중복 실행은 기존 창을 열고, 창 닫기는 기본적으로 트레이로 숨긴다.

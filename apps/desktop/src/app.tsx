@@ -639,7 +639,7 @@ export function App() {
                         </Field>
                         <Field
                           label="기기 등록키"
-                          hint="Compose의 ENROLLMENT_TOKEN 값을 입력하세요."
+                          hint="Insights API의 GROUNDLINE_ENROLLMENT_TOKEN 값입니다. 생성한 secrets.json에서는 ENROLLMENT_TOKEN으로 표시됩니다. TrueNAS 관리용 API 키와는 별개입니다."
                         >
                           <input
                             type="password"
@@ -761,7 +761,7 @@ export function App() {
                       [
                         KeyRound,
                         "기기 등록키",
-                        "관리자가 발급한 ENROLLMENT_TOKEN",
+                        "서버 관리자가 전달한 Insights 기기 등록키",
                       ],
                     ].map(([Icon, title, desc]) => {
                       const I = Icon as typeof Activity;
