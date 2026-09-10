@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./app";
-import type { Status } from "./model";
+import { defaultPreferences, type AppPreferences, type Status } from "./model";
 
 const rpc = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => true, invoke: rpc }));
@@ -22,8 +22,10 @@ const enrolled: Status = {
   pending_event_count: 0,
 };
 let current: Status;
+let preferences: AppPreferences;
 beforeEach(() => {
   current = { ...enrolled };
+  preferences = { ...defaultPreferences };
   localStorage.clear();
   vi.stubGlobal("scrollTo", vi.fn());
   vi.stubGlobal("matchMedia", () => ({
@@ -37,6 +39,11 @@ beforeEach(() => {
   });
   rpc.mockReset();
   rpc.mockImplementation(async (command: string, args: any) => {
+    if (command === "get_app_preferences") return { ...preferences };
+    if (command === "save_app_preferences") {
+      preferences = { ...args.preferences };
+      return preferences;
+    }
     if (command === "snapshot") return { ...current };
     if (command === "check_connection") return { ticket: "fixture-ticket" };
     if (command === "set_collection") {
@@ -87,6 +94,52 @@ function nav(label: string) {
 }
 
 describe("메뉴에서 끝내는 사용자 작업", () => {
+  it("창 닫기는 트레이가 기본이며 저장 성공 뒤에만 종료 설정을 반영한다", async () => {
+    await mount();
+    nav("설정");
+    const tray = screen.getByRole("button", { name: /트레이로 숨기기/ });
+    const quit = screen.getByRole("button", { name: /앱 완전히 종료/ });
+    expect(tray.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(quit);
+    await screen.findByText("앱 실행 설정을 저장했습니다.");
+    expect(quit.getAttribute("aria-pressed")).toBe("true");
+    expect(preferences.close_action).toBe("quit");
+    rpc.mockImplementationOnce(async () => {
+      throw "local_state_failed";
+    });
+    fireEvent.click(tray);
+    await screen.findByRole("alert");
+    expect(quit.getAttribute("aria-pressed")).toBe("true");
+    expect(
+      rpc.mock.calls.some(([name]) =>
+        ["set_collection", "resume_collection", "connect"].includes(name),
+      ),
+    ).toBe(false);
+  });
+  it("수집 완료를 수신으로 오인하지 않고 다시 열면 실제 확인 기록을 갱신한다", async () => {
+    current = { ...enrolled, last_success_utc: "2026-09-10T00:00:00Z" };
+    await mount();
+    const delivery = screen.getByRole("region", { name: "서버 수신 확인" });
+    expect(
+      within(delivery).getByText(/아직 서버 수신 확인 기록이 없습니다/),
+    ).toBeTruthy();
+    current = {
+      ...current,
+      delivery_confirmation: {
+        confirmed_at_utc: "2026-09-10T00:05:00Z",
+        event_count: 3,
+      },
+      pending_event_count: 2,
+    };
+    fireEvent.focus(window);
+    await within(delivery).findByText("3건");
+    expect(within(delivery).getByText("2건")).toBeTruthy();
+    expect(
+      rpc.mock.calls.every(([name]) =>
+        ["snapshot", "get_app_preferences"].includes(name),
+      ),
+    ).toBe(true);
+  });
   it("개요를 기본으로 열고 설정된 연결은 등록 폼 대신 관리 화면을 보여준다", async () => {
     await mount();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
@@ -101,7 +154,11 @@ describe("메뉴에서 끝내는 사용자 작업", () => {
     nav("서버");
     expect(screen.getByText("저장된 연결")).toBeTruthy();
     expect(screen.queryByPlaceholderText("등록키 입력")).toBeNull();
-    expect(rpc.mock.calls.every(([name]) => name === "snapshot")).toBe(true);
+    expect(
+      rpc.mock.calls.every(([name]) =>
+        ["snapshot", "get_app_preferences"].includes(name),
+      ),
+    ).toBe(true);
     fireEvent.click(
       screen.getByRole("button", { name: "지금 수집·전송 확인" }),
     );
@@ -213,7 +270,7 @@ describe("메뉴에서 끝내는 사용자 작업", () => {
     expect(screen.getByText("https://dashboard.example.com")).toBeTruthy();
     expect(
       rpc.mock.calls.every(([name]) =>
-        ["snapshot", "save_dashboard"].includes(name),
+        ["snapshot", "get_app_preferences", "save_dashboard"].includes(name),
       ),
     ).toBe(true);
   });
@@ -329,7 +386,11 @@ describe("메뉴에서 끝내는 사용자 작업", () => {
         }) as HTMLInputElement
       ).value,
     ).toBe("https://revised.example.com");
-    expect(rpc.mock.calls.every(([name]) => name === "snapshot")).toBe(true);
+    expect(
+      rpc.mock.calls.every(([name]) =>
+        ["snapshot", "get_app_preferences"].includes(name),
+      ),
+    ).toBe(true);
   });
   it("서버 메뉴 안에서 구성 작업으로 전환해도 확인 티켓과 임시 등록키를 취소한다", async () => {
     current = { collection_enabled: false, collection_state: "disabled" };
@@ -366,6 +427,10 @@ describe("메뉴에서 끝내는 사용자 작업", () => {
     fireEvent.click(screen.getByRole("button", { name: /기존 서버 연결/ }));
     expect(screen.getByText("https://insights.example.com")).toBeTruthy();
     expect(screen.queryByPlaceholderText("등록키 입력")).toBeNull();
-    expect(rpc.mock.calls.every(([name]) => name === "snapshot")).toBe(true);
+    expect(
+      rpc.mock.calls.every(([name]) =>
+        ["snapshot", "get_app_preferences"].includes(name),
+      ),
+    ).toBe(true);
   });
 });

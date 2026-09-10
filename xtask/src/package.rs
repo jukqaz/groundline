@@ -11,9 +11,6 @@ use walkdir::WalkDir;
 use super::XtaskError;
 
 const MAX_SOURCE_FILE_BYTES: u64 = 4 * 1024 * 1024;
-const PRIVATE_MARKER_DECLARATION_PREFIX: &[u8] = b"const PRIVATE_MARKERS:";
-const PRIVATE_MARKER_TEST_PREFIX: &[u8] =
-    b"fn public_source_guard_rejects_private_artifact_names_and_secret_markers()";
 const MAX_PRIVATE_MARKER_DECLARATION_BYTES: usize = 4096;
 const PRIVATE_MARKERS: &[&[u8]] = &[
     b"@gmail.com",
@@ -110,55 +107,81 @@ pub(super) fn contains_private_marker(bytes: &[u8]) -> bool {
         .is_match(bytes)
 }
 
-fn mask_braced_item(bytes: &mut [u8], prefix: &[u8]) -> bool {
-    let Some(start) = bytes
-        .windows(prefix.len())
-        .position(|window| window == prefix)
-    else {
-        return true;
-    };
-    let Some(open_offset) = bytes[start..].iter().position(|byte| *byte == b'{') else {
+fn mask_fixture(
+    bytes: &mut [u8],
+    start: proc_macro2::Span,
+    end: proc_macro2::Span,
+    limit: usize,
+) -> bool {
+    let range = start.byte_range().start..end.byte_range().end;
+    if range.is_empty() || range.len() > limit {
+        return false;
+    }
+    let Some(fixture) = bytes.get_mut(range) else {
         return false;
     };
-    let open = start + open_offset;
-    let mut depth = 0_usize;
-    for index in open..bytes.len() {
-        match bytes[index] {
-            b'{' => depth += 1,
-            b'}' => {
-                let Some(next_depth) = depth.checked_sub(1) else {
-                    return false;
-                };
-                depth = next_depth;
-                if depth == 0 {
-                    bytes[start..=index].fill(b'_');
+    fixture.fill(b'_');
+    true
+}
+
+pub(super) fn contains_private_marker_outside_scanner_fixtures(bytes: &[u8]) -> bool {
+    if !contains_private_marker(bytes) {
+        return false;
+    }
+    let Ok(source) = std::str::from_utf8(bytes) else {
+        return true;
+    };
+    let Ok(parsed) = syn::parse_file(source) else {
+        return true;
+    };
+    let mut normalized = bytes.to_vec();
+    // Only exact scanner fixtures in this file may be excluded. Rust token spans
+    // keep braces in strings/comments and declaration-like text outside the mask.
+    for item in parsed.items {
+        match item {
+            syn::Item::Const(item) if item.ident == "PRIVATE_MARKERS" => {
+                if !mask_fixture(
+                    &mut normalized,
+                    item.const_token.span,
+                    item.semi_token.span,
+                    MAX_PRIVATE_MARKER_DECLARATION_BYTES,
+                ) {
                     return true;
+                }
+            }
+            syn::Item::Mod(module)
+                if module.ident == "tests"
+                    && module.attrs.iter().any(|attr| {
+                        attr.path().is_ident("cfg")
+                            && attr
+                                .parse_args::<syn::Path>()
+                                .is_ok_and(|path| path.is_ident("test"))
+                    }) =>
+            {
+                let Some((_, items)) = module.content else {
+                    continue;
+                };
+                for item in items {
+                    if let syn::Item::Fn(function) = item
+                        && function.sig.ident
+                            == "public_source_guard_rejects_private_artifact_names_and_secret_markers"
+                        && function
+                            .attrs
+                            .iter()
+                            .any(|attr| attr.path().is_ident("test"))
+                        && !mask_fixture(
+                            &mut normalized,
+                            function.sig.fn_token.span,
+                            function.block.brace_token.span.close(),
+                            16 * 1024,
+                        )
+                    {
+                        return true;
+                    }
                 }
             }
             _ => {}
         }
-    }
-    false
-}
-
-pub(super) fn contains_private_marker_outside_scanner_fixtures(bytes: &[u8]) -> bool {
-    let Some(start) = bytes
-        .windows(PRIVATE_MARKER_DECLARATION_PREFIX.len())
-        .position(|window| window == PRIVATE_MARKER_DECLARATION_PREFIX)
-    else {
-        return contains_private_marker(bytes);
-    };
-    let declaration = &bytes[start
-        ..bytes
-            .len()
-            .min(start + MAX_PRIVATE_MARKER_DECLARATION_BYTES)];
-    let Some(end_offset) = declaration.windows(2).position(|window| window == b"];") else {
-        return contains_private_marker(bytes);
-    };
-    let mut normalized = bytes.to_vec();
-    normalized[start..start + end_offset + 2].fill(b'_');
-    if !mask_braced_item(&mut normalized, PRIVATE_MARKER_TEST_PREFIX) {
-        return true;
     }
     contains_private_marker(&normalized)
 }
@@ -431,6 +454,62 @@ mod tests {
             format!("const LEAK: &str = \"/{}/private\";\n", "Users").as_bytes(),
         );
         assert!(contains_private_marker_outside_scanner_fixtures(&leaked));
+    }
+
+    #[test]
+    fn scanner_fixture_boundaries_ignore_braces_in_strings_and_comments() {
+        let fixture = format!(
+            "const PRIVATE_MARKERS: &[&[u8]] = &[b\"/{}/\"];\n\
+             #[cfg(test)] mod tests {{\n\
+             #[test] fn public_source_guard_rejects_private_artifact_names_and_secret_markers() {{\n\
+             let _ = \"{{\"; /* {{ */ }}\n\
+             const LEAK: &str = \"/{}/private\";\n\
+             const CLOSING: &str = \"}}}}\";\n\
+             }}",
+            "Users", "Users"
+        );
+        assert!(contains_private_marker_outside_scanner_fixtures(
+            fixture.as_bytes()
+        ));
+    }
+
+    #[test]
+    fn scanner_uses_byte_spans_after_unicode_and_requires_real_test_items() {
+        let marker = format!("/{}/", "Users");
+        let declaration =
+            format!("// 한글과 🦀\nconst PRIVATE_MARKERS: &[&[u8]] = &[b\"{marker}\"];\n");
+        let fixture = format!(
+            "{declaration}#[cfg(test)] mod tests {{ #[test] fn public_source_guard_rejects_private_artifact_names_and_secret_markers() {{ let _ = \"{marker}\"; }} }}"
+        );
+        assert!(!contains_private_marker_outside_scanner_fixtures(
+            fixture.as_bytes()
+        ));
+        assert!(contains_private_marker_outside_scanner_fixtures(
+            fixture.replace("#[cfg(test)]", "").as_bytes()
+        ));
+        assert!(contains_private_marker_outside_scanner_fixtures(
+            fixture.replace("#[test]", "").as_bytes()
+        ));
+        for suffix in [
+            format!("const LEAK: &str = \"{marker}\";"),
+            format!("// const PRIVATE_MARKERS: &[&[u8]] = &[b\"{marker}\"];"),
+        ] {
+            assert!(contains_private_marker_outside_scanner_fixtures(
+                format!("{fixture}\n{suffix}").as_bytes()
+            ));
+        }
+    }
+
+    #[test]
+    fn scanner_does_not_exempt_invalid_rust_or_utf8() {
+        let marker = format!("/{}/", "Users");
+        let invalid = format!("const PRIVATE_MARKERS: &[&[u8]] = &[b\"{marker}\"]; fn broken(");
+        assert!(contains_private_marker_outside_scanner_fixtures(
+            invalid.as_bytes()
+        ));
+        let mut bytes = format!("const PRIVATE_MARKERS: &[&[u8]] = &[b\"{marker}\"];").into_bytes();
+        bytes.push(0xff);
+        assert!(contains_private_marker_outside_scanner_fixtures(&bytes));
     }
 
     #[test]

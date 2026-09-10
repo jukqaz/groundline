@@ -1,10 +1,10 @@
 use std::collections::hash_map::DefaultHasher;
 use std::fs::File;
 use std::hash::{Hash, Hasher};
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use groundline_contracts::event::{
@@ -24,14 +24,15 @@ use zeroize::Zeroizing;
 use crate::audit_store::collect_audit;
 use crate::insights::{default_codex_home, discover_plugin_root, report_url, state_directory};
 use crate::local_file::{
-    atomic_write_private, create_private_new, open_bounded_regular_file,
-    open_or_create_private_lock, private_for_current_user,
+    atomic_write_private, open_bounded_regular_file, open_or_create_private_lock,
+    private_for_current_user,
 };
 use crate::tailnet;
 
 mod collection;
 #[cfg(test)]
 mod collection_stop_tests;
+mod delivery_confirmation;
 
 const PROFILE_PATH: &str = "groundline/insights/owner-profile.json";
 const ENROLLMENT_TOKEN_PATH: &str = "groundline/insights/enrollment-token";
@@ -247,36 +248,24 @@ struct UploadReceipt {
 }
 
 struct CycleLock {
-    path: PathBuf,
     _file: File,
 }
 
 impl CycleLock {
     fn acquire(directory: &Path) -> Result<Self, StateError> {
         let path = directory.join(LOCK_FILE);
-        if let Ok(metadata) = std::fs::symlink_metadata(&path) {
-            let stale = metadata.file_type().is_file()
-                && metadata
-                    .modified()
-                    .ok()
-                    .and_then(|value| SystemTime::now().duration_since(value).ok())
-                    .is_some_and(|age| age > Duration::from_secs(30 * 60));
-            if stale {
-                std::fs::remove_file(&path).map_err(|_| StateError::AlreadyRunning)?;
-            } else {
-                return Err(StateError::AlreadyRunning);
-            }
+        let file = open_or_create_private_lock(&path).map_err(|_| StateError::LocalState)?;
+        // A previous worker's PID marker may still be active. Do not overwrite
+        // it or start alongside an older process that does not use OS locks.
+        if file.metadata().map_err(|_| StateError::LocalState)?.len() != 0 {
+            return Err(StateError::AlreadyRunning);
         }
-        let mut file = create_private_new(&path).map_err(|_| StateError::AlreadyRunning)?;
-        writeln!(file, "{}", std::process::id()).map_err(|_| StateError::LocalState)?;
-        file.sync_all().map_err(|_| StateError::LocalState)?;
-        Ok(Self { path, _file: file })
-    }
-}
-
-impl Drop for CycleLock {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
+        file.try_lock().map_err(|error| match error {
+            std::fs::TryLockError::WouldBlock => StateError::AlreadyRunning,
+            std::fs::TryLockError::Error(_) => StateError::LocalState,
+        })?;
+        // Keep the inode. The OS releases this lock even if a worker is killed.
+        Ok(Self { _file: file })
     }
 }
 
@@ -1076,6 +1065,7 @@ async fn upload(
     token: &SecretString,
     events: Vec<(PathBuf, Value)>,
 ) -> Result<UploadReceipt, StateError> {
+    delivery_confirmation::read(directory)?;
     let mut uploaded = 0_u64;
     let mut acknowledged_paths = Vec::new();
     let mut collected_through = None::<DateTime<Utc>>;
@@ -1133,6 +1123,7 @@ async fn upload(
         }
         acknowledged_paths.push(path);
         uploaded = uploaded.checked_add(1).ok_or(StateError::LocalState)?;
+        delivery_confirmation::record(directory, uploaded, Utc::now())?;
     }
     Ok(UploadReceipt {
         uploaded_count: uploaded,
@@ -1556,6 +1547,7 @@ fn status_with_tailnet_at(
         "last_check_result_code":last_result_code,
         "last_check_utc":previous.as_ref().map(|value| value.last_check_utc.as_str()),"last_success_utc":last_success_utc,
         "last_collected_through_utc":previous.as_ref().and_then(|value| value.last_collected_through_utc.as_deref()),
+        "delivery_confirmation":delivery_confirmation::read(&directory)?,
         "tailnet_required":tailnet_required,"tailnet":tailnet,"raw_content_emitted":false,"private_paths_emitted":false,"secret_value_printed":false,
     }))
 }

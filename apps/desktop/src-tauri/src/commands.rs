@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use zeroize::Zeroizing;
 
 struct Verified {
@@ -36,12 +36,13 @@ pub async fn resume_collection(
     runtime: String,
     consent: bool,
     state: tauri::State<'_, PendingConnection>,
+    lifecycle: tauri::State<'_, crate::lifecycle::Lifecycle>,
 ) -> Result<Value, String> {
     let _operation = state.operation.lock().await;
     if !consent {
         return Err("consent_required".into());
     }
-    worker("resume", &runtime, json!({})).await
+    worker("resume", &runtime, json!({}), &lifecycle).await
 }
 
 #[tauri::command]
@@ -91,7 +92,16 @@ fn runtime_mode(runtime: &str) -> Result<&'static str, String> {
     }
 }
 
-async fn worker(action: &str, runtime: &str, data: Value) -> Result<Value, String> {
+pub(crate) async fn worker(
+    action: &str,
+    runtime: &str,
+    data: Value,
+    lifecycle: &crate::lifecycle::Lifecycle,
+) -> Result<Value, String> {
+    let _tracked = lifecycle.tasks.token();
+    if lifecycle.shutdown.is_cancelled() {
+        return Err("app_exiting".into());
+    }
     let mode = runtime_mode(runtime)?;
     let bytes = Zeroizing::new(serde_json::to_vec(&data).map_err(|_| "invalid_input")?);
     let mut command =
@@ -104,18 +114,12 @@ async fn worker(action: &str, runtime: &str, data: Value) -> Result<Value, Strin
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true);
-    let mut child = command.spawn().map_err(|_| "worker_failed")?;
-    let mut stdin = child.stdin.take().ok_or("worker_failed")?;
-    stdin.write_all(&bytes).await.map_err(|_| "worker_failed")?;
-    drop(stdin);
-    let output = tokio::time::timeout(Duration::from_secs(120), child.wait_with_output())
-        .await
-        .map_err(|_| "worker_timeout")?
-        .map_err(|_| "worker_failed")?;
-    if output.stdout.len() > 65536 || !output.status.success() {
+    let child = command.spawn().map_err(|_| "worker_failed")?;
+    let (output, status) = wait_worker(child, &bytes, lifecycle).await?;
+    if output.len() > 65536 || !status.success() {
         return Err("worker_failed".into());
     }
-    let response: Value = serde_json::from_slice(&output.stdout).map_err(|_| "worker_failed")?;
+    let response: Value = serde_json::from_slice(&output).map_err(|_| "worker_failed")?;
     if response["ok"] == true {
         Ok(response["value"].clone())
     } else {
@@ -126,9 +130,96 @@ async fn worker(action: &str, runtime: &str, data: Value) -> Result<Value, Strin
     }
 }
 
+async fn wait_worker(
+    mut child: tokio::process::Child,
+    bytes: &[u8],
+    lifecycle: &crate::lifecycle::Lifecycle,
+) -> Result<(Vec<u8>, std::process::ExitStatus), String> {
+    let mut stdin = child.stdin.take().ok_or("worker_failed")?;
+    let mut stdout = child.stdout.take().ok_or("worker_failed")?.take(65537);
+    let mut output = Vec::new();
+    let result = {
+        let wait = async {
+            stdin.write_all(bytes).await?;
+            drop(stdin);
+            tokio::try_join!(stdout.read_to_end(&mut output), child.wait())
+        };
+        tokio::select! {
+            biased;
+            _ = lifecycle.shutdown.cancelled() => Err("app_exiting"),
+            value = tokio::time::timeout(Duration::from_secs(120), wait) =>
+                value.map_err(|_| "worker_timeout").and_then(|value| value.map_err(|_| "worker_failed")),
+        }
+    };
+    let (_, status) = match result {
+        Ok(value) => value,
+        Err(code) => {
+            let _ = child.kill().await;
+            return Err(code.into());
+        }
+    };
+    Ok((output, status))
+}
+
+#[cfg(test)]
+mod worker_cleanup_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn cancelling_a_running_worker_waits_for_its_process_exit() {
+        let home = tempfile::tempdir().unwrap();
+        let lifecycle = crate::lifecycle::Lifecycle::new(home.path().into());
+        let mut command = tokio::process::Command::new("/bin/sh");
+        command
+            .args(["-c", "cat >/dev/null; exec sleep 60"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true);
+        let child = command.spawn().unwrap();
+        let pid = child.id().unwrap();
+        let state = lifecycle.clone();
+        let task = tokio::spawn(async move { wait_worker(child, b"{}", &state).await });
+        tokio::task::yield_now().await;
+        lifecycle.shutdown.cancel();
+        let result = tokio::time::timeout(Duration::from_secs(3), task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.unwrap_err(), "app_exiting");
+        assert!(
+            !std::process::Command::new("/bin/kill")
+                .args(["-0", &pid.to_string()])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+}
+
 #[tauri::command]
-pub async fn snapshot(runtime: String) -> Result<Value, String> {
-    worker("status", &runtime, json!({})).await
+pub async fn snapshot(
+    runtime: String,
+    lifecycle: tauri::State<'_, crate::lifecycle::Lifecycle>,
+) -> Result<Value, String> {
+    worker("status", &runtime, json!({}), &lifecycle).await
+}
+
+#[tauri::command]
+pub fn get_app_preferences(
+    lifecycle: tauri::State<'_, crate::lifecycle::Lifecycle>,
+) -> Result<crate::preferences::Preferences, String> {
+    lifecycle.preferences()
+}
+
+#[tauri::command]
+pub fn save_app_preferences(
+    preferences: crate::preferences::Preferences,
+    lifecycle: tauri::State<'_, crate::lifecycle::Lifecycle>,
+) -> Result<crate::preferences::Preferences, String> {
+    lifecycle.save(preferences)
 }
 
 #[tauri::command]
@@ -159,10 +250,10 @@ pub async fn check_connection(
     let expires = ticket.clone();
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(600)).await;
-        if let Ok(mut value) = pending.lock() {
-            if value.as_ref().is_some_and(|v| v.ticket == expires) {
-                *value = None;
-            }
+        if let Ok(mut value) = pending.lock()
+            && value.as_ref().is_some_and(|v| v.ticket == expires)
+        {
+            *value = None;
         }
     });
     Ok(json!({"ticket":ticket,"receipt":receipt}))
@@ -173,6 +264,7 @@ pub async fn connect(
     ticket: String,
     consent: bool,
     state: tauri::State<'_, PendingConnection>,
+    lifecycle: tauri::State<'_, crate::lifecycle::Lifecycle>,
 ) -> Result<Value, String> {
     let _operation = state.operation.lock().await;
     if !consent {
@@ -191,6 +283,7 @@ pub async fn connect(
         "configure",
         &verified.runtime,
         json!({"endpoint":verified.endpoint,"key":verified.key.expose_secret(),"grafana_url":verified.grafana_url}),
+        &lifecycle,
     )
     .await
 }
@@ -200,12 +293,13 @@ pub async fn set_collection(
     runtime: String,
     action: String,
     state: tauri::State<'_, PendingConnection>,
+    lifecycle: tauri::State<'_, crate::lifecycle::Lifecycle>,
 ) -> Result<Value, String> {
     let _operation = state.operation.lock().await;
     if !matches!(action.as_str(), "disable" | "run") {
         return Err("unsupported_operation".into());
     }
-    worker(&action, &runtime, json!({})).await
+    worker(&action, &runtime, json!({}), &lifecycle).await
 }
 
 #[tauri::command]

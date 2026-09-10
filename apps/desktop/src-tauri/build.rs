@@ -17,6 +17,8 @@ fn main() {
             "resume_collection",
             "save_dashboard",
             "reveal_export",
+            "get_app_preferences",
+            "save_app_preferences",
         ]),
     ))
     .expect("desktop build");

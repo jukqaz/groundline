@@ -11,6 +11,9 @@ import {
   ShieldCheck,
   Sun,
   X,
+  PanelBottom,
+  Power,
+  Send,
 } from "lucide-react";
 import {
   collectionLabel,
@@ -20,6 +23,7 @@ import {
   type CoreStatus,
   type Status,
   type Theme,
+  type AppPreferences,
 } from "./model";
 
 export function CollectionFacts({ status }: { status: Status | null }) {
@@ -52,6 +56,46 @@ export function CollectionFacts({ status }: { status: Status | null }) {
         </dd>
       </div>
     </dl>
+  );
+}
+
+export function DeliverySummary({ status }: { status: Status | null }) {
+  const receipt = status?.delivery_confirmation;
+  return (
+    <section className="delivery-card" aria-label="서버 수신 확인">
+      <div className="section-title">
+        <h2>서버 수신 확인</h2>
+        <Send size={20} />
+      </div>
+      <p className="helper">서버 응답으로 확인한 이 기기의 최근 전송입니다.</p>
+      <dl className="delivery-facts">
+        <div>
+          <dt>최근 전송 묶음</dt>
+          <dd>
+            {receipt
+              ? `${receipt.event_count.toLocaleString("ko-KR")}건`
+              : "기록 없음"}
+          </dd>
+        </div>
+        <div>
+          <dt>서버 수신 확인 시각</dt>
+          <dd>{formatTime(receipt?.confirmed_at_utc)}</dd>
+        </div>
+        <div>
+          <dt>전송 대기</dt>
+          <dd>
+            {status?.pending_event_count == null
+              ? "확인 전"
+              : `${status.pending_event_count.toLocaleString("ko-KR")}건`}
+          </dd>
+        </div>
+      </dl>
+      <p className="helper">
+        {receipt
+          ? "한 건은 집계 이벤트입니다. 재전송에 대한 서버의 중복 수신 확인도 포함하며, 누적 고유 건수와는 다릅니다."
+          : "아직 서버 수신 확인 기록이 없습니다. 수집 완료만으로 전송 성공을 표시하지 않습니다."}
+      </p>
+    </section>
   );
 }
 
@@ -195,6 +239,7 @@ export function Overview({
           </dl>
         </section>
       </div>
+      <DeliverySummary status={status} />
       <section className="overview-section">
         <div>
           <h2>직접 서버를 운영하시나요?</h2>
@@ -270,6 +315,7 @@ export function ConnectionManager({
         </p>
       </section>
       <Attention status={status} />
+      <DeliverySummary status={status} />
       <section className="overview-section">
         <div>
           <h2>Grafana 대시보드</h2>
@@ -409,6 +455,9 @@ export function SettingsPage({
   status,
   theme,
   setTheme,
+  preferences,
+  preferencesError,
+  setCloseAction,
   busy,
   native,
   stop,
@@ -418,6 +467,9 @@ export function SettingsPage({
   status: Status | null;
   theme: Theme;
   setTheme: (v: Theme) => void;
+  preferences: AppPreferences;
+  preferencesError: string;
+  setCloseAction: (value: AppPreferences["close_action"]) => void;
   busy: boolean;
   native: boolean;
   stop: () => void;
@@ -428,6 +480,55 @@ export function SettingsPage({
   const [consent, setConsent] = useState(false);
   return (
     <div className="settings-page">
+      <section className="settings-block">
+        <h2>창을 닫을 때</h2>
+        <p className="helper">
+          기본값은 트레이로 숨기기입니다. 메뉴 막대에서 다시 열거나 완전히
+          종료할 수 있습니다.
+        </p>
+        {preferencesError && <p role="alert">{preferencesError}</p>}
+        <div
+          className="appearance-options close-options"
+          role="group"
+          aria-label="창 닫기 동작"
+        >
+          {(
+            [
+              [
+                "tray",
+                PanelBottom,
+                "트레이로 숨기기",
+                "창을 숨기고 백그라운드에서 계속 실행",
+              ],
+              [
+                "quit",
+                Power,
+                "앱 완전히 종료",
+                "이 앱을 종료하며 Codex 훅은 계속 사용",
+              ],
+            ] as const
+          ).map(([id, Icon, label, description]) => (
+            <button
+              key={id}
+              disabled={!native || busy || !!preferencesError}
+              aria-pressed={preferences.close_action === id}
+              onClick={() => setCloseAction(id)}
+            >
+              <Icon size={23} />
+              <strong>{label}</strong>
+              <small>{description}</small>
+              {preferences.close_action === id && (
+                <Check className="choice-check" size={16} />
+              )}
+            </button>
+          ))}
+        </div>
+        <p className="helper">
+          자동 수집·전송은 Codex 훅이 담당합니다. 앱을 완전히 종료해도 기존 수집
+          동의에 따라 훅이 호출될 때 실행됩니다. 트레이로 숨기면 앱에서 시작한
+          작업도 계속됩니다. 자동 수집을 끄려면 아래 ‘수집 중지’를 사용하세요.
+        </p>
+      </section>
       <section className="settings-block">
         <h2>화면 테마</h2>
         <p className="helper">

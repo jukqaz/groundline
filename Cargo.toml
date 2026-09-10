@@ -10,7 +10,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.24.2"
+version = "0.24.3"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/jukqaz/groundline"
@@ -27,6 +27,9 @@ divan = "0.1.21"
 futures-util = "0.3.31"
 hmac = "0.12.1"
 ipnet = "2.12.1"
+percent-encoding = "2.3.2"
+proc-macro2 = { version = "1.0.107", default-features = false, features = ["span-locations"] }
+pulldown-cmark = { version = "0.13.4", default-features = false }
 regex = "1.12.3"
 proptest = { version = "1.11.0", default-features = false, features = ["std"] }
 reqwest = { version = "0.13.4", default-features = false, features = ["rustls-no-provider"] }
@@ -41,6 +44,7 @@ serde_path_to_error = "0.1.20"
 serde-saphyr = { version = "1.2.0", default-features = false, features = ["deserialize"] }
 sha2 = "0.10.9"
 subtle = "2.6.1"
+syn = { version = "3.0.5", default-features = false, features = ["full", "parsing"] }
 thiserror = "2.0.18"
 tempfile = "3.23.0"
 tokio = { version = "1.53.1", features = ["fs", "io-util", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "time"] }

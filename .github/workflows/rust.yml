@@ -382,6 +382,10 @@ jobs:
           shared-key: windows-setup-${{ matrix.target }}
       - name: Verify user ownership, repair, setup, and installer behavior
         run: cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --lib --test config_repair_cli --test setup_cli --test install_cli -- --show-output
+      - name: Verify private replacement and cross-process collection stop before release
+        run: |
+          cargo test --locked -p groundline-runtime --lib --all-features --target "${{ matrix.target }}" local_file::tests -- --show-output
+          cargo test --locked -p groundline-runtime --lib --all-features --target "${{ matrix.target }}" collection_stop_tests -- --show-output
 
   artifacts:
     name: package both products for ${{ matrix.target }}

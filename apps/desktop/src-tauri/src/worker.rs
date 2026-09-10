@@ -46,10 +46,10 @@ pub async fn execute(action: &str, input: Value, home: &Path) -> Result<Value, S
             insights::report_url(endpoint, 7).map_err(|_| "invalid_owner_profile")?;
             let grafana_url = input["grafana_url"].as_str().unwrap_or_default();
             crate::desktop_settings::validate_grafana(grafana_url)?;
-            if let Some(profile) = read_profile(home)? {
-                if profile["endpoint"].as_str() != Some(endpoint) {
-                    return Err("endpoint_change_requires_review".into());
-                }
+            if let Some(profile) = read_profile(home)?
+                && profile["endpoint"].as_str() != Some(endpoint)
+            {
+                return Err("endpoint_change_requires_review".into());
             }
             // Validate existing policy, consent and outbox before any profile write.
             insights_state::status(home).map_err(|e| e.to_string())?;

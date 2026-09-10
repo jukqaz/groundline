@@ -159,6 +159,13 @@ async fn stop_after_first_upload_preserves_unsent_events_and_received_ack() {
     respond(first, json!({"status":"PASS","outcome":"accepted"})).await;
     let receipt = worker.await.unwrap().unwrap();
     assert_eq!(receipt.uploaded_count, 1);
+    assert_eq!(
+        delivery_confirmation::read(&state_directory(home.path()))
+            .unwrap()
+            .unwrap()
+            .event_count,
+        1
+    );
     assert_eq!(receipt.acknowledged_paths, vec![paths[0].clone()]);
     assert_eq!(stop.await.unwrap().unwrap()["disabled"], true);
     assert_eq!(std::fs::read(&paths[1]).unwrap(), original);
@@ -167,6 +174,80 @@ async fn stop_after_first_upload_preserves_unsent_events_and_received_ack() {
         tokio::time::timeout(Duration::from_millis(100), listener.accept())
             .await
             .is_err()
+    );
+}
+
+#[tokio::test]
+async fn rejected_upload_never_creates_a_server_confirmation() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let home = setup(&format!("http://{}", listener.local_addr().unwrap()));
+    let directory = state_directory(home.path());
+    let profile = load_profile(home.path()).unwrap();
+    let (identity, _) = initialize(&directory, Utc::now()).unwrap();
+    let upload_dir = directory.clone();
+    let worker = tokio::spawn(async move {
+        upload(
+            &upload_dir,
+            &profile,
+            &identity,
+            &SecretString::from("t".repeat(32)),
+            vec![(
+                upload_dir.join("event.json"),
+                json!({"idempotency_key":Uuid::new_v4()}),
+            )],
+        )
+        .await
+    });
+    let (mut stream, _) = request(&listener, "post /v1/events ").await;
+    let body = r#"{"status":"FAIL","outcome":"invalid_auth"}"#;
+    stream.write_all(format!("HTTP/1.1 401 Unauthorized\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+    drop(stream);
+    assert!(worker.await.unwrap().is_err());
+    assert!(delivery_confirmation::read(&directory).unwrap().is_none());
+}
+
+#[test]
+fn terminated_worker_releases_cycle_lock_without_a_stale_timeout() {
+    const CHILD_HOME: &str = "GROUNDLINE_TEST_CYCLE_LOCK_HOME";
+    if let Some(home) = std::env::var_os(CHILD_HOME) {
+        let directory = Path::new(&home);
+        let _lock = CycleLock::acquire(directory).unwrap();
+        atomic_write_private(&directory.join("ready"), b"ready").unwrap();
+        std::thread::sleep(Duration::from_secs(30));
+        return;
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "insights_state::collection_stop_tests::terminated_worker_releases_cycle_lock_without_a_stale_timeout"])
+        .env(CHILD_HOME, directory.path()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::inherit()).spawn().unwrap();
+    let started = std::time::Instant::now();
+    while !directory.path().join("ready").exists() {
+        if started.elapsed() > Duration::from_secs(5) {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("worker lock readiness timed out");
+        }
+        assert!(child.try_wait().unwrap().is_none());
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(matches!(
+        CycleLock::acquire(directory.path()),
+        Err(StateError::AlreadyRunning)
+    ));
+    child.kill().unwrap();
+    child.wait().unwrap();
+    let lock = CycleLock::acquire(directory.path()).unwrap();
+    drop(lock);
+    assert!(directory.path().join(LOCK_FILE).exists());
+    let original = b"12345\n";
+    atomic_write_private(&directory.path().join(LOCK_FILE), original).unwrap();
+    assert!(matches!(
+        CycleLock::acquire(directory.path()),
+        Err(StateError::AlreadyRunning)
+    ));
+    assert_eq!(
+        std::fs::read(directory.path().join(LOCK_FILE)).unwrap(),
+        original
     );
 }
 
@@ -188,12 +269,15 @@ fn subprocess_stop_uses_the_same_control_lock() {
             "--nocapture",
         ])
         .env(CHILD_HOME, home.path())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
         .spawn()
         .unwrap();
     let started = std::time::Instant::now();
     while policy_enabled(&directory).unwrap() {
+        if let Some(status) = child.try_wait().unwrap() {
+            panic!("stop process exited before policy revocation: {status}");
+        }
         if started.elapsed() > Duration::from_secs(5) {
             child.kill().unwrap();
             child.wait().unwrap();

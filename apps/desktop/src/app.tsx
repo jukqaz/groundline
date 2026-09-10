@@ -27,6 +27,8 @@ import {
   type Theme,
   type Status,
   type CoreStatus,
+  defaultPreferences,
+  type AppPreferences,
 } from "./model";
 import { Field, Notice } from "./ui";
 import {
@@ -53,6 +55,10 @@ export function App() {
     }
   });
   const [runtime, setRuntime] = useState<Runtime>("codex_app");
+  const [preferences, setPreferences] =
+    useState<AppPreferences>(defaultPreferences);
+  const [preferencesLoaded, setPreferencesLoaded] = useState(!native);
+  const [preferencesError, setPreferencesError] = useState("");
   const [status, setStatus] = useState<Status | null>(null);
   const [core, setCore] = useState<CoreStatus | null>(null);
   const [busy, setBusy] = useState("");
@@ -75,6 +81,26 @@ export function App() {
   const [ticket, setTicket] = useState("");
   const [consent, setConsent] = useState(false);
   const [connected, setConnected] = useState(false);
+  useEffect(() => {
+    if (!native) return;
+    let current = true;
+    invoke<AppPreferences>("get_app_preferences")
+      .then((value) => {
+        if (current) {
+          setPreferences(value);
+          setRuntime(value.runtime);
+        }
+      })
+      .catch((error) => {
+        if (current) setPreferencesError(errorMessage(error));
+      })
+      .finally(() => {
+        if (current) setPreferencesLoaded(true);
+      });
+    return () => {
+      current = false;
+    };
+  }, []);
   useEffect(() => {
     heading.current?.focus({ preventScroll: true });
     window.scrollTo({ top: 0 });
@@ -100,6 +126,7 @@ export function App() {
     return () => media.removeEventListener("change", apply);
   }, [theme]);
   useEffect(() => {
+    if (!preferencesLoaded) return;
     let current = true;
     setStatus(null);
     setServerView("connection");
@@ -139,7 +166,36 @@ export function App() {
     return () => {
       current = false;
     };
-  }, [runtime]);
+  }, [runtime, preferencesLoaded]);
+  useEffect(() => {
+    if (!native || !preferencesLoaded) return;
+    let current = true;
+    let refreshing = false;
+    const update = async () => {
+      if (document.hidden || running.current || refreshing) return;
+      refreshing = true;
+      try {
+        const value = await invoke<Status>("snapshot", { runtime });
+        if (current) {
+          setStatus(value);
+          setCheckedAt(new Date().toLocaleTimeString("ko-KR"));
+        }
+      } catch {
+        /* Keep the last verified state until an explicit refresh. */
+      } finally {
+        refreshing = false;
+      }
+    };
+    const timer = setInterval(() => void update(), 10_000);
+    window.addEventListener("focus", update);
+    document.addEventListener("visibilitychange", update);
+    return () => {
+      current = false;
+      clearInterval(timer);
+      window.removeEventListener("focus", update);
+      document.removeEventListener("visibilitychange", update);
+    };
+  }, [runtime, preferencesLoaded]);
   useEffect(() => {
     if (!ticket) return;
     const timeout = setTimeout(() => {
@@ -204,6 +260,16 @@ export function App() {
     const result = await invoke<Status>("snapshot", { runtime });
     setStatus(result);
     setCheckedAt(new Date().toLocaleTimeString("ko-KR"));
+  }
+  async function savePreferences(patch: Partial<AppPreferences>) {
+    await action("preferences", async () => {
+      const value = await invoke<AppPreferences>("save_app_preferences", {
+        preferences: { ...preferences, ...patch },
+      });
+      setPreferences(value);
+      if (value.runtime !== runtime) setRuntime(value.runtime);
+      setSuccess("앱 실행 설정을 저장했습니다.");
+    });
   }
   async function runCollection() {
     await action("run", async () => {
@@ -330,7 +396,7 @@ export function App() {
               </button>
             ))}
           </div>
-          <p className="version">GroundLine 0.24.2 · 미리보기</p>
+          <p className="version">GroundLine 0.24.3 · 미리보기</p>
         </div>
       </aside>
       <main aria-busy={!!busy || loading}>
@@ -397,7 +463,12 @@ export function App() {
                   const next = e.target.value as Runtime;
                   void action("runtime", async () => {
                     await cancelConnection();
-                    setRuntime(next);
+                    const value = await invoke<AppPreferences>(
+                      "save_app_preferences",
+                      { preferences: { ...preferences, runtime: next } },
+                    );
+                    setPreferences(value);
+                    setRuntime(value.runtime);
                   });
                 }}
               >
@@ -747,6 +818,11 @@ export function App() {
             status={status}
             theme={theme}
             setTheme={setTheme}
+            preferences={preferences}
+            preferencesError={preferencesError}
+            setCloseAction={(close_action) =>
+              void savePreferences({ close_action })
+            }
             busy={!!busy || loading}
             native={native}
             stop={() => void stopCollection()}

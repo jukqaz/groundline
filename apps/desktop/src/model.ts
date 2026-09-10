@@ -1,5 +1,15 @@
 export type Theme = "light" | "system" | "dark";
 export type Runtime = "codex_app" | "codex_cli";
+export type AppPreferences = {
+  schema: 1;
+  close_action: "tray" | "quit";
+  runtime: Runtime;
+};
+export const defaultPreferences: AppPreferences = {
+  schema: 1,
+  close_action: "tray",
+  runtime: "codex_app",
+};
 export type Status = {
   collection_state?: string;
   collection_enabled?: boolean;
@@ -15,6 +25,10 @@ export type Status = {
   grafana_url?: string;
   tailnet_required?: boolean;
   blocking_reason_codes?: string[];
+  delivery_confirmation?: {
+    confirmed_at_utc: string;
+    event_count: number;
+  } | null;
 };
 export type CoreStatus = {
   version: string;
