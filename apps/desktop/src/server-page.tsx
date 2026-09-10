@@ -20,7 +20,7 @@ import {
   Monitor,
   RefreshCw,
 } from "lucide-react";
-import { Field, Notice } from "./ui";
+import { Button, Input, Field, Notice } from "./ui";
 import { initialSetup, setupError, setupStepError, type Setup } from "./model";
 import compatibility from "../../../infrastructure/compatibility.json";
 export function ServerPage({
@@ -142,7 +142,7 @@ export function ServerPage({
               <h2>접속 주소</h2>
               <div className="field-grid">
                 <Field label="Insights API 주소">
-                  <input
+                  <Input
                     type="url"
                     aria-label="Insights API 주소"
                     required
@@ -152,7 +152,7 @@ export function ServerPage({
                   />
                 </Field>
                 <Field label="Grafana 주소">
-                  <input
+                  <Input
                     type="url"
                     required
                     placeholder="https://grafana.example.com"
@@ -169,21 +169,21 @@ export function ServerPage({
                 role="group"
                 aria-label="서버 연결 방식"
               >
-                <button
+                <Button
                   type="button"
                   aria-pressed={setup.mode === "https"}
                   onClick={() => update("mode", "https")}
                 >
                   <Globe2 size={16} />
                   일반 HTTPS
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
                   aria-pressed={setup.mode === "tailscale"}
                   onClick={() => update("mode", "tailscale")}
                 >
                   Tailscale <span className="optional">선택 사항</span>
-                </button>
+                </Button>
               </div>
               {setup.mode === "tailscale" ? (
                 <div className="spaced">
@@ -191,7 +191,7 @@ export function ServerPage({
                     label="서버 Tailnet IPv4"
                     hint="Tailscale을 사용하는 서버에만 필요합니다."
                   >
-                    <input
+                    <Input
                       placeholder="100.64.0.1"
                       value={setup.tailnetIp}
                       onChange={(e) => update("tailnetIp", e.target.value)}
@@ -211,7 +211,7 @@ export function ServerPage({
             <section>
               <h2>저장소와 포트</h2>
               <Field label="데이터 저장 경로">
-                <input
+                <Input
                   required
                   value={setup.datasetRoot}
                   onChange={(e) => update("datasetRoot", e.target.value)}
@@ -220,7 +220,7 @@ export function ServerPage({
               </Field>
               <div className="field-grid spaced">
                 <Field label="API 포트 (Insights)">
-                  <input
+                  <Input
                     type="number"
                     min="1024"
                     max="65535"
@@ -230,7 +230,7 @@ export function ServerPage({
                   />
                 </Field>
                 <Field label="Grafana 포트">
-                  <input
+                  <Input
                     type="number"
                     min="1024"
                     max="65535"
@@ -248,13 +248,13 @@ export function ServerPage({
               </div>
               <div className="field-grid triple">
                 <Field label="데이터베이스">
-                  <input value="groundline" readOnly />
+                  <Input value="groundline" readOnly />
                 </Field>
                 <Field label="사용자">
-                  <input value="groundline_ingest" readOnly />
+                  <Input value="groundline_ingest" readOnly />
                 </Field>
                 <Field label="비밀번호">
-                  <input
+                  <Input
                     type="password"
                     autoComplete="new-password"
                     placeholder="자동 생성"
@@ -276,7 +276,7 @@ export function ServerPage({
                 label="Insights API 이미지"
                 hint="배포할 버전의 ghcr.io 이미지와 @sha256: digest를 입력하세요."
               >
-                <input
+                <Input
                   value={setup.apiImage}
                   placeholder="ghcr.io/jukqaz/groundline-insights-api@sha256:…"
                   onChange={(e) => update("apiImage", e.target.value)}
@@ -295,7 +295,7 @@ export function ServerPage({
               </summary>
               <div className="field-grid spaced">
                 <Field label="Grafana 관리자 비밀번호">
-                  <input
+                  <Input
                     type="password"
                     autoComplete="new-password"
                     placeholder="자동 생성"
@@ -304,7 +304,7 @@ export function ServerPage({
                   />
                 </Field>
                 <Field label="기기 등록키">
-                  <input
+                  <Input
                     type="password"
                     autoComplete="new-password"
                     placeholder="자동 생성"
@@ -382,7 +382,7 @@ export function ServerPage({
           </Notice>
           <div className="actions">
             {step > 0 && (
-              <button
+              <Button
                 className="secondary"
                 type="button"
                 disabled={!!busy}
@@ -392,17 +392,17 @@ export function ServerPage({
                 }}
               >
                 이전 단계
-              </button>
+              </Button>
             )}
-            <button className="primary" disabled={!!busy} type="submit">
+            <Button className="primary" disabled={!!busy} type="submit">
               {busy === "export" ? (
                 <RefreshCw className="spin" size={17} />
               ) : (
                 <FileDown size={17} />
               )}
               {step === 2 ? "Compose 파일 만들기" : "다음 단계"}
-            </button>
-            <button
+            </Button>
+            <Button
               className="secondary"
               type="button"
               disabled={!!busy}
@@ -415,7 +415,7 @@ export function ServerPage({
               }}
             >
               기본값 복원
-            </button>
+            </Button>
           </div>
           <p className="helper">
             다운로드 폴더에 새 비공개 폴더를 만듭니다. 기존 배포 파일을 덮어쓰지
@@ -443,7 +443,7 @@ export function ServerPage({
                 </li>
               </ul>
               <div className="actions">
-                <button
+                <Button
                   type="button"
                   className="primary"
                   disabled={!!busy}
@@ -455,8 +455,8 @@ export function ServerPage({
                 >
                   <FolderOpen size={17} />
                   생성 폴더 열기
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
                   className="secondary"
                   disabled={!!busy}
@@ -464,7 +464,7 @@ export function ServerPage({
                 >
                   이 주소로 기기 연결
                   <ArrowRight size={16} />
-                </button>
+                </Button>
               </div>
               <p className="helper">
                 README 순서대로 서버를 실행하고 HTTPS를 준비한 뒤 연결하세요.

@@ -1,3 +1,4 @@
+import { Button, Input, Choice } from "./ui";
 import { useState } from "react";
 import {
   Activity,
@@ -101,7 +102,11 @@ export function Overview({
   return (
     <>
       <section className="next-action">
-        <span className="connection-indicator" aria-hidden="true">
+        <span
+          className="connection-indicator"
+          data-active={status?.collection_state === "active"}
+          aria-hidden="true"
+        >
           {status?.collection_state === "active" &&
           status.delivery_confirmation &&
           status.pending_event_count === 0 ? (
@@ -120,7 +125,7 @@ export function Overview({
             </p>
           )}
         </div>
-        <button
+        <Button
           className="primary"
           disabled={busy || (next.action === "refresh" && !native)}
           onClick={() =>
@@ -137,7 +142,7 @@ export function Overview({
                 ? "연결 관리"
                 : "서버 연결 보기"}
           <ArrowRight size={16} />
-        </button>
+        </Button>
       </section>
       <DeliverySummary status={status} />
       <section className="insights-row">
@@ -159,21 +164,30 @@ export function Overview({
         <div className="section-title">
           <h2>GroundLine Core</h2>
           <ShieldCheck size={20} />
-          <strong className="metric">
+          <strong
+            className="metric"
+            data-state={
+              core
+                ? core.status === "PASS"
+                  ? "success"
+                  : "attention"
+                : "unknown"
+            }
+          >
             {core
               ? core.status === "PASS"
                 ? "실행 진단 통과"
                 : "확인 필요"
               : "진단 전"}
           </strong>
-          <button
+          <Button
             className="secondary"
             disabled={!native || busy}
             onClick={diagnose}
           >
             <RefreshCw size={16} />
             Core 진단
-          </button>
+          </Button>
         </div>
         {core && (
           <details className="core-details">
@@ -242,17 +256,17 @@ export function ConnectionManager({
             : "수집 동의 필요"}
         </p>
         <div className="actions">
-          <button
+          <Button
             className="primary"
             disabled={!native || busy || !status.collection_enabled}
             onClick={run}
           >
             지금 수집·전송 확인
             <ArrowRight size={16} />
-          </button>
-          <button className="secondary" disabled={busy} onClick={settings}>
+          </Button>
+          <Button className="secondary" disabled={busy} onClick={settings}>
             {status.collection_enabled ? "수집 설정" : "수집 다시 시작"}
-          </button>
+          </Button>
         </div>
       </section>
       <Attention status={status} />
@@ -266,15 +280,15 @@ export function ConnectionManager({
           </p>
         </div>
         <div className="actions">
-          <button
+          <Button
             className="secondary"
             disabled={!native || busy || !status.grafana_url}
             onClick={openDashboard}
           >
             대시보드 열기
             <ArrowRight size={16} />
-          </button>
-          <button
+          </Button>
+          <Button
             className="text-button"
             disabled={busy}
             onClick={() => {
@@ -283,7 +297,7 @@ export function ConnectionManager({
             }}
           >
             주소 {status.grafana_url ? "수정" : "추가"}
-          </button>
+          </Button>
         </div>
       </section>
       {editingDashboard && (
@@ -296,7 +310,7 @@ export function ConnectionManager({
         >
           <label className="field">
             <span>대시보드 주소</span>
-            <input
+            <Input
               type="url"
               value={dashboard}
               onChange={(e) => setDashboard(e.target.value)}
@@ -309,17 +323,17 @@ export function ConnectionManager({
             </small>
           </label>
           <div className="actions">
-            <button className="primary" disabled={!native || busy}>
+            <Button className="primary" disabled={!native || busy}>
               주소 저장
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               className="secondary"
               disabled={busy}
               onClick={() => setEditingDashboard(false)}
             >
               취소
-            </button>
+            </Button>
           </div>
         </form>
       )}
@@ -347,9 +361,9 @@ export function ConnectionManager({
           인증 실패 시 같은 서버의 등록키를 다시 확인할 수 있습니다. 서버
           변경에는 기존 등록과 대기 데이터의 별도 검토가 필요합니다.
         </p>
-        <button className="secondary" disabled={busy} onClick={repair}>
+        <Button className="secondary" disabled={busy} onClick={repair}>
           등록키 다시 확인
-        </button>
+        </Button>
       </details>
     </>
   );
@@ -426,17 +440,19 @@ export function SettingsPage({
         <h2>
           <label htmlFor="close-action">창 닫기</label>
         </h2>
-        <select
+        <Choice
           id="close-action"
+          label="창 닫기"
           value={preferences.close_action}
           disabled={!native || busy || !!preferencesError}
-          onChange={(e) =>
-            setCloseAction(e.target.value as AppPreferences["close_action"])
+          options={[
+            ["tray", "트레이에 숨기기"],
+            ["quit", "앱 종료"],
+          ]}
+          onValueChange={(value) =>
+            setCloseAction(value as AppPreferences["close_action"])
           }
-        >
-          <option value="tray">트레이에 숨기기</option>
-          <option value="quit">앱 종료</option>
-        </select>
+        />
         {preferencesError && (
           <p className="preference-error" role="alert">
             {preferencesError}
@@ -456,14 +472,14 @@ export function SettingsPage({
               ["dark", Moon, "다크"],
             ] as const
           ).map(([id, Icon, label]) => (
-            <button
+            <Button
               key={id}
               aria-pressed={theme === id}
               onClick={() => setTheme(id)}
             >
               <Icon size={16} />
               <span>{label}</span>
-            </button>
+            </Button>
           ))}
         </div>
       </section>
@@ -482,15 +498,15 @@ export function SettingsPage({
           Codex 사용 시 통계를 전송합니다. 수집을 꺼도 기존 기록은 보존됩니다.
         </p>
         {status?.collection_enabled ? (
-          <button
+          <Button
             className="secondary stop-button"
             disabled={!native || busy}
             onClick={stop}
           >
             수집 중지
-          </button>
+          </Button>
         ) : status?.endpoint ? (
-          <button
+          <Button
             className="primary"
             disabled={!native || busy || resuming}
             onClick={() => {
@@ -499,19 +515,19 @@ export function SettingsPage({
             }}
           >
             동의 후 다시 시작
-          </button>
+          </Button>
         ) : (
-          <button className="secondary" disabled={busy} onClick={connect}>
+          <Button className="secondary" disabled={busy} onClick={connect}>
             서버 연결 설정
             <ArrowRight size={16} />
-          </button>
+          </Button>
         )}
         {resuming && !status?.collection_enabled && (
           <div className="resume-panel">
             <p className="endpoint">전송 대상: {status?.endpoint}</p>
             <Consent checked={consent} setChecked={setConsent} />
             <div className="actions">
-              <button
+              <Button
                 className="primary"
                 disabled={!consent || busy || !native}
                 onClick={async () => {
@@ -522,8 +538,8 @@ export function SettingsPage({
                 }}
               >
                 동의하고 수집 재개
-              </button>
-              <button
+              </Button>
+              <Button
                 className="secondary"
                 disabled={busy}
                 onClick={() => {
@@ -532,7 +548,7 @@ export function SettingsPage({
                 }}
               >
                 취소
-              </button>
+              </Button>
             </div>
           </div>
         )}

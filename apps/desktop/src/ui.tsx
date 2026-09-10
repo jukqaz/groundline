@@ -1,5 +1,64 @@
-import { type ReactNode } from "react";
+import { type ComponentProps, type ReactNode } from "react";
+import { Button as RadixButton, TextField, Select } from "@radix-ui/themes";
 import { Check, Info, X } from "lucide-react";
+
+export function Button({
+  className = "",
+  type,
+  ...props
+}: ComponentProps<typeof RadixButton>) {
+  const primary = className.split(" ").includes("primary");
+  const quiet = /nav-item|theme-|text-button|notice-dismiss/.test(className);
+  return (
+    <RadixButton
+      size="2"
+      variant={primary ? "solid" : quiet ? "ghost" : "surface"}
+      color="gray"
+      highContrast={primary}
+      type={type ?? "submit"}
+      className={className}
+      {...props}
+    />
+  );
+}
+
+export function Input(props: ComponentProps<typeof TextField.Root>) {
+  return <TextField.Root size="2" variant="surface" {...props} />;
+}
+
+export function Choice({
+  label,
+  value,
+  onValueChange,
+  disabled,
+  options,
+  id,
+}: {
+  label: string;
+  value: string;
+  onValueChange: (value: string) => void;
+  disabled?: boolean;
+  options: readonly (readonly [string, string])[];
+  id?: string;
+}) {
+  return (
+    <Select.Root
+      value={value}
+      onValueChange={onValueChange}
+      disabled={disabled}
+      size="2"
+    >
+      <Select.Trigger id={id} aria-label={label} className="choice-control" />
+      <Select.Content position="popper" variant="soft">
+        {options.map(([value, label]) => (
+          <Select.Item key={value} value={value}>
+            {label}
+          </Select.Item>
+        ))}
+      </Select.Content>
+    </Select.Root>
+  );
+}
 export function Field({
   label,
   hint,
@@ -34,13 +93,13 @@ export function Notice({
       {kind === "success" ? <Check size={17} /> : <Info size={17} />}
       <div>{children}</div>
       {onDismiss && (
-        <button
+        <Button
           className="notice-dismiss"
           aria-label="알림 닫기"
           onClick={onDismiss}
         >
           <X size={16} />
-        </button>
+        </Button>
       )}
     </div>
   );
