@@ -1490,3 +1490,37 @@ select {
     transition: none !important;
   }
 }
+/* Native lifecycle and acknowledged delivery use the existing settings surface. */
+.close-options {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.delivery-card {
+  margin: 22px 0;
+  padding: 26px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+}
+.delivery-facts {
+  display: grid;
+  grid-template-columns: 1fr 1.8fr 1fr;
+  gap: 20px;
+  margin: 24px 0;
+}
+.delivery-facts dt {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+.delivery-facts dd {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 950px) {
+  .delivery-facts {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+}

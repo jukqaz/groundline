@@ -2,6 +2,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod commands;
 mod desktop_settings;
+mod lifecycle;
+mod preferences;
 mod setup;
 mod worker;
 
@@ -11,8 +13,25 @@ fn main() {
         return;
     }
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            lifecycle::show(app)
+        }))
         .plugin(tauri_plugin_opener::init())
         .manage(commands::PendingConnection::default())
+        .setup(|app| {
+            use tauri::Manager;
+            let home = groundline_runtime::insights::default_codex_home()
+                .map_err(|_| "local_state_failed")?;
+            let state = lifecycle::Lifecycle::new(home);
+            app.manage(state);
+            lifecycle::install_tray(app)?;
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                lifecycle::close(window, api);
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             commands::snapshot,
             commands::check_connection,
@@ -24,10 +43,18 @@ fn main() {
             commands::cancel_connection,
             commands::resume_collection,
             commands::save_dashboard,
-            commands::reveal_export
+            commands::reveal_export,
+            commands::get_app_preferences,
+            commands::save_app_preferences
         ])
-        .run(tauri::generate_context!())
-        .expect("desktop runtime failed");
+        .build(tauri::generate_context!())
+        .expect("desktop runtime failed")
+        .run(|app, event| match event {
+            tauri::RunEvent::ExitRequested { api, .. } => lifecycle::exit_requested(app, &api),
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => lifecycle::show(app),
+            _ => {}
+        });
 }
 
 #[cfg(test)]

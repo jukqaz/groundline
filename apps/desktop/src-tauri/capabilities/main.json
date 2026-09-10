@@ -13,6 +13,8 @@
     "allow-cancel-connection",
     "allow-resume-collection",
     "allow-save-dashboard",
-    "allow-reveal-export"
+    "allow-reveal-export",
+    "allow-get-app-preferences",
+    "allow-save-app-preferences"
   ]
 }
