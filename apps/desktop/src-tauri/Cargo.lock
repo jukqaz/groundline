@@ -1563,7 +1563,7 @@ dependencies = [
 
 [[package]]
 name = "groundline-contracts"
-version = "0.24.0"
+version = "0.24.1"
 dependencies = [
  "chrono",
  "semver",
@@ -1577,7 +1577,7 @@ dependencies = [
 
 [[package]]
 name = "groundline-desktop"
-version = "0.24.0"
+version = "0.24.1"
 dependencies = [
  "dirs",
  "groundline-runtime",
@@ -1599,7 +1599,7 @@ dependencies = [
 
 [[package]]
 name = "groundline-runtime"
-version = "0.24.0"
+version = "0.24.1"
 dependencies = [
  "chrono",
  "command-group",
@@ -5587,7 +5587,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.24.0"
+version = "0.24.1"
 dependencies = [
  "aho-corasick",
  "chrono",

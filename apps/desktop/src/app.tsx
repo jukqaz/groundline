@@ -330,7 +330,7 @@ export function App() {
               </button>
             ))}
           </div>
-          <p className="version">GroundLine 0.24.0 · 미리보기</p>
+          <p className="version">GroundLine 0.24.1 · 미리보기</p>
         </div>
       </aside>
       <main aria-busy={!!busy || loading}>

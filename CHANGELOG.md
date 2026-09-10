@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.24.1
+
+- Pin the dependency-checking tool and its checksum so desktop and workspace
+  qualification use the same supported cargo-deny options.
+- Include the desktop, HTTPS integration, and privacy fixes prepared in 0.24.0.
+  The 0.24.0 tag did not publish release assets because qualification failed.
+
 ## 0.24.0
 
 - Synchronize collection stop with in-flight reads and requests across desktop,
