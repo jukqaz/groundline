@@ -17,6 +17,19 @@ The default is `--bind-ip 127.0.0.1`. Terminate TLS at a reverse proxy on the Do
 
 Only for Tailscale, pass `--require-tailnet --bind-ip 100.64.0.1` with the actual server Tailnet IPv4. This sets `GROUNDLINE_REQUIRE_TAILNET=true`. Standard HTTPS uses false and preserves enrollment, collector and admin token authentication, rate limits and bounded requests. Clients skip Tailscale probing for ordinary HTTPS endpoints. The API does not terminate TLS itself; expose a valid TLS proxy, never a public plaintext API. Loopback HTTP is supported for local development; Tailnet HTTP is optional.
 
+## Choose the Insights enrollment credential
+
+Use the API container's `GROUNDLINE_ENROLLMENT_TOKEN` for the desktop enrollment
+key. The Compose generator names the same value `ENROLLMENT_TOKEN` in its private
+`secrets.json`. A TrueNAS management API key is for NAS administration, and a
+Grafana administrator password is for dashboard sign-in. Give collectors the
+Insights enrollment key.
+
+If connection checking returns `api_upgrade_required`, update the server to an
+Insights API distribution that supports `/v1/enroll/check` first. A TrueNAS custom
+app's `1.0.0` or up-to-date label does not identify the API product version. Verify
+server startup, enrollment credentials, and accepted stored uploads separately.
+
 ## Requirements
 
 Existing deployments without `GROUNDLINE_REQUIRE_TAILNET` retain Tailnet-only

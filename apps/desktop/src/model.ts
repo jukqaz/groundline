@@ -255,9 +255,9 @@ export function collectionLabel(code: string | undefined) {
 const errors: Record<string, string> = {
   invalid_owner_profile: "서버 주소와 등록키 형식을 확인하세요.",
   enrollment_credential_rejected:
-    "등록키가 일치하지 않습니다. 서버의 ENROLLMENT_TOKEN을 확인하세요.",
+    "Insights 등록키가 일치하지 않습니다. 서버 API의 GROUNDLINE_ENROLLMENT_TOKEN을 확인하세요. TrueNAS 관리용 API 키와는 별개입니다.",
   remote_authentication_rejected:
-    "서버 인증에 실패했습니다. 등록키와 프록시 설정을 확인하세요.",
+    "서버가 인증을 거절했습니다. Insights 기기 등록키와 프록시 설정을 확인하세요. TrueNAS 관리용 API 키와는 별개입니다.",
   proxy_authentication_rejected: "서버의 프록시 인증 설정을 확인하세요.",
   tailnet_peer_rejected:
     "서버가 Tailscale 전용으로 설정되어 있습니다. 서버의 연결 방식을 확인하세요.",
