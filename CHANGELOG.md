@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.24.0
+
+- Add a macOS Apple Silicon desktop preview with unified server connection and
+  Docker Compose setup, independent Core diagnostics, and explicit collection consent.
+- Support general HTTPS endpoints with Tailscale as an optional transport. Keep
+  enrollment authentication, bounded retries, private credentials, and strict schemas.
+- Add a read-only enrollment-key check and distinguish enrollment, proxy, and
+  peer authentication failures without returning secret values.
+- Share API and Grafana address drafts across setup flows, preserve saved
+  connections, and default desktop appearance to the operating system theme.
+- Publish Core, Insights, API, and the desktop preview from one versioned source.
+  Upgrade the owner API before using the new desktop connection check.
+
 ## 0.23.2
 
 - Reuse validated native catalogs for repair audits and binary-search model

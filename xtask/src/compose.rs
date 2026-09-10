@@ -4,6 +4,7 @@ use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+use crate::secret_store::{MAX_SECRET_STORE_BYTES, SECRET_KEYS, load_private_secret_store};
 use groundline_runtime::local_file::{
     atomic_write_private, open_bounded_regular_file, private_for_current_user,
 };
@@ -14,9 +15,16 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use url::Url;
 use uuid::Uuid;
-use xtask::secret_store::{MAX_SECRET_STORE_BYTES, SECRET_KEYS, load_private_secret_store};
 
-use super::XtaskError;
+#[derive(Debug, thiserror::Error)]
+pub enum ComposeError {
+    #[error("invalid_compose")]
+    InvalidCompose,
+    #[error("compose_io_failed")]
+    Io(#[from] std::io::Error),
+    #[error("compose_manifest_failed")]
+    Manifest(#[from] serde_json::Error),
+}
 
 const MAX_TEMPLATE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_COMPATIBILITY_PROFILE_BYTES: u64 = 16 * 1024;
@@ -44,7 +52,8 @@ pub struct RenderOptions<'a> {
     pub output: &'a Path,
     pub secrets_file: &'a Path,
     pub dataset_root: &'a str,
-    pub tailscale_bind_ip: &'a str,
+    pub bind_ip: &'a str,
+    pub require_tailnet: bool,
     pub dashboard_port: u16,
     pub ingest_port: u16,
     pub image: &'a str,
@@ -53,13 +62,13 @@ pub struct RenderOptions<'a> {
     pub overwrite: bool,
 }
 
-fn read_bounded(path: &Path, maximum: u64) -> Result<Vec<u8>, XtaskError> {
+fn read_bounded(path: &Path, maximum: u64) -> Result<Vec<u8>, ComposeError> {
     let mut file =
-        open_bounded_regular_file(path, 1, maximum).map_err(|_| XtaskError::InvalidCompose)?;
+        open_bounded_regular_file(path, 1, maximum).map_err(|_| ComposeError::InvalidCompose)?;
     let mut bytes = Vec::with_capacity(file.metadata()?.len() as usize);
     file.by_ref().take(maximum + 1).read_to_end(&mut bytes)?;
     if bytes.len() as u64 > maximum {
-        return Err(XtaskError::InvalidCompose);
+        return Err(ComposeError::InvalidCompose);
     }
     Ok(bytes)
 }
@@ -68,10 +77,10 @@ fn generated_secret() -> String {
     format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
 }
 
-fn secrets(path: &Path) -> Result<(BTreeMap<String, String>, bool), XtaskError> {
+fn secrets(path: &Path) -> Result<(BTreeMap<String, String>, bool), ComposeError> {
     if path.exists() {
         return Ok((
-            load_private_secret_store(path).map_err(|_| XtaskError::InvalidCompose)?,
+            load_private_secret_store(path).map_err(|_| ComposeError::InvalidCompose)?,
             false,
         ));
     }
@@ -191,11 +200,11 @@ fn plugin_is_pinned(value: &str) -> bool {
 fn load_compatibility_profile(
     path: &Path,
     allow_unpinned_dependencies: bool,
-) -> Result<ValidatedCompatibilityProfile, XtaskError> {
+) -> Result<ValidatedCompatibilityProfile, ComposeError> {
     let bytes = read_bounded(path, MAX_COMPATIBILITY_PROFILE_BYTES)?;
     let fingerprint = format!("{:x}", Sha256::digest(&bytes));
     let profile = serde_json::from_slice::<CompatibilityProfile>(&bytes)
-        .map_err(|_| XtaskError::InvalidCompose)?;
+        .map_err(|_| ComposeError::InvalidCompose)?;
     let images = [
         profile.clickhouse_image.as_str(),
         profile.nginx_image.as_str(),
@@ -223,7 +232,7 @@ fn load_compatibility_profile(
         || (!plugin_is_pinned && !plugin_is_latest)
         || (!all_dependencies_pinned && !allow_unpinned_dependencies)
     {
-        return Err(XtaskError::InvalidCompose);
+        return Err(ComposeError::InvalidCompose);
     }
     Ok(ValidatedCompatibilityProfile {
         profile,
@@ -235,7 +244,7 @@ fn load_compatibility_profile(
 pub fn verify_compatibility_profile(
     path: &Path,
     allow_unpinned_dependencies: bool,
-) -> Result<Value, XtaskError> {
+) -> Result<Value, ComposeError> {
     let validated = load_compatibility_profile(path, allow_unpinned_dependencies)?;
     Ok(json!({
         "status":"PASS",
@@ -251,24 +260,24 @@ fn unresolved_placeholder_regex() -> &'static Regex {
     REGEX.get_or_init(|| Regex::new(r"__[A-Z][A-Z0-9_]*__").expect("fixed placeholder regex"))
 }
 
-fn stable_target(path: &Path) -> Result<PathBuf, XtaskError> {
-    let parent = path.parent().ok_or(XtaskError::InvalidCompose)?;
-    let file_name = path.file_name().ok_or(XtaskError::InvalidCompose)?;
+fn stable_target(path: &Path) -> Result<PathBuf, ComposeError> {
+    let parent = path.parent().ok_or(ComposeError::InvalidCompose)?;
+    let file_name = path.file_name().ok_or(ComposeError::InvalidCompose)?;
     let parent = if parent.exists() {
-        std::fs::canonicalize(parent).map_err(|_| XtaskError::InvalidCompose)?
+        std::fs::canonicalize(parent).map_err(|_| ComposeError::InvalidCompose)?
     } else {
         parent.to_owned()
     };
     Ok(parent.join(file_name))
 }
 
-pub fn render(options: RenderOptions<'_>) -> Result<Value, XtaskError> {
+pub fn render(options: RenderOptions<'_>) -> Result<Value, ComposeError> {
     let template_path =
-        std::fs::canonicalize(options.template).map_err(|_| XtaskError::InvalidCompose)?;
+        std::fs::canonicalize(options.template).map_err(|_| ComposeError::InvalidCompose)?;
     let output_path = stable_target(options.output)?;
     let secrets_path = stable_target(options.secrets_file)?;
     let dataset_root =
-        normalized_dataset_root(options.dataset_root).ok_or(XtaskError::InvalidCompose)?;
+        normalized_dataset_root(options.dataset_root).ok_or(ComposeError::InvalidCompose)?;
     let image_is_immutable = image_is_immutable(options.image);
     let compatibility = load_compatibility_profile(
         options.compatibility_profile,
@@ -278,21 +287,26 @@ pub fn render(options: RenderOptions<'_>) -> Result<Value, XtaskError> {
         || output_path == template_path
         || secrets_path == template_path
         || (output_path.exists() && !options.overwrite)
-        || !valid_tailnet_ip(options.tailscale_bind_ip)
+        || !(if options.require_tailnet {
+            valid_tailnet_ip(options.bind_ip)
+        } else {
+            options.bind_ip == "127.0.0.1"
+        })
+        || options.dashboard_port == options.ingest_port
         || !valid_port(options.dashboard_port)
         || !valid_port(options.ingest_port)
         || !image_is_valid(options.image)
         || (!image_is_immutable && !options.allow_unpinned_dependencies)
     {
-        return Err(XtaskError::InvalidCompose);
+        return Err(ComposeError::InvalidCompose);
     }
     let (access_origin, access_host) =
-        access_origin_and_host(options.access_url).ok_or(XtaskError::InvalidCompose)?;
+        access_origin_and_host(options.access_url).ok_or(ComposeError::InvalidCompose)?;
     let source = String::from_utf8(read_bounded(&template_path, MAX_TEMPLATE_BYTES)?)
-        .map_err(|_| XtaskError::InvalidCompose)?;
+        .map_err(|_| ComposeError::InvalidCompose)?;
     for placeholder in SECRET_KEYS.iter().copied().chain([
         "DATASET_ROOT",
-        "TAILSCALE_BIND_IP",
+        "BIND_IP",
         "DASHBOARD_PORT",
         "INGEST_PORT",
         "INSIGHTS_API_IMAGE",
@@ -302,12 +316,22 @@ pub fn render(options: RenderOptions<'_>) -> Result<Value, XtaskError> {
         "GRAFANA_CLICKHOUSE_PLUGIN",
         "INSIGHTS_ACCESS_URL",
         "INSIGHTS_ACCESS_HOST",
+        "REQUIRE_TAILNET",
+        "FORWARDED_PEER",
     ]) {
         if !source.contains(&format!("__{placeholder}__")) {
-            return Err(XtaskError::InvalidCompose);
+            return Err(ComposeError::InvalidCompose);
         }
     }
     let (secrets, secrets_created) = secrets(&secrets_path)?;
+    // Shared credentials enter YAML, XML and Nginx: use one safe alphabet.
+    if secrets.values().any(|value| {
+        !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-_".contains(&byte))
+    }) {
+        return Err(ComposeError::InvalidCompose);
+    }
     let mut replacements = secrets
         .iter()
         .map(|(key, value)| (format!("__{key}__"), value.clone()))
@@ -315,9 +339,19 @@ pub fn render(options: RenderOptions<'_>) -> Result<Value, XtaskError> {
     replacements.extend([
         ("__DATASET_ROOT__".to_owned(), dataset_root),
         (
-            "__TAILSCALE_BIND_IP__".to_owned(),
-            options.tailscale_bind_ip.to_owned(),
+            "__REQUIRE_TAILNET__".to_owned(),
+            options.require_tailnet.to_string(),
         ),
+        (
+            "__FORWARDED_PEER__".to_owned(),
+            if options.require_tailnet {
+                options.bind_ip
+            } else {
+                "$$remote_addr"
+            }
+            .to_owned(),
+        ),
+        ("__BIND_IP__".to_owned(), options.bind_ip.to_owned()),
         (
             "__DASHBOARD_PORT__".to_owned(),
             options.dashboard_port.to_string(),
@@ -356,17 +390,17 @@ pub fn render(options: RenderOptions<'_>) -> Result<Value, XtaskError> {
     if unresolved_placeholder_regex().is_match(&rendered)
         || rendered.len() > MAX_TEMPLATE_BYTES as usize
     {
-        return Err(XtaskError::InvalidCompose);
+        return Err(ComposeError::InvalidCompose);
     }
     atomic_write_private(&output_path, rendered.as_bytes())?;
     let output_file = open_bounded_regular_file(&output_path, 1, MAX_TEMPLATE_BYTES)
-        .map_err(|_| XtaskError::InvalidCompose)?;
+        .map_err(|_| ComposeError::InvalidCompose)?;
     let secrets_file = open_bounded_regular_file(&secrets_path, 1, MAX_SECRET_STORE_BYTES)
-        .map_err(|_| XtaskError::InvalidCompose)?;
+        .map_err(|_| ComposeError::InvalidCompose)?;
     let output_private = private_for_current_user(&output_file);
     let secrets_private = private_for_current_user(&secrets_file);
     if !output_private || !secrets_private {
-        return Err(XtaskError::InvalidCompose);
+        return Err(ComposeError::InvalidCompose);
     }
     Ok(json!({
         "status":"PASS",
@@ -394,7 +428,7 @@ mod tests {
     use super::{RenderOptions, normalized_dataset_root, render, verify_compatibility_profile};
 
     const TEST_IMAGE_DIGEST: &str = "ghcr.io/jukqaz/groundline-insights-api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-    const TEST_TEMPLATE: &str = "__CLICKHOUSE_PASSWORD__ __GRAFANA_READER_PASSWORD__ __GRAFANA_ADMIN_PASSWORD__ __ADMIN_TOKEN__ __ENROLLMENT_TOKEN__ __PROXY_TOKEN__ __DATASET_ROOT__ __TAILSCALE_BIND_IP__ __DASHBOARD_PORT__ __INGEST_PORT__ __INSIGHTS_API_IMAGE__ __CLICKHOUSE_IMAGE__ __NGINX_IMAGE__ __GRAFANA_IMAGE__ __GRAFANA_CLICKHOUSE_PLUGIN__ __INSIGHTS_ACCESS_URL__ __INSIGHTS_ACCESS_HOST__";
+    const TEST_TEMPLATE: &str = "__CLICKHOUSE_PASSWORD__ __GRAFANA_READER_PASSWORD__ __GRAFANA_ADMIN_PASSWORD__ __ADMIN_TOKEN__ __ENROLLMENT_TOKEN__ __PROXY_TOKEN__ __DATASET_ROOT__ __BIND_IP__ __DASHBOARD_PORT__ __INGEST_PORT__ __INSIGHTS_API_IMAGE__ __CLICKHOUSE_IMAGE__ __NGINX_IMAGE__ __GRAFANA_IMAGE__ __GRAFANA_CLICKHOUSE_PLUGIN__ __INSIGHTS_ACCESS_URL__ __INSIGHTS_ACCESS_HOST__ __REQUIRE_TAILNET__ __FORWARDED_PEER__";
 
     fn compatibility_profile(root: &Path) -> PathBuf {
         let path = root.join("compatibility.json");
@@ -567,7 +601,8 @@ mod tests {
             output: &output,
             secrets_file: &secrets,
             dataset_root: "/mnt/tank/apps/groundline",
-            tailscale_bind_ip: "100.64.0.1",
+            bind_ip: "100.64.0.1",
+            require_tailnet: true,
             dashboard_port: 13000,
             ingest_port: 18080,
             image: TEST_IMAGE_DIGEST,
@@ -616,7 +651,8 @@ mod tests {
             output: &output,
             secrets_file: &secrets,
             dataset_root: "/mnt/tank/apps/groundline",
-            tailscale_bind_ip: "100.64.0.1",
+            bind_ip: "100.64.0.1",
+            require_tailnet: true,
             dashboard_port: 13000,
             ingest_port: 18080,
             image: TEST_IMAGE_DIGEST,
@@ -642,7 +678,8 @@ mod tests {
                 output: &root.path().join("out"),
                 secrets_file: &root.path().join("secrets"),
                 dataset_root: "/mnt/../etc",
-                tailscale_bind_ip: "192.168.1.1",
+                bind_ip: "192.168.1.1",
+                require_tailnet: true,
                 dashboard_port: 13000,
                 ingest_port: 18080,
                 image: "latest",
@@ -685,7 +722,8 @@ mod tests {
             },
             secrets_file: &secrets,
             dataset_root: "/mnt/tank/apps/groundline",
-            tailscale_bind_ip: "100.64.0.1",
+            bind_ip: "100.64.0.1",
+            require_tailnet: true,
             dashboard_port: 13000,
             ingest_port: 18080,
             image: "local/groundline-insights-api:ci",
@@ -716,7 +754,8 @@ mod tests {
                     output: $output,
                     secrets_file: $secrets_file,
                     dataset_root: "/mnt/groundline",
-                    tailscale_bind_ip: "100.64.0.1",
+                    bind_ip: "100.64.0.1",
+                    require_tailnet: true,
                     dashboard_port: 13000,
                     ingest_port: 18080,
                     image: TEST_IMAGE_DIGEST,

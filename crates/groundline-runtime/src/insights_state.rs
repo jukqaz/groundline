@@ -84,6 +84,18 @@ pub enum StateError {
     UploadFailed,
     #[error("remote_request_rejected")]
     RemoteRejected,
+    #[error("remote_authentication_rejected")]
+    RemoteAuthenticationRejected,
+    #[error("enrollment_credential_rejected")]
+    EnrollmentCredentialRejected,
+    #[error("proxy_authentication_rejected")]
+    ProxyAuthenticationRejected,
+    #[error("tailnet_peer_rejected")]
+    TailnetPeerRejected,
+    #[error("enrollment_disabled")]
+    EnrollmentDisabled,
+    #[error("collector_already_enrolled")]
+    CollectorAlreadyEnrolled,
     #[error("outbox_capacity_exceeded")]
     OutboxCapacity,
     #[error("reconsent_required")]
@@ -91,14 +103,23 @@ pub enum StateError {
 }
 
 impl StateError {
-    pub fn network_performed(&self) -> bool {
+    fn requires_operator_retry(&self) -> bool {
         matches!(
             self,
-            Self::EnrollmentFailed
-                | Self::UploadFailed
-                | Self::RemoteRejected
+            Self::RemoteRejected
+                | Self::RemoteAuthenticationRejected
+                | Self::EnrollmentCredentialRejected
+                | Self::ProxyAuthenticationRejected
+                | Self::TailnetPeerRejected
+                | Self::EnrollmentDisabled
+                | Self::CollectorAlreadyEnrolled
                 | Self::ApiUpgradeRequired
         )
+    }
+
+    pub fn network_performed(&self) -> bool {
+        self.requires_operator_retry()
+            || matches!(self, Self::EnrollmentFailed | Self::UploadFailed)
     }
 
     pub fn mutation_performed(&self) -> Option<bool> {
@@ -117,6 +138,12 @@ impl StateError {
             | Self::EnrollmentFailed
             | Self::UploadFailed
             | Self::RemoteRejected
+            | Self::RemoteAuthenticationRejected
+            | Self::EnrollmentCredentialRejected
+            | Self::ProxyAuthenticationRejected
+            | Self::TailnetPeerRejected
+            | Self::EnrollmentDisabled
+            | Self::CollectorAlreadyEnrolled
             | Self::OutboxCapacity => None,
         }
     }
@@ -621,8 +648,44 @@ fn classify_response_status(status: reqwest::StatusCode) -> Result<(), StateErro
     }
 }
 
+fn classify_remote_response(status: reqwest::StatusCode, value: &Value) -> Result<(), StateError> {
+    // Only documented codes paired with their expected HTTP status may escape
+    // the remote body. Arbitrary response text must never reach logs or state.
+    let error = match (
+        status.as_u16(),
+        value.get("reason_code").and_then(Value::as_str),
+    ) {
+        (401, Some("enrollment_credential_rejected")) => StateError::EnrollmentCredentialRejected,
+        (401, Some("proxy_authentication_rejected")) => StateError::ProxyAuthenticationRejected,
+        (401, Some("tailnet_peer_rejected")) => StateError::TailnetPeerRejected,
+        (403, Some("enrollment_disabled")) => StateError::EnrollmentDisabled,
+        (409, Some("collector_already_enrolled")) => StateError::CollectorAlreadyEnrolled,
+        (401 | 403, _) => StateError::RemoteAuthenticationRejected,
+        _ => return classify_response_status(status),
+    };
+    Err(error)
+}
+
+async fn checked_response(
+    response: reqwest::Response,
+) -> Result<(reqwest::StatusCode, Value), StateError> {
+    let status = response.status();
+    match bounded_response(response).await {
+        Ok((status, value)) => {
+            classify_remote_response(status, &value)?;
+            Ok((status, value))
+        }
+        Err(error) => {
+            // A malformed or oversized error body must not turn a permanent
+            // rejection into a retryable transport failure.
+            classify_remote_response(status, &Value::Null)?;
+            Err(error)
+        }
+    }
+}
+
 fn validate_upload_response(status: reqwest::StatusCode, value: &Value) -> Result<(), StateError> {
-    classify_response_status(status)?;
+    classify_remote_response(status, value)?;
     if matches!(status.as_u16(), 200 | 202)
         && value.get("status").and_then(Value::as_str) == Some("PASS")
         && matches!(
@@ -670,7 +733,7 @@ fn validate_api_capabilities(status: reqwest::StatusCode, value: &Value) -> Resu
     if status == reqwest::StatusCode::NOT_FOUND {
         return Err(StateError::ApiUpgradeRequired);
     }
-    classify_response_status(status)?;
+    classify_remote_response(status, value)?;
     if !status.is_success() || value.get("storage_ready").and_then(Value::as_bool) != Some(true) {
         return Err(StateError::UploadFailed);
     }
@@ -694,9 +757,43 @@ async fn check_api_capabilities_url(url: Url) -> Result<(), StateError> {
     if response.status() == reqwest::StatusCode::NOT_FOUND {
         return Err(StateError::ApiUpgradeRequired);
     }
-    classify_response_status(response.status())?;
-    let (status, value) = bounded_response(response).await?;
+    let (status, value) = checked_response(response).await?;
     validate_api_capabilities(status, &value)
+}
+
+/// Verify a newly supplied enrollment key without storing it or enrolling a collector.
+pub async fn check_connection(endpoint: &str, token: &SecretString) -> Result<Value, StateError> {
+    if !(32..=4096).contains(&token.expose_secret().len()) {
+        return Err(StateError::InvalidProfile);
+    }
+    let mut url = report_url(endpoint, 7).map_err(|_| StateError::InvalidProfile)?;
+    url.set_query(None);
+    url.set_path("/healthz");
+    check_api_capabilities_url(url.clone()).await?;
+    url.set_path("/v1/enroll/check");
+    let response = client()?
+        .post(url)
+        .bearer_auth(token.expose_secret())
+        .send()
+        .await
+        .map_err(|_| StateError::EnrollmentFailed)?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err(StateError::ApiUpgradeRequired);
+    }
+    let (status, value) = checked_response(response).await?;
+    if !status.is_success()
+        || value["kind"] != "groundline-insights-enrollment-check"
+        || value["schema"] != 1
+        || value["status"] != "PASS"
+        || value["enrollment_credential_verified"] != true
+        || value["mutation_performed"] != false
+    {
+        return Err(StateError::EnrollmentFailed);
+    }
+    Ok(
+        json!({"status":"PASS","storage_ready":true,"enrollment_credential_verified":true,
+        "mutation_performed":false,"secret_value_printed":false}),
+    )
 }
 
 fn enrollment_generation(value: &Value) -> Result<u32, StateError> {
@@ -751,10 +848,13 @@ async fn enroll(
         .send()
         .await
         .map_err(|_| StateError::EnrollmentFailed)?;
-    classify_response_status(response.status())?;
-    let (status, value) = bounded_response(response)
-        .await
-        .map_err(|_| StateError::EnrollmentFailed)?;
+    let (status, value) = checked_response(response).await.map_err(|error| {
+        if error.requires_operator_retry() {
+            error
+        } else {
+            StateError::EnrollmentFailed
+        }
+    })?;
     if !matches!(status.as_u16(), 200 | 201)
         || value.get("status").and_then(Value::as_str) != Some("PASS")
         || value.get("collector_instance_id").and_then(Value::as_str)
@@ -986,8 +1086,7 @@ async fn upload(
             .send()
             .await
             .map_err(|_| StateError::UploadFailed)?;
-        classify_response_status(response.status())?;
-        let (status, value) = bounded_response(response).await?;
+        let (status, value) = checked_response(response).await?;
         validate_upload_response(status, &value)?;
         let event_through = event
             .pointer("/period/end_utc")
@@ -1086,10 +1185,7 @@ fn record_delivery_retry(
         .unwrap_or(0)
         .saturating_add(1)
         .min(32);
-    let operator_required = matches!(
-        error,
-        StateError::RemoteRejected | StateError::ApiUpgradeRequired
-    );
+    let operator_required = error.requires_operator_retry();
     let next_attempt_utc = if operator_required {
         None
     } else {
@@ -1199,6 +1295,7 @@ fn valid_tailnet_status(status: &str) -> bool {
     matches!(
         status,
         "connected"
+            | "not_required"
             | "disconnected"
             | "login_required"
             | "machine_approval_required"
@@ -1298,7 +1395,11 @@ fn status_with_tailnet_at(
         .as_ref()
         .is_some_and(|window| window.blocked("activity_checkpoint"));
     let profile_present = tailnet::is_regular_file(&codex_home.join(PROFILE_PATH));
-    let profile_configured = load_profile(codex_home).is_ok();
+    let profile = load_profile(codex_home).ok();
+    let profile_configured = profile.is_some();
+    let tailnet_required = profile
+        .as_ref()
+        .is_some_and(|value| crate::insights::endpoint_requires_tailnet(&value.endpoint));
     let credential_present = tailnet::is_regular_file(&codex_home.join(ENROLLMENT_TOKEN_PATH));
     let credential_valid = enrollment_token(codex_home).is_ok();
     let tailnet_connected = tailnet.get("tailnet_connected").and_then(Value::as_bool);
@@ -1320,7 +1421,7 @@ fn status_with_tailnet_at(
         && profile_configured
         && credential_valid
         && consent_status == "active"
-        && tailnet_connected == Some(true)
+        && (!tailnet_required || tailnet_connected == Some(true))
         && !collection_paused
         && retry.as_ref().is_none_or(|value| !value.operator_required);
     let mut blocking_reason_codes = Vec::new();
@@ -1343,10 +1444,10 @@ fn status_with_tailnet_at(
     } else if consent_status != "active" {
         blocking_reason_codes.push("reconsent_required");
         ("WARN", "reconsent_required")
-    } else if tailnet_connected == Some(false) {
+    } else if tailnet_required && tailnet_connected == Some(false) {
         blocking_reason_codes.push("tailnet_not_connected");
         ("WARN", "tailnet_disconnected")
-    } else if tailnet_connected.is_none() {
+    } else if tailnet_required && tailnet_connected.is_none() {
         blocking_reason_codes.push("tailnet_connection_unverified");
         ("WARN", "tailnet_unverified")
     } else if outbox.capacity_exceeded {
@@ -1413,7 +1514,7 @@ fn status_with_tailnet_at(
         "last_check_result_code":last_result_code,
         "last_check_utc":previous.as_ref().map(|value| value.last_check_utc.as_str()),"last_success_utc":last_success_utc,
         "last_collected_through_utc":previous.as_ref().and_then(|value| value.last_collected_through_utc.as_deref()),
-        "tailnet":tailnet,"raw_content_emitted":false,"private_paths_emitted":false,"secret_value_printed":false,
+        "tailnet_required":tailnet_required,"tailnet":tailnet,"raw_content_emitted":false,"private_paths_emitted":false,"secret_value_printed":false,
     }))
 }
 
@@ -1422,7 +1523,18 @@ fn status_with_tailnet(codex_home: &Path, tailnet: Value) -> Result<Value, State
 }
 
 pub fn status(codex_home: &Path) -> Result<Value, StateError> {
-    status_with_tailnet(codex_home, tailnet::probe())
+    let required = load_profile(codex_home)
+        .ok()
+        .is_some_and(|profile| crate::insights::endpoint_requires_tailnet(&profile.endpoint));
+    status_with_tailnet(codex_home, connection_probe(required))
+}
+
+fn connection_probe(tailnet_required: bool) -> Value {
+    if tailnet_required {
+        tailnet::probe()
+    } else {
+        json!({"tailnet_status":"not_required","tailnet_connected":null})
+    }
 }
 
 pub fn checkpoint_enabled(codex_home: &Path) -> Result<bool, StateError> {
@@ -1532,16 +1644,18 @@ pub async fn run_once(
         }));
     }
     let (identity, consent) = initialize(&directory, now)?;
-    let tailnet_state = tailnet::probe();
+    let tailnet_required = crate::insights::endpoint_requires_tailnet(&profile.endpoint);
+    let tailnet_state = connection_probe(tailnet_required);
     let tailnet_status = tailnet_state
         .get("tailnet_status")
         .and_then(Value::as_str)
         .unwrap_or("unknown")
         .to_owned();
-    if tailnet_state
-        .get("tailnet_connected")
-        .and_then(Value::as_bool)
-        != Some(true)
+    if tailnet_required
+        && tailnet_state
+            .get("tailnet_connected")
+            .and_then(Value::as_bool)
+            != Some(true)
     {
         let error = StateError::TailnetDisconnected;
         record_delivery_retry(&directory, now, &error)?;
@@ -1891,7 +2005,7 @@ mod tests {
             ("admin_token", "owner-admin-fixture"),
             ("grafana_password", "dashboard-login-fixture"),
             ("mode", "shared_service"),
-            ("endpoint", "https://example.com"),
+            ("endpoint", "http://example.com"),
         ] {
             let home = tempdir().expect("isolated owner home");
             let mut input: Value = serde_json::from_slice(&profile("")).unwrap();
@@ -1956,6 +2070,33 @@ mod tests {
             result["blocking_reason_codes"],
             json!(["first_collection_pending"])
         );
+    }
+
+    #[test]
+    fn general_https_collection_does_not_require_tailscale() {
+        let home = tempdir().unwrap();
+        let mut input: Value = serde_json::from_slice(&profile("")).unwrap();
+        input["endpoint"] = json!("https://insights.example.com");
+        configure_profile(home.path(), &serde_json::to_vec(&input).unwrap()).unwrap();
+        enable(home.path()).unwrap();
+        native_store(home.path());
+        for connected in [Value::Null, json!(false)] {
+            let result =
+                status_with_tailnet(home.path(), json!({"tailnet_connected":connected})).unwrap();
+            assert_eq!(result["ready_to_collect"], true);
+            assert_eq!(result["tailnet_required"], false);
+            assert_eq!(result["collection_state"], "awaiting_first_collection");
+        }
+        assert_eq!(
+            super::status(home.path()).unwrap()["tailnet"]["tailnet_status"],
+            "not_required"
+        );
+        input["endpoint"] = json!("http://100.64.0.1:18080");
+        configure_profile(home.path(), &serde_json::to_vec(&input).unwrap()).unwrap();
+        let result = status_with_tailnet(home.path(), json!({"tailnet_connected":false})).unwrap();
+        assert_eq!(result["ready_to_collect"], false);
+        assert_eq!(result["tailnet_required"], true);
+        assert_eq!(result["collection_state"], "tailnet_disconnected");
     }
 
     fn native_store(home: &std::path::Path) {
@@ -2432,7 +2573,11 @@ mod tests {
                 )
                 .unwrap_err()
                 .to_string(),
-                "remote_request_rejected"
+                if matches!(status, 401 | 403) {
+                    "remote_authentication_rejected"
+                } else {
+                    "remote_request_rejected"
+                }
             );
             assert_eq!(
                 classify_response_status(reqwest::StatusCode::from_u16(status).unwrap())
@@ -2545,7 +2690,7 @@ async fn capability_preflight_handles_real_http_new_old_and_unready_servers() {
         (200,json!({"storage_ready":true}).to_string(),"api_upgrade_required"),
         (404,"old api html".to_owned(),"api_upgrade_required"),
         (503,json!({"storage_ready":false}).to_string(),"event_upload_failed"),
-        (403,"not json".to_owned(),"remote_request_rejected"),
+        (403,"not json".to_owned(),"remote_authentication_rejected"),
     ] {
         let listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url=Url::parse(&format!("http://{}/healthz",listener.local_addr().unwrap())).unwrap();
@@ -2559,6 +2704,162 @@ async fn capability_preflight_handles_real_http_new_old_and_unready_servers() {
         });
         let result=check_api_capabilities_url(url).await;
         assert_eq!(result.err().map(|e|e.to_string()).as_deref().unwrap_or("ok"),expected);
+        server.await.unwrap();
+    }
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn connection_check_uses_read_only_routes_and_never_follows_auth_redirects() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    for status in [200, 401, 302] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            for step in 0..2 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = [0; 8192];
+                let size = stream.read(&mut request).await.unwrap();
+                let request = String::from_utf8_lossy(&request[..size]).to_ascii_lowercase();
+                let (code, body) = if step == 0 {
+                    assert!(request.starts_with("get /healthz"));
+                    assert!(!request.contains("authorization:"));
+                    (
+                        200,
+                        json!({"storage_ready":true,"ingest_capabilities":groundline_contracts::insights::ingest_capabilities()}),
+                    )
+                } else {
+                    assert!(request.starts_with("post /v1/enroll/check "));
+                    assert!(request.contains(&format!("authorization: bearer {}", "e".repeat(32))));
+                    (
+                        status,
+                        if status == 200 {
+                            json!({"kind":"groundline-insights-enrollment-check","schema":1,"status":"PASS",
+                            "enrollment_credential_verified":true,"mutation_performed":false})
+                        } else {
+                            json!({"reason_code":"enrollment_credential_rejected","detail":"PRIVATE_SENTINEL"})
+                        },
+                    )
+                };
+                let body = body.to_string();
+                let response = format!(
+                    "HTTP/1.1 {code} Test\r\nContent-Length: {}\r\nLocation: https://invalid.example.com\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                stream.write_all(response.as_bytes()).await.unwrap();
+            }
+        });
+        let result = check_connection(&endpoint, &SecretString::from("e".repeat(32))).await;
+        if status == 200 {
+            let receipt = result.unwrap();
+            assert_eq!(receipt["mutation_performed"], false);
+            assert!(!receipt.to_string().contains(&"e".repeat(32)));
+        } else {
+            let code = result.unwrap_err().to_string();
+            assert!(!code.contains("PRIVATE_SENTINEL"));
+            assert!(!code.contains(&"e".repeat(32)));
+        }
+        server.await.unwrap();
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn auth_rejections_preserve_bounded_server_reason_codes() {
+    for (status, reason, expected) in [
+        (
+            401,
+            "enrollment_credential_rejected",
+            "enrollment_credential_rejected",
+        ),
+        (
+            401,
+            "proxy_authentication_rejected",
+            "proxy_authentication_rejected",
+        ),
+        (401, "tailnet_peer_rejected", "tailnet_peer_rejected"),
+        (403, "enrollment_disabled", "enrollment_disabled"),
+        (
+            409,
+            "collector_already_enrolled",
+            "collector_already_enrolled",
+        ),
+        (401, "invalid_auth", "remote_authentication_rejected"),
+        (
+            401,
+            "do-not-echo-untrusted-server-detail",
+            "remote_authentication_rejected",
+        ),
+        (
+            400,
+            "enrollment_credential_rejected",
+            "remote_request_rejected",
+        ),
+    ] {
+        let error = validate_upload_response(
+            reqwest::StatusCode::from_u16(status).unwrap(),
+            &json!({"status":"FAIL","reason_code":reason}),
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), expected);
+        assert!(error.network_performed());
+        let home = tempfile::tempdir().unwrap();
+        let retry = record_delivery_retry(home.path(), Utc::now(), &error).unwrap();
+        assert!(retry.operator_required);
+        assert!(retry.next_attempt_utc.is_none());
+    }
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn rejection_bodies_are_bounded_and_keep_permanent_retry_policy() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    for (status, body, expected) in [
+        (
+            401,
+            json!({"reason_code":"enrollment_credential_rejected"}).to_string(),
+            "enrollment_credential_rejected",
+        ),
+        (
+            401,
+            json!({"reason_code":"private-untrusted-response-detail"}).to_string(),
+            "remote_authentication_rejected",
+        ),
+        (401, "not JSON".to_owned(), "remote_authentication_rejected"),
+        (
+            401,
+            "x".repeat(MAX_RESPONSE_BYTES + 1),
+            "remote_authentication_rejected",
+        ),
+        (400, "not JSON".to_owned(), "remote_request_rejected"),
+    ] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/test", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0; 4096];
+            let size = stream.read(&mut request).await.unwrap();
+            assert!(
+                !String::from_utf8_lossy(&request[..size])
+                    .to_lowercase()
+                    .contains("authorization:")
+            );
+            let response = format!(
+                "HTTP/1.1 {status} Test\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            // The bounded client may close early on an oversized body.
+            let _ = stream.write_all(response.as_bytes()).await;
+        });
+        let response = client().unwrap().get(url).send().await.unwrap();
+        let error = checked_response(response).await.unwrap_err();
+        assert_eq!(error.to_string(), expected);
+        assert!(error.requires_operator_retry());
+        assert!(
+            !error
+                .to_string()
+                .contains("private-untrusted-response-detail")
+        );
         server.await.unwrap();
     }
 }

@@ -6,7 +6,7 @@ does not require Core. It owns only the networked surface:
 
 - four fail-open Codex lifecycle hooks;
 - owner-private identity, consent, checkpoint, credential, and outbox state;
-- Tailnet-only collection and owner reports;
+- HTTPS collection and owner reports, with optional Tailnet restriction;
 - a Rust/Axum API, ClickHouse schema, Grafana dashboards, and generic deployment
   tooling.
 
@@ -16,7 +16,7 @@ a daemon or scheduler, or replace Codex permissions and execution.
 Native Codex App/CLI is the collection source. No inference proxy, generated
 model catalog, custom provider configuration, or Core installation is required.
 Insights reads native activity into a private aggregate outbox and sends it
-directly to the owner API over Tailnet; ClickHouse and Grafana remain downstream
+directly to the owner API over HTTPS or an optional Tailnet connection; ClickHouse and Grafana remain downstream
 of that API. It does not read model configuration or inference credentials.
 
 ## Install and upgrade
@@ -61,11 +61,11 @@ groundline-insights insights fetch-report \
 ## Owner configuration
 
 Installation does not activate collection. `worker configure` accepts a reviewed
-schema-7 input containing a Tailnet endpoint and an owner-issued
+schema-7 input containing an HTTPS endpoint (or optional Tailnet endpoint) and an owner-issued
 `enrollment_token`. It writes a sanitized profile and the credential to separate
 owner-private files under `~/.codex/groundline/insights`; the secret is never
 printed or copied into the plugin. First-contact enrollment requires both
-Tailnet reachability and that credential. Each collector then uses its own token.
+server reachability and that credential. Each collector then uses its own token.
 The fleet-wide CLI report is an administrative operation: it requires an
 explicit owner-private file containing only the separate admin token. Collector
 tokens cannot fetch it. Keep that file off collector-only hosts and never commit
@@ -119,7 +119,7 @@ paths, hostnames, repository names, task IDs, rollout IDs, account identifiers,
 and IP addresses.
 
 The supported collector runtimes are Codex App and Codex CLI. The worker accepts
-only a Tailnet IPv4 or `*.ts.net` endpoint, and every operator supplies their own
+an HTTPS origin or optional Tailnet endpoint, and every operator supplies their own
 private service and credentials. The official service path is the Rust/Axum API,
 ClickHouse storage, strict 7/30/90-day CLI JSON reports, and the provisioned
 Grafana dashboard. Docker Compose is the public self-hosting preview; TrueNAS is

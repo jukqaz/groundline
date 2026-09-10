@@ -103,7 +103,7 @@ upgrade or reconfigure anyone's private service.
 ## User-selectable operations
 
 An owner can choose whether to install Insights, when to enable or disable it,
-which private Tailnet endpoint to use, when to explicitly retry collection,
+which HTTPS or optional Tailnet endpoint to use, when to explicitly retry collection,
 and whether to consume strict JSON reports or the supplied Grafana
 dashboard. Report windows are 7, 30, or 90 days.
 

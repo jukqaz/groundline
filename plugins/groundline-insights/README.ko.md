@@ -6,7 +6,7 @@ self-hosted 데이터 플러그인입니다. Core와 독립적으로 설치할 �
 
 - fail-open Codex lifecycle hook 4개
 - owner-private identity, consent, checkpoint, credential, outbox
-- Tailnet 전용 수집과 owner report
+- 일반 HTTPS 수집과 owner report, 선택형 Tailscale 제한
 - Rust/Axum API, ClickHouse schema, Grafana dashboard, 범용 배포 도구
 
 GroundLine skill을 중복 설치하거나 global Codex 설정을 바꾸지 않으며 daemon,
@@ -14,7 +14,7 @@ scheduler, model router를 만들지 않습니다.
 
 수집 원본은 네이티브 Codex App/CLI입니다. 추론 프록시, 생성된 모델 카탈로그,
 custom provider 설정, Core 설치가 필요하지 않습니다. 네이티브 활동을 비공개
-집계 outbox에 저장하고 Tailnet Insights API로 직접 전송하며, ClickHouse와
+집계 outbox에 저장하고 HTTPS 또는 선택형 Tailnet Insights API로 직접 전송하며, ClickHouse와
 Grafana는 이 API에 연결됩니다. 모델 설정이나 추론 인증 정보는 읽지 않습니다.
 
 ## 설치와 업그레이드
@@ -48,12 +48,12 @@ binary 이름은 macOS/Linux에서 `groundline-insights`, Windows에서
 
 ## Owner 설정
 
-설치만으로 수집이 활성화되지 않습니다. `worker configure`는 Tailnet endpoint와
+설치만으로 수집이 활성화되지 않습니다. `worker configure`는 HTTPS endpoint 또는 선택형 Tailnet endpoint와
 owner-issued `enrollment_token`이 들어간 schema-7 입력을 받아, secret이 제거된
 profile과 credential을 `~/.codex/groundline/insights` 아래의 서로 다른 비공개
 파일로 저장합니다. secret은 출력하거나 plugin에 복사하지 않습니다.
 
-첫 enrollment에는 Tailnet 연결과 credential이 모두 필요하며, 이후 collector별
+첫 enrollment에는 서버 연결과 credential이 모두 필요하며, 이후 collector별
 token을 사용합니다. 설정 입력은 운영 비밀이므로 Git에 commit하면 안 됩니다.
 `references/owner-profile.example.json`은 전체 필드를 제공하지만 `REPLACE_ME`를
 의도적으로 짧게 두었으므로 그대로는 활성화되지 않습니다. endpoint와 token을
@@ -106,8 +106,8 @@ receipt를 만들고 미동의 pending event를 quarantine으로 격리합니다
 표시합니다. 기존 전송 대기·운영 조치 사유는 우선 표시하며 pending event는 보존합니다.
 추론 wrapper를 제거해도 기존 Codex 홈, identity, 동의와 outbox를 유지해야 합니다.
 
-지원 collector runtime은 Codex App과 Codex CLI입니다. worker endpoint는 Tailnet
-IPv4 또는 `*.ts.net`만 허용하며, 각 운영자가 자신의 비공개 서비스와 credential을
+지원 collector runtime은 Codex App과 Codex CLI입니다. worker endpoint는 일반 HTTPS
+origin 또는 선택형 Tailnet 주소를 허용하며, 각 운영자가 자신의 비공개 서비스와 credential을
 제공합니다. 공식 서비스 경로는 Rust/Axum API, ClickHouse 저장소, 엄격한
 7일·30일·90일 CLI JSON report, provision된 Grafana dashboard입니다. Docker
 Compose는 공개 self-hosting preview이고 TrueNAS는 선택형 운영 overlay일 뿐

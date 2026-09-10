@@ -2,6 +2,10 @@
 
 1. Freeze scope and update the workspace plus both plugin manifests to the same
    strict semantic version.
+   Keep the desktop package, Tauri configuration, and native workspace at that
+   version. Qualify its frontend tests and native commands before packaging the
+   macOS Apple Silicon preview. Include its archive in checksums and provenance;
+   label the preview's notarization and platform support accurately.
 2. Run formatting and targeted CLI/xtask tests while editing. On final source,
    run workspace tests, Clippy, dependency policy, source verification, and
    `git diff --check` once.

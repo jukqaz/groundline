@@ -315,7 +315,8 @@ struct Config {
     clickhouse_password: SecretString,
     admin_token: SecretString,
     enrollment_token: SecretString,
-    proxy_token: SecretString,
+    proxy_token: Option<SecretString>,
+    require_tailnet: bool,
     owner_enrollment_enabled: bool,
     latest_version: String,
     minimum_supported_version: String,
@@ -344,7 +345,8 @@ fn bounded_env_u64(name: &str, default: u64, minimum: u64, maximum: u64) -> Resu
 
 impl Config {
     fn from_env() -> Result<Self, ApiError> {
-        let host = std::env::var("GROUNDLINE_LISTEN_HOST").unwrap_or_else(|_| "0.0.0.0".to_owned());
+        let host =
+            std::env::var("GROUNDLINE_LISTEN_HOST").unwrap_or_else(|_| "127.0.0.1".to_owned());
         let port = std::env::var("GROUNDLINE_LISTEN_PORT")
             .unwrap_or_else(|_| "8080".to_owned())
             .parse::<u16>()
@@ -433,7 +435,20 @@ impl Config {
             clickhouse_password: required_secret("GROUNDLINE_CLICKHOUSE_PASSWORD")?,
             admin_token: required_secret("GROUNDLINE_ADMIN_TOKEN")?,
             enrollment_token: required_secret("GROUNDLINE_ENROLLMENT_TOKEN")?,
-            proxy_token: required_secret("GROUNDLINE_PROXY_TOKEN")?,
+            proxy_token: std::env::var("GROUNDLINE_PROXY_TOKEN")
+                .ok()
+                .map(|_| required_secret("GROUNDLINE_PROXY_TOKEN"))
+                .transpose()?,
+            require_tailnet: match std::env::var("GROUNDLINE_REQUIRE_TAILNET").as_deref() {
+                Ok("true") => true,
+                Ok("false") | Err(_) => false,
+                _ => {
+                    return Err(ApiError::new(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "invalid_request",
+                    ));
+                }
+            },
             owner_enrollment_enabled: std::env::var("GROUNDLINE_OWNER_ENROLLMENT_ENABLED")
                 .is_ok_and(|value| value.eq_ignore_ascii_case("true")),
             latest_version,
@@ -841,24 +856,53 @@ fn private_address(address: IpAddr) -> bool {
     }
 }
 
-fn require_tailnet(
+fn effective_peer(
     state: &AppState,
     peer: SocketAddr,
     headers: &HeaderMap,
 ) -> Result<IpAddr, ApiError> {
+    // Public HTTPS deployments terminate TLS at the operator's reverse proxy.
+    // Forwarded addresses affect rate limiting only after proxy authentication.
+    if !state.config.require_tailnet {
+        let trusted_proxy = (private_address(peer.ip()) || peer.ip().is_loopback())
+            && state.config.proxy_token.as_ref().is_some_and(|token| {
+                headers
+                    .get("x-groundline-proxy-token")
+                    .and_then(|value| value.to_str().ok())
+                    .is_some_and(|value| constant_time_equal(value, token.expose_secret()))
+            });
+        return Ok(if trusted_proxy {
+            headers
+                .get("x-forwarded-for")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<IpAddr>().ok())
+                .unwrap_or(peer.ip())
+        } else {
+            peer.ip()
+        });
+    }
     if tailnet_address(peer.ip()) {
         return Ok(peer.ip());
     }
-    if !private_address(peer.ip())
-        || !constant_time_equal(
+    if !private_address(peer.ip()) {
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "tailnet_peer_rejected",
+        ));
+    }
+    if !state.config.proxy_token.as_ref().is_some_and(|token| {
+        constant_time_equal(
             headers
                 .get("x-groundline-proxy-token")
                 .and_then(|value| value.to_str().ok())
                 .unwrap_or_default(),
-            state.config.proxy_token.expose_secret(),
+            token.expose_secret(),
         )
-    {
-        return Err(ApiError::new(StatusCode::UNAUTHORIZED, "invalid_auth"));
+    }) {
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "proxy_authentication_rejected",
+        ));
     }
     let forwarded = headers
         .get("x-forwarded-for")
@@ -866,17 +910,16 @@ fn require_tailnet(
         .filter(|value| !value.contains(','))
         .and_then(|value| value.parse::<IpAddr>().ok());
     if !forwarded.is_some_and(tailnet_address) {
-        return Err(ApiError::new(StatusCode::UNAUTHORIZED, "invalid_auth"));
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "tailnet_peer_rejected",
+        ));
     }
     Ok(forwarded.expect("validated forwarded Tailnet address"))
 }
 
-fn admit_tailnet(
-    state: &AppState,
-    peer: SocketAddr,
-    headers: &HeaderMap,
-) -> Result<IpAddr, ApiError> {
-    let effective_peer = require_tailnet(state, peer, headers)?;
+fn admit_peer(state: &AppState, peer: SocketAddr, headers: &HeaderMap) -> Result<IpAddr, ApiError> {
+    let effective_peer = effective_peer(state, peer, headers)?;
     state.rate_limit(
         RateLimitScope::PreAuthPeer(effective_peer),
         MAX_PRE_AUTH_REQUESTS_PER_MINUTE,
@@ -894,7 +937,7 @@ async fn admit_collector_request(
     request: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
-    admit_tailnet(&state, peer, request.headers())?;
+    admit_peer(&state, peer, request.headers())?;
     let _request_permit = state
         .collector_request_permits
         .clone()
@@ -920,7 +963,8 @@ fn require_token(headers: &HeaderMap, expected: &SecretString) -> Result<(), Api
 }
 
 fn require_enrollment(config: &Config, headers: &HeaderMap) -> Result<(), ApiError> {
-    require_token(headers, &config.enrollment_token)?;
+    require_token(headers, &config.enrollment_token)
+        .map_err(|_| ApiError::new(StatusCode::UNAUTHORIZED, "enrollment_credential_rejected"))?;
     if !config.owner_enrollment_enabled {
         return Err(ApiError::new(StatusCode::FORBIDDEN, "enrollment_disabled"));
     }
@@ -1021,13 +1065,32 @@ struct Enrollment {
     groundline_version: String,
 }
 
+async fn check_enrollment(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    admit_peer(&state, peer, &headers)?;
+    require_enrollment(&state.config, &headers)?;
+    state.rate_limit(RateLimitScope::Enrollment, MAX_ENROLLMENTS_PER_MINUTE)?;
+    Ok(safe_response(
+        StatusCode::OK,
+        json!({
+            "kind":"groundline-insights-enrollment-check", "schema":1,
+            "status":"PASS", "enrollment_credential_verified":true,
+            "mutation_performed":false,
+        }),
+        "accepted",
+    ))
+}
+
 async fn enroll(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Json(input): Json<Enrollment>,
 ) -> Result<Response, ApiError> {
-    require_tailnet(&state, peer, &headers)?;
+    effective_peer(&state, peer, &headers)?;
     require_enrollment(&state.config, &headers)?;
     state.rate_limit(RateLimitScope::Enrollment, MAX_ENROLLMENTS_PER_MINUTE)?;
     let _storage_permit = state.storage_permit(StorageClass::Operator)?;
@@ -1503,7 +1566,7 @@ async fn delete_collector(
     Path(collector_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
-    require_tailnet(&state, peer, &headers)?;
+    effective_peer(&state, peer, &headers)?;
     require_admin_report(&state.config, &headers)?;
     state.rate_limit(RateLimitScope::Admin, MAX_REQUESTS_PER_MINUTE)?;
     let _storage_permit = state.storage_permit(StorageClass::Operator)?;
@@ -1574,7 +1637,7 @@ async fn weekly_report(
     headers: HeaderMap,
     Query(query): Query<ReportQuery>,
 ) -> Result<Response, ApiError> {
-    require_tailnet(&state, peer, &headers)?;
+    effective_peer(&state, peer, &headers)?;
     require_admin_report(&state.config, &headers)?;
     state.rate_limit(RateLimitScope::Admin, MAX_REQUESTS_PER_MINUTE)?;
     if !matches!(query.days, 7 | 30 | 90) {
@@ -1857,6 +1920,7 @@ fn app(state: AppState) -> Router {
         .route("/healthz", get(health))
         .route("/v3/reports/weekly", get(weekly_report))
         .route("/v1/enroll", post(enroll))
+        .route("/v1/enroll/check", post(check_enrollment))
         .route("/v1/collectors/{collector_id}", delete(delete_collector))
         .merge(collector_routes)
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BYTES))
@@ -1945,6 +2009,131 @@ mod tests {
         assert!(!String::from_utf8_lossy(&body).contains(&"x".repeat(32)));
     }
 
+    #[tokio::test]
+    async fn enrollment_check_is_read_only_and_distinguishes_auth_boundaries() {
+        for (peer, proxy, forwarded, token, enabled, status, reason) in [
+            ("100.64.0.2:41000", None, None, "e", true, 200, "accepted"),
+            (
+                "100.64.0.2:41000",
+                None,
+                None,
+                "x",
+                true,
+                401,
+                "enrollment_credential_rejected",
+            ),
+            (
+                "100.64.0.2:41000",
+                None,
+                None,
+                "e",
+                false,
+                403,
+                "enrollment_disabled",
+            ),
+            (
+                "172.16.4.5:41000",
+                Some("x"),
+                Some("100.64.0.2"),
+                "e",
+                true,
+                401,
+                "proxy_authentication_rejected",
+            ),
+            (
+                "172.16.4.5:41000",
+                Some("p"),
+                Some("192.168.1.1"),
+                "e",
+                true,
+                401,
+                "tailnet_peer_rejected",
+            ),
+            (
+                "172.16.4.5:41000",
+                Some("p"),
+                Some("100.64.0.2"),
+                "e",
+                true,
+                200,
+                "accepted",
+            ),
+            (
+                "8.8.8.8:41000",
+                None,
+                None,
+                "e",
+                true,
+                401,
+                "tailnet_peer_rejected",
+            ),
+        ] {
+            // Storage points to an absent local server: successful checks must
+            // not enroll a collector or query/write ClickHouse.
+            let mut state = unit_state(0, 0);
+            state.config.owner_enrollment_enabled = enabled;
+            let mut request = local_request(
+                Method::POST,
+                "/v1/enroll/check",
+                &token.repeat(32),
+                None,
+                &[],
+            );
+            request
+                .extensions_mut()
+                .insert(ConnectInfo(peer.parse::<SocketAddr>().unwrap()));
+            if let Some(proxy) = proxy {
+                request.headers_mut().insert(
+                    "x-groundline-proxy-token",
+                    HeaderValue::from_str(&proxy.repeat(32)).unwrap(),
+                );
+            }
+            if let Some(forwarded) = forwarded {
+                request
+                    .headers_mut()
+                    .insert("x-forwarded-for", HeaderValue::from_str(forwarded).unwrap());
+            }
+            let response = app(state).oneshot(request).await.unwrap();
+            assert_eq!(response.status().as_u16(), status);
+            let value = response_json(response).await;
+            assert_eq!(value["reason_code"], reason);
+            assert!(!value.to_string().contains(&token.repeat(32)));
+            if status == 200 {
+                assert_eq!(value["enrollment_credential_verified"], true);
+                assert_eq!(value["mutation_performed"], false);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn public_https_admission_keeps_enrollment_auth_and_ignores_untrusted_forwarding() {
+        for (token, expected) in [("e", 200), ("x", 401)] {
+            let mut state = unit_state(2, 2);
+            state.config.require_tailnet = false;
+            state.config.proxy_token = None;
+            let peer: SocketAddr = "203.0.113.25:41000".parse().unwrap();
+            let mut request = Request::builder()
+                .method("POST")
+                .uri("/v1/enroll/check")
+                .header("authorization", format!("Bearer {}", token.repeat(32)))
+                .header("x-forwarded-for", "100.64.0.1")
+                .body(Body::empty())
+                .unwrap();
+            assert_eq!(
+                effective_peer(&state, peer, request.headers()).unwrap(),
+                peer.ip()
+            );
+            request.extensions_mut().insert(ConnectInfo(peer));
+            let response = app(state).oneshot(request).await.unwrap();
+            assert_eq!(response.status().as_u16(), expected);
+            let body = response_json(response).await;
+            assert!(!body.to_string().contains(&token.repeat(32)));
+            if expected == 200 {
+                assert_eq!(body["mutation_performed"], false);
+            }
+        }
+    }
+
     fn unit_config() -> Config {
         Config {
             listen: "127.0.0.1:8080".parse().expect("socket"),
@@ -1954,7 +2143,8 @@ mod tests {
             clickhouse_password: SecretString::from("x".repeat(32)),
             admin_token: SecretString::from("x".repeat(32)),
             enrollment_token: SecretString::from("e".repeat(32)),
-            proxy_token: SecretString::from("p".repeat(32)),
+            proxy_token: Some(SecretString::from("p".repeat(32))),
+            require_tailnet: true,
             owner_enrollment_enabled: true,
             latest_version: env!("CARGO_PKG_VERSION").to_owned(),
             minimum_supported_version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -2014,7 +2204,8 @@ mod tests {
             ),
             admin_token: SecretString::from("a".repeat(32)),
             enrollment_token: SecretString::from("e".repeat(32)),
-            proxy_token: SecretString::from("p".repeat(32)),
+            proxy_token: Some(SecretString::from("p".repeat(32))),
+            require_tailnet: true,
             owner_enrollment_enabled: true,
             latest_version: env!("CARGO_PKG_VERSION").to_owned(),
             minimum_supported_version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -2353,7 +2544,7 @@ mod tests {
         let state = unit_state(1, 1);
         let mut headers = HeaderMap::new();
         headers.insert("x-forwarded-for", HeaderValue::from_static("100.64.0.9"));
-        let direct = require_tailnet(
+        let direct = effective_peer(
             &state,
             "100.64.0.7:41000".parse().expect("direct peer"),
             &headers,
@@ -2365,7 +2556,7 @@ mod tests {
             "x-groundline-proxy-token",
             HeaderValue::from_str(&"p".repeat(32)).expect("proxy token"),
         );
-        let proxied = require_tailnet(
+        let proxied = effective_peer(
             &state,
             "192.168.1.10:41000".parse().expect("proxy peer"),
             &headers,
@@ -2378,7 +2569,7 @@ mod tests {
             HeaderValue::from_static("100.64.0.9, 100.64.0.10"),
         );
         assert!(
-            require_tailnet(
+            effective_peer(
                 &state,
                 "192.168.1.10:41000".parse().expect("proxy peer"),
                 &headers,
@@ -2412,7 +2603,8 @@ mod tests {
             clickhouse_password: SecretString::from("x".repeat(32)),
             admin_token: SecretString::from("x".repeat(32)),
             enrollment_token: SecretString::from("e".repeat(32)),
-            proxy_token: SecretString::from("x".repeat(32)),
+            proxy_token: Some(SecretString::from("x".repeat(32))),
+            require_tailnet: true,
             owner_enrollment_enabled: true,
             latest_version: "0.20.0".to_owned(),
             minimum_supported_version: "0.20.0".to_owned(),

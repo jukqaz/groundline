@@ -122,7 +122,7 @@ enum WorkerCommand {
 
 #[derive(Debug, Subcommand)]
 enum InsightsCommand {
-    /// Fetch one strict privacy-safe report from the configured Tailnet service.
+    /// Fetch one strict privacy-safe report from the configured HTTPS or optional Tailnet service.
     FetchReport {
         #[arg(long, value_parser = parse_report_days, default_value_t = 7)]
         days: u16,

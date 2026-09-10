@@ -20,7 +20,7 @@ use thiserror::Error;
 use self::package::contains_private_marker;
 
 mod arm64_verify;
-mod compose;
+use xtask::compose;
 mod guidance;
 mod history;
 mod local_verify;
@@ -99,8 +99,11 @@ enum Command {
         secrets_file: PathBuf,
         #[arg(long)]
         dataset_root: String,
+        #[arg(long, default_value = "127.0.0.1")]
+        bind_ip: String,
+        /// Restrict admission to Tailscale peers; optional for normal HTTPS.
         #[arg(long)]
-        tailscale_bind_ip: String,
+        require_tailnet: bool,
         #[arg(long, default_value_t = 13000)]
         dashboard_port: u16,
         #[arg(long, default_value_t = 18080)]
@@ -173,8 +176,8 @@ enum XtaskError {
     InvalidSource,
     #[error("invalid_history")]
     InvalidHistory,
-    #[error("invalid_compose")]
-    InvalidCompose,
+    #[error(transparent)]
+    Compose(#[from] xtask::compose::ComposeError),
     #[error("local_verification_failed")]
     LocalVerificationFailed,
     #[error("arm64_verification_failed")]
@@ -539,7 +542,8 @@ fn run(cli: Cli) -> Result<(), XtaskError> {
             output,
             secrets_file,
             dataset_root,
-            tailscale_bind_ip,
+            bind_ip,
+            require_tailnet,
             dashboard_port,
             ingest_port,
             image,
@@ -554,7 +558,8 @@ fn run(cli: Cli) -> Result<(), XtaskError> {
                 output: &output,
                 secrets_file: &secrets_file,
                 dataset_root: &dataset_root,
-                tailscale_bind_ip: &tailscale_bind_ip,
+                bind_ip: &bind_ip,
+                require_tailnet,
                 dashboard_port,
                 ingest_port,
                 image: &image,

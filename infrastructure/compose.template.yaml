@@ -55,6 +55,7 @@ services:
       GROUNDLINE_CLICKHOUSE_PASSWORD: "__CLICKHOUSE_PASSWORD__"
       GROUNDLINE_ADMIN_TOKEN: "__ADMIN_TOKEN__"
       GROUNDLINE_ENROLLMENT_TOKEN: "__ENROLLMENT_TOKEN__"
+      GROUNDLINE_REQUIRE_TAILNET: "__REQUIRE_TAILNET__"
       GROUNDLINE_PROXY_TOKEN: "__PROXY_TOKEN__"
       GROUNDLINE_OWNER_ENROLLMENT_ENABLED: "true"
       GROUNDLINE_MINIMUM_SUPPORTED_VERSION: "0.20.0"
@@ -120,7 +121,7 @@ services:
               proxy_read_timeout 30s;
               proxy_set_header Connection "";
               proxy_set_header Host $$host;
-              proxy_set_header X-Forwarded-For __TAILSCALE_BIND_IP__;
+              proxy_set_header X-Forwarded-For __FORWARDED_PEER__;
               proxy_set_header X-Forwarded-Proto http;
               proxy_set_header X-GroundLine-Proxy-Token "__PROXY_TOKEN__";
             }
@@ -136,7 +137,7 @@ services:
     tmpfs:
       - /tmp:size=8m,mode=1777
     ports:
-      - "__TAILSCALE_BIND_IP__:__INGEST_PORT__:8080"
+      - "__BIND_IP__:__INGEST_PORT__:8080"
     depends_on:
       api:
         condition: service_healthy
@@ -216,7 +217,7 @@ services:
       - source: grafana_dashboard
         target: /var/lib/grafana/dashboards/groundline-insights.json
     ports:
-      - "__TAILSCALE_BIND_IP__:__DASHBOARD_PORT__:3000"
+      - "__BIND_IP__:__DASHBOARD_PORT__:3000"
     depends_on:
       api:
         condition: service_healthy

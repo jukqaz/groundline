@@ -2,6 +2,7 @@
 
 use thiserror::Error;
 
+pub mod compose;
 pub mod deploy;
 pub mod secret_store;
 

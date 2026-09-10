@@ -34,6 +34,21 @@ Interpret the lanes independently:
 
 ## Common actions
 
+- `enrollment_credential_rejected`: the owner API rejected the enrollment
+  credential. Keep the collector identity, token, consent, and outbox. Review the
+  owner-issued enrollment credential through the normal private configuration
+  flow, then perform one explicit retry. A collector token or a locally valid
+  credential file does not establish enrollment authorization.
+- `proxy_authentication_rejected` / `tailnet_peer_rejected`: inspect the trusted
+  ingress boundary and effective Tailnet peer. Do not rotate enrollment
+  credentials based on these errors.
+- `enrollment_disabled` / `collector_already_enrolled`: review the server's owner
+  enrollment policy or collector identity/token ownership respectively. Do not
+  reset an identity or discard pending data to bypass a conflict.
+- `remote_authentication_rejected`: an HTTP 401/403 response did not provide a
+  recognized, matching reason code. The runtime intentionally does not echo
+  arbitrary server details. Use server-side evidence before assigning blame to
+  an enrollment credential, proxy, or collector token.
 - `native_activity_unavailable` / `codex_state_store_unavailable`: check the
   intended native `CODEX_HOME` and source permissions. The highest numeric
   `state_<n>.sqlite` must be a nonempty, owned regular file; a newer unusable
@@ -97,6 +112,13 @@ package-integrity failure. Enabling without a valid owner profile and enrollment
 credential is rejected before identity, consent, or policy state is created.
 Seven days without a successful collection becomes `collection_state: stale`;
 a success timestamp more than five minutes in the future becomes `clock_skew`.
+
+`enrollment_credential_valid` checks only the local file and its token format;
+it does not make a network request or prove server acceptance. A reviewed API
+client can use `POST /v1/enroll/check` with the owner enrollment credential to
+verify the Tailnet and enrollment boundaries without registering a collector or
+accessing ClickHouse. This route still enforces authentication and rate limits;
+it does not grant authority to read a credential or reset collection state.
 
 ## Unrecoverable historical gaps
 

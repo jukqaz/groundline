@@ -60,7 +60,7 @@ collector와 API 계약은 공개 Compose preview와 분리해 release qualifica
 운영 준비 완료를 주장하려면 정확한 release image digest, fresh-host stack 검증,
 해당 운영 배포의 외부 TLS/Tailnet 인증 검증이 추가로 필요합니다.
 
-각 사용자는 자신의 Tailnet endpoint, enrollment credential, 저장소, retention,
+각 사용자는 자신의 HTTPS 또는 선택형 Tailnet endpoint, enrollment credential, 저장소, retention,
 접근 제어를 제공합니다. 공개 플러그인을 설치해도 maintainer의 ClickHouse,
 Grafana, Tailnet에 연결되지 않습니다.
 
@@ -88,7 +88,7 @@ maintainer 기본 endpoint는 없습니다. 개인 배포 설정과 데이터는
 
 ## 사용자가 선택할 수 있는 것
 
-Insights 설치 여부, enable/disable 시점, 개인 Tailnet endpoint, 수집 재시도
+Insights 설치 여부, enable/disable 시점, 개인 HTTPS 또는 선택형 Tailnet endpoint, 수집 재시도
 시점, CLI JSON report와 Grafana dashboard 사용 여부를 선택할 수 있습니다.
 report 기간은 7일, 30일, 90일입니다.
 

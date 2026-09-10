@@ -1,0 +1,18 @@
+{
+  "identifier": "main",
+  "description": "Only the bundled main window can use typed GroundLine operations.",
+  "windows": ["main"],
+  "permissions": [
+    "allow-snapshot",
+    "allow-check-connection",
+    "allow-connect",
+    "allow-set-collection",
+    "allow-export-compose",
+    "allow-core-diagnostic",
+    "allow-open-dashboard",
+    "allow-cancel-connection",
+    "allow-resume-collection",
+    "allow-save-dashboard",
+    "allow-reveal-export"
+  ]
+}

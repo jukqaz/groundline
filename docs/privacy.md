@@ -15,7 +15,7 @@ edits. See the [personal improvement contract](../plugins/groundline/references/
 GroundLine Insights is separately installed, does not require Core, and remains
 inactive until the owner configures and enables it. It writes only bounded
 owner-private state under the Codex home and sends strict aggregate events to an
-owner-selected Tailnet endpoint. Its contracts exclude raw prompts, responses,
+owner-selected HTTPS endpoint (or optional Tailnet endpoint). Its contracts exclude raw prompts, responses,
 transcripts, commands, patches, paths, hostnames, repository names, task IDs,
 rollout IDs, account identifiers, and IP addresses.
 

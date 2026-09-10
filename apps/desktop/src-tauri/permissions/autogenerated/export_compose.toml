@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-export-compose"
+description = "Enables the export_compose command without any pre-configured scope."
+commands.allow = ["export_compose"]
+
+[[permission]]
+identifier = "deny-export-compose"
+description = "Denies the export_compose command without any pre-configured scope."
+commands.deny = ["export_compose"]

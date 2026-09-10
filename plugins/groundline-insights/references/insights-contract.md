@@ -17,7 +17,7 @@ modes are `desktop`, `local_headless`, and `remote_headless`. Supported platform
 are macOS, Linux, and Windows on ARM64 and x86-64.
 
 The current integration contract is deliberately narrow: Codex App/CLI are the
-only collector sources, Tailnet is the only remote transport, the Rust/Axum API
+only collector sources, HTTPS is the default remote transport, with optional Tailnet access, the Rust/Axum API
 is the ingestion service, ClickHouse is the storage and report backend, and
 Grafana is the first-party dashboard. Docker Compose is the generic self-hosting
 path and TrueNAS is one supported owner-run deployment path. Arbitrary Internet
@@ -29,7 +29,7 @@ databases, and hosted GroundLine accounts are outside the current contract.
 Installation is inert. An owner explicitly supplies a schema-7
 `groundline-insights-owner-profile` input with:
 
-- a Tailnet HTTP or HTTPS endpoint with no userinfo, query, fragment, or path;
+- an HTTPS endpoint (or optional Tailnet/loopback HTTP endpoint) with no userinfo, query, fragment, or path;
 - automatic activity checkpoints and initial history sync enabled;
 - `all_activity`, a 900-second minimum interval, diagnostics disabled, and
   `native_hook_checkpoints`;
@@ -40,6 +40,8 @@ private file, and enablement is rejected until both the sanitized profile and
 enrollment credential are valid. Disabled lifecycle checkpoints exit without
 spawning a detached worker. Worker status reports readiness and bounded blockers;
 it never converts an unobservable Tailnet probe into a false disconnected state.
+For ordinary HTTPS endpoints, tailnet_required is false and the probe is skipped;
+not_required is a bounded Tailnet status. Only explicit Tailnet endpoints gate readiness on that probe.
 Only the current compact policy schema 1, status schema 4, and consent schema 2
 are accepted. The former private policy shape and status schema 3 are not
 imported. Unsupported versions, kinds, or shapes fail closed with
@@ -105,8 +107,7 @@ update; retrospective repair needs a separate generation/activation decision.
 
 The `/v1/enroll` route requires all of the following:
 
-1. a loopback/Tailnet peer, or a private trusted proxy presenting the configured
-   proxy credential and one unambiguous Tailnet forwarded address;
+1. in optional `GROUNDLINE_REQUIRE_TAILNET=true` mode, a loopback/Tailnet peer or a private authenticated proxy with one Tailnet forwarded address; in general HTTPS mode, normal peers are admitted before token authentication and bounded rate limits;
 2. owner enrollment enabled on the service;
 3. `Authorization: Bearer <owner enrollment credential>`;
 4. a strict schema-2 enrollment body with one collector UUID, one proposed
@@ -121,6 +122,20 @@ The CLI requires that admin token through an explicit owner-private token file;
 an authenticated collector token never authorizes the fleet-wide report.
 Comparisons are constant-time and request bodies, responses, and rate windows
 are bounded.
+
+`POST /v1/enroll/check` uses the same selected network policy and owner enrollment checks without
+reading or writing collector records, event history, or ClickHouse. It requires
+no enrollment body and returns `enrollment_credential_verified: true` only after
+authentication and rate checks succeed. Its `mutation_performed: false` refers
+to persistent application data; transient rate budgets still apply.
+
+The API distinguishes `enrollment_credential_rejected`,
+`proxy_authentication_rejected`, and `tailnet_peer_rejected` with HTTP 401.
+Disabled enrollment returns 403 `enrollment_disabled`; a collector identity
+already bound to another token returns 409 `collector_already_enrolled`.
+The worker preserves only these allowlisted, status-matched reasons. Other
+401/403 replies become `remote_authentication_rejected`; arbitrary response text
+is never emitted. These permanent failures still require an operator retry.
 
 ## Collection and transport
 

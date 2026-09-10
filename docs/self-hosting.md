@@ -7,13 +7,20 @@ the plugin never connects to a maintainer service.
 
 The generic Compose path is an optional public self-hosting preview. It is not a
 hosted GroundLine service and it is not required by Core. Qualify the exact
-release on a fresh host and verify the external TLS/Tailnet gate before treating
+release on a fresh host and verify the external HTTPS endpoint before treating
 an operator deployment as production-ready.
+
+
+## Standard HTTPS and optional Tailscale
+
+The default is `--bind-ip 127.0.0.1`. Terminate TLS at a reverse proxy on the Docker host: route the API HTTPS origin to 127.0.0.1:18080 and the separate Grafana HTTPS origin to 127.0.0.1:13000. ClickHouse has no host port.
+
+Only for Tailscale, pass `--require-tailnet --bind-ip 100.64.0.1` with the actual server Tailnet IPv4. This sets `GROUNDLINE_REQUIRE_TAILNET=true`. Standard HTTPS uses false and preserves enrollment, collector and admin token authentication, rate limits and bounded requests. Clients skip Tailscale probing for ordinary HTTPS endpoints. The API does not terminate TLS itself; expose a valid TLS proxy, never a public plaintext API. Loopback HTTP is supported for local development; Tailnet HTTP is optional.
 
 ## Requirements
 
 - Docker Engine or Docker Desktop with Compose v2;
-- a Tailscale-connected host with a stable Tailnet IPv4 address;
+- an HTTPS reverse proxy on the Docker host; Tailscale is optional;
 - Rust stable for the source-checkout deployment tools;
 - an HTTPS access origin for Grafana, normally supplied by Tailscale Serve or an
   owner-managed reverse proxy;
@@ -32,7 +39,7 @@ released separately for ARM64 and x86-64 on all three operating systems.
 ```console
 RELEASE_TAG="vMAJOR.MINOR.PATCH"
 INSIGHTS_IMAGE_DIGEST="ghcr.io/jukqaz/groundline-insights-api@sha256:REPLACE_WITH_64_HEX_DIGEST"
-INSIGHTS_ACCESS_URL="https://insights.REPLACE_WITH_YOUR_TAILNET.ts.net"
+INSIGHTS_ACCESS_URL="https://grafana.example.com"
 COMPATIBILITY_PROFILE="infrastructure/compatibility.json"
 git clone https://github.com/jukqaz/groundline.git
 cd groundline
@@ -58,7 +65,7 @@ PowerShell uses the same versioned source and digest-pinned image:
 ```powershell
 $ReleaseTag = "vMAJOR.MINOR.PATCH"
 $InsightsImageDigest = "ghcr.io/jukqaz/groundline-insights-api@sha256:REPLACE_WITH_64_HEX_DIGEST"
-$InsightsAccessUrl = "https://insights.REPLACE_WITH_YOUR_TAILNET.ts.net"
+$InsightsAccessUrl = "https://grafana.example.com"
 $CompatibilityProfile = "infrastructure/compatibility.json"
 git clone https://github.com/jukqaz/groundline.git
 Set-Location groundline
@@ -76,7 +83,7 @@ DEPLOY_ROOT="$(dirname "$REPOSITORY_ROOT")/groundline-insights-owner"
 DATASET_ROOT="$DEPLOY_ROOT/data"
 COMPOSE_FILE="$DEPLOY_ROOT/compose.yaml"
 SECRETS_FILE="$DEPLOY_ROOT/secrets.json"
-BIND_IP="$(tailscale ip -4 | head -n 1)"
+BIND_IP="127.0.0.1"
 mkdir -p "$DATASET_ROOT/clickhouse" "$DATASET_ROOT/grafana"
 chmod 0750 "$DATASET_ROOT/clickhouse" "$DATASET_ROOT/grafana"
 ```
@@ -88,7 +95,7 @@ $DeployRoot = Join-Path $env:LOCALAPPDATA "GroundLine\Insights"
 $DatasetRoot = Join-Path $DeployRoot "data"
 $ComposeFile = Join-Path $DeployRoot "compose.yaml"
 $SecretsFile = Join-Path $DeployRoot "secrets.json"
-$BindIp = (tailscale ip -4 | Select-Object -First 1).Trim()
+$BindIp = "127.0.0.1"
 New-Item -ItemType Directory -Force "$DatasetRoot\clickhouse", "$DatasetRoot\grafana"
 ```
 
@@ -103,7 +110,7 @@ cargo run --locked -p xtask -- render-compose \
   --output "$COMPOSE_FILE" \
   --secrets-file "$SECRETS_FILE" \
   --dataset-root "$DATASET_ROOT" \
-  --tailscale-bind-ip "$BIND_IP" \
+  --bind-ip "$BIND_IP" \
   --dashboard-port 13000 \
   --ingest-port 18080 \
   --image "$INSIGHTS_IMAGE_DIGEST" \
@@ -120,7 +127,7 @@ cargo run --locked -p xtask -- render-compose `
   --output $ComposeFile `
   --secrets-file $SecretsFile `
   --dataset-root $DatasetRoot `
-  --tailscale-bind-ip $BindIp `
+  --bind-ip $BindIp `
   --dashboard-port 13000 `
   --ingest-port 18080 `
   --image $InsightsImageDigest `

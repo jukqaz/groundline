@@ -144,6 +144,22 @@ fn is_tailnet_host(host: Host<&str>) -> bool {
     }
 }
 
+/// Tailnet probing is needed only for explicitly selected Tailnet endpoints.
+pub fn endpoint_requires_tailnet(endpoint: &str) -> bool {
+    Url::parse(endpoint)
+        .ok()
+        .is_some_and(|url| url.host().is_some_and(is_tailnet_host))
+}
+
+fn allows_plain_http(host: Host<&str>) -> bool {
+    is_tailnet_host(host.clone())
+        || match host {
+            Host::Ipv4(address) => address.is_loopback(),
+            Host::Ipv6(address) => address.is_loopback(),
+            Host::Domain(domain) => domain == "localhost",
+        }
+}
+
 pub fn report_url(endpoint: &str, days: u16) -> Result<Url, InsightsRuntimeError> {
     if !matches!(days, 7 | 30 | 90) {
         return Err(InsightsRuntimeError::InvalidLocalState);
@@ -155,7 +171,8 @@ pub fn report_url(endpoint: &str, days: u16) -> Result<Url, InsightsRuntimeError
         || url.query().is_some()
         || url.fragment().is_some()
         || url.path() != "/"
-        || !url.host().is_some_and(is_tailnet_host)
+        || url.host().is_none()
+        || (url.scheme() == "http" && !url.host().is_some_and(allows_plain_http))
     {
         return Err(InsightsRuntimeError::InvalidLocalState);
     }
@@ -357,7 +374,7 @@ mod tests {
     }
 
     #[test]
-    fn report_endpoint_is_fixed_to_tailnet_hosts_without_redirect_inputs() {
+    fn report_endpoint_supports_https_and_optional_tailnet_without_redirect_inputs() {
         assert_eq!(
             report_url("http://100.64.0.1:18080", 7).unwrap().as_str(),
             "http://100.64.0.1:18080/v3/reports/weekly?days=7"
@@ -370,10 +387,19 @@ mod tests {
         );
         for endpoint in [
             "https://example.com",
+            "http://127.0.0.1:18080",
+            "http://[::1]:18080",
+        ] {
+            assert!(report_url(endpoint, 7).is_ok());
+            assert!(!super::endpoint_requires_tailnet(endpoint));
+        }
+        assert!(super::endpoint_requires_tailnet("http://100.64.0.1:18080"));
+        for endpoint in [
+            "http://example.com",
+            "http://192.168.1.1:18080",
             "https://user@groundline.example.ts.net",
             "https://groundline.example.ts.net/path",
             "https://groundline.example.ts.net?redirect=1",
-            "http://127.0.0.1:18080",
         ] {
             assert!(matches!(
                 report_url(endpoint, 7),

@@ -1,6 +1,6 @@
 {
   "name": "groundline-insights",
-  "version": "0.23.2",
+  "version": "0.24.0",
   "description": "Independently installable, opt-in self-hosted Insights for Codex.",
   "author": {
     "name": "GroundLine contributors",
@@ -20,13 +20,13 @@
   "interface": {
     "displayName": "GroundLine Insights",
     "shortDescription": "Opt-in self-hosted Insights for GroundLine.",
-    "longDescription": "GroundLine Insights is an independently installable, public-source, private-data companion for Codex and GroundLine Core. It does not require or install Core. It owns four fail-open Codex lifecycle hooks, local collector state, owner-selected Tailnet transport, ClickHouse ingestion and reports, Grafana dashboards, and generic self-hosted deployment tooling. Every operator supplies their own endpoint, credentials, retention, and access control. It does not ship GroundLine guidance skills, change global Codex configuration, install a daemon, or replace Codex execution and permission behavior.",
+    "longDescription": "GroundLine Insights is an independently installable, public-source, private-data companion for Codex and GroundLine Core. It does not require or install Core. It owns four fail-open Codex lifecycle hooks, local collector state, owner-selected HTTPS or optional Tailnet transport, ClickHouse ingestion and reports, Grafana dashboards, and generic self-hosted deployment tooling. Every operator supplies their own endpoint, credentials, retention, and access control. It does not ship GroundLine guidance skills, change global Codex configuration, install a daemon, or replace Codex execution and permission behavior.",
     "developerName": "GroundLine contributors",
     "category": "Coding",
     "capabilities": [
       "Read",
       "Write",
-      "Private Tailnet Insights"
+      "Private Insights"
     ],
     "defaultPrompt": "Check the GroundLine Insights collector, upload, ClickHouse, and Grafana evidence lanes without exposing secrets or raw Codex content.",
     "websiteURL": "https://github.com/jukqaz/groundline/tree/main/plugins/groundline-insights",
