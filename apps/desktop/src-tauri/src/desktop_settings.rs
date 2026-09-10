@@ -38,6 +38,13 @@ pub fn save(home: &Path, value: &str) -> Result<(), String> {
     atomic_write_private(&home.join("groundline/desktop/settings.json"), &data)
         .map_err(|_| "local_state_failed".into())
 }
+pub fn dashboard_url(origin: &str) -> Result<String, String> {
+    validate_grafana(origin)?;
+    let url = url::Url::parse(origin).map_err(|_| "invalid_grafana_url")?;
+    url.join("/d/groundline-insights/groundline-insights")
+        .map(|url| url.to_string())
+        .map_err(|_| "invalid_grafana_url".into())
+}
 pub fn load(home: &Path) -> Result<String, String> {
     let path = home.join("groundline/desktop/settings.json");
     if !path.try_exists().map_err(|_| "local_state_failed")? {
@@ -60,6 +67,17 @@ pub fn load(home: &Path) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn opens_the_provisioned_dashboard_and_preserves_origin_port() {
+        assert_eq!(
+            dashboard_url("http://localhost:23100").unwrap(),
+            "http://localhost:23100/d/groundline-insights/groundline-insights"
+        );
+        assert!(dashboard_url("").is_err());
+        assert!(dashboard_url("https://user:secret@example.com").is_err());
+        let compose = include_str!("../../../../infrastructure/compose.template.yaml");
+        assert!(compose.contains("\"uid\": \"groundline-insights\""));
+    }
     #[test]
     fn local_dashboard_allows_only_loopback_http() {
         for url in [

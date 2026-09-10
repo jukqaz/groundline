@@ -46,3 +46,14 @@ cargo run --locked -p xtask -- verify-history --root . --json
 [Rust 파서](https://docs.rs/syn/latest/syn/),
 [바이트 범위](https://docs.rs/proc-macro2/latest/proc_macro2/struct.Span.html),
 [표준 파일 교체](https://doc.rust-lang.org/std/fs/fn.rename.html).
+
+활동 기록 집계에서는 기존 `serde_json::RawValue`와 `serde::de::DeserializeSeed`를
+사용한다. 큰 도구 결과를 `Value` 트리로 만들기 전에 결과 분류만 순회해 남기며,
+원본 JSON 문법과 64 MiB 레코드 한도는 유지한다. 새 파서나 crate 없이 기존
+Serde의 스트리밍 방문자로 이미지·본문 트리의 메모리 할당을 피한다. 작은 결과의
+분류 동등성, 이스케이프 문자열, 큰 이미지 결과, 중복 순번의 설정 알림과 실제
+사용량 충돌을 회귀 검증한다. 읽기 예산은 8 GiB, 보관한 집계 기록은 512 MiB로
+독립 제한하며 실제 수집 창의 일부만 읽었을 때 전송하지 않는다.
+
+공식 근거: [RawValue](https://docs.rs/serde_json/latest/serde_json/value/struct.RawValue.html),
+[DeserializeSeed](https://docs.rs/serde/latest/serde/de/trait.DeserializeSeed.html).

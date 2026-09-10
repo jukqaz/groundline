@@ -55,7 +55,7 @@ describe("사용자 설정과 경계", () => {
     ).not.toContain("수신");
     expect(
       nextStep({ ...acknowledged, collection_enabled: false }).action,
-    ).toBe("settings");
+    ).toBe("collection");
   });
   it("첫 실행과 잘못된 저장값은 시스템 테마를 사용한다", () => {
     expect(storedTheme(null)).toBe("system");
@@ -105,7 +105,7 @@ describe("사용자 설정과 경계", () => {
     expect(
       nextStep({ endpoint: "https://example.com", collection_enabled: false })
         .action,
-    ).toBe("settings");
+    ).toBe("collection");
     expect(
       nextStep({
         endpoint: "https://example.com",

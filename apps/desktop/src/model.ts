@@ -78,7 +78,7 @@ export function nextStep(status: Status | null) {
       title: "수집 동의를 확인하세요",
       detail:
         "서버 설정은 보존되어 있습니다. 수집 범위를 확인하고 다시 시작할 수 있습니다.",
-      action: "settings",
+      action: "collection",
     } as const;
   const code = status.collection_state;
   if (
@@ -114,7 +114,7 @@ const guidance: Record<string, string> = {
   delivery_operator_action_required:
     "서버의 등록키, API와 ClickHouse 실행 상태를 확인한 뒤 전송을 다시 확인하세요.",
   api_upgrade_required: "관리자에게 Insights API 업데이트를 요청하세요.",
-  reconsent_required: "설정에서 현재 수집 범위를 읽고 다시 동의하세요.",
+  reconsent_required: "서버의 자동 수집에서 범위를 확인하고 다시 동의하세요.",
   tailnet_not_connected: "선택한 Tailscale 연결을 켠 뒤 상태를 새로고침하세요.",
   tailnet_connection_unverified:
     "Tailscale 실행 상태와 서버 접근 경로를 확인하세요.",
@@ -132,7 +132,7 @@ const guidance: Record<string, string> = {
   retry_required:
     "최근 작업이 완료되지 않았습니다. 서버 상태를 확인하고 재시도하세요.",
   collection_incomplete:
-    "초기 기록을 나누어 수집하고 있습니다. 다음 수집에서 이어갑니다.",
+    "일부 활동 기록을 집계하지 못해 전송을 보류했습니다. 로컬 기록 진단이 필요합니다.",
   collection_operator_action_required:
     "수집이 중단되었습니다. 로컬 상태를 보존한 채 진단이 필요합니다.",
 };
@@ -279,7 +279,7 @@ const reasons: Record<string, string> = {
   tailnet_unverified: "Tailscale 확인 필요",
   outbox_capacity_exceeded: "대기 데이터 한도 도달",
   collection_operator_action_required: "수집 점검 필요",
-  collection_incomplete: "기존 기록 수집 중",
+  collection_incomplete: "기록 집계 확인 필요",
   clock_skew: "기기 시간 확인 필요",
   stale: "최근 수집 확인 필요",
   retry_required: "다시 확인 필요",

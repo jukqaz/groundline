@@ -12,10 +12,12 @@ import { App } from "./app";
 import { defaultPreferences, type AppPreferences, type Status } from "./model";
 
 const rpc = vi.hoisted(() => vi.fn());
+const nativeTheme = vi.hoisted(() => vi.fn());
 const events = vi.hoisted(
   () => new Map<string, (event: { payload: string }) => void>(),
 );
 vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => true, invoke: rpc }));
+vi.mock("@tauri-apps/api/app", () => ({ setTheme: nativeTheme }));
 vi.mock("@tauri-apps/api/event", () => ({
   listen: async (
     name: string,
@@ -39,6 +41,7 @@ beforeEach(() => {
   current = { ...enrolled };
   preferences = { ...defaultPreferences };
   localStorage.clear();
+  nativeTheme.mockReset().mockResolvedValue(undefined);
   vi.stubGlobal("scrollTo", vi.fn());
   vi.stubGlobal("matchMedia", () => ({
     matches: false,
@@ -122,6 +125,97 @@ async function choose(name: string, option: string) {
 }
 
 describe("메뉴에서 끝내는 사용자 작업", () => {
+  it("수집 바로가기는 서버의 수집 항목에 초점을 맞추고 전역 설정과 분리한다", async () => {
+    current = {
+      ...enrolled,
+      collection_enabled: false,
+      collection_state: "disabled",
+    };
+    await mount();
+    fireEvent.click(screen.getByRole("button", { name: "수집 설정" }));
+    expect(document.activeElement).toBe(
+      screen.getByRole("region", { name: "활동 통계 수집" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "동의 후 다시 시작" }),
+    ).toBeTruthy();
+    nav("설정");
+    expect(screen.queryByRole("region", { name: "활동 통계 수집" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "대상 환경" })).toBeNull();
+    expect(screen.getAllByRole("group", { name: "화면 테마" })).toHaveLength(1);
+    nav("서버");
+    fireEvent.click(screen.getByRole("button", { name: "새 서버 구성" }));
+    nav("개요");
+    nav("서버");
+    expect(screen.getByRole("region", { name: "연결 관리" })).toBeTruthy();
+  });
+  it("Grafana 주소가 없는 상세 분석은 대시보드 주소 항목으로 이동한다", async () => {
+    current = { ...enrolled, grafana_url: "" };
+    await mount();
+    fireEvent.click(screen.getByRole("button", { name: "사용량 불러오기" }));
+    fireEvent.click(await screen.findByRole("button", { name: "상세 분석" }));
+    expect(document.activeElement?.id).toBe("dashboard");
+    expect(screen.getByRole("button", { name: "주소 추가" })).toBeTruthy();
+    expect(rpc.mock.calls.some(([name]) => name === "open_dashboard")).toBe(
+      false,
+    );
+  });
+  it.each(["collection", "dashboard"])(
+    "트레이의 %s 바로가기는 서버의 같은 항목을 연다",
+    async (target) => {
+      await mount();
+      events.get("groundline:navigate")?.({ payload: target });
+      await waitFor(() => expect(document.activeElement?.id).toBe(target));
+      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
+        "서버",
+      );
+    },
+  );
+  it("본문과 네이티브 창의 테마를 함께 바꾸고 시스템 추적을 복원한다", async () => {
+    const media = {
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    };
+    vi.stubGlobal("matchMedia", () => media);
+    await mount();
+    expect(nativeTheme).toHaveBeenLastCalledWith(null);
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    nav("설정");
+    const picker = within(screen.getByRole("group", { name: "화면 테마" }));
+    fireEvent.click(picker.getByRole("button", { name: "라이트" }));
+    await waitFor(() => expect(nativeTheme).toHaveBeenLastCalledWith("light"));
+    expect(document.documentElement.style.colorScheme).toBe("light");
+    fireEvent.click(picker.getByRole("button", { name: "다크" }));
+    await waitFor(() => expect(nativeTheme).toHaveBeenLastCalledWith("dark"));
+    expect(document.documentElement.style.colorScheme).toBe("dark");
+    media.matches = false;
+    fireEvent.click(picker.getByRole("button", { name: "시스템" }));
+    await waitFor(() => expect(nativeTheme).toHaveBeenLastCalledWith(null));
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(localStorage.getItem("groundline-theme")).toBe("system");
+    expect(
+      rpc.mock.calls.every(([name]) =>
+        ["snapshot", "get_app_preferences"].includes(name),
+      ),
+    ).toBe(true);
+  });
+  it("창 테마 적용 실패를 알리고 다음 선택에서 복구한다", async () => {
+    nativeTheme.mockRejectedValueOnce(new Error("fixture failure"));
+    await mount();
+    await screen.findByText(
+      "창 테마를 적용하지 못했습니다. 테마를 다시 선택하세요.",
+    );
+    nav("설정");
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "화면 테마" })).getByRole(
+        "button",
+        { name: "다크" },
+      ),
+    );
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(nativeTheme).toHaveBeenLastCalledWith("dark");
+  });
   it("창 닫기는 트레이가 기본이며 저장 성공 뒤에만 종료 설정을 반영한다", async () => {
     await mount();
     nav("설정");
@@ -192,7 +286,7 @@ describe("메뉴에서 끝내는 사용자 작업", () => {
   });
   it("중지 후 동의 체크가 있어야 기존 연결의 수집을 재개한다", async () => {
     await mount();
-    nav("설정");
+    nav("서버");
     fireEvent.click(screen.getByRole("button", { name: "수집 중지" }));
     await screen.findByText(/자동 수집을 중지했습니다/);
     fireEvent.click(screen.getByRole("button", { name: "동의 후 다시 시작" }));
@@ -248,7 +342,7 @@ describe("메뉴에서 끝내는 사용자 작업", () => {
   it("소모된 연결 티켓의 실패는 재확인 폼으로 복구한다", async () => {
     await mount();
     nav("서버");
-    fireEvent.click(screen.getByText("연결 진단과 등록키 관리"));
+    fireEvent.click(screen.getByText("연결 점검과 전송 상세"));
     fireEvent.click(screen.getByRole("button", { name: "등록키 다시 확인" }));
     expect(
       (
@@ -278,7 +372,7 @@ describe("메뉴에서 끝내는 사용자 작업", () => {
     await choose("대상 환경", "Codex CLI");
     await screen.findByText("https://cli.example.com");
     expect(screen.queryByText("https://insights.example.com")).toBeNull();
-    nav("설정");
+    nav("서버");
     fireEvent.click(screen.getByRole("button", { name: "수집 중지" }));
     await screen.findByText(/자동 수집을 중지했습니다/);
     expect(rpc).toHaveBeenCalledWith("set_collection", {
@@ -376,7 +470,7 @@ describe("메뉴에서 끝내는 사용자 작업", () => {
       ),
     ).toBe(false);
   });
-  it("기존 서버 연결과 새 서버 구성에서 입력한 주소를 양방향으로 공유한다", async () => {
+  it("연결 관리과 새 서버 구성에서 입력한 주소를 양방향으로 공유한다", async () => {
     current = { collection_enabled: false, collection_state: "disabled" };
     await mount();
     nav("서버");
@@ -406,7 +500,7 @@ describe("메뉴에서 끝내는 사용자 작업", () => {
       screen.getByRole("textbox", { name: "Insights API 주소" }),
       { target: { value: "https://revised.example.com" } },
     );
-    fireEvent.click(screen.getByRole("button", { name: /기존 서버 연결/ }));
+    fireEvent.click(screen.getByRole("button", { name: /연결 관리/ }));
     expect(
       (
         screen.getByRole("textbox", {
@@ -436,7 +530,7 @@ describe("메뉴에서 끝내는 사용자 작업", () => {
     fireEvent.click(screen.getByRole("button", { name: /새 서버 구성/ }));
     await screen.findByRole("heading", { name: "접속 주소" });
     expect(rpc).toHaveBeenCalledWith("cancel_connection");
-    fireEvent.click(screen.getByRole("button", { name: /기존 서버 연결/ }));
+    fireEvent.click(screen.getByRole("button", { name: /연결 관리/ }));
     expect(
       (screen.getByPlaceholderText("등록키 입력") as HTMLInputElement).value,
     ).toBe("");
@@ -445,14 +539,14 @@ describe("메뉴에서 끝내는 사용자 작업", () => {
   it("새 서버 초안의 주소를 고쳐도 현재 연결에는 적용하지 않는다", async () => {
     await mount();
     nav("서버");
-    fireEvent.click(screen.getByText("연결 진단과 등록키 관리"));
+    fireEvent.click(screen.getByText("연결 점검과 전송 상세"));
     fireEvent.click(screen.getByRole("button", { name: "등록키 다시 확인" }));
     fireEvent.click(screen.getByRole("button", { name: /새 서버 구성/ }));
     fireEvent.change(
       screen.getByRole("textbox", { name: "Insights API 주소" }),
       { target: { value: "https://new.example.com" } },
     );
-    fireEvent.click(screen.getByRole("button", { name: /기존 서버 연결/ }));
+    fireEvent.click(screen.getByRole("button", { name: /연결 관리/ }));
     expect(screen.getByText("https://insights.example.com")).toBeTruthy();
     expect(screen.queryByPlaceholderText("등록키 입력")).toBeNull();
     expect(

@@ -9,7 +9,6 @@ pub(crate) const MAX_AUDIT_BYTES: u64 = 512 * 1024 * 1024;
 // Input I/O and retained audit memory are independent budgets. Long-lived
 // native logs contain large context-storage records that need no audit body.
 pub(crate) const MAX_AUDIT_SCAN_BYTES: u64 = 8 * 1024 * 1024 * 1024;
-const MAX_AUDIT_ROLLOUT_BYTES: u64 = 1024 * 1024 * 1024;
 // Native compaction/context records can contain multi-megabyte unused blobs.
 // Their raw read is bounded separately from the 4 MiB retained projection.
 const MAX_AUDIT_RECORD_BYTES: u64 = 64 * 1024 * 1024;
@@ -31,19 +30,19 @@ pub(crate) fn read_audit_rollout(
         if !allowed_roots.iter().any(|root| canonical.starts_with(root)) {
             return Err(rejected());
         }
-        let file = open_bounded_regular_file(&canonical, 1, MAX_AUDIT_ROLLOUT_BYTES)?;
+        // File size is not the read budget: inspect metadata before excluding
+        // other runtimes, then stream within the shared invocation I/O limit.
+        let file = open_bounded_regular_file(&canonical, 1, u64::MAX)?;
         if !owned_by_current_user(&file) {
             return Err(rejected());
         }
         let stored_bytes = file.metadata()?.len();
         let before_scan = *scanned;
-        let limit = MAX_AUDIT_SCAN_BYTES
-            .saturating_sub(*scanned)
-            .min(MAX_AUDIT_ROLLOUT_BYTES);
+        let limit = MAX_AUDIT_SCAN_BYTES.saturating_sub(*scanned);
         if limit == 0 {
             return Err(rejected());
         }
-        let input = file.take(MAX_AUDIT_ROLLOUT_BYTES + 1);
+        let input = file.take(limit + 1);
         let reader: Box<dyn Read> = if compressed {
             let mut decoder = zstd::stream::read::Decoder::new(input)?;
             decoder.window_log_max(26)?;
@@ -234,6 +233,28 @@ mod tests {
             metadata.len() as u64,
             "other runtimes consume only metadata I/O"
         );
+    }
+
+    #[test]
+    fn large_other_runtime_file_is_filtered_before_reading_its_body() {
+        use std::io::Write;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("large.jsonl");
+        let mut file = std::fs::File::create(&path).unwrap();
+        let metadata = b"{\"type\":\"session_meta\",\"payload\":{\"originator\":\"codex_app\"}}\n";
+        file.write_all(metadata).unwrap();
+        file.set_len(MAX_AUDIT_SCAN_BYTES + 1).unwrap();
+        let mut scanned = 0;
+        let result = read_audit_rollout(
+            &path,
+            &[directory.path().canonicalize().unwrap()],
+            &mut scanned,
+            &mut 0,
+            |_| false,
+        )
+        .unwrap();
+        assert!(result.is_none());
+        assert_eq!(scanned, metadata.len() as u64);
     }
 
     #[test]

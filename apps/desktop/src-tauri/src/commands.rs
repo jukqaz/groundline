@@ -424,10 +424,7 @@ pub async fn export_compose(
 pub fn open_dashboard(app: tauri::AppHandle) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
     let home = insights::default_codex_home().map_err(|_| "local_state_failed")?;
-    let url = crate::desktop_settings::load(&home)?;
-    if url.is_empty() {
-        return Err("invalid_grafana_url".into());
-    }
+    let url = crate::desktop_settings::dashboard_url(&crate::desktop_settings::load(&home)?)?;
     app.opener()
         .open_url(&url, None::<&str>)
         .map_err(|_| "dashboard_open_failed".into())

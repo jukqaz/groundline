@@ -21,6 +21,9 @@
     "allow-usage-summary",
     "allow-server-health",
     "allow-export-diagnostics",
+    "core:app:allow-set-app-theme",
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

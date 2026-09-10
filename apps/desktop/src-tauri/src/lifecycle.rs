@@ -128,10 +128,10 @@ pub fn install_tray(app: &tauri::App) -> tauri::Result<()> {
             "show-main" => show(app),
             "dashboard" => {
                 if crate::commands::open_dashboard(app.clone()).is_err() {
-                    crate::monitor::show_page(app, "server");
+                    crate::monitor::show_page(app, "dashboard");
                 }
             }
-            "collection" => crate::monitor::show_page(app, "settings"),
+            "collection" => crate::monitor::show_page(app, "collection"),
             "quit-app" => quit(app),
             _ => {}
         });

@@ -250,11 +250,7 @@ fn failure_signals(output: &Value, payload: &Map<String, Value>) -> BTreeSet<&'s
     signals
 }
 
-pub(crate) fn project_tool_output(output: &Value, payload: &Map<String, Value>) -> Value {
-    if output.is_null() {
-        return Value::Null;
-    }
-    let signals = failure_signals(output, payload);
+fn projected_signals(signals: &BTreeSet<&'static str>) -> Value {
     json!({
         "exit_code": if signals.contains("nonzero_exit") {1} else {0},
         "markers": signals.iter().filter_map(|signal| match *signal {
@@ -265,6 +261,108 @@ pub(crate) fn project_tool_output(output: &Value, payload: &Map<String, Value>) 
             _ => None,
         }).collect::<Vec<_>>()
     })
+}
+
+/// Scan large native tool results without allocating their image/content trees.
+/// Only fixed outcome markers survive; raw and retained byte limits are separate.
+pub(crate) fn project_raw_tool_output(
+    raw: &serde_json::value::RawValue,
+    payload: &Map<String, Value>,
+) -> serde_json::Result<Value> {
+    use serde::Deserializer;
+    use serde::de::{DeserializeSeed, MapAccess, SeqAccess, Visitor};
+
+    if raw.get().len() > 64 * 1024 * 1024 {
+        return Err(serde::de::Error::custom("tool output byte limit exceeded"));
+    }
+    if raw.get().trim() == "null" {
+        return Ok(Value::Null);
+    }
+    struct Scan<'a> {
+        signals: &'a mut BTreeSet<&'static str>,
+        root: bool,
+    }
+    impl Scan<'_> {
+        fn text(&mut self, value: &str) {
+            self.signals.extend(failure_signals(
+                &Value::String(value.to_owned()),
+                &Map::new(),
+            ));
+        }
+    }
+    impl<'de> DeserializeSeed<'de> for Scan<'_> {
+        type Value = ();
+        fn deserialize<D: Deserializer<'de>>(self, de: D) -> Result<(), D::Error> {
+            de.deserialize_any(self)
+        }
+    }
+    impl<'de> Visitor<'de> for Scan<'_> {
+        type Value = ();
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a native tool result")
+        }
+        fn visit_str<E: serde::de::Error>(mut self, value: &str) -> Result<(), E> {
+            self.text(value);
+            Ok(())
+        }
+        fn visit_unit<E: serde::de::Error>(self) -> Result<(), E> {
+            Ok(())
+        }
+        fn visit_bool<E: serde::de::Error>(self, _: bool) -> Result<(), E> {
+            Ok(())
+        }
+        fn visit_i64<E: serde::de::Error>(self, _: i64) -> Result<(), E> {
+            Ok(())
+        }
+        fn visit_u64<E: serde::de::Error>(self, _: u64) -> Result<(), E> {
+            Ok(())
+        }
+        fn visit_f64<E: serde::de::Error>(self, _: f64) -> Result<(), E> {
+            Ok(())
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<(), A::Error> {
+            while seq
+                .next_element_seed(Scan {
+                    signals: self.signals,
+                    root: false,
+                })?
+                .is_some()
+            {}
+            Ok(())
+        }
+        fn visit_map<A: MapAccess<'de>>(mut self, mut map: A) -> Result<(), A::Error> {
+            let mut nonzero_exit = false;
+            while let Some(key) = map.next_key::<String>()? {
+                self.text(&key);
+                if self.root && key == "exit_code" {
+                    let value = map.next_value::<&serde_json::value::RawValue>()?;
+                    nonzero_exit = serde_json::from_str::<i64>(value.get()).is_ok_and(|v| v != 0);
+                    Scan {
+                        signals: self.signals,
+                        root: false,
+                    }
+                    .deserialize(value)
+                    .map_err(serde::de::Error::custom)?;
+                } else {
+                    map.next_value_seed(Scan {
+                        signals: self.signals,
+                        root: false,
+                    })?;
+                }
+            }
+            if nonzero_exit {
+                self.signals.insert("nonzero_exit");
+            }
+            Ok(())
+        }
+    }
+    let mut signals = failure_signals(&Value::Null, payload);
+    Scan {
+        signals: &mut signals,
+        root: true,
+    }
+    .deserialize(raw)?;
+    Ok(projected_signals(&signals))
 }
 
 fn is_tool_call(item_type: &str) -> bool {
@@ -437,7 +535,14 @@ pub fn audit_rollouts(
                     errors.push(format!("rollout[{rollout_index}] missing history ordinal"));
                     continue;
                 };
-                if last_ordinal.is_some_and(|previous| ordinal <= previous) {
+                // Native settings notifications may share the preceding history
+                // ordinal. They contain no usage and must not relax ordering for
+                // token records or any other event.
+                let settings_notification = record.string("type").as_deref() == Some("event_msg")
+                    && record.payload_type().as_deref() == Some("thread_settings_applied");
+                if last_ordinal.is_some_and(|previous| {
+                    ordinal < previous || (ordinal == previous && !settings_notification)
+                }) {
                     errors.push(format!(
                         "rollout[{rollout_index}] non-increasing history ordinal"
                     ));
@@ -1529,6 +1634,52 @@ mod tests {
             result["provider_reported_usage"]["fallback_rollout_count"],
             1
         );
+    }
+
+    #[test]
+    fn native_settings_notification_can_share_ordinal_without_relaxing_usage_order() {
+        let records = [
+            json!({"ordinal":0,"type":"session_meta","payload":{"id":"owner","history_mode":"paginated"}}),
+            json!({"ordinal":1,"type":"token_usage_record","payload":{"thread_id":"owner","response_id":"a","usage":{"total_tokens":7}}}),
+            json!({"ordinal":1,"type":"event_msg","payload":{"type":"thread_settings_applied"}}),
+            json!({"ordinal":2,"type":"token_usage_record","payload":{"thread_id":"owner","response_id":"b","usage":{"total_tokens":3}}}),
+        ];
+        let audit = |records: &[Value]| {
+            audit_rollouts(&[&lines(records)], 0, 20, AuditWindow::default()).unwrap()
+        };
+        let result = audit(&records);
+        assert_eq!(result["collection_complete"], true);
+        assert_eq!(result["provider_reported_usage"]["total_tokens"], 10);
+        let mut duplicate_usage = records.clone();
+        duplicate_usage[2] = json!({"ordinal":1,"type":"token_usage_record","payload":{"thread_id":"owner","response_id":"different","usage":{"total_tokens":999}}});
+        assert_eq!(audit(&duplicate_usage)["collection_complete"], false);
+        let mut reordered = records;
+        reordered[2]["ordinal"] = json!(0);
+        assert_eq!(audit(&reordered)["collection_complete"], false);
+    }
+
+    #[test]
+    fn raw_tool_output_keeps_outcomes_and_discards_large_bodies() {
+        for output in [
+            json!("TIMED OUT: invalid argument; permission denied; script running with cell id"),
+            json!({"exit_code":2,"nested":[true,null,42,1.5,"rejected"]}),
+            json!({"content":[{"text":"Process running with session id"},{"image":"x".repeat(5 * 1024 * 1024)}]}),
+        ] {
+            let raw = serde_json::value::to_raw_value(&output).unwrap();
+            let projected = project_raw_tool_output(&raw, &Map::new()).unwrap();
+            assert_eq!(
+                projected,
+                projected_signals(&failure_signals(&output, &Map::new()))
+            );
+            assert!(projected.to_string().len() < 300);
+        }
+        let raw = serde_json::value::RawValue::from_string(
+            r#"{"exit_code":2,"exit_code":0,"text":"t\u0069meout"}"#.to_owned(),
+        )
+        .unwrap();
+        let projected = project_raw_tool_output(&raw, &Map::new()).unwrap();
+        assert_eq!(projected["exit_code"], 0);
+        assert_eq!(projected["markers"], json!(["timed out"]));
     }
 
     #[test]

@@ -69,6 +69,11 @@ impl<'a> Record<'a> {
             .transpose()
     }
 
+    pub fn payload_type(&self) -> Option<Cow<'a, str>> {
+        let raw = self.fields.get("payload")?;
+        Self::parse(raw.get()).ok()??.string("type")
+    }
+
     /// Retain the audit envelope while dropping bodies the audit never reads.
     /// Parsing the original record has already validated every JSON value.
     pub fn audit_projection(&self) -> serde_json::Result<String> {
@@ -103,21 +108,22 @@ impl<'a> Record<'a> {
                     .and_then(|v| v.as_str().map(str::to_owned))
                     .unwrap_or_default();
                 let mut fields = serde_json::Map::new();
-                for (name, raw) in borrowed {
-                    if keep_payload_field(kind.as_deref(), &item, &name) {
-                        fields.insert(name, bounded_value(raw, &mut remaining)?);
-                    }
-                }
-                if kind.as_deref() == Some("response_item")
+                let tool_output = kind.as_deref() == Some("response_item")
                     && matches!(
                         item.as_str(),
                         "function_call_output"
                             | "custom_tool_call_output"
                             | "local_shell_call_output"
-                    )
-                    && let Some(output) = fields.get("output")
-                {
-                    let output = crate::audit::project_tool_output(output, &fields);
+                    );
+                for (name, raw) in &borrowed {
+                    if keep_payload_field(kind.as_deref(), &item, name)
+                        && !(tool_output && name == "output")
+                    {
+                        fields.insert(name.clone(), bounded_value(raw, &mut remaining)?);
+                    }
+                }
+                if tool_output && let Some(output) = borrowed.get("output") {
+                    let output = crate::audit::project_raw_tool_output(output, &fields)?;
                     fields.insert("output".to_owned(), output);
                 }
                 Value::Object(fields)
@@ -271,6 +277,15 @@ mod tests {
                 .audit_projection()
                 .is_err()
         );
+        let input = serde_json::json!({"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"test","output":[{"type":"image","data":body},{"type":"text","text":"permission denied"}]}}).to_string();
+        let projected = Record::parse(&input)
+            .unwrap()
+            .unwrap()
+            .audit_projection()
+            .unwrap();
+        assert!(projected.len() < 300);
+        assert!(projected.contains("permission denied"));
+        assert!(!projected.contains("xxxxx"));
         let many = format!(
             "{{{}}}",
             (0..129)

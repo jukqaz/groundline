@@ -8,6 +8,7 @@ import React, {
   type FormEvent,
 } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { setTheme as setNativeTheme } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import {
   Activity,
@@ -16,14 +17,9 @@ import {
   CircleHelp,
   Globe2,
   Home,
-  KeyRound,
-  Monitor,
-  Moon,
   RefreshCw,
   Server,
-  ShieldCheck,
   Settings2,
-  Sun,
 } from "lucide-react";
 import {
   errorMessage,
@@ -53,11 +49,15 @@ import { version } from "../package.json";
 import "./style.css";
 
 const native = isTauri();
+const nativeMac = native && navigator.platform.startsWith("Mac");
 type Page = "overview" | "server" | "settings";
 type ServerView = "connection" | "compose";
+type ConnectionSection = "collection" | "dashboard";
 export function App() {
   const [page, setPage] = useState<Page>("overview");
   const [serverView, setServerView] = useState<ServerView>("connection");
+  const [connectionSection, setConnectionSection] =
+    useState<ConnectionSection | null>(null);
   const [setup, setSetup] = useState<Setup>(initialSetup);
   const [theme, setTheme] = useState<Theme>(() => {
     try {
@@ -74,6 +74,7 @@ export function App() {
     useState<AppPreferences>(defaultPreferences);
   const [preferencesLoaded, setPreferencesLoaded] = useState(!native);
   const [preferencesError, setPreferencesError] = useState("");
+  const [themeError, setThemeError] = useState("");
   const [status, setStatus] = useState<Status | null>(null);
   const [core, setCore] = useState<CoreStatus | null>(null);
   const [busy, setBusy] = useState("");
@@ -97,7 +98,9 @@ export function App() {
   const [connected, setConnected] = useState(false);
   const [statusReadFailed, setStatusReadFailed] = useState(false);
   const navigateFromTray = useEffectEvent((payload: string) => {
-    if (["overview", "server", "settings"].includes(payload))
+    if (payload === "collection" || payload === "dashboard")
+      navigate("server", "connection", payload);
+    else if (["overview", "server", "settings"].includes(payload))
       navigate(payload as Page);
   });
   useEffect(() => {
@@ -140,7 +143,12 @@ export function App() {
   useEffect(() => {
     heading.current?.focus({ preventScroll: true });
     window.scrollTo({ top: 0 });
-  }, [page, serverView]);
+    if (page === "server" && serverView === "connection" && connectionSection) {
+      const section = document.getElementById(connectionSection);
+      section?.scrollIntoView({ block: "start" });
+      section?.focus({ preventScroll: true });
+    }
+  }, [page, serverView, connectionSection]);
   useEffect(() => {
     if (error) window.scrollTo({ top: 0 });
   }, [error]);
@@ -149,6 +157,7 @@ export function App() {
     const apply = () => {
       const resolved = resolveTheme(theme, media.matches);
       document.documentElement.dataset.theme = resolved;
+      document.documentElement.style.colorScheme = resolved;
       setAppearance(resolved);
     };
     apply();
@@ -159,6 +168,24 @@ export function App() {
       /* Theme still works without storage. */
     }
     return () => media.removeEventListener("change", apply);
+  }, [theme]);
+  useEffect(() => {
+    if (!native) return;
+    let current = true;
+    // Keep native titles and menus in sync. Null restores OS theme tracking.
+    void setNativeTheme(theme === "system" ? null : theme)
+      .then(() => {
+        if (current) setThemeError("");
+      })
+      .catch(() => {
+        if (current)
+          setThemeError(
+            "창 테마를 적용하지 못했습니다. 테마를 다시 선택하세요.",
+          );
+      });
+    return () => {
+      current = false;
+    };
   }, [theme]);
   useEffect(() => {
     if (!preferencesLoaded) return;
@@ -246,7 +273,11 @@ export function App() {
     setKey("");
     if (native) await invoke("cancel_connection");
   }
-  function navigate(next: Page, view: ServerView = serverView) {
+  function navigate(
+    next: Page,
+    view: ServerView = "connection",
+    section: ConnectionSection | null = null,
+  ) {
     if (running.current || loading) return;
     const apply = () => {
       if (
@@ -259,6 +290,7 @@ export function App() {
       }
       setPage(next);
       setServerView(view);
+      setConnectionSection(section);
       setError("");
       setSuccess("");
       setKey("");
@@ -328,6 +360,13 @@ export function App() {
       );
     });
   }
+  function resumeCollection() {
+    return action("resume", async () => {
+      await invoke("resume_collection", { runtime, consent: true });
+      await refresh();
+      setSuccess("수집 동의를 저장하고 자동 수집을 다시 켰습니다.");
+    });
+  }
   function checkConnection(e: FormEvent) {
     e.preventDefault();
     setTicket("");
@@ -373,7 +412,13 @@ export function App() {
       radius="medium"
       panelBackground="solid"
       className="groundline-theme"
+      data-native-macos={nativeMac || undefined}
     >
+      {nativeMac && (
+        <div className="window-titlebar" data-tauri-drag-region>
+          GroundLine Desktop
+        </div>
+      )}
       <div className="shell">
         <aside className="sidebar">
           <div className="brand">
@@ -405,25 +450,6 @@ export function App() {
             ))}
           </nav>
           <div className="sidebar-bottom">
-            <div className="theme-picker" role="group" aria-label="화면 테마">
-              {(
-                [
-                  ["light", Sun, "라이트"],
-                  ["system", Monitor, "시스템"],
-                  ["dark", Moon, "다크"],
-                ] as const
-              ).map(([id, Icon, label]) => (
-                <Button
-                  key={id}
-                  onClick={() => setTheme(id)}
-                  aria-pressed={theme === id}
-                  aria-label={label}
-                  title={label}
-                >
-                  <Icon size={16} />
-                </Button>
-              ))}
-            </div>
             <p className="version">v{version}</p>
           </div>
         </aside>
@@ -433,7 +459,8 @@ export function App() {
               {titles[page]}
             </h1>
             <div className="header-controls">
-              {(page !== "server" || serverView === "connection") && (
+              {(page === "overview" ||
+                (page === "server" && serverView === "connection")) && (
                 <div className="environment-bar">
                   <label>
                     대상 환경{" "}
@@ -461,7 +488,8 @@ export function App() {
                   </label>
                 </div>
               )}
-              {(page !== "server" || serverView === "connection") && (
+              {(page === "overview" ||
+                (page === "server" && serverView === "connection")) && (
                 <Button
                   className="secondary header-action"
                   disabled={!native || !!busy || loading}
@@ -490,8 +518,7 @@ export function App() {
                 >
                   <Globe2 size={20} />
                   <span>
-                    <strong>기존 서버 연결</strong>
-                    <small>서버 연결 · 전송 관리 · 대시보드</small>
+                    <strong>연결 관리</strong>
                   </span>
                 </Button>
                 <Button
@@ -502,12 +529,12 @@ export function App() {
                   <Server size={20} />
                   <span>
                     <strong>새 서버 구성</strong>
-                    <small>Docker Compose · ClickHouse · Grafana</small>
                   </span>
                 </Button>
               </div>
             )}
             {error && <Notice kind="error">{error}</Notice>}
+            {themeError && <Notice kind="error">{themeError}</Notice>}
             {statusReadFailed && (
               <Notice kind="error">
                 상태 갱신에 실패했습니다. 아래 정보는 마지막 확인 기록입니다.
@@ -580,7 +607,8 @@ export function App() {
                       setError("");
                       setSuccess("");
                     }}
-                    settings={() => navigate("settings")}
+                    stop={() => void stopCollection()}
+                    resume={resumeCollection}
                     run={() => void runCollection()}
                     openDashboard={() =>
                       void action("dashboard", async () => {
@@ -643,7 +671,7 @@ export function App() {
                         ),
                       )}
                     </div>
-                    <div className="content-columns connection-columns">
+                    <div className="connection-content">
                       <div>
                         {!ticket && !connected ? (
                           <form
@@ -820,39 +848,6 @@ export function App() {
                           </div>
                         )}
                       </div>
-                      <aside className="connection-help">
-                        <h2>연결 전에 확인해요</h2>
-                        {[
-                          [Globe2, "HTTPS 연결", "서버의 유효한 TLS 인증서"],
-                          [
-                            Server,
-                            "Insights 서버 준비",
-                            "API와 ClickHouse 실행",
-                          ],
-                          [
-                            KeyRound,
-                            "기기 등록키",
-                            "서버 관리자가 전달한 Insights 기기 등록키",
-                          ],
-                        ].map(([Icon, title, desc]) => {
-                          const I = Icon as typeof Activity;
-                          return (
-                            <div className="help-item" key={String(title)}>
-                              <span>
-                                <I size={22} />
-                              </span>
-                              <div>
-                                <strong>{String(title)}</strong>
-                                <p>{String(desc)}</p>
-                              </div>
-                            </div>
-                          );
-                        })}
-                        <p className="helper">
-                          Tailscale은 선택 사항입니다. 연결 확인 단계에서는
-                          등록키를 저장하거나 수집기를 등록하지 않습니다.
-                        </p>
-                      </aside>
                     </div>
                   </>
                 )}
@@ -866,15 +861,17 @@ export function App() {
                     ? void action("dashboard", async () => {
                         await invoke("open_dashboard");
                       })
-                    : navigate("server", "connection")
+                    : navigate("server", "connection", "dashboard")
                 }
                 status={status}
                 native={native}
                 busy={!!busy || loading}
                 navigate={(target) =>
-                  target === "settings"
-                    ? navigate("settings")
-                    : navigate("server", target)
+                  navigate(
+                    "server",
+                    "connection",
+                    target === "collection" ? "collection" : null,
+                  )
                 }
                 refresh={() => void action("refresh", refresh)}
               />
@@ -898,7 +895,6 @@ export function App() {
                 setAlerts={(alerts_enabled) =>
                   void savePreferences({ alerts_enabled })
                 }
-                status={status}
                 theme={theme}
                 setTheme={setTheme}
                 preferences={preferences}
@@ -908,20 +904,6 @@ export function App() {
                 }
                 busy={!!busy || loading}
                 native={native}
-                stop={() => void stopCollection()}
-                connect={() => navigate("server", "connection")}
-                resume={() =>
-                  action("resume", async () => {
-                    await invoke("resume_collection", {
-                      runtime,
-                      consent: true,
-                    });
-                    await refresh();
-                    setSuccess(
-                      "수집 동의를 저장하고 자동 수집을 다시 켰습니다. 서버 메뉴에서 전송 결과를 확인하세요.",
-                    );
-                  })
-                }
               />
             )}
             {!native && (

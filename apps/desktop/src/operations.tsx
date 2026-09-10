@@ -154,7 +154,9 @@ export function UsageCard({
           <Activity size={24} />
           <div>
             <strong>
-              {loading ? "사용량을 계산하고 있습니다" : "선택한 기간의 작업 요약"}
+              {loading
+                ? "사용량을 계산하고 있습니다"
+                : "선택한 기간의 작업 요약"}
             </strong>
             <p>이 기기의 활동 통계만 읽으며 서버로 보내지 않습니다.</p>
           </div>
@@ -317,7 +319,7 @@ export function diagnosticStages(
           : "neutral",
       detail: status?.collection_enabled
         ? "Codex 훅이 실행될 때 통계를 수집합니다"
-        : "수집 꺼짐 · 설정에서 동의 후 시작할 수 있습니다",
+        : "수집 꺼짐 · 위의 자동 수집에서 다시 시작할 수 있습니다",
     },
     {
       title: "Insights API",
@@ -567,7 +569,7 @@ export function DiagnosticExport({
     <section className="settings-block preference-row">
       <div>
         <h2>
-          <ShieldCheck size={16} /> 문제 해결
+          <ShieldCheck size={16} /> 진단 파일
         </h2>
         <p className="helper">서버 주소·등록키·원문을 제외한 진단 파일</p>
       </div>

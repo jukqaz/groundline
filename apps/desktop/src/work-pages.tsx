@@ -24,7 +24,6 @@ import {
   Send,
 } from "lucide-react";
 import {
-  collectionLabel,
   formatTime,
   nextStep,
   reasonHelp,
@@ -60,6 +59,12 @@ export function DeliverySummary({ status }: { status: Status | null }) {
             {status?.pending_event_count == null
               ? "—"
               : `${status.pending_event_count.toLocaleString("ko-KR")}건`}
+          </dd>
+        </div>
+        <div>
+          <dt>마지막 수집 완료</dt>
+          <dd className="collection-time">
+            {formatTime(status?.last_success_utc)}
           </dd>
         </div>
       </dl>
@@ -100,7 +105,7 @@ export function Overview({
   status: Status | null;
   busy: boolean;
   native: boolean;
-  navigate: (target: "connection" | "settings" | "compose") => void;
+  navigate: (target: "connection" | "collection") => void;
   refresh: () => void;
 }) {
   const next = nextStep(status);
@@ -136,12 +141,14 @@ export function Overview({
           onClick={() =>
             next.action === "refresh"
               ? refresh()
-              : navigate(next.action === "connect" ? "connection" : "settings")
+              : navigate(
+                  next.action === "collection" ? "collection" : "connection",
+                )
           }
         >
           {next.action === "refresh"
             ? "상태 확인"
-            : next.action === "settings"
+            : next.action === "collection"
               ? "수집 설정"
               : status?.endpoint
                 ? "연결 관리"
@@ -158,21 +165,6 @@ export function Overview({
         dashboard={dashboard}
       />
       <DeliveryHistory status={status} />
-      <section className="insights-row">
-        <div className="section-title">
-          <h2>Insights</h2>
-          <Activity size={20} />
-        </div>
-        <strong className="collection-state">
-          {collectionLabel(status?.collection_state)}
-        </strong>
-        <p className="helper">
-          마지막 수집 완료{" "}
-          <span>
-            {status ? formatTime(status.last_success_utc) : "확인 전"}
-          </span>
-        </p>
-      </section>
     </>
   );
 }
@@ -183,7 +175,8 @@ export function ConnectionManager({
   busy,
   native,
   repair,
-  settings,
+  stop,
+  resume,
   run,
   openDashboard,
   saveDashboard,
@@ -193,7 +186,8 @@ export function ConnectionManager({
   busy: boolean;
   native: boolean;
   repair: () => void;
-  settings: () => void;
+  stop: () => void;
+  resume: () => Promise<boolean>;
   run: () => void;
   openDashboard: () => void;
   saveDashboard: (value: string) => Promise<boolean>;
@@ -205,17 +199,15 @@ export function ConnectionManager({
       <section className="connection-summary" aria-label="연결 관리">
         <div className="section-title">
           <div>
-            <h2>{collectionLabel(status.collection_state)}</h2>
+            <h2>Insights 서버</h2>
           </div>
-          <span className="tag">
+          <span className="tag" data-active={status.collection_enabled}>
             {status.tailnet_required ? "Tailscale" : "일반 연결"}
           </span>
         </div>
         <p className="endpoint">{status.endpoint}</p>
         <p className="helper">
-          {status.consent_status === "active"
-            ? "수집 동의 완료"
-            : "수집 동의 필요"}
+          연결은 공통으로 사용하고, 수집 설정은 선택한 Codex 환경에 적용합니다.
         </p>
         <div className="actions">
           <Button
@@ -226,20 +218,17 @@ export function ConnectionManager({
             지금 수집·전송 확인
             <ArrowRight size={16} />
           </Button>
-          <Button className="secondary" disabled={busy} onClick={settings}>
-            {status.collection_enabled ? "수집 설정" : "수집 다시 시작"}
-          </Button>
         </div>
       </section>
-      <Attention status={status} />
-      <Diagnostics
-        key={runtime}
+      <CollectionSettings
         status={status}
-        runtime={runtime}
+        busy={busy}
         native={native}
-        disabled={busy}
+        stop={stop}
+        resume={resume}
       />
-      <section className="overview-section">
+      <Attention status={status} />
+      <section id="dashboard" tabIndex={-1} className="overview-section">
         <div>
           <h2>Grafana 대시보드</h2>
           <p className="endpoint">
@@ -306,7 +295,15 @@ export function ConnectionManager({
         </form>
       )}
       <details className="diagnostic-details">
-        <summary>연결 진단과 등록키 관리</summary>
+        <summary>연결 점검과 전송 상세</summary>
+        <Diagnostics
+          key={runtime}
+          status={status}
+          runtime={runtime}
+          native={native}
+          disabled={busy}
+        />
+
         <dl className="facts">
           <div>
             <dt>마지막 상태 확인</dt>
@@ -349,8 +346,8 @@ export function Consent({
       <ShieldCheck size={26} />
       <h2>수집할 정보를 확인하세요</h2>
       <p>
-        처음 연결하면 기존 Codex 활동 기록을 동기화합니다. 이후에는 활동
-        체크포인트를 수집합니다.
+        처음 연결하면 최근 7일의 활동 통계를 전송합니다. 이후에는 새로 발생한
+        활동을 수집합니다.
       </p>
       <ul>
         <li>토큰 사용량과 모델·도구 사용 통계</li>
@@ -375,93 +372,31 @@ export function Consent({
   );
 }
 
-export function SettingsPage({
-  runtime,
-  core,
-  diagnose,
-  setAlerts,
+function CollectionSettings({
   status,
-  theme,
-  setTheme,
-  preferences,
-  preferencesError,
-  setCloseAction,
   busy,
   native,
   stop,
   resume,
-  connect,
 }: {
-  runtime: Runtime;
-  core: CoreStatus | null;
-  diagnose: () => void;
-  setAlerts: (enabled: boolean) => void;
-  status: Status | null;
-  theme: Theme;
-  setTheme: (v: Theme) => void;
-  preferences: AppPreferences;
-  preferencesError: string;
-  setCloseAction: (value: AppPreferences["close_action"]) => void;
+  status: Status;
   busy: boolean;
   native: boolean;
   stop: () => void;
   resume: () => Promise<boolean>;
-  connect: () => void;
 }) {
   const [resuming, setResuming] = useState(false);
   const [consent, setConsent] = useState(false);
   return (
-    <div className="settings-page">
-      <section className="settings-block preference-row">
-        <h2>
-          <label htmlFor="close-action">창 닫기</label>
-        </h2>
-        <Choice
-          id="close-action"
-          label="창 닫기"
-          value={preferences.close_action}
-          disabled={!native || busy || !!preferencesError}
-          options={[
-            ["tray", "트레이에 숨기기"],
-            ["quit", "앱 종료"],
-          ]}
-          onValueChange={(value) =>
-            setCloseAction(value as AppPreferences["close_action"])
-          }
-        />
-        {preferencesError && (
-          <p className="preference-error" role="alert">
-            {preferencesError}
-          </p>
-        )}
-      </section>
-      <section className="settings-block preference-row">
-        <div>
-          <h2>테마</h2>
-          <p className="helper">시스템을 선택하면 기기 설정을 따릅니다.</p>
-        </div>
-        <div className="theme-segment" role="group" aria-label="설정 화면 테마">
-          {(
-            [
-              ["system", Monitor, "시스템"],
-              ["light", Sun, "라이트"],
-              ["dark", Moon, "다크"],
-            ] as const
-          ).map(([id, Icon, label]) => (
-            <Button
-              key={id}
-              aria-pressed={theme === id}
-              onClick={() => setTheme(id)}
-            >
-              <Icon size={16} />
-              <span>{label}</span>
-            </Button>
-          ))}
-        </div>
-      </section>
-      <section className="settings-block">
+    <>
+      <section
+        id="collection"
+        tabIndex={-1}
+        className="collection-controls"
+        aria-label="활동 통계 수집"
+      >
         <div className="section-title">
-          <h2>활동 통계 수집</h2>
+          <h3>자동 수집</h3>
           <span className="tag">
             {status
               ? status.collection_enabled
@@ -481,7 +416,7 @@ export function SettingsPage({
           >
             수집 중지
           </Button>
-        ) : status?.endpoint ? (
+        ) : (
           <Button
             className="primary"
             disabled={!native || busy || resuming}
@@ -491,11 +426,6 @@ export function SettingsPage({
             }}
           >
             동의 후 다시 시작
-          </Button>
-        ) : (
-          <Button className="secondary" disabled={busy} onClick={connect}>
-            서버 연결 설정
-            <ArrowRight size={16} />
           </Button>
         )}
         {resuming && !status?.collection_enabled && (
@@ -568,58 +498,83 @@ export function SettingsPage({
           );
         })}
       </details>
-      <section className="settings-block core-settings">
-        <div className="section-title">
-          <h2>GroundLine Core</h2>
-          <ShieldCheck size={20} />
-          <strong
-            className="metric"
-            data-state={
-              core
-                ? core.status === "PASS"
-                  ? "success"
-                  : "attention"
-                : "unknown"
-            }
-          >
-            {core
-              ? core.status === "PASS"
-                ? "실행 진단 통과"
-                : "확인 필요"
-              : "진단 전"}
-          </strong>
-          <Button
-            className="secondary"
-            disabled={!native || busy}
-            onClick={diagnose}
-          >
-            <RefreshCw size={16} />
-            Core 진단
-          </Button>
-        </div>
-        {core && (
-          <details className="core-details">
-            <summary>
-              진단 상세 <ChevronDown size={14} />
-            </summary>
-            <dl className="facts compact">
-              <div>
-                <dt>패키지 버전</dt>
-                <dd>{core.version}</dd>
-              </div>
-              <div>
-                <dt>패키지 무결성</dt>
-                <dd>{core.checksum_verified ? "확인 완료" : "확인 필요"}</dd>
-              </div>
-              <div>
-                <dt>실제 훅 실행</dt>
-                <dd>
-                  {core.live_hooks_verified ? "확인 완료" : "별도 확인 필요"}
-                </dd>
-              </div>
-            </dl>
-          </details>
+    </>
+  );
+}
+
+export function SettingsPage({
+  runtime,
+  core,
+  diagnose,
+  setAlerts,
+  theme,
+  setTheme,
+  preferences,
+  preferencesError,
+  setCloseAction,
+  busy,
+  native,
+}: {
+  runtime: Runtime;
+  core: CoreStatus | null;
+  diagnose: () => void;
+  setAlerts: (enabled: boolean) => void;
+  theme: Theme;
+  setTheme: (v: Theme) => void;
+  preferences: AppPreferences;
+  preferencesError: string;
+  setCloseAction: (value: AppPreferences["close_action"]) => void;
+  busy: boolean;
+  native: boolean;
+}) {
+  return (
+    <div className="settings-page">
+      <section className="settings-block preference-row">
+        <h2>
+          <label htmlFor="close-action">창 닫기</label>
+        </h2>
+        <Choice
+          id="close-action"
+          label="창 닫기"
+          value={preferences.close_action}
+          disabled={!native || busy || !!preferencesError}
+          options={[
+            ["tray", "트레이에 숨기기"],
+            ["quit", "앱 종료"],
+          ]}
+          onValueChange={(value) =>
+            setCloseAction(value as AppPreferences["close_action"])
+          }
+        />
+        {preferencesError && (
+          <p className="preference-error" role="alert">
+            {preferencesError}
+          </p>
         )}
+      </section>
+      <section className="settings-block preference-row">
+        <div>
+          <h2>테마</h2>
+          <p className="helper">시스템을 선택하면 기기 설정을 따릅니다.</p>
+        </div>
+        <div className="theme-segment" role="group" aria-label="화면 테마">
+          {(
+            [
+              ["system", Monitor, "시스템"],
+              ["light", Sun, "라이트"],
+              ["dark", Moon, "다크"],
+            ] as const
+          ).map(([id, Icon, label]) => (
+            <Button
+              key={id}
+              aria-pressed={theme === id}
+              onClick={() => setTheme(id)}
+            >
+              <Icon size={16} />
+              <span>{label}</span>
+            </Button>
+          ))}
+        </div>
       </section>
       <section className="settings-block preference-row">
         <div>
@@ -637,12 +592,68 @@ export function SettingsPage({
           onValueChange={(v) => setAlerts(v === "on")}
         />
       </section>
-      <DiagnosticExport
-        key={runtime}
-        runtime={runtime}
-        native={native}
-        disabled={busy}
-      />
+      <details className="diagnostic-details settings-diagnostics">
+        <summary>문제 해결</summary>
+        <section className="settings-block core-settings">
+          <div className="section-title">
+            <h2>GroundLine Core</h2>
+            <ShieldCheck size={20} />
+            <strong
+              className="metric"
+              data-state={
+                core
+                  ? core.status === "PASS"
+                    ? "success"
+                    : "attention"
+                  : "unknown"
+              }
+            >
+              {core
+                ? core.status === "PASS"
+                  ? "실행 진단 통과"
+                  : "확인 필요"
+                : "진단 전"}
+            </strong>
+            <Button
+              className="secondary"
+              disabled={!native || busy}
+              onClick={diagnose}
+            >
+              <RefreshCw size={16} />
+              Core 진단
+            </Button>
+          </div>
+          {core && (
+            <details className="core-details">
+              <summary>
+                진단 상세 <ChevronDown size={14} />
+              </summary>
+              <dl className="facts compact">
+                <div>
+                  <dt>패키지 버전</dt>
+                  <dd>{core.version}</dd>
+                </div>
+                <div>
+                  <dt>패키지 무결성</dt>
+                  <dd>{core.checksum_verified ? "확인 완료" : "확인 필요"}</dd>
+                </div>
+                <div>
+                  <dt>실제 훅 실행</dt>
+                  <dd>
+                    {core.live_hooks_verified ? "확인 완료" : "별도 확인 필요"}
+                  </dd>
+                </div>
+              </dl>
+            </details>
+          )}
+        </section>
+        <DiagnosticExport
+          key={runtime}
+          runtime={runtime}
+          native={native}
+          disabled={busy}
+        />
+      </details>
     </div>
   );
 }
