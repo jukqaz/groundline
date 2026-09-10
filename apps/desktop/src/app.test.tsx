@@ -37,6 +37,15 @@ beforeEach(() => {
     cb();
     return 1;
   });
+  HTMLElement.prototype.scrollIntoView = vi.fn();
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
   rpc.mockReset();
   rpc.mockImplementation(async (command: string, args: any) => {
     if (command === "get_app_preferences") return { ...preferences };
@@ -93,23 +102,29 @@ function nav(label: string) {
   );
 }
 
+async function choose(name: string, option: string) {
+  fireEvent.keyDown(screen.getByRole("combobox", { name }), {
+    key: "ArrowDown",
+  });
+  fireEvent.click(await screen.findByRole("option", { name: option }));
+}
+
 describe("메뉴에서 끝내는 사용자 작업", () => {
   it("창 닫기는 트레이가 기본이며 저장 성공 뒤에만 종료 설정을 반영한다", async () => {
     await mount();
     nav("설정");
-    const tray = screen.getByRole("button", { name: /트레이로 숨기기/ });
-    const quit = screen.getByRole("button", { name: /앱 완전히 종료/ });
-    expect(tray.getAttribute("aria-pressed")).toBe("true");
-    fireEvent.click(quit);
+    const closeAction = screen.getByRole("combobox", { name: "창 닫기" });
+    expect(closeAction.textContent).toContain("트레이에 숨기기");
+    await choose("창 닫기", "앱 종료");
     await screen.findByText("앱 실행 설정을 저장했습니다.");
-    expect(quit.getAttribute("aria-pressed")).toBe("true");
+    expect(closeAction.textContent).toContain("앱 종료");
     expect(preferences.close_action).toBe("quit");
     rpc.mockImplementationOnce(async () => {
       throw "local_state_failed";
     });
-    fireEvent.click(tray);
+    await choose("창 닫기", "트레이에 숨기기");
     await screen.findByRole("alert");
-    expect(quit.getAttribute("aria-pressed")).toBe("true");
+    expect(closeAction.textContent).toContain("앱 종료");
     expect(
       rpc.mock.calls.some(([name]) =>
         ["set_collection", "resume_collection", "connect"].includes(name),
@@ -142,9 +157,7 @@ describe("메뉴에서 끝내는 사용자 작업", () => {
   });
   it("개요를 기본으로 열고 설정된 연결은 등록 폼 대신 관리 화면을 보여준다", async () => {
     await mount();
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
-      "이 기기의 상태",
-    );
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("개요");
     expect(localStorage.getItem("groundline-theme")).toBe("system");
     expect(
       within(screen.getByRole("navigation", { name: "주 메뉴" }))
@@ -152,7 +165,7 @@ describe("메뉴에서 끝내는 사용자 작업", () => {
         .map((button) => button.textContent),
     ).toEqual(["개요", "서버", "설정"]);
     nav("서버");
-    expect(screen.getByText("저장된 연결")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "연결 관리" })).toBeTruthy();
     expect(screen.queryByPlaceholderText("등록키 입력")).toBeNull();
     expect(
       rpc.mock.calls.every(([name]) =>
@@ -245,9 +258,7 @@ describe("메뉴에서 끝내는 사용자 작업", () => {
     await mount();
     nav("서버");
     current = { ...enrolled, endpoint: "https://cli.example.com" };
-    fireEvent.change(screen.getByRole("combobox", { name: "대상 환경" }), {
-      target: { value: "codex_cli" },
-    });
+    await choose("대상 환경", "Codex CLI");
     await screen.findByText("https://cli.example.com");
     expect(screen.queryByText("https://insights.example.com")).toBeNull();
     nav("설정");
@@ -262,7 +273,7 @@ describe("메뉴에서 끝내는 사용자 작업", () => {
     await mount();
     nav("서버");
     fireEvent.click(screen.getByRole("button", { name: "주소 수정" }));
-    fireEvent.change(screen.getByLabelText(/대시보드 HTTPS 주소/), {
+    fireEvent.change(screen.getByLabelText(/대시보드 주소/), {
       target: { value: "https://dashboard.example.com" },
     });
     fireEvent.click(screen.getByRole("button", { name: "주소 저장" }));

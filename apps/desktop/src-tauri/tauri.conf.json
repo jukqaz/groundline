@@ -14,8 +14,8 @@
       {
         "label": "main",
         "title": "GroundLine Desktop",
-        "width": 1360,
-        "height": 960,
+        "width": 1200,
+        "height": 820,
         "minWidth": 760,
         "minHeight": 600,
         "backgroundColor": "#f9fbfd"

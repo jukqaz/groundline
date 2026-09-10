@@ -1,6 +1,10 @@
+import { Button, Input, Choice } from "./ui";
 import { useState } from "react";
 import {
   Activity,
+  CircleCheck,
+  Link2,
+  ChevronDown,
   ArrowRight,
   Check,
   Database,
@@ -11,8 +15,6 @@ import {
   ShieldCheck,
   Sun,
   X,
-  PanelBottom,
-  Power,
   Send,
 } from "lucide-react";
 import {
@@ -26,39 +28,6 @@ import {
   type AppPreferences,
 } from "./model";
 
-export function CollectionFacts({ status }: { status: Status | null }) {
-  return (
-    <dl className="facts">
-      <div>
-        <dt>수집 상태</dt>
-        <dd>{collectionLabel(status?.collection_state)}</dd>
-      </div>
-      <div>
-        <dt>수집 동의</dt>
-        <dd>
-          {!status
-            ? "확인 전"
-            : status.consent_status === "active"
-              ? "동의함"
-              : "동의 필요"}
-        </dd>
-      </div>
-      <div>
-        <dt>마지막 수집 완료</dt>
-        <dd>{status ? formatTime(status.last_success_utc) : "확인 전"}</dd>
-      </div>
-      <div>
-        <dt>전송 대기</dt>
-        <dd>
-          {status?.pending_event_count == null
-            ? "확인 전"
-            : `${status.pending_event_count}건`}
-        </dd>
-      </div>
-    </dl>
-  );
-}
-
 export function DeliverySummary({ status }: { status: Status | null }) {
   const receipt = status?.delivery_confirmation;
   return (
@@ -67,7 +36,6 @@ export function DeliverySummary({ status }: { status: Status | null }) {
         <h2>서버 수신 확인</h2>
         <Send size={20} />
       </div>
-      <p className="helper">서버 응답으로 확인한 이 기기의 최근 전송입니다.</p>
       <dl className="delivery-facts">
         <div>
           <dt>최근 전송 묶음</dt>
@@ -77,7 +45,7 @@ export function DeliverySummary({ status }: { status: Status | null }) {
               : "기록 없음"}
           </dd>
         </div>
-        <div>
+        <div className="receipt-time">
           <dt>서버 수신 확인 시각</dt>
           <dd>{formatTime(receipt?.confirmed_at_utc)}</dd>
         </div>
@@ -92,7 +60,7 @@ export function DeliverySummary({ status }: { status: Status | null }) {
       </dl>
       <p className="helper">
         {receipt
-          ? "한 건은 집계 이벤트입니다. 재전송에 대한 서버의 중복 수신 확인도 포함하며, 누적 고유 건수와는 다릅니다."
+          ? "최근 묶음의 수신 기록입니다. 중복 응답을 포함하며 누적 건수는 아닙니다."
           : "아직 서버 수신 확인 기록이 없습니다. 수집 완료만으로 전송 성공을 표시하지 않습니다."}
       </p>
     </section>
@@ -134,15 +102,30 @@ export function Overview({
   return (
     <>
       <section className="next-action">
-        <div className="large-mark">
-          <Activity size={29} />
-        </div>
+        <span
+          className="connection-indicator"
+          data-active={status?.collection_state === "active"}
+          aria-hidden="true"
+        >
+          {status?.collection_state === "active" &&
+          status.delivery_confirmation &&
+          status.pending_event_count === 0 ? (
+            <CircleCheck size={34} />
+          ) : (
+            <Activity size={30} />
+          )}
+        </span>
         <div>
-          <span className="eyebrow">지금 할 일</span>
           <h2>{next.title}</h2>
           <p>{next.detail}</p>
+          {status?.endpoint && (
+            <p className="endpoint connected-endpoint">
+              <Link2 size={14} />
+              {status.endpoint}
+            </p>
+          )}
         </div>
-        <button
+        <Button
           className="primary"
           disabled={busy || (next.action === "refresh" && !native)}
           onClick={() =>
@@ -155,33 +138,62 @@ export function Overview({
             ? "상태 확인"
             : next.action === "settings"
               ? "수집 설정"
-              : "서버 연결 보기"}
+              : status?.endpoint
+                ? "연결 관리"
+                : "서버 연결 보기"}
           <ArrowRight size={16} />
-        </button>
+        </Button>
       </section>
-      <div className="summary-grid">
-        <section className="summary-card">
-          <div className="section-title">
-            <h2>GroundLine Core</h2>
-            <ShieldCheck size={20} />
-          </div>
-          <strong className="metric">
+      <DeliverySummary status={status} />
+      <section className="insights-row">
+        <div className="section-title">
+          <h2>Insights</h2>
+          <Activity size={20} />
+        </div>
+        <strong className="collection-state">
+          {collectionLabel(status?.collection_state)}
+        </strong>
+        <p className="helper">
+          마지막 수집 완료{" "}
+          <span>
+            {status ? formatTime(status.last_success_utc) : "확인 전"}
+          </span>
+        </p>
+      </section>
+      <section className="summary-card">
+        <div className="section-title">
+          <h2>GroundLine Core</h2>
+          <ShieldCheck size={20} />
+          <strong
+            className="metric"
+            data-state={
+              core
+                ? core.status === "PASS"
+                  ? "success"
+                  : "attention"
+                : "unknown"
+            }
+          >
             {core
               ? core.status === "PASS"
                 ? "실행 진단 통과"
                 : "확인 필요"
               : "진단 전"}
           </strong>
-          <p>로컬 작업 규칙과 실행 상태를 점검합니다.</p>
-          <button
+          <Button
             className="secondary"
             disabled={!native || busy}
             onClick={diagnose}
           >
             <RefreshCw size={16} />
             Core 진단
-          </button>
-          {core && (
+          </Button>
+        </div>
+        {core && (
+          <details className="core-details">
+            <summary>
+              진단 상세 <ChevronDown size={14} />
+            </summary>
             <dl className="facts compact">
               <div>
                 <dt>패키지 버전</dt>
@@ -198,64 +210,8 @@ export function Overview({
                 </dd>
               </div>
             </dl>
-          )}
-        </section>
-        <section className="summary-card">
-          <div className="section-title">
-            <h2>Insights</h2>
-            <Activity size={20} />
-          </div>
-          <strong className="metric">
-            {collectionLabel(status?.collection_state)}
-          </strong>
-          <p>
-            {status?.endpoint
-              ? "연결 설정이 저장되어 있습니다."
-              : "활동 통계를 내 서버에서 확인하세요."}
-          </p>
-          <button
-            className="secondary"
-            disabled={busy}
-            onClick={() => navigate("connection")}
-          >
-            {status?.endpoint ? "연결 관리" : "서버 연결"}
-            <ArrowRight size={16} />
-          </button>
-          <dl className="facts compact">
-            <div>
-              <dt>마지막 수집 완료</dt>
-              <dd>
-                {status ? formatTime(status.last_success_utc) : "확인 전"}
-              </dd>
-            </div>
-            <div>
-              <dt>전송 대기</dt>
-              <dd>
-                {status?.pending_event_count == null
-                  ? "확인 전"
-                  : `${status.pending_event_count}건`}
-              </dd>
-            </div>
-          </dl>
-        </section>
-      </div>
-      <DeliverySummary status={status} />
-      <section className="overview-section">
-        <div>
-          <h2>직접 서버를 운영하시나요?</h2>
-          <p>
-            Docker Compose로 API·ClickHouse·Grafana 설정을 함께 준비할 수
-            있습니다. 서버 메뉴에서 기존 서버에 연결하거나 새 구성을 만드세요.
-          </p>
-        </div>
-        <button
-          className="secondary"
-          disabled={busy}
-          onClick={() => navigate("compose")}
-        >
-          서버 구성
-          <ArrowRight size={16} />
-        </button>
+          </details>
+        )}
       </section>
     </>
   );
@@ -284,10 +240,9 @@ export function ConnectionManager({
   const [dashboard, setDashboard] = useState(status.grafana_url || "");
   return (
     <>
-      <section className="connection-summary">
+      <section className="connection-summary" aria-label="연결 관리">
         <div className="section-title">
           <div>
-            <span className="eyebrow">저장된 연결</span>
             <h2>{collectionLabel(status.collection_state)}</h2>
           </div>
           <span className="tag">
@@ -295,24 +250,24 @@ export function ConnectionManager({
           </span>
         </div>
         <p className="endpoint">{status.endpoint}</p>
-        <CollectionFacts status={status} />
+        <p className="helper">
+          {status.consent_status === "active"
+            ? "수집 동의 완료"
+            : "수집 동의 필요"}
+        </p>
         <div className="actions">
-          <button
+          <Button
             className="primary"
             disabled={!native || busy || !status.collection_enabled}
             onClick={run}
           >
             지금 수집·전송 확인
             <ArrowRight size={16} />
-          </button>
-          <button className="secondary" disabled={busy} onClick={settings}>
+          </Button>
+          <Button className="secondary" disabled={busy} onClick={settings}>
             {status.collection_enabled ? "수집 설정" : "수집 다시 시작"}
-          </button>
+          </Button>
         </div>
-        <p className="helper">
-          수집 완료 기록과 서버 수신은 다를 수 있습니다. 전송 실행 결과에서
-          서버가 받은 건수를 확인하세요.
-        </p>
       </section>
       <Attention status={status} />
       <DeliverySummary status={status} />
@@ -325,15 +280,15 @@ export function ConnectionManager({
           </p>
         </div>
         <div className="actions">
-          <button
+          <Button
             className="secondary"
             disabled={!native || busy || !status.grafana_url}
             onClick={openDashboard}
           >
             대시보드 열기
             <ArrowRight size={16} />
-          </button>
-          <button
+          </Button>
+          <Button
             className="text-button"
             disabled={busy}
             onClick={() => {
@@ -342,7 +297,7 @@ export function ConnectionManager({
             }}
           >
             주소 {status.grafana_url ? "수정" : "추가"}
-          </button>
+          </Button>
         </div>
       </section>
       {editingDashboard && (
@@ -354,30 +309,31 @@ export function ConnectionManager({
           }}
         >
           <label className="field">
-            <span>대시보드 HTTPS 주소</span>
-            <input
+            <span>대시보드 주소</span>
+            <Input
               type="url"
               value={dashboard}
               onChange={(e) => setDashboard(e.target.value)}
               placeholder="https://grafana.example.com"
             />
             <small>
-              비우고 저장하면 바로가기만 제거됩니다. 모든 Codex 환경에서
-              공통으로 사용합니다.
+              외부 서버는 HTTPS, 이 기기의 localhost는 HTTP도 지원합니다. 비우고
+              저장하면 바로가기만 제거됩니다. 모든 Codex 환경에서 공통으로
+              사용합니다.
             </small>
           </label>
           <div className="actions">
-            <button className="primary" disabled={!native || busy}>
+            <Button className="primary" disabled={!native || busy}>
               주소 저장
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               className="secondary"
               disabled={busy}
               onClick={() => setEditingDashboard(false)}
             >
               취소
-            </button>
+            </Button>
           </div>
         </form>
       )}
@@ -405,9 +361,9 @@ export function ConnectionManager({
           인증 실패 시 같은 서버의 등록키를 다시 확인할 수 있습니다. 서버
           변경에는 기존 등록과 대기 데이터의 별도 검토가 필요합니다.
         </p>
-        <button className="secondary" disabled={busy} onClick={repair}>
+        <Button className="secondary" disabled={busy} onClick={repair}>
           등록키 다시 확인
-        </button>
+        </Button>
       </details>
     </>
   );
@@ -480,88 +436,56 @@ export function SettingsPage({
   const [consent, setConsent] = useState(false);
   return (
     <div className="settings-page">
-      <section className="settings-block">
-        <h2>창을 닫을 때</h2>
-        <p className="helper">
-          기본값은 트레이로 숨기기입니다. 메뉴 막대에서 다시 열거나 완전히
-          종료할 수 있습니다.
-        </p>
-        {preferencesError && <p role="alert">{preferencesError}</p>}
-        <div
-          className="appearance-options close-options"
-          role="group"
-          aria-label="창 닫기 동작"
-        >
-          {(
-            [
-              [
-                "tray",
-                PanelBottom,
-                "트레이로 숨기기",
-                "창을 숨기고 백그라운드에서 계속 실행",
-              ],
-              [
-                "quit",
-                Power,
-                "앱 완전히 종료",
-                "이 앱을 종료하며 Codex 훅은 계속 사용",
-              ],
-            ] as const
-          ).map(([id, Icon, label, description]) => (
-            <button
-              key={id}
-              disabled={!native || busy || !!preferencesError}
-              aria-pressed={preferences.close_action === id}
-              onClick={() => setCloseAction(id)}
-            >
-              <Icon size={23} />
-              <strong>{label}</strong>
-              <small>{description}</small>
-              {preferences.close_action === id && (
-                <Check className="choice-check" size={16} />
-              )}
-            </button>
-          ))}
-        </div>
-        <p className="helper">
-          자동 수집·전송은 Codex 훅이 담당합니다. 앱을 완전히 종료해도 기존 수집
-          동의에 따라 훅이 호출될 때 실행됩니다. 트레이로 숨기면 앱에서 시작한
-          작업도 계속됩니다. 자동 수집을 끄려면 아래 ‘수집 중지’를 사용하세요.
-        </p>
+      <section className="settings-block preference-row">
+        <h2>
+          <label htmlFor="close-action">창 닫기</label>
+        </h2>
+        <Choice
+          id="close-action"
+          label="창 닫기"
+          value={preferences.close_action}
+          disabled={!native || busy || !!preferencesError}
+          options={[
+            ["tray", "트레이에 숨기기"],
+            ["quit", "앱 종료"],
+          ]}
+          onValueChange={(value) =>
+            setCloseAction(value as AppPreferences["close_action"])
+          }
+        />
+        {preferencesError && (
+          <p className="preference-error" role="alert">
+            {preferencesError}
+          </p>
+        )}
       </section>
-      <section className="settings-block">
-        <h2>화면 테마</h2>
-        <p className="helper">
-          기본값은 시스템입니다. 운영체제의 화면 모드가 바뀌면 함께 전환됩니다.
-        </p>
-        <div
-          className="appearance-options"
-          role="group"
-          aria-label="설정 화면 테마"
-        >
+      <section className="settings-block preference-row">
+        <div>
+          <h2>테마</h2>
+          <p className="helper">시스템을 선택하면 기기 설정을 따릅니다.</p>
+        </div>
+        <div className="theme-segment" role="group" aria-label="설정 화면 테마">
           {(
             [
-              ["system", Monitor, "시스템", "운영체제 설정 따르기"],
-              ["light", Sun, "라이트", "밝은 화면"],
-              ["dark", Moon, "다크", "어두운 화면"],
+              ["system", Monitor, "시스템"],
+              ["light", Sun, "라이트"],
+              ["dark", Moon, "다크"],
             ] as const
-          ).map(([id, Icon, label, desc]) => (
-            <button
+          ).map(([id, Icon, label]) => (
+            <Button
               key={id}
               aria-pressed={theme === id}
               onClick={() => setTheme(id)}
             >
-              <Icon size={23} />
-              <strong>{label}</strong>
-              <small>{desc}</small>
-              {theme === id && <Check className="choice-check" size={16} />}
-            </button>
+              <Icon size={16} />
+              <span>{label}</span>
+            </Button>
           ))}
         </div>
       </section>
       <section className="settings-block">
         <div className="section-title">
-          <h2>개인정보와 수집</h2>
+          <h2>활동 통계 수집</h2>
           <span className="tag">
             {status
               ? status.collection_enabled
@@ -570,21 +494,19 @@ export function SettingsPage({
               : "확인 전"}
           </span>
         </div>
-        <CollectionFacts status={status} />
         <p className="helper">
-          수집을 중지하면 이후 자동 수집을 멈춥니다. 기존 로컬 데이터와 서버에
-          저장된 통계는 보존됩니다.
+          Codex 사용 시 통계를 전송합니다. 수집을 꺼도 기존 기록은 보존됩니다.
         </p>
         {status?.collection_enabled ? (
-          <button
+          <Button
             className="secondary stop-button"
             disabled={!native || busy}
             onClick={stop}
           >
             수집 중지
-          </button>
+          </Button>
         ) : status?.endpoint ? (
-          <button
+          <Button
             className="primary"
             disabled={!native || busy || resuming}
             onClick={() => {
@@ -593,19 +515,19 @@ export function SettingsPage({
             }}
           >
             동의 후 다시 시작
-          </button>
+          </Button>
         ) : (
-          <button className="secondary" disabled={busy} onClick={connect}>
+          <Button className="secondary" disabled={busy} onClick={connect}>
             서버 연결 설정
             <ArrowRight size={16} />
-          </button>
+          </Button>
         )}
         {resuming && !status?.collection_enabled && (
           <div className="resume-panel">
             <p className="endpoint">전송 대상: {status?.endpoint}</p>
             <Consent checked={consent} setChecked={setConsent} />
             <div className="actions">
-              <button
+              <Button
                 className="primary"
                 disabled={!consent || busy || !native}
                 onClick={async () => {
@@ -616,8 +538,8 @@ export function SettingsPage({
                 }}
               >
                 동의하고 수집 재개
-              </button>
-              <button
+              </Button>
+              <Button
                 className="secondary"
                 disabled={busy}
                 onClick={() => {
@@ -626,13 +548,16 @@ export function SettingsPage({
                 }}
               >
                 취소
-              </button>
+              </Button>
             </div>
           </div>
         )}
       </section>
-      <section className="settings-block">
-        <h2>어떤 정보가 어디에 남나요?</h2>
+      <details className="settings-block privacy-details">
+        <summary>
+          <ShieldCheck size={18} />
+          개인정보 처리 안내 <ChevronDown size={16} />
+        </summary>
         {[
           [
             Check,
@@ -666,7 +591,7 @@ export function SettingsPage({
             </div>
           );
         })}
-      </section>
+      </details>
     </div>
   );
 }

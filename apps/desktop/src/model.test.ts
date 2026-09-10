@@ -3,6 +3,7 @@ import {
   storedTheme,
   resolveTheme,
   validOrigin,
+  validDashboardOrigin,
   setupError,
   initialSetup,
   errorMessage,
@@ -13,6 +14,49 @@ import {
 } from "./model";
 
 describe("사용자 설정과 경계", () => {
+  it("대시보드는 외부 HTTPS와 loopback HTTP만 허용한다", () => {
+    for (const url of [
+      "https://grafana.example.com",
+      "http://localhost:23100",
+      "http://127.0.0.1:23100",
+      "http://[::1]:23100",
+    ])
+      expect(validDashboardOrigin(url)).toBe(true);
+    for (const url of [
+      "http://192.168.1.1",
+      "http://100.64.0.1",
+      "http://localhost.example.com",
+      "http://localhost@evil.example.com",
+      "http://localhost/path",
+      "http://localhost?token=value",
+      "http://localhost#fragment",
+    ])
+      expect(validDashboardOrigin(url)).toBe(false);
+  });
+  it("수집 완료를 서버 수신 성공으로 오인하지 않는다", () => {
+    const status = {
+      endpoint: "https://example.com",
+      collection_enabled: true,
+      consent_status: "active",
+      collection_state: "active",
+      pending_event_count: 0,
+    };
+    expect(nextStep(status).title).not.toContain("수신");
+    const acknowledged = {
+      ...status,
+      delivery_confirmation: {
+        event_count: 1,
+        confirmed_at_utc: "2026-09-10T00:00:00Z",
+      },
+    };
+    expect(nextStep(acknowledged).title).toContain("수신");
+    expect(
+      nextStep({ ...acknowledged, pending_event_count: 1 }).title,
+    ).not.toContain("수신");
+    expect(
+      nextStep({ ...acknowledged, collection_enabled: false }).action,
+    ).toBe("settings");
+  });
   it("첫 실행과 잘못된 저장값은 시스템 테마를 사용한다", () => {
     expect(storedTheme(null)).toBe("system");
     expect(storedTheme("unexpected")).toBe("system");
