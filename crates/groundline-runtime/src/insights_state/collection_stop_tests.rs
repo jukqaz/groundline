@@ -188,12 +188,15 @@ fn subprocess_stop_uses_the_same_control_lock() {
             "--nocapture",
         ])
         .env(CHILD_HOME, home.path())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
         .spawn()
         .unwrap();
     let started = std::time::Instant::now();
     while policy_enabled(&directory).unwrap() {
+        if let Some(status) = child.try_wait().unwrap() {
+            panic!("stop process exited before policy revocation: {status}");
+        }
         if started.elapsed() > Duration::from_secs(5) {
             child.kill().unwrap();
             child.wait().unwrap();

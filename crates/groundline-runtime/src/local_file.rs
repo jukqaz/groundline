@@ -270,9 +270,9 @@ pub fn atomic_write_private(path: &Path, contents: &[u8]) -> io::Result<()> {
             ));
         }
         drop(file);
-        tempfile::TempPath::try_from_path(&temporary)?
-            .persist(path)
-            .map_err(|error| error.error)?;
+        // std uses FileRenameInfoEx when Windows cannot replace an open reader
+        // with MoveFileExW. Keep the private file's ACL and the atomic replacement.
+        std::fs::rename(&temporary, path)?;
         #[cfg(unix)]
         File::open(parent)?.sync_all()?;
         Ok(())
@@ -468,6 +468,53 @@ mod tests {
         drop(file);
         atomic_write_private(&path, b"{\"state\":2}\n").expect("private replace");
         assert_eq!(fs::read(path).unwrap(), b"{\"state\":2}\n");
+    }
+
+    #[test]
+    fn replacement_preserves_open_readers_and_private_permissions() {
+        use std::io::Read;
+
+        let root = tempdir().unwrap();
+        let path = root.path().join("state.json");
+        atomic_write_private(&path, b"before").unwrap();
+        let mut reader = open_bounded_regular_file(&path, 1, 64).unwrap();
+        atomic_write_private(&path, b"after").unwrap();
+        let mut previous = Vec::new();
+        reader.read_to_end(&mut previous).unwrap();
+        assert_eq!(previous, b"before");
+        let current = open_bounded_regular_file(&path, 1, 64).unwrap();
+        assert!(private_for_current_user(&current));
+        assert!(owned_by_current_user(&current));
+        assert_eq!(fs::read(&path).unwrap(), b"after");
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn failed_replacement_preserves_existing_data_and_removes_temporary_file() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("directory");
+        fs::create_dir(&path).unwrap();
+        fs::write(path.join("existing"), b"preserve").unwrap();
+        assert!(atomic_write_private(&path, b"replacement").is_err());
+        assert_eq!(fs::read(path.join("existing")).unwrap(), b"preserve");
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn readonly_destination_remains_protected() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("state.json");
+        atomic_write_private(&path, b"preserve").unwrap();
+        let original = fs::metadata(&path).unwrap().permissions();
+        let mut readonly = original.clone();
+        readonly.set_readonly(true);
+        fs::set_permissions(&path, readonly).unwrap();
+        let result = atomic_write_private(&path, b"replacement");
+        fs::set_permissions(&path, original).unwrap();
+        assert!(result.is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"preserve");
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
     }
 
     #[cfg(unix)]

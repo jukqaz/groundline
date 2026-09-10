@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.24.3
+
+- Windows에서 다른 프로세스가 정책 파일을 읽는 중에도 수집 중지를 저장할 수
+  있도록 표준 라이브러리의 원자적 파일 교체를 사용한다. 이전 읽기 핸들,
+  소유자 전용 권한, 실패 시 기존 데이터 보존을 회귀 검증한다.
+- Markdown 링크 검증에 `pulldown-cmark`와 `percent-encoding`을 적용해 참조형
+  링크, 이미지, 한글·공백·이스케이프 경로와 인코딩된 경로 이탈을 처리한다.
+- 개인정보 검사기의 제한된 테스트 예외를 `syn`·`proc-macro2`의 실제 Rust 구문
+  범위로 판별해 문자열·주석 안의 괄호가 이후 검사 범위를 가리지 못하게 한다.
+- Windows 파일 교체와 프로세스 간 중지 검사를 PR 단계에서도 실행한다.
+  0.24.2 태그는 Windows x64 검증에서 멈춰 공개 파일·이미지를 게시하지 않았다.
+
 ## 0.24.2
 
 - Support literal loopback HTTP endpoints for local Docker Compose verification,

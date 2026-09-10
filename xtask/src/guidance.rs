@@ -1,10 +1,9 @@
 //! Validate callable skill metadata and local references, not prose semantics.
+use percent_encoding::percent_decode_str;
+use pulldown_cmark::{Event, Parser, Tag};
+use serde::Deserialize;
 use std::collections::BTreeSet;
 use std::path::Path;
-use std::sync::OnceLock;
-
-use regex::Regex;
-use serde::Deserialize;
 
 use super::XtaskError;
 use super::package::regular_bytes;
@@ -45,17 +44,25 @@ fn text(path: &Path) -> Result<String, XtaskError> {
 }
 
 fn local_links(root: &Path, file: &Path, body: &str) -> Result<(), XtaskError> {
-    static LINKS: OnceLock<Regex> = OnceLock::new();
-    let links = LINKS.get_or_init(|| Regex::new(r"\[[^\]\n]*\]\(([^)\s]+)\)").unwrap());
-    for found in links.captures_iter(body) {
-        let target = found[1].split('#').next().unwrap_or("");
+    for event in Parser::new(body) {
+        let Event::Start(Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. }) = event else {
+            continue;
+        };
+        let target = dest_url.split('#').next().unwrap_or("");
         if target.is_empty() || target.starts_with("https://") || target.starts_with("http://") {
             continue;
         }
-        if Path::new(target).is_absolute() || target.contains(':') || target.contains('\\') {
+        let target = percent_decode_str(target)
+            .decode_utf8()
+            .map_err(|_| XtaskError::InvalidSource)?;
+        if Path::new(target.as_ref()).is_absolute() || target.contains(':') || target.contains('\\')
+        {
             return Err(XtaskError::InvalidSource);
         }
-        let joined = file.parent().ok_or(XtaskError::InvalidSource)?.join(target);
+        let joined = file
+            .parent()
+            .ok_or(XtaskError::InvalidSource)?
+            .join(target.as_ref());
         let resolved = joined
             .canonicalize()
             .map_err(|_| XtaskError::InvalidSource)?;
@@ -249,5 +256,64 @@ mod tests {
             .map(|entry| entry.unwrap().file_name().into_string().unwrap())
             .collect();
         verify(&root, &names).unwrap();
+    }
+
+    #[test]
+    fn reference_links_and_images_cannot_hide_missing_targets() {
+        for body in [
+            "[Read][missing]\n\n[missing]: ../../references/missing.md",
+            "![Image][missing]\n\n[missing]: ../../references/missing.png",
+        ] {
+            let (root, _) = fixture();
+            let canonical = root.path().canonicalize().unwrap();
+            let file = canonical.join("skills/close-live-work/SKILL.md");
+            assert!(local_links(&canonical, &file, body).is_err());
+        }
+    }
+
+    #[test]
+    fn markdown_links_support_unicode_spaces_escapes_and_encoded_fragments() {
+        let (root, _) = fixture();
+        let canonical = root.path().canonicalize().unwrap();
+        let file = canonical.join("skills/close-live-work/SKILL.md");
+        fs::write(canonical.join("references/연동 안내 (새)#1.md"), "ok").unwrap();
+        for body in [
+            "[Read](<../../references/연동 안내 (새)%231.md>)",
+            "[Read](../../references/연동%20안내%20\\(새\\)%231.md#section)",
+            "[Read][guide]\n\n[guide]: <../../references/연동 안내 (새)%231.md>",
+        ] {
+            assert!(local_links(&canonical, &file, body).is_ok(), "{body}");
+        }
+    }
+
+    #[test]
+    fn code_examples_are_not_treated_as_document_links() {
+        let (root, _) = fixture();
+        let canonical = root.path().canonicalize().unwrap();
+        let file = canonical.join("skills/close-live-work/SKILL.md");
+        assert!(
+            local_links(
+                &canonical,
+                &file,
+                "`[example](missing.md)`\n\n```md\n[example](missing.md)\n```\n"
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn encoded_local_targets_cannot_escape_or_change_to_other_schemes() {
+        let (root, _) = fixture();
+        let canonical = root.path().canonicalize().unwrap();
+        let file = canonical.join("skills/close-live-work/SKILL.md");
+        for target in [
+            "%2Fprivate",
+            "C%3A%5Cprivate",
+            "%FF.md",
+            "%00.md",
+            "%2e%2e/%2e%2e/%2e%2e/outside.md",
+        ] {
+            assert!(local_links(&canonical, &file, &format!("[Read](<{target}>)")).is_err());
+        }
     }
 }
