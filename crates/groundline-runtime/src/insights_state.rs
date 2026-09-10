@@ -24,11 +24,14 @@ use zeroize::Zeroizing;
 use crate::audit_store::collect_audit;
 use crate::insights::{default_codex_home, discover_plugin_root, report_url, state_directory};
 use crate::local_file::{
-    atomic_write_private, create_private_new, open_bounded_regular_file, private_for_current_user,
+    atomic_write_private, create_private_new, open_bounded_regular_file,
+    open_or_create_private_lock, private_for_current_user,
 };
 use crate::tailnet;
 
 mod collection;
+#[cfg(test)]
+mod collection_stop_tests;
 
 const PROFILE_PATH: &str = "groundline/insights/owner-profile.json";
 const ENROLLMENT_TOKEN_PATH: &str = "groundline/insights/enrollment-token";
@@ -42,6 +45,7 @@ const OUTBOX_DIR: &str = "outbox";
 const QUARANTINE_DIR: &str = "outbox-quarantine";
 const RETRY_FILE: &str = "delivery-retry.json";
 const LOCK_FILE: &str = "owner-auto.lock";
+const COLLECTION_CONTROL_LOCK: &str = "collection-control.lock";
 const MAX_STATE_BYTES: u64 = 64 * 1024;
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 const MAX_OUTBOX_EVENTS: usize = 256;
@@ -124,12 +128,10 @@ impl StateError {
 
     pub fn mutation_performed(&self) -> Option<bool> {
         match self {
-            Self::InvalidProfile
-            | Self::AlreadyRunning
-            | Self::Disabled
-            | Self::ReconsentRequired => Some(false),
+            Self::InvalidProfile | Self::AlreadyRunning | Self::ReconsentRequired => Some(false),
             Self::TailnetDisconnected => Some(true),
-            Self::LocalState
+            Self::Disabled
+            | Self::LocalState
             | Self::UnsupportedState
             | Self::AuditFailed
             | Self::AuditIncomplete
@@ -570,6 +572,30 @@ fn set_policy(directory: &Path, enabled: bool, now: DateTime<Utc>) -> Result<(),
     )
 }
 
+// Keep this inode: unlinking an advisory lock would let another process lock a
+// different file. The OS releases it if a CLI, desktop, or hook worker exits.
+fn collection_control_lock(directory: &Path) -> Result<File, StateError> {
+    open_or_create_private_lock(&directory.join(COLLECTION_CONTROL_LOCK))
+        .map_err(|_| StateError::LocalState)
+}
+
+fn require_collection(directory: &Path) -> Result<(), StateError> {
+    if !policy_enabled(directory)? {
+        return Err(StateError::Disabled);
+    }
+    active_consent(directory)?;
+    Ok(())
+}
+
+fn collection_permit(directory: &Path) -> Result<File, StateError> {
+    require_collection(directory)?;
+    let lock = collection_control_lock(directory)?;
+    // Never block an async worker on a policy change. Pending work stays local.
+    lock.try_lock().map_err(|_| StateError::LocalState)?;
+    require_collection(directory)?;
+    Ok(lock)
+}
+
 fn endpoint(profile: &Profile, path: &str) -> Result<Url, StateError> {
     if !matches!(path, "/healthz" | "/v1/enroll" | "/v1/events") {
         return Err(StateError::InvalidProfile);
@@ -813,6 +839,7 @@ async fn enroll(
     // Cached authentication is not evidence of compatibility after an upgrade.
     // Check once per due cycle, including cycles that only drain an old outbox.
     check_api_capabilities(profile).await?;
+    require_collection(directory)?;
     // Re-enroll with the same identity and token once per due cycle. The server
     // owns the active generation; cached metadata cannot establish its value.
     let token = token_value(directory)?.unwrap_or_else(|| {
@@ -1043,6 +1070,7 @@ fn enqueue(directory: &Path, event: &Value) -> Result<(), StateError> {
 }
 
 async fn upload(
+    directory: &Path,
     profile: &Profile,
     identity: &Identity,
     token: &SecretString,
@@ -1052,6 +1080,12 @@ async fn upload(
     let mut acknowledged_paths = Vec::new();
     let mut collected_through = None::<DateTime<Utc>>;
     for (path, event) in events {
+        let _permit = match collection_permit(directory) {
+            Ok(permit) => permit,
+            // Return ACKs already received; leave every unsent event untouched.
+            Err(StateError::Disabled) => break,
+            Err(error) => return Err(error),
+        };
         let body = serde_json::to_vec(&event).map_err(|_| StateError::LocalState)?;
         let mut headers = HeaderMap::new();
         let mut auth =
@@ -1348,6 +1382,8 @@ pub fn enable(codex_home: &Path) -> Result<Value, StateError> {
     let now = Utc::now();
     load_profile(codex_home)?;
     enrollment_token(codex_home).map_err(|_| StateError::InvalidProfile)?;
+    let _control = collection_control_lock(&directory)?;
+    _control.try_lock().map_err(|_| StateError::LocalState)?;
     // Refuse unsupported state before creating consent or replacing a policy.
     policy_enabled(&directory)?;
     current_status(&directory)?;
@@ -1362,6 +1398,12 @@ pub fn enable(codex_home: &Path) -> Result<Value, StateError> {
 
 pub fn disable(codex_home: &Path) -> Result<Value, StateError> {
     let directory = state_directory(codex_home);
+    set_policy(&directory, false, Utc::now())?;
+    // Revoke first so an in-flight request cannot start the next batch item.
+    // Success waits for its bounded request/read to finish. A previously sent
+    // request can still be received by the server; it cannot be recalled.
+    let _control = collection_control_lock(&directory)?;
+    _control.lock().map_err(|_| StateError::LocalState)?;
     set_policy(&directory, false, Utc::now())?;
     Ok(json!({"status":"PASS","disabled":true,"mutation_performed":true}))
 }
@@ -1593,6 +1635,7 @@ pub async fn run_once(
     }
     let profile = load_profile(codex_home)?;
     let _lock = CycleLock::acquire(&directory)?;
+    require_collection(&directory)?;
     crate::checkpoint::claim_triggers(codex_home).map_err(|_| StateError::LocalState)?;
     let now = Utc::now();
     let previous = current_status(&directory)?;
@@ -1677,8 +1720,13 @@ pub async fn run_once(
         )?;
         return Err(StateError::TailnetDisconnected);
     }
-    let (token, generation) = match enroll(&profile, codex_home, &directory, &identity).await {
+    let enrollment = {
+        let _permit = collection_permit(&directory)?;
+        enroll(&profile, codex_home, &directory, &identity).await
+    };
+    let (token, generation) = match enrollment {
         Ok(token) => token,
+        Err(StateError::Disabled) => return Err(StateError::Disabled),
         Err(error) => {
             record_delivery_retry(&directory, now, &error)?;
             persist_cycle_status(
@@ -1708,6 +1756,7 @@ pub async fn run_once(
         || outbox.observed_count >= OUTBOX_HIGH_WATERMARK_EVENTS
         || retry.as_ref().is_some_and(|value| value.operator_required);
     if collection_due && !collection_deferred {
+        let _permit = collection_permit(&directory)?;
         match collection::stage(
             &directory,
             collected_through.as_deref(),
@@ -1771,7 +1820,7 @@ pub async fn run_once(
     let uploaded = if outbox.observed_count > 0 && delivery_is_due(trigger, retry.as_ref(), now) {
         let result = tokio::time::timeout(
             UPLOAD_CYCLE_TIMEOUT,
-            upload(&profile, &identity, &token, outbox.batch),
+            upload(&directory, &profile, &identity, &token, outbox.batch),
         )
         .await
         .unwrap_or(Err(StateError::UploadFailed));

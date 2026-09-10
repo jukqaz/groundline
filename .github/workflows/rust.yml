@@ -199,7 +199,7 @@ jobs:
         with:
           manifest-path: apps/desktop/src-tauri/Cargo.toml
           command: check
-          command-arguments: "--show-stats --config deny.toml"
+          command-arguments: "--show-stats --config apps/desktop/deny.toml"
       - name: Validate desktop frontend dependency advisories
         run: npm audit --omit=dev --audit-level=high --prefix apps/desktop
       - name: Validate the release-tested and selected compatibility profiles
@@ -441,6 +441,8 @@ jobs:
           cargo test --locked -p xtask dataset_roots_are_portable_absolute_and_injection_safe
       - name: Verify setup and installer behavior on each native target
         run: cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --lib --test setup_cli --test config_repair_cli --test install_cli
+      - name: Verify collection stop across native processes
+        run: cargo test --locked -p groundline-runtime --all-features --target "${{ matrix.target }}" collection_stop_tests
       - name: Build both release binaries and the host packager
         run: |
           cargo build --locked -p xtask
@@ -477,6 +479,7 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           destination="dist/api/$TARGET"
+          target/debug/xtask verify-binary-privacy --binary "target/$TARGET/release/groundline-insights-api"
           mkdir -p "$destination"
           cp "target/$TARGET/release/groundline-insights-api" "$destination/groundline-insights-api"
           chmod 0755 "$destination/groundline-insights-api"
@@ -540,6 +543,9 @@ jobs:
         run: |
           export RUSTFLAGS="--remap-path-prefix=$GITHUB_WORKSPACE=/_groundline --remap-path-prefix=$HOME=/_cargo_home"
           npm run tauri -- build --bundles app
+          codesign --force --sign - --timestamp=none "src-tauri/target/release/bundle/macos/GroundLine Desktop.app"
+          codesign --verify --deep --strict "src-tauri/target/release/bundle/macos/GroundLine Desktop.app"
+          cargo run --locked --manifest-path ../../Cargo.toml -p xtask -- verify-binary-privacy --binary "src-tauri/target/release/bundle/macos/GroundLine Desktop.app/Contents/MacOS/groundline-desktop"
           mkdir -p ../../desktop-assets
           ditto -c -k --sequesterRsrc --keepParent "src-tauri/target/release/bundle/macos/GroundLine Desktop.app" ../../desktop-assets/groundline-desktop-aarch64-apple-darwin.zip
       - name: Upload desktop preview separately from plugin packages

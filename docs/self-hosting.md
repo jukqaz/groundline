@@ -19,6 +19,12 @@ Only for Tailscale, pass `--require-tailnet --bind-ip 100.64.0.1` with the actua
 
 ## Requirements
 
+Existing deployments without `GROUNDLINE_REQUIRE_TAILNET` retain Tailnet-only
+API access after an image upgrade. To deliberately switch to general HTTPS,
+first configure and verify the TLS proxy, then set the variable to `false` in
+the private server configuration. The update controller preserves explicit
+`true`/`false`, adds `true` when absent, and rejects ambiguous values.
+
 - Docker Engine or Docker Desktop with Compose v2;
 - an HTTPS reverse proxy on the Docker host; Tailscale is optional;
 - Rust stable for the source-checkout deployment tools;
@@ -168,7 +174,7 @@ to UID 472 with mode `0750`; do not work around ownership failures with `0777`.
 Grafana needs outbound access on first start to download the pinned ClickHouse
 datasource plugin. The API, ClickHouse, and ingress remain on the private data
 network. Ingress also uses a dedicated bridge required for Docker's published
-Tailnet port; Nginx allows only the bridge gateway plus Tailnet sources and
+loopback or Tailnet port; Nginx allows loopback, the bridge gateway, and Tailnet sources and
 keeps its destination fixed to the API. Grafana uses a different
 plugin-download egress network. These bridges isolate service paths but are not
 an application-layer outbound firewall; production operators should add host
@@ -229,10 +235,10 @@ cargo run --locked -p xtask --bin groundline-deploy -- verify-stack `
 The verifier waits for API storage readiness, checks Grafana itself, executes
 every provisioned dashboard query through the ClickHouse datasource, and
 validates fleet, roster, and storage-quality frame semantics. It does not prove
-the external HTTPS/Tailscale access gate; verify that separately from another
-Tailnet node before configuring collectors.
+the external HTTPS/Tailscale access gate; verify that separately from an
+authorized client before configuring collectors (a Tailnet node in Tailnet mode).
 
-From that other Tailnet node, first confirm TLS reachability and that an
+From that authorized client, first confirm TLS reachability and that an
 unauthenticated dashboard request is redirected to login or rejected:
 
 ```console

@@ -2,6 +2,11 @@
 
 ## 0.24.0
 
+- Synchronize collection stop with in-flight reads and requests across desktop,
+  CLI, and hooks; preserve unsent events and recheck consent before each request.
+- Preserve the network restriction of existing API deployments when their mode
+  is unset, while explicitly selecting general HTTPS for new Compose setups.
+
 - Add a macOS Apple Silicon desktop preview with unified server connection and
   Docker Compose setup, independent Core diagnostics, and explicit collection consent.
 - Support general HTTPS endpoints with Tailscale as an optional transport. Keep

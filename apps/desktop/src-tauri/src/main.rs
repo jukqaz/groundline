@@ -29,3 +29,22 @@ fn main() {
         .run(tauri::generate_context!())
         .expect("desktop runtime failed");
 }
+
+#[cfg(test)]
+#[test]
+fn bundled_capability_does_not_enable_remote_url_patterns() {
+    let config: serde_json::Value =
+        serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+    assert_eq!(
+        config["app"]["security"]["capabilities"],
+        serde_json::json!(["main"])
+    );
+    let capability: serde_json::Value =
+        serde_json::from_str(include_str!("../capabilities/main.json")).unwrap();
+    assert!(capability.get("remote").is_none());
+    assert_ne!(
+        capability.get("local"),
+        Some(&serde_json::Value::Bool(false))
+    );
+    assert_eq!(capability["windows"], serde_json::json!(["main"]));
+}

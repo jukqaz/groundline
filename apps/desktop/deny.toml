@@ -1,0 +1,31 @@
+# Only the shipped desktop target. The root policy still checks all six CLI targets.
+[graph]
+targets = ["aarch64-apple-darwin"]
+all-features = true
+
+[advisories]
+# Specific maintenance notices, not vulnerability/unsoundness exceptions.
+# Reviewed dependency path, scope, and removal conditions: SECURITY.md.
+ignore = [
+  { id = "RUSTSEC-2025-0075", reason = "unic-char-range 0.9: Tauri 2.11.5 remote URL pattern parsing; no remote capabilities enabled" },
+  { id = "RUSTSEC-2025-0080", reason = "unic-common 0.9: transitive Unicode data for the same Tauri URL pattern parser" },
+  { id = "RUSTSEC-2025-0081", reason = "unic-char-property 0.9: transitive Unicode data for the same Tauri URL pattern parser" },
+  { id = "RUSTSEC-2025-0098", reason = "unic-ucd-version 0.9: transitive Unicode data for the same Tauri URL pattern parser" },
+  { id = "RUSTSEC-2025-0100", reason = "unic-ucd-ident 0.9: Tauri 2.11.5 remote URL pattern parsing; no remote capabilities enabled" },
+]
+unused-ignored-advisory = "deny"
+
+[licenses]
+allow = ["Apache-2.0", "BSD-3-Clause", "ISC", "MIT", "MPL-2.0", "Unicode-3.0", "Zlib"]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "simplest-path"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

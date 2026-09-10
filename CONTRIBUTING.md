@@ -22,8 +22,8 @@ structured JSON keys and reason codes remain English.
 - Keep dependencies minimal and justify every new network or platform surface.
 - Keep Codex as the only supported runtime.
 - Preserve ARM64 and x86_64 support on macOS, Linux, and Windows.
-- Keep Core read-only and offline by default. Keep Insights opt-in, Tailnet-only,
-  authenticated, and privacy-bounded.
+- Keep Core read-only and offline by default. Keep Insights opt-in,
+  authenticated, and privacy-bounded over HTTPS with optional Tailnet access.
 - Do not commit provider auth files, sessions, shell snapshots, logs, caches,
   raw prompts, transcripts, or secret values.
 - Do not add lifecycle hooks, network clients, background workers, or collector

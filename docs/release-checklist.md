@@ -78,9 +78,11 @@
    If refresh leaves an installed version unchanged, reinstall only that same
    plugin ID from the refreshed distribution and verify its checksum.
 13. Keep the generic Compose path labeled public preview until the exact release
-   passes on a fresh host and another Tailnet node verifies TLS reachability,
+   passes on a fresh host and an authorized external client verifies TLS reachability,
    unauthenticated rejection, authenticated dashboard access, collector upload,
    ClickHouse visibility, and Grafana frames.
+   Use another Tailnet node for the optional Tailnet mode, and preserve the
+   network policy of existing deployments when updating their API image.
 14. To extend support to newer infrastructure, run the manual workflow with all
    four candidate inputs. After the live mutation and Grafana semantic lanes
    pass, replace moving tags with resolved digests and the installed plugin with

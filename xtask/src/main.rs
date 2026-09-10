@@ -41,6 +41,11 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Check an already-built API or desktop binary before uploading it.
+    VerifyBinaryPrivacy {
+        #[arg(long)]
+        binary: PathBuf,
+    },
     /// Package one already-built target with a checksum and strict manifest.
     PackageBinary {
         #[arg(long, value_enum)]
@@ -471,8 +476,17 @@ fn package_binary(
     Ok(())
 }
 
+fn verify_binary_privacy(binary: &Path) -> Result<(), XtaskError> {
+    let bytes = read_bounded(binary, 1, MAX_BINARY_BYTES).map_err(|_| XtaskError::InvalidBinary)?;
+    if contains_private_marker(&bytes) {
+        return Err(XtaskError::InvalidBinary);
+    }
+    Ok(())
+}
+
 fn run(cli: Cli) -> Result<(), XtaskError> {
     match cli.command {
+        Command::VerifyBinaryPrivacy { binary } => verify_binary_privacy(&binary),
         Command::PackageBinary {
             product,
             target,
@@ -654,7 +668,29 @@ mod tests {
     use sha2::{Digest, Sha256};
     use tempfile::tempdir;
 
-    use super::{Product, SUPPORTED_TARGETS, XtaskError, package_binary, verify_package_set};
+    use super::{
+        Product, SUPPORTED_TARGETS, XtaskError, package_binary, verify_binary_privacy,
+        verify_package_set,
+    };
+
+    #[test]
+    fn binary_privacy_rejects_private_bytes_and_invalid_input() {
+        let root = tempdir().unwrap();
+        let binary = root.path().join("binary");
+        assert!(verify_binary_privacy(&binary).is_err());
+        fs::write(&binary, b"").unwrap();
+        assert!(verify_binary_privacy(&binary).is_err());
+        fs::write(&binary, b"bounded-test-binary").unwrap();
+        verify_binary_privacy(&binary).unwrap();
+        fs::write(&binary, format!("binary\0/{}/example/private", "Users")).unwrap();
+        assert!(verify_binary_privacy(&binary).is_err());
+        #[cfg(unix)]
+        {
+            let link = root.path().join("link");
+            std::os::unix::fs::symlink(&binary, &link).unwrap();
+            assert!(verify_binary_privacy(&link).is_err());
+        }
+    }
 
     #[test]
     fn every_target_gets_one_bounded_reproducible_artifact() {

@@ -17,8 +17,15 @@ enrollment credential, explicit `worker enable` consent, and hook trust.
 - Tailnet reachability is not authorization. Enrollment also requires the
   owner-issued credential; the server then authenticates each collector with a
   distinct token. Admin and trusted-proxy credentials remain separate.
-- Collector endpoints are restricted to Tailnet IPv4 or `*.ts.net`; arbitrary
-  public Internet, webhook, and observability-export endpoints are unsupported.
+- Collector endpoints accept an owner-selected HTTPS origin, with optional
+  Tailnet access. Plain HTTP is limited to loopback development and Tailnet.
+  Webhook and observability-export endpoints are unsupported. A missing API
+  network-mode variable preserves Tailnet restriction on existing deployments;
+  new general HTTPS renders explicitly set `GROUNDLINE_REQUIRE_TAILNET=false`.
+- Stop revokes collection policy and waits for any current request/read before
+  reporting success. New phases and requests recheck policy and consent under
+  a process-shared lock. Already transmitted requests cannot be recalled, and
+  unsent events remain local. Older running collectors must also be upgraded.
 - Bearer clients reject redirects and ambient proxy discovery. The API uses
   fixed reason codes and must not log paths, headers, payloads, identifiers,
   credentials, or exception text.

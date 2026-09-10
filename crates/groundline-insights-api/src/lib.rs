@@ -439,16 +439,9 @@ impl Config {
                 .ok()
                 .map(|_| required_secret("GROUNDLINE_PROXY_TOKEN"))
                 .transpose()?,
-            require_tailnet: match std::env::var("GROUNDLINE_REQUIRE_TAILNET").as_deref() {
-                Ok("true") => true,
-                Ok("false") | Err(_) => false,
-                _ => {
-                    return Err(ApiError::new(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "invalid_request",
-                    ));
-                }
-            },
+            require_tailnet: parse_tailnet_requirement(std::env::var(
+                "GROUNDLINE_REQUIRE_TAILNET",
+            ))?,
             owner_enrollment_enabled: std::env::var("GROUNDLINE_OWNER_ENROLLMENT_ENABLED")
                 .is_ok_and(|value| value.eq_ignore_ascii_case("true")),
             latest_version,
@@ -853,6 +846,18 @@ fn private_address(address: IpAddr) -> bool {
     match address {
         IpAddr::V4(value) => value.is_private(),
         IpAddr::V6(value) => value.is_unique_local(),
+    }
+}
+
+fn parse_tailnet_requirement(value: Result<String, std::env::VarError>) -> Result<bool, ApiError> {
+    match value.as_deref() {
+        // Older deployments always required Tailnet and have no mode variable.
+        Ok("true") | Err(std::env::VarError::NotPresent) => Ok(true),
+        Ok("false") => Ok(false),
+        _ => Err(ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "invalid_request",
+        )),
     }
 }
 
@@ -2132,6 +2137,29 @@ mod tests {
                 assert_eq!(body["mutation_performed"], false);
             }
         }
+    }
+
+    #[test]
+    fn missing_network_mode_preserves_tailnet_and_explicit_modes_are_strict() {
+        use std::env::VarError;
+        for (input, expected) in [
+            (Err(VarError::NotPresent), true),
+            (Ok("true".to_owned()), true),
+            (Ok("false".to_owned()), false),
+        ] {
+            let mut state = unit_state(0, 0);
+            state.config.require_tailnet = parse_tailnet_requirement(input).unwrap();
+            assert_eq!(state.config.require_tailnet, expected);
+            let peer = "203.0.113.25:41000".parse().unwrap();
+            assert_eq!(
+                effective_peer(&state, peer, &HeaderMap::new()).is_err(),
+                expected
+            );
+        }
+        for value in ["", "False", "0", " true "] {
+            assert!(parse_tailnet_requirement(Ok(value.to_owned())).is_err());
+        }
+        assert!(parse_tailnet_requirement(Err(VarError::NotUnicode("invalid".into()))).is_err());
     }
 
     fn unit_config() -> Config {

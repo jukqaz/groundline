@@ -6,7 +6,7 @@ provider compatibility are not part of the active interface.
 ## Ownership
 
 GroundLine Core owns offline guidance and local analysis. GroundLine Insights
-owns the optional networked path: four Codex hooks, collector state, Tailnet
+owns the optional networked path: four Codex hooks, collector state, HTTPS
 transport, the API, ClickHouse, Grafana, and generic self-hosting tools. It does
 not require or install Core, install skills, change global Codex configuration,
 or route models. Core-only, Insights-only, and combined installations are all
@@ -20,8 +20,8 @@ The current integration contract is deliberately narrow: Codex App/CLI are the
 only collector sources, HTTPS is the default remote transport, with optional Tailnet access, the Rust/Axum API
 is the ingestion service, ClickHouse is the storage and report backend, and
 Grafana is the first-party dashboard. Docker Compose is the generic self-hosting
-path and TrueNAS is one supported owner-run deployment path. Arbitrary Internet
-endpoints, generic webhooks, third-party observability exporters, alternative
+path and TrueNAS is one supported owner-run deployment path. Generic webhooks,
+third-party observability exporters, alternative
 databases, and hosted GroundLine accounts are outside the current contract.
 
 ## Activation and local state
@@ -66,6 +66,12 @@ Before replacing unsupported state, stop collection, preserve the original
 state/outbox, and obtain explicit approval for a fresh setup. Do not restore old
 pending events into a newly consented outbox or reset collection watermarks
 without a separate data-authorization decision.
+
+Stop revokes policy immediately and waits for any active bounded request or
+collection read before reporting success. Each subsequent phase/request checks
+policy and consent under a process-shared lock. Already transmitted requests
+cannot be recalled; unsent events and received ACKs are preserved. This requires
+the updated executable on every collector process, including detached hooks.
 
 ## Enrollment and authentication
 

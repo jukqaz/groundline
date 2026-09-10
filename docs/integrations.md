@@ -29,7 +29,7 @@ Insights uses this direct path:
 
 ```text
 Native Codex App / CLI -> trusted plugin hooks + read-only native activity
-                      -> private aggregate outbox -> Tailnet Insights API
+                      -> private aggregate outbox -> owner HTTPS Insights API
                       -> ClickHouse -> Grafana / owner JSON reports
 ```
 
@@ -53,7 +53,8 @@ retain priority; a missing source must not delete or prevent draining the outbox
 | --- | --- | --- |
 | Codex App | Built in | Four fail-open lifecycle checkpoints after explicit activation |
 | Codex CLI | Built in | Desktop, local headless, and remote headless runtime metadata |
-| Tailscale/Tailnet | Required transport | A Tailnet IPv4 address or `*.ts.net` HTTPS endpoint; arbitrary public endpoints are rejected |
+| HTTPS | Default transport | Owner-selected HTTPS origin with certificate verification and no redirects |
+| Tailscale/Tailnet | Optional transport | Tailnet IPv4 or `*.ts.net`; only these endpoints require a local Tailnet probe |
 | GroundLine Insights API | Built in | Rust/Axum enrollment, upload, report, and administration API |
 | ClickHouse | Required storage | API-owned schema migration, idempotent event ingestion, and fixed report views |
 | CLI JSON reports | Built in | Strict 7, 30, or 90-day owner reports using a separate admin-token file; collector tokens are rejected |
@@ -123,7 +124,7 @@ storage. These are safety invariants, not user preferences.
 GroundLine Insights does not currently provide:
 
 - Claude, Hermes, Antigravity, or generic provider collectors;
-- arbitrary Internet, webhook, Slack, OpenTelemetry, or Prometheus exports;
+- generic webhook, Slack, OpenTelemetry, or Prometheus exports;
 - PostgreSQL, SQLite, S3, or pluggable storage backends;
 - Grafana Cloud account provisioning or a hosted GroundLine SaaS;
 - raw prompt, response, transcript, command, patch, path, repository, task, or

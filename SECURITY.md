@@ -11,12 +11,21 @@ bounded inputs, opens Codex SQLite read-only, and emits aggregates or reason cod
 
 GroundLine Insights is a separately installed opt-in plugin and does not require
 Core. It owns exactly four fail-open Codex lifecycle hooks, owner-private local
-state, a no-proxy/no-redirect Tailnet client, an authenticated Axum API,
-ClickHouse, and Grafana. Collector endpoints are restricted to Tailnet IPv4 or
-`*.ts.net`; arbitrary public endpoints and generic exporters are unsupported.
+state, a no-proxy/no-redirect HTTPS client, an authenticated Axum API,
+ClickHouse, and Grafana. Collectors accept an owner-selected HTTPS origin;
+Tailnet access is optional. Plain HTTP is limited to loopback development and
+Tailnet endpoints. Generic exporters are unsupported. TLS terminates at the
+operator's HTTPS proxy. New Compose renders explicitly select general HTTPS;
+an absent API network-mode variable preserves the existing Tailnet restriction.
 Tailnet reachability alone never authorizes enrollment: first contact also
 requires an owner-issued enrollment credential, then every collector uses a
 distinct token. Administrative and trusted-proxy tokens remain separate.
+
+Collection stop revokes policy and waits for the active request or collection
+read before returning success. Every new phase/request rechecks policy and
+consent under a process-shared lock. Already transmitted requests cannot be
+recalled; unsent events stay local. Upgrade all collector processes to apply
+this boundary, since an already running older executable cannot use the new lock.
 
 All secret files are outside the plugin, opened as bounded regular files, and
 required to be private to the current user where the platform exposes permission

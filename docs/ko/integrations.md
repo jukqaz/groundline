@@ -7,7 +7,7 @@ GroundLine은 하나의 marketplace에서 서로 독립적인 Codex 플러그인
 ## 설치 프로필 선택
 
 Insights 연결 경로는 네이티브 Codex App/CLI의 hook·읽기 전용 활동 데이터에서
-비공개 집계 outbox, Tailnet Insights API, ClickHouse, Grafana/JSON report로
+비공개 집계 outbox, 운영자 HTTPS Insights API, ClickHouse, Grafana/JSON report로
 이어집니다. 추론 프록시, 생성된 모델 카탈로그, custom provider, Core 설치는
 필요하지 않습니다. Insights는 Codex `config.toml`이나 추론 인증 정보를 읽거나
 고치지 않습니다. 프록시 제거 후 남은 Codex provider 설정은 네이티브 Codex
@@ -43,7 +43,8 @@ marketplace를 갱신해도 설치하지 않은 형제 플러그인이 자동 �
 | --- | --- | --- |
 | Codex App | 내장 | 명시적 활성화 후 fail-open lifecycle checkpoint 4개 |
 | Codex CLI | 내장 | desktop, local headless, remote headless 메타데이터 |
-| Tailscale/Tailnet | 필수 전송 경로 | Tailnet IPv4 또는 `*.ts.net` HTTPS endpoint만 허용 |
+| HTTPS | 기본 전송 경로 | 운영자 HTTPS origin, 인증서 검증 및 리다이렉트 거부 |
+| Tailscale/Tailnet | 선택형 전송 경로 | Tailnet IPv4 또는 `*.ts.net`; 해당 주소만 로컬 Tailnet 상태 확인 |
 | GroundLine Insights API | 내장 | Rust/Axum enrollment, upload, report, 관리 API |
 | ClickHouse | 필수 저장소 | API 소유 schema migration, idempotent ingest, 고정 report view |
 | CLI JSON report | 내장 | 별도 admin-token 파일이 필요한 엄격한 7일·30일·90일 owner report, collector token은 거부 |
@@ -105,7 +106,7 @@ ambient proxy와 redirect 금지, ClickHouse 저장은 현재 개인정보·보�
 ## 현재 지원하지 않는 연동
 
 - Claude, Hermes, Antigravity 또는 범용 provider collector
-- 임의 인터넷 endpoint, webhook, Slack, OpenTelemetry, Prometheus export
+- 범용 webhook, Slack, OpenTelemetry, Prometheus export
 - PostgreSQL, SQLite, S3 또는 교체 가능한 저장 backend
 - Grafana Cloud 계정 provisioning 또는 hosted GroundLine SaaS
 - raw prompt, response, transcript, command, patch, path, 저장소, task, account 전송

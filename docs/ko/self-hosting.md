@@ -20,6 +20,12 @@ API 자체는 TLS를 종료하지 않습니다. 외부에는 유효한 인증서
 
 ## 요구 사항
 
+`GROUNDLINE_REQUIRE_TAILNET` 값이 없는 기존 배포는 이미지 업데이트 후에도
+Tailnet 전용 접근을 유지합니다. 일반 HTTPS로 전환하려면 TLS 프록시를 먼저
+구성·검증한 뒤 비공개 서버 설정에서 값을 명시적으로 `false`로 바꿉니다.
+업데이트 도구는 기존 `true`·`false`를 보존하고 누락 시 `true`를 추가하며,
+잘못된 값은 거부합니다.
+
 - Docker Engine 또는 Docker Desktop과 Compose v2
 - Docker host의 HTTPS reverse proxy. Tailscale은 선택 사항입니다.
 - source checkout 배포 도구를 실행할 Rust stable
@@ -161,9 +167,9 @@ Compose 파일도 공개 가능한 파생물이 아닙니다. `insights fetch-re
 `0750`으로 맞춥니다. ownership 오류를 `0777`로 우회하지 않습니다. Grafana는 첫
 시작에 고정된 ClickHouse datasource plugin을 내려받기 위한 outbound access가
 필요합니다. API·ClickHouse·ingress는 private data network를 공유합니다.
-ingress에는 Docker host gateway와 Tailnet source만 식별·허용하기 위한
-ingress는 Docker published Tailnet port에 필요한 전용 bridge도 사용하며 Nginx는
-해당 bridge gateway와 Tailnet source만 허용하고 목적지를 API로 고정합니다.
+ingress는 Docker의 loopback 또는 Tailnet 포트 게시에 필요한 전용 bridge도
+사용하며 Nginx는 loopback·해당 bridge gateway·Tailnet source만 허용하고
+목적지를 API로 고정합니다.
 Grafana는 별도 plugin-download egress network를 사용합니다. 이 bridge 분리는
 service path 격리이지 application-layer outbound firewall은 아니므로 그 경계가
 필요한 운영 환경은 host egress policy를 추가해야 합니다. Grafana usage
@@ -219,9 +225,10 @@ cargo run --locked -p xtask --bin groundline-deploy -- verify-stack `
 verifier는 API storage readiness와 Grafana 자체 상태를 확인한 뒤 provision된 모든
 dashboard query를 ClickHouse datasource를 통해 실행하고 fleet·roster·storage
 quality frame 의미까지 검증합니다. 외부 HTTPS/Tailscale access gate는 이 명령의
-검증 대상이 아니므로 collector 설정 전에 다른 Tailnet node에서 별도로 확인합니다.
+검증 대상이 아니므로 collector 설정 전에 허용된 클라이언트에서 별도로 확인합니다.
+Tailnet 모드에서는 다른 Tailnet node를 사용합니다.
 
-다른 Tailnet node에서 TLS reachability와 미인증 dashboard 요청이 login으로
+그 클라이언트에서 TLS reachability와 미인증 dashboard 요청이 login으로
 redirect되거나 거부되는지 먼저 확인합니다.
 
 ```console

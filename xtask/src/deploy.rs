@@ -397,6 +397,14 @@ fn update_compose(
             .get_mut("environment")
             .and_then(Value::as_object_mut)
             .ok_or(XtaskError::DeploymentFailed)?;
+        match environment.get("GROUNDLINE_REQUIRE_TAILNET") {
+            Some(Value::String(value)) if matches!(value.as_str(), "true" | "false") => {}
+            Some(_) => return Err(XtaskError::DeploymentFailed),
+            None => {
+                // Preserve the mandatory network policy of pre-mode deployments.
+                environment.insert("GROUNDLINE_REQUIRE_TAILNET".to_owned(), json!("true"));
+            }
+        }
         if environment
             .get("GROUNDLINE_MINIMUM_SUPPORTED_VERSION")
             .is_some_and(|value| !value.is_string())
@@ -1718,6 +1726,44 @@ mod tests {
             std::os::unix::fs::symlink(&config, root.path().join("compose-link.yaml"))
                 .expect("config symlink");
             assert!(read_private_runtime_config(&root.path().join("compose-link.yaml")).is_err());
+        }
+    }
+
+    #[test]
+    fn migration_preserves_network_mode_and_rejects_ambiguous_values() {
+        let template = compose("__INSIGHTS_API_IMAGE__", "new");
+        let image = format!(
+            "ghcr.io/jukqaz/groundline-insights-api@sha256:{}",
+            "a".repeat(64)
+        );
+        for mode in [None, Some(json!("true")), Some(json!("false"))] {
+            let mut current =
+                current_config("ghcr.io/jukqaz/groundline-insights-api:0.23.2", "old\n");
+            if let Some(mode) = &mode {
+                current["services"]["api"]["environment"]["GROUNDLINE_REQUIRE_TAILNET"] =
+                    mode.clone();
+            }
+            let before = current.clone();
+            let updated =
+                update_compose(&current, &template, &image, &enrollment_credential()).unwrap();
+            assert_eq!(
+                updated["services"]["api"]["environment"]["GROUNDLINE_REQUIRE_TAILNET"],
+                mode.unwrap_or(json!("true"))
+            );
+            assert_eq!(current, before);
+        }
+        for mode in [
+            json!(false),
+            json!("False"),
+            json!(""),
+            serde_json::Value::Null,
+        ] {
+            let mut current =
+                current_config("ghcr.io/jukqaz/groundline-insights-api:0.23.2", "old\n");
+            current["services"]["api"]["environment"]["GROUNDLINE_REQUIRE_TAILNET"] = mode;
+            let before = current.clone();
+            assert!(update_compose(&current, &template, &image, &enrollment_credential()).is_err());
+            assert_eq!(current, before);
         }
     }
 
