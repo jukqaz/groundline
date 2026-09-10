@@ -12,7 +12,19 @@ import { App } from "./app";
 import { defaultPreferences, type AppPreferences, type Status } from "./model";
 
 const rpc = vi.hoisted(() => vi.fn());
+const events = vi.hoisted(
+  () => new Map<string, (event: { payload: string }) => void>(),
+);
 vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => true, invoke: rpc }));
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: async (
+    name: string,
+    listener: (event: { payload: string }) => void,
+  ) => {
+    events.set(name, listener);
+    return () => events.delete(name);
+  },
+}));
 const enrolled: Status = {
   endpoint: "https://insights.example.com",
   grafana_url: "https://grafana.example.com",
@@ -136,7 +148,7 @@ describe("메뉴에서 끝내는 사용자 작업", () => {
     await mount();
     const delivery = screen.getByRole("region", { name: "서버 수신 확인" });
     expect(
-      within(delivery).getByText(/아직 서버 수신 확인 기록이 없습니다/),
+      within(delivery).getByText(/서버의 수신 확인 기록이 생기면 표시됩니다/),
     ).toBeTruthy();
     current = {
       ...current,
@@ -199,35 +211,40 @@ describe("메뉴에서 끝내는 사용자 작업", () => {
       consent: true,
     });
   });
-  it("연결 동의 화면에서 메뉴를 떠나면 네이티브 임시 등록키도 해제한다", async () => {
-    current = { collection_enabled: false, collection_state: "disabled" };
-    await mount();
-    nav("서버");
-    fireEvent.change(
-      screen.getByRole("textbox", { name: /^Insights 서버 주소/ }),
-      { target: { value: "https://insights.example.com" } },
-    );
-    fireEvent.change(screen.getByPlaceholderText("등록키 입력"), {
-      target: { value: "x".repeat(32) },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "연결 확인" }));
-    await screen.findByRole("button", { name: "동의하고 연결" });
-    expect(
-      (
-        screen.getByRole("button", {
-          name: "동의하고 연결",
-        }) as HTMLButtonElement
-      ).disabled,
-    ).toBe(true);
-    nav("설정");
-    await screen.findByRole("heading", { level: 1, name: "설정" });
-    expect(rpc).toHaveBeenCalledWith("cancel_connection");
-    nav("서버");
-    expect(
-      (screen.getByPlaceholderText("등록키 입력") as HTMLInputElement).value,
-    ).toBe("");
-    expect(rpc.mock.calls.some(([name]) => name === "connect")).toBe(false);
-  });
+  it.each(["화면", "트레이"])(
+    "연결 동의 중 %s 메뉴를 바꾸면 네이티브 임시 등록키도 해제한다",
+    async (source) => {
+      current = { collection_enabled: false, collection_state: "disabled" };
+      await mount();
+      nav("서버");
+      fireEvent.change(
+        screen.getByRole("textbox", { name: /^Insights 서버 주소/ }),
+        { target: { value: "https://insights.example.com" } },
+      );
+      fireEvent.change(screen.getByPlaceholderText("등록키 입력"), {
+        target: { value: "x".repeat(32) },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "연결 확인" }));
+      await screen.findByRole("button", { name: "동의하고 연결" });
+      expect(
+        (
+          screen.getByRole("button", {
+            name: "동의하고 연결",
+          }) as HTMLButtonElement
+        ).disabled,
+      ).toBe(true);
+      if (source === "트레이")
+        events.get("groundline:navigate")?.({ payload: "settings" });
+      else nav("설정");
+      await screen.findByRole("heading", { level: 1, name: "설정" });
+      expect(rpc).toHaveBeenCalledWith("cancel_connection");
+      nav("서버");
+      expect(
+        (screen.getByPlaceholderText("등록키 입력") as HTMLInputElement).value,
+      ).toBe("");
+      expect(rpc.mock.calls.some(([name]) => name === "connect")).toBe(false);
+    },
+  );
   it("소모된 연결 티켓의 실패는 재확인 폼으로 복구한다", async () => {
     await mount();
     nav("서버");

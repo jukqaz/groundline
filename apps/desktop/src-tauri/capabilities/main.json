@@ -1,7 +1,9 @@
 {
   "identifier": "main",
   "description": "Only the bundled main window can use typed GroundLine operations.",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "allow-snapshot",
     "allow-check-connection",
@@ -15,6 +17,11 @@
     "allow-save-dashboard",
     "allow-reveal-export",
     "allow-get-app-preferences",
-    "allow-save-app-preferences"
+    "allow-save-app-preferences",
+    "allow-usage-summary",
+    "allow-server-health",
+    "allow-export-diagnostics",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
   ]
 }

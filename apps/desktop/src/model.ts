@@ -4,13 +4,30 @@ export type AppPreferences = {
   schema: 1;
   close_action: "tray" | "quit";
   runtime: Runtime;
+  alerts_enabled?: boolean;
 };
 export const defaultPreferences: AppPreferences = {
   schema: 1,
   close_action: "tray",
   runtime: "codex_app",
+  alerts_enabled: false,
 };
 export type Status = {
+  codex_state_store_present?: boolean;
+  owner_profile_configured?: boolean;
+  enrollment_credential_valid?: boolean;
+  delivery_operator_required?: boolean;
+  last_delivery_error_code?: string;
+  history_unavailable?: boolean;
+  activity_history?: {
+    last_hook_at_utc: string | null;
+    entries: {
+      at_utc: string;
+      outcome: "accepted" | "duplicate" | "checked" | "failed";
+      event_count: number;
+      reason: string;
+    }[];
+  };
   collection_state?: string;
   collection_enabled?: boolean;
   ready_to_collect?: boolean;
@@ -271,6 +288,12 @@ export function collectionLabel(code: string | undefined) {
   return code ? (reasons[code] ?? "상태 확인 필요") : "확인 전";
 }
 const errors: Record<string, string> = {
+  usage_unavailable:
+    "이 환경의 Codex 활동 기록을 읽지 못했습니다. Codex App 또는 CLI 선택을 확인하세요.",
+  notification_permission_required:
+    "시스템 설정에서 GroundLine 알림을 허용한 뒤 다시 켜세요.",
+  notification_unavailable:
+    "시스템 알림을 사용할 수 없습니다. 트레이와 앱에서 상태를 확인할 수 있습니다.",
   invalid_owner_profile: "서버 주소와 등록키 형식을 확인하세요.",
   enrollment_credential_rejected:
     "Insights 등록키가 일치하지 않습니다. 서버 API의 GROUNDLINE_ENROLLMENT_TOKEN을 확인하세요. TrueNAS 관리용 API 키와는 별개입니다.",

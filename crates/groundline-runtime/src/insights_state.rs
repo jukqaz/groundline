@@ -29,6 +29,7 @@ use crate::local_file::{
 };
 use crate::tailnet;
 
+mod activity_history;
 mod collection;
 #[cfg(test)]
 mod collection_stop_tests;
@@ -762,6 +763,33 @@ async fn check_api_capabilities(profile: &Profile) -> Result<(), StateError> {
     check_api_capabilities_url(endpoint(profile, "/healthz")?).await
 }
 
+/// Explicit, unauthenticated readiness check; never enrolls or uploads data.
+pub async fn server_health(endpoint: &str) -> Result<Value, StateError> {
+    let mut url = report_url(endpoint, 7).map_err(|_| StateError::InvalidProfile)?;
+    url.set_query(None);
+    url.set_path("/healthz");
+    let response = client()?
+        .get(url)
+        .send()
+        .await
+        .map_err(|_| StateError::UploadFailed)?;
+    let status = response.status();
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return Err(StateError::ApiUpgradeRequired);
+    }
+    let (_, value) = bounded_response(response).await?;
+    if !matches!(status.as_u16(), 200 | 503) {
+        return Err(StateError::RemoteRejected);
+    }
+    Ok(json!({
+        "checked_at_utc":Utc::now().to_rfc3339(),
+        "reachable":true,
+        "storage_ready":value["storage_ready"].as_bool(),
+        "contract_compatible":groundline_contracts::insights::supports_current_ingest(&value["ingest_capabilities"]),
+        "authentication_verified":false,"network_performed":true,"mutation_performed":false
+    }))
+}
+
 async fn check_api_capabilities_url(url: Url) -> Result<(), StateError> {
     let response = client()?
         .get(url)
@@ -1124,6 +1152,17 @@ async fn upload(
         acknowledged_paths.push(path);
         uploaded = uploaded.checked_add(1).ok_or(StateError::LocalState)?;
         delivery_confirmation::record(directory, uploaded, Utc::now())?;
+        let outcome = if value["outcome"] == "duplicate" {
+            activity_history::Outcome::Duplicate
+        } else {
+            activity_history::Outcome::Accepted
+        };
+        let _ = activity_history::record(
+            directory,
+            outcome,
+            value["outcome"].as_str().unwrap_or_default(),
+            Utc::now(),
+        );
     }
     Ok(UploadReceipt {
         uploaded_count: uploaded,
@@ -1526,7 +1565,8 @@ fn status_with_tailnet_at(
     } else {
         ("PASS", "active")
     };
-    Ok(json!({
+    let history = activity_history::read(&directory);
+    let mut result = json!({
         "kind":"groundline-insights-worker-status","schema":2,"status":overall_status,
         "collection_state":collection_state,"ready_to_collect":ready_to_collect,"collection_stale":collection_stale,"blocking_reason_codes":blocking_reason_codes,
         "collection_source":"native_codex_state","codex_state_store_present":state_store_present,
@@ -1549,7 +1589,12 @@ fn status_with_tailnet_at(
         "last_collected_through_utc":previous.as_ref().and_then(|value| value.last_collected_through_utc.as_deref()),
         "delivery_confirmation":delivery_confirmation::read(&directory)?,
         "tailnet_required":tailnet_required,"tailnet":tailnet,"raw_content_emitted":false,"private_paths_emitted":false,"secret_value_printed":false,
-    }))
+    });
+    result["activity_history"] = json!(history.as_ref().ok());
+    result["history_unavailable"] = json!(history.is_err());
+    result["last_delivery_error_code"] =
+        json!(retry.as_ref().map(|value| value.last_error_code.as_str()));
+    Ok(result)
 }
 
 fn status_with_tailnet(codex_home: &Path, tailnet: Value) -> Result<Value, StateError> {
@@ -1591,6 +1636,7 @@ fn persist_cycle_status(
     now: DateTime<Utc>,
     update: StatusUpdate<'_>,
 ) -> Result<(), StateError> {
+    activity_history::cycle(directory, &update, now);
     write_status(
         directory,
         &Status {
@@ -2745,6 +2791,49 @@ async fn capability_preflight_handles_real_http_new_old_and_unready_servers() {
         });
         let result=check_api_capabilities_url(url).await;
         assert_eq!(result.err().map(|e|e.to_string()).as_deref().unwrap_or("ok"),expected);
+        server.await.unwrap();
+    }
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn desktop_health_distinguishes_storage_readiness_without_authentication_or_redirects() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    for status in [200, 503, 404, 302] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0; 4096];
+            let size = stream.read(&mut request).await.unwrap();
+            let request = String::from_utf8_lossy(&request[..size]).to_ascii_lowercase();
+            assert!(request.starts_with("get /healthz "));
+            assert!(!request.contains("authorization:"));
+            let body = json!({"storage_ready":status == 200,
+                "ingest_capabilities":groundline_contracts::insights::ingest_capabilities(),
+                "private_detail":"PRIVATE_SENTINEL"})
+            .to_string();
+            let response = format!(
+                "HTTP/1.1 {status} Test\r\nContent-Length: {}\r\nLocation: http://127.0.0.1:1/redirect\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        });
+        let result = server_health(&endpoint).await;
+        match status {
+            200 | 503 => {
+                let value = result.unwrap();
+                assert_eq!(value["reachable"], true);
+                assert_eq!(value["storage_ready"], status == 200);
+                assert_eq!(value["contract_compatible"], true);
+                assert_eq!(value["authentication_verified"], false);
+                assert_eq!(value["mutation_performed"], false);
+                assert!(!value.to_string().contains("PRIVATE_SENTINEL"));
+            }
+            404 => assert!(matches!(result, Err(StateError::ApiUpgradeRequired))),
+            302 => assert!(matches!(result, Err(StateError::RemoteRejected))),
+            _ => unreachable!(),
+        }
         server.await.unwrap();
     }
 }

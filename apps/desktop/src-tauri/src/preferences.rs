@@ -19,6 +19,14 @@ pub enum Runtime {
     CodexApp,
     CodexCli,
 }
+impl Runtime {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CodexApp => "codex_app",
+            Self::CodexCli => "codex_cli",
+        }
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -26,6 +34,8 @@ pub struct Preferences {
     pub schema: u8,
     pub close_action: CloseAction,
     pub runtime: Runtime,
+    #[serde(default)]
+    pub alerts_enabled: bool,
 }
 
 impl Default for Preferences {
@@ -34,6 +44,7 @@ impl Default for Preferences {
             schema: 1,
             close_action: CloseAction::Tray,
             runtime: Runtime::CodexApp,
+            alerts_enabled: false,
         }
     }
 }

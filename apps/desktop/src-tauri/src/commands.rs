@@ -165,6 +165,18 @@ async fn wait_worker(
 mod worker_cleanup_tests {
     use super::*;
 
+    #[test]
+    fn diagnostics_rebuilds_allowlisted_fields_without_private_text() {
+        let value = safe_diagnostics(
+            &json!({"endpoint":"private endpoint","key":"private credential",
+            "last_delivery_error_code":"private error","pending_event_count":2,"collection_enabled":true,
+            "codex_state_store_present":"private text"}),
+        );
+        assert_eq!(value["pending_event_count"], 2);
+        assert!(value["codex_state_store_present"].is_null());
+        assert!(!value.to_string().contains("private"));
+    }
+
     #[tokio::test]
     async fn cancelling_a_running_worker_waits_for_its_process_exit() {
         let home = tempfile::tempdir().unwrap();
@@ -208,6 +220,85 @@ pub async fn snapshot(
 }
 
 #[tauri::command]
+pub async fn usage_summary(
+    runtime: String,
+    period: String,
+    lifecycle: tauri::State<'_, crate::lifecycle::Lifecycle>,
+) -> Result<Value, String> {
+    worker("usage", &runtime, json!({"period":period}), &lifecycle).await
+}
+
+#[tauri::command]
+pub async fn server_health(
+    runtime: String,
+    lifecycle: tauri::State<'_, crate::lifecycle::Lifecycle>,
+) -> Result<Value, String> {
+    worker("health", &runtime, json!({}), &lifecycle).await
+}
+
+pub(crate) fn safe_diagnostics(status: &Value) -> Value {
+    let mut result = json!({"schema":1,"kind":"groundline-desktop-diagnostics",
+        "desktop_version":env!("CARGO_PKG_VERSION"),"endpoints_included":false,
+        "credentials_included":false,"raw_content_included":false});
+    for name in [
+        "collection_enabled",
+        "codex_state_store_present",
+        "owner_profile_configured",
+        "enrollment_credential_valid",
+        "tailnet_required",
+        "delivery_operator_required",
+        "history_unavailable",
+    ] {
+        result[name] = status[name]
+            .as_bool()
+            .map(Value::from)
+            .unwrap_or(Value::Null);
+    }
+    for name in [
+        "pending_event_count",
+        "quarantined_event_count",
+        "delivery_attempt_count",
+    ] {
+        result[name] = status[name]
+            .as_u64()
+            .map(Value::from)
+            .unwrap_or(Value::Null);
+    }
+    result["delivery_confirmed"] = json!(
+        status["delivery_confirmation"]["event_count"]
+            .as_u64()
+            .is_some_and(|v| v > 0)
+    );
+    result
+}
+
+#[tauri::command]
+pub async fn export_diagnostics(
+    runtime: String,
+    lifecycle: tauri::State<'_, crate::lifecycle::Lifecycle>,
+    state: tauri::State<'_, PendingConnection>,
+) -> Result<Value, String> {
+    let _operation = state.operation.lock().await;
+    let status = worker("status", &runtime, json!({}), &lifecycle).await?;
+    let directory = dirs::download_dir()
+        .ok_or("downloads_unavailable")?
+        .join(format!("GroundLine-diagnostics-{}", uuid::Uuid::new_v4()));
+    let mut report = safe_diagnostics(&status);
+    report["runtime"] = json!(runtime);
+    let bytes = serde_json::to_vec_pretty(&report).map_err(|_| "local_state_failed")?;
+    groundline_runtime::local_file::atomic_write_private(
+        &directory.join("diagnostics.json"),
+        &bytes,
+    )
+    .map_err(|_| "local_state_failed")?;
+    groundline_runtime::local_file::atomic_write_private(&directory.join("README.ko.md"),
+        "# GroundLine 진단\n\n진단 파일: diagnostics.json\n서버 주소, 등록키, 대화 원문, 파일 경로는 포함하지 않습니다.\n".as_bytes())
+        .map_err(|_| "local_state_failed")?;
+    *state.exported.lock().map_err(|_| "worker_failed")? = Some(directory);
+    Ok(json!({"exported":true}))
+}
+
+#[tauri::command]
 pub fn get_app_preferences(
     lifecycle: tauri::State<'_, crate::lifecycle::Lifecycle>,
 ) -> Result<crate::preferences::Preferences, String> {
@@ -217,8 +308,19 @@ pub fn get_app_preferences(
 #[tauri::command]
 pub fn save_app_preferences(
     preferences: crate::preferences::Preferences,
+    app: tauri::AppHandle,
     lifecycle: tauri::State<'_, crate::lifecycle::Lifecycle>,
 ) -> Result<crate::preferences::Preferences, String> {
+    if preferences.alerts_enabled && !lifecycle.preferences()?.alerts_enabled {
+        use tauri_plugin_notification::{NotificationExt, PermissionState};
+        let permission = app
+            .notification()
+            .request_permission()
+            .map_err(|_| "notification_unavailable")?;
+        if permission != PermissionState::Granted {
+            return Err("notification_permission_required".into());
+        }
+    }
     lifecycle.save(preferences)
 }
 

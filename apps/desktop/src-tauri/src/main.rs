@@ -3,8 +3,10 @@
 mod commands;
 mod desktop_settings;
 mod lifecycle;
+mod monitor;
 mod preferences;
 mod setup;
+mod usage;
 mod worker;
 
 fn main() {
@@ -17,6 +19,7 @@ fn main() {
             lifecycle::show(app)
         }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(commands::PendingConnection::default())
         .setup(|app| {
             use tauri::Manager;
@@ -25,6 +28,7 @@ fn main() {
             let state = lifecycle::Lifecycle::new(home);
             app.manage(state);
             lifecycle::install_tray(app)?;
+            monitor::start(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -34,6 +38,9 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::snapshot,
+            commands::usage_summary,
+            commands::server_health,
+            commands::export_diagnostics,
             commands::check_connection,
             commands::connect,
             commands::set_collection,

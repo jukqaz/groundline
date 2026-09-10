@@ -33,6 +33,20 @@ pub fn profile_input(endpoint: &str, key: &str) -> Value {
 
 pub async fn execute(action: &str, input: Value, home: &Path) -> Result<Value, String> {
     match action {
+        "usage" => crate::usage::load(
+            home,
+            &std::env::var("GROUNDLINE_RUNTIME_FAMILY").unwrap_or_default(),
+            input["period"].as_str().ok_or("invalid_usage_period")?,
+        ),
+        "health" => {
+            let profile = read_profile(home)?.ok_or("collection_configuration_required")?;
+            let endpoint = profile["endpoint"]
+                .as_str()
+                .ok_or("invalid_owner_profile")?;
+            insights_state::server_health(endpoint)
+                .await
+                .map_err(|e| e.to_string())
+        }
         "status" => {
             let mut result = insights_state::status(home).map_err(|e| e.to_string())?;
             result["endpoint"] = read_profile(home)?

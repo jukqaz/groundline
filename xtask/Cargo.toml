@@ -13,8 +13,8 @@ chrono.workspace = true
 clap.workspace = true
 command-group.workspace = true
 futures-util.workspace = true
-groundline-contracts = { version = "0.24.3", path = "../crates/groundline-contracts", default-features = false, features = ["guidance"] }
-groundline-runtime = { version = "0.24.3", path = "../crates/groundline-runtime", default-features = false }
+groundline-contracts = { version = "0.24.4", path = "../crates/groundline-contracts", default-features = false, features = ["guidance"] }
+groundline-runtime = { version = "0.24.4", path = "../crates/groundline-runtime", default-features = false }
 percent-encoding.workspace = true
 proc-macro2.workspace = true
 pulldown-cmark.workspace = true

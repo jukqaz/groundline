@@ -145,7 +145,7 @@ pub fn export_to(input: SetupInput, directory: &Path) -> Result<Value, String> {
     atomic_write_private(
         &directory.join("connection.json"),
         &serde_json::to_vec_pretty(&json!({
-            "api_url":input.api_url,"grafana_url":input.grafana_url,"transport":input.mode
+            "schema":1,"kind":"groundline-connection","api_url":input.api_url,"grafana_url":input.grafana_url
         }))
         .map_err(|_| "compose_export_failed")?,
     )

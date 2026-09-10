@@ -1,6 +1,12 @@
 import { Button, Input, Choice } from "./ui";
 import { useState } from "react";
 import {
+  DeliveryHistory,
+  DiagnosticExport,
+  Diagnostics,
+  UsageCard,
+} from "./operations";
+import {
   Activity,
   CircleCheck,
   Link2,
@@ -26,6 +32,7 @@ import {
   type Status,
   type Theme,
   type AppPreferences,
+  type Runtime,
 } from "./model";
 
 export function DeliverySummary({ status }: { status: Status | null }) {
@@ -38,11 +45,9 @@ export function DeliverySummary({ status }: { status: Status | null }) {
       </div>
       <dl className="delivery-facts">
         <div>
-          <dt>최근 전송 묶음</dt>
+          <dt>최근 수신 건수</dt>
           <dd>
-            {receipt
-              ? `${receipt.event_count.toLocaleString("ko-KR")}건`
-              : "기록 없음"}
+            {receipt ? `${receipt.event_count.toLocaleString("ko-KR")}건` : "—"}
           </dd>
         </div>
         <div className="receipt-time">
@@ -53,15 +58,15 @@ export function DeliverySummary({ status }: { status: Status | null }) {
           <dt>전송 대기</dt>
           <dd>
             {status?.pending_event_count == null
-              ? "확인 전"
+              ? "—"
               : `${status.pending_event_count.toLocaleString("ko-KR")}건`}
           </dd>
         </div>
       </dl>
       <p className="helper">
         {receipt
-          ? "최근 묶음의 수신 기록입니다. 중복 응답을 포함하며 누적 건수는 아닙니다."
-          : "아직 서버 수신 확인 기록이 없습니다. 수집 완료만으로 전송 성공을 표시하지 않습니다."}
+          ? "최근 전송 묶음 기준 · 중복 수신 포함"
+          : "서버의 수신 확인 기록이 생기면 표시됩니다."}
       </p>
     </section>
   );
@@ -82,20 +87,20 @@ export function Attention({ status }: { status: Status | null }) {
 }
 
 export function Overview({
+  runtime,
+  dashboard,
   status,
-  core,
   busy,
   native,
   navigate,
-  diagnose,
   refresh,
 }: {
+  runtime: Runtime;
+  dashboard: () => void;
   status: Status | null;
-  core: CoreStatus | null;
   busy: boolean;
   native: boolean;
   navigate: (target: "connection" | "settings" | "compose") => void;
-  diagnose: () => void;
   refresh: () => void;
 }) {
   const next = nextStep(status);
@@ -145,6 +150,14 @@ export function Overview({
         </Button>
       </section>
       <DeliverySummary status={status} />
+      <UsageCard
+        key={runtime}
+        runtime={runtime}
+        native={native}
+        disabled={busy}
+        dashboard={dashboard}
+      />
+      <DeliveryHistory status={status} />
       <section className="insights-row">
         <div className="section-title">
           <h2>Insights</h2>
@@ -160,64 +173,12 @@ export function Overview({
           </span>
         </p>
       </section>
-      <section className="summary-card">
-        <div className="section-title">
-          <h2>GroundLine Core</h2>
-          <ShieldCheck size={20} />
-          <strong
-            className="metric"
-            data-state={
-              core
-                ? core.status === "PASS"
-                  ? "success"
-                  : "attention"
-                : "unknown"
-            }
-          >
-            {core
-              ? core.status === "PASS"
-                ? "실행 진단 통과"
-                : "확인 필요"
-              : "진단 전"}
-          </strong>
-          <Button
-            className="secondary"
-            disabled={!native || busy}
-            onClick={diagnose}
-          >
-            <RefreshCw size={16} />
-            Core 진단
-          </Button>
-        </div>
-        {core && (
-          <details className="core-details">
-            <summary>
-              진단 상세 <ChevronDown size={14} />
-            </summary>
-            <dl className="facts compact">
-              <div>
-                <dt>패키지 버전</dt>
-                <dd>{core.version}</dd>
-              </div>
-              <div>
-                <dt>패키지 무결성</dt>
-                <dd>{core.checksum_verified ? "확인 완료" : "확인 필요"}</dd>
-              </div>
-              <div>
-                <dt>실제 훅 실행</dt>
-                <dd>
-                  {core.live_hooks_verified ? "확인 완료" : "별도 확인 필요"}
-                </dd>
-              </div>
-            </dl>
-          </details>
-        )}
-      </section>
     </>
   );
 }
 
 export function ConnectionManager({
+  runtime,
   status,
   busy,
   native,
@@ -227,6 +188,7 @@ export function ConnectionManager({
   openDashboard,
   saveDashboard,
 }: {
+  runtime: Runtime;
   status: Status;
   busy: boolean;
   native: boolean;
@@ -270,7 +232,13 @@ export function ConnectionManager({
         </div>
       </section>
       <Attention status={status} />
-      <DeliverySummary status={status} />
+      <Diagnostics
+        key={runtime}
+        status={status}
+        runtime={runtime}
+        native={native}
+        disabled={busy}
+      />
       <section className="overview-section">
         <div>
           <h2>Grafana 대시보드</h2>
@@ -408,6 +376,10 @@ export function Consent({
 }
 
 export function SettingsPage({
+  runtime,
+  core,
+  diagnose,
+  setAlerts,
   status,
   theme,
   setTheme,
@@ -420,6 +392,10 @@ export function SettingsPage({
   resume,
   connect,
 }: {
+  runtime: Runtime;
+  core: CoreStatus | null;
+  diagnose: () => void;
+  setAlerts: (enabled: boolean) => void;
   status: Status | null;
   theme: Theme;
   setTheme: (v: Theme) => void;
@@ -592,6 +568,81 @@ export function SettingsPage({
           );
         })}
       </details>
+      <section className="settings-block core-settings">
+        <div className="section-title">
+          <h2>GroundLine Core</h2>
+          <ShieldCheck size={20} />
+          <strong
+            className="metric"
+            data-state={
+              core
+                ? core.status === "PASS"
+                  ? "success"
+                  : "attention"
+                : "unknown"
+            }
+          >
+            {core
+              ? core.status === "PASS"
+                ? "실행 진단 통과"
+                : "확인 필요"
+              : "진단 전"}
+          </strong>
+          <Button
+            className="secondary"
+            disabled={!native || busy}
+            onClick={diagnose}
+          >
+            <RefreshCw size={16} />
+            Core 진단
+          </Button>
+        </div>
+        {core && (
+          <details className="core-details">
+            <summary>
+              진단 상세 <ChevronDown size={14} />
+            </summary>
+            <dl className="facts compact">
+              <div>
+                <dt>패키지 버전</dt>
+                <dd>{core.version}</dd>
+              </div>
+              <div>
+                <dt>패키지 무결성</dt>
+                <dd>{core.checksum_verified ? "확인 완료" : "확인 필요"}</dd>
+              </div>
+              <div>
+                <dt>실제 훅 실행</dt>
+                <dd>
+                  {core.live_hooks_verified ? "확인 완료" : "별도 확인 필요"}
+                </dd>
+              </div>
+            </dl>
+          </details>
+        )}
+      </section>
+      <section className="settings-block preference-row">
+        <div>
+          <h2>문제 알림</h2>
+          <p className="helper">트레이 실행 중 반복 실패·조치 필요 시 알림</p>
+        </div>
+        <Choice
+          label="문제 알림"
+          value={preferences.alerts_enabled ? "on" : "off"}
+          disabled={!native || busy || !!preferencesError}
+          options={[
+            ["off", "꺼짐"],
+            ["on", "켜짐"],
+          ]}
+          onValueChange={(v) => setAlerts(v === "on")}
+        />
+      </section>
+      <DiagnosticExport
+        key={runtime}
+        runtime={runtime}
+        native={native}
+        disabled={busy}
+      />
     </div>
   );
 }

@@ -97,13 +97,41 @@ pub fn close(window: &tauri::Window, api: &tauri::CloseRequestApi) {
 
 pub fn install_tray(app: &tauri::App) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "show-main", "GroundLine 열기", true, None::<&str>)?;
+    let summary = MenuItem::with_id(app, "status", "상태 확인 중…", false, None::<&str>)?;
+    let pending = MenuItem::with_id(app, "pending", "전송 대기 확인 전", false, None::<&str>)?;
+    let receipt = MenuItem::with_id(app, "receipt", "최근 수신 확인 전", false, None::<&str>)?;
+    let dashboard = MenuItem::with_id(app, "dashboard", "Grafana 열기", false, None::<&str>)?;
+    let collection = MenuItem::with_id(app, "collection", "수집 설정…", true, None::<&str>)?;
     let exit = MenuItem::with_id(app, "quit-app", "완전히 종료", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &exit])?;
+    let menu = Menu::with_items(
+        app,
+        &[
+            &summary,
+            &pending,
+            &receipt,
+            &open,
+            &dashboard,
+            &collection,
+            &exit,
+        ],
+    )?;
+    app.manage(crate::monitor::TrayStatus {
+        summary,
+        pending,
+        receipt,
+        dashboard,
+    });
     let mut tray = TrayIconBuilder::with_id("groundline")
         .tooltip("GroundLine · 활동 통계")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show-main" => show(app),
+            "dashboard" => {
+                if crate::commands::open_dashboard(app.clone()).is_err() {
+                    crate::monitor::show_page(app, "server");
+                }
+            }
+            "collection" => crate::monitor::show_page(app, "settings"),
             "quit-app" => quit(app),
             _ => {}
         });

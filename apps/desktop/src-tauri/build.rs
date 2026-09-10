@@ -7,6 +7,9 @@ fn main() {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
             "snapshot",
+            "usage_summary",
+            "server_health",
+            "export_diagnostics",
             "check_connection",
             "connect",
             "set_collection",

@@ -1,7 +1,14 @@
 import { Theme as DesignTheme } from "@radix-ui/themes";
 import "@radix-ui/themes/styles.css";
-import React, { useEffect, useRef, useState, type FormEvent } from "react";
+import React, {
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   Activity,
   ArrowRight,
@@ -41,6 +48,7 @@ import {
   Consent,
 } from "./work-pages";
 import { ServerPage } from "./server-page";
+import { ConnectionImport } from "./operations";
 import "./style.css";
 
 const native = isTauri();
@@ -86,6 +94,28 @@ export function App() {
   const [ticket, setTicket] = useState("");
   const [consent, setConsent] = useState(false);
   const [connected, setConnected] = useState(false);
+  const [statusReadFailed, setStatusReadFailed] = useState(false);
+  const navigateFromTray = useEffectEvent((payload: string) => {
+    if (["overview", "server", "settings"].includes(payload))
+      navigate(payload as Page);
+  });
+  useEffect(() => {
+    if (!native) return;
+    let disposed = false;
+    let unsubscribe: (() => void) | undefined;
+    void listen<string>("groundline:navigate", ({ payload }) => {
+      navigateFromTray(payload);
+    })
+      .then((fn) => {
+        if (disposed) fn();
+        else unsubscribe = fn;
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      unsubscribe?.();
+    };
+  }, []);
   useEffect(() => {
     if (!native) return;
     let current = true;
@@ -133,6 +163,7 @@ export function App() {
     if (!preferencesLoaded) return;
     let current = true;
     setStatus(null);
+    setStatusReadFailed(false);
     setServerView("connection");
     setSetup((s) => ({
       ...s,
@@ -180,9 +211,10 @@ export function App() {
         const value = await invoke<Status>("snapshot", { runtime });
         if (current) {
           setStatus(value);
+          setStatusReadFailed(false);
         }
       } catch {
-        /* Keep the last verified state until an explicit refresh. */
+        if (current) setStatusReadFailed(true);
       } finally {
         refreshing = false;
       }
@@ -260,6 +292,7 @@ export function App() {
   async function refresh() {
     const result = await invoke<Status>("snapshot", { runtime });
     setStatus(result);
+    setStatusReadFailed(false);
   }
   async function savePreferences(patch: Partial<AppPreferences>) {
     await action("preferences", async () => {
@@ -474,6 +507,12 @@ export function App() {
               </div>
             )}
             {error && <Notice kind="error">{error}</Notice>}
+            {statusReadFailed && (
+              <Notice kind="error">
+                상태 갱신에 실패했습니다. 아래 정보는 마지막 확인 기록입니다.
+                다시 상태를 확인하세요.
+              </Notice>
+            )}
             {success && (
               <Notice kind="success" onDismiss={() => setSuccess("")}>
                 {success}
@@ -528,6 +567,7 @@ export function App() {
                 ) : status?.endpoint && !editingConnection && !connected ? (
                   <ConnectionManager
                     key={runtime}
+                    runtime={runtime}
                     status={status}
                     busy={!!busy}
                     native={native}
@@ -609,6 +649,31 @@ export function App() {
                             className="connection-form"
                             onSubmit={checkConnection}
                           >
+                            <ConnectionImport
+                              key={runtime}
+                              disabled={!!busy}
+                              apply={async (value) => {
+                                if (
+                                  status?.endpoint &&
+                                  new URL(status.endpoint).origin !==
+                                    new URL(value.api_url).origin
+                                )
+                                  throw new Error(
+                                    "endpoint_change_requires_review",
+                                  );
+                                const applied = await action(
+                                  "import",
+                                  async () => {
+                                    await cancelConnection();
+                                    setKey("");
+                                    setEndpoint(value.api_url);
+                                    setGrafana(value.grafana_url);
+                                  },
+                                );
+                                if (!applied)
+                                  throw new Error("connection_import_failed");
+                              }}
+                            />
                             <Field
                               label="Insights 서버 주소"
                               hint="일반 HTTPS를 지원합니다. Tailscale 주소도 선택해서 사용할 수 있습니다."
@@ -637,7 +702,7 @@ export function App() {
                             </Field>
                             <Field
                               label="기기 등록키"
-                              hint="Insights API의 GROUNDLINE_ENROLLMENT_TOKEN 값입니다. 생성한 secrets.json에서는 ENROLLMENT_TOKEN으로 표시됩니다. TrueNAS 관리용 API 키와는 별개입니다."
+                              hint="서버 관리자가 제공한 Insights 등록키를 입력하세요."
                             >
                               <Input
                                 type="password"
@@ -794,8 +859,15 @@ export function App() {
             )}
             {page === "overview" && (
               <Overview
+                runtime={runtime}
+                dashboard={() =>
+                  status?.grafana_url
+                    ? void action("dashboard", async () => {
+                        await invoke("open_dashboard");
+                      })
+                    : navigate("server", "connection")
+                }
                 status={status}
-                core={core}
                 native={native}
                 busy={!!busy || loading}
                 navigate={(target) =>
@@ -804,6 +876,11 @@ export function App() {
                     : navigate("server", target)
                 }
                 refresh={() => void action("refresh", refresh)}
+              />
+            )}
+            {page === "settings" && (
+              <SettingsPage
+                key={runtime}
                 diagnose={() =>
                   void action("core", async () => {
                     const result = await invoke<CoreStatus>("core_diagnostic");
@@ -815,11 +892,11 @@ export function App() {
                     );
                   })
                 }
-              />
-            )}
-            {page === "settings" && (
-              <SettingsPage
-                key={runtime}
+                core={core}
+                runtime={runtime}
+                setAlerts={(alerts_enabled) =>
+                  void savePreferences({ alerts_enabled })
+                }
                 status={status}
                 theme={theme}
                 setTheme={setTheme}
