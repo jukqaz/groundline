@@ -2,6 +2,8 @@
 
 ## 0.24.2
 
+- Support literal loopback HTTP endpoints for local Docker Compose verification,
+  while retaining HTTPS for public endpoints.
 - Read metric groups as object keys to avoid Linux string-pool concatenation
   triggering the strict artifact privacy guard. Keep the guard unchanged and
   verify the event-to-row mapping with a regression test.
