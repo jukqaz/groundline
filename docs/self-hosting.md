@@ -221,6 +221,41 @@ semantic checks. A successful candidate run is compatibility evidence; it does
 not rewrite the release-tested profile, publish an image, promote `stable`, or
 change an owner deployment.
 
+### Migrate an existing installation
+
+Pin the complete qualified profile before changing an owner deployment. Record
+the current images, plugin version, configuration fingerprint, and application
+table counts. Updating the API image alone does not update ClickHouse, Grafana,
+Nginx, or the datasource plugin.
+
+Check the selected image on the actual host before mounting database storage:
+`docker run --rm --network none --entrypoint clickhouse <image> --version`.
+The [official ClickHouse 26.6+ default amd64 build](https://hub.docker.com/_/clickhouse)
+requires x86-64-v3, including AVX2. A passing CI run on a different CPU does not
+establish host compatibility.
+For an unsupported CPU, explicitly qualify a supported LTS profile for that
+host or move to compatible hardware; never silently substitute an image.
+
+Pause ingestion and Grafana before taking a consistent database backup. Keep
+ClickHouse data, Grafana's database and plugins, and the private deployment
+configuration together on owner-controlled storage. Test the ClickHouse upgrade
+against an isolated copy and compare every application table before and after.
+Never mount the production data directory into a rehearsal container.
+
+Review stored events with the target collector's `insights validate-event`
+command before enabling a stricter API contract or quarantine TTL. Preserve a
+typed inventory and a recoverable original backup; invalid historical envelopes
+must not be rewritten into fabricated current-contract measurements. Removing
+history requires the owner's approval of the concrete scope. Check that no new
+receipts arrived between inventory and replacement.
+
+After migration, verify API storage readiness, all provisioned Grafana queries,
+the installed datasource version, and a fresh collector receipt matched to a
+database row. Preserve enrollment credentials, collection consent, network
+policy, and retention settings. If a database upgrade fails, restore its matching
+backup before starting the previous image; an image-only downgrade is not a
+database rollback.
+
 ## 4. Start and verify the real stack
 
 ```console

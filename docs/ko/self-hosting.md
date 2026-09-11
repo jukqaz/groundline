@@ -211,6 +211,36 @@ GitHub 수동 workflow에도 후보 입력 네 개가 있습니다. 네 개를 �
 run 성공은 호환성 증거일 뿐 기본 profile 수정, image 게시, `stable` 승격, owner
 배포를 자동 수행하지 않습니다.
 
+### 기존 설치 마이그레이션
+
+검증한 profile의 모든 버전을 고정하고 현재 image, plugin 버전, 설정 fingerprint,
+애플리케이션 테이블의 건수를 기록합니다. API image만 바꾸면 ClickHouse, Grafana,
+Nginx, datasource plugin은 업데이트되지 않습니다.
+
+DB 저장소를 마운트하기 전에 실제 호스트에서 선택한 image를 확인합니다.
+`docker run --rm --network none --entrypoint clickhouse <image> --version`
+[공식 ClickHouse 26.6 이상 기본 amd64 빌드](https://hub.docker.com/_/clickhouse)는
+AVX2를 포함한 x86-64-v3가 필요합니다.
+다른 CPU에서 통과한 CI만으로 호스트 호환성을 확인할 수 없습니다. 지원하지 않는
+CPU라면 해당 호스트에서 지원되는 LTS profile을 명시적으로 검증하거나 호환되는
+하드웨어로 이전합니다. image를 조용히 다른 버전으로 대체하지 않습니다.
+
+일관된 백업을 위해 수집과 Grafana를 일시 중지합니다. ClickHouse 데이터, Grafana
+DB와 plugin, 비공개 배포 설정을 소유자 저장소에 함께 보관합니다. 격리된 복제본에서
+ClickHouse를 업그레이드하고 모든 애플리케이션 테이블의 변경 전후 값을 비교합니다.
+리허설 컨테이너에 운영 데이터 디렉터리를 마운트하지 않습니다.
+
+더 엄격한 API 계약이나 격리 TTL을 적용하기 전에 대상 collector의
+`insights validate-event`로 기존 이벤트를 검사합니다. 유형별 목록과 복원 가능한
+원본 백업을 남기고, 구형 이벤트를 현재 규격에 맞추려고 측정값을 만들어 내지
+않습니다. 과거 데이터 제거는 구체적인 범위에 대한 소유자 승인이 필요합니다.
+목록 작성과 교체 사이에 새 수신 데이터가 생기지 않았는지도 확인합니다.
+
+마이그레이션 후 API 저장소 준비 상태, Grafana의 모든 query, 설치된 datasource
+버전, 새 collector 수신 확인과 DB 행의 일치를 검증합니다. 등록 인증정보, 수집 동의,
+네트워크 정책과 보존 설정을 유지합니다. DB 업그레이드 실패 시 이전 image를 시작하기
+전에 그 버전과 일치하는 백업을 복원합니다. image만 되돌리는 것은 DB 복원이 아닙니다.
+
 ## 4. 실제 stack 시작과 semantic 검증
 
 ```console
