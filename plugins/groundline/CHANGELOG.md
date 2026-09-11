@@ -3,6 +3,12 @@
 This package summary covers the current release line. See the repository
 [changelog](https://github.com/jukqaz/groundline/blob/main/CHANGELOG.md) for shared release and packaging changes.
 
+## 0.25.1
+
+- Prioritize GPT-6/Astra guidance while supporting GPT-5.6 and preserving selected settings.
+- Reconcile weekly advice within the current authorized task without extra approval or recurring-review requirements.
+- Propose diagnosis from aggregate failure signals, retaining quality/cohort context and strict personal-trial gates.
+
 ## 0.25.0
 
 - Separate model-guidance review from Insights-based personal trials; preserve

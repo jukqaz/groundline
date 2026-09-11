@@ -4,6 +4,11 @@ This package summary covers the current release line. The repository
 [changelog](https://github.com/jukqaz/groundline/blob/main/CHANGELOG.md) records shared changes. A source version entry
 does not prove that its image or `stable` distribution has been published.
 
+## 0.25.1
+
+- Align the shared release with Core's evidence-based GPT-6/GPT-5.6 workflow review.
+- Preserve the existing collection, report, and storage contracts; no historical data reset or migration is required.
+
 ## 0.25.0
 
 - Share Codex App/CLI environment validation across collection and enrollment;
