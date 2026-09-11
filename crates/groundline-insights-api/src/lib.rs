@@ -2574,6 +2574,17 @@ mod tests {
     }
 
     #[test]
+    fn dashboard_time_filters_are_compose_escaped() {
+        for (index, query) in dashboard_queries().iter().enumerate() {
+            let expanded = expand_grafana_time_filter(query).expect("bounded Grafana macro");
+            assert!(
+                !expanded.contains("$__timeFilter"),
+                "dashboard query {index} contains an unescaped time filter"
+            );
+        }
+    }
+
+    #[test]
     fn constant_time_comparison_rejects_different_lengths() {
         assert!(constant_time_equal("same", "same"));
         assert!(!constant_time_equal("same", "different"));
@@ -2911,9 +2922,12 @@ mod tests {
         }
         let queries = dashboard_queries();
         assert!(queries.len() >= 10, "dashboard query inventory shrank");
-        for query in queries {
-            let query = expand_grafana_time_filter(&query).expect("bounded Grafana macro");
-            clickhouse.request(&query, &[], None).await.unwrap();
+        for (index, query) in queries.iter().enumerate() {
+            let query = expand_grafana_time_filter(query).expect("bounded Grafana macro");
+            clickhouse
+                .request(&query, &[], None)
+                .await
+                .unwrap_or_else(|error| panic!("dashboard query {index} failed: {error:?}"));
         }
     }
 
