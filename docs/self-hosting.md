@@ -228,6 +228,14 @@ the current images, plugin version, configuration fingerprint, and application
 table counts. Updating the API image alone does not update ClickHouse, Grafana,
 Nginx, or the datasource plugin.
 
+Check the selected image on the actual host before mounting database storage:
+`docker run --rm --network none --entrypoint clickhouse <image> --version`.
+The [official ClickHouse 26.6+ default amd64 build](https://hub.docker.com/_/clickhouse)
+requires x86-64-v3, including AVX2. A passing CI run on a different CPU does not
+establish host compatibility.
+For an unsupported CPU, explicitly qualify a supported LTS profile for that
+host or move to compatible hardware; never silently substitute an image.
+
 Pause ingestion and Grafana before taking a consistent database backup. Keep
 ClickHouse data, Grafana's database and plugins, and the private deployment
 configuration together on owner-controlled storage. Test the ClickHouse upgrade

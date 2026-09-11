@@ -217,6 +217,14 @@ run 성공은 호환성 증거일 뿐 기본 profile 수정, image 게시, `stab
 애플리케이션 테이블의 건수를 기록합니다. API image만 바꾸면 ClickHouse, Grafana,
 Nginx, datasource plugin은 업데이트되지 않습니다.
 
+DB 저장소를 마운트하기 전에 실제 호스트에서 선택한 image를 확인합니다.
+`docker run --rm --network none --entrypoint clickhouse <image> --version`
+[공식 ClickHouse 26.6 이상 기본 amd64 빌드](https://hub.docker.com/_/clickhouse)는
+AVX2를 포함한 x86-64-v3가 필요합니다.
+다른 CPU에서 통과한 CI만으로 호스트 호환성을 확인할 수 없습니다. 지원하지 않는
+CPU라면 해당 호스트에서 지원되는 LTS profile을 명시적으로 검증하거나 호환되는
+하드웨어로 이전합니다. image를 조용히 다른 버전으로 대체하지 않습니다.
+
 일관된 백업을 위해 수집과 Grafana를 일시 중지합니다. ClickHouse 데이터, Grafana
 DB와 plugin, 비공개 배포 설정을 소유자 저장소에 함께 보관합니다. 격리된 복제본에서
 ClickHouse를 업그레이드하고 모든 애플리케이션 테이블의 변경 전후 값을 비교합니다.
