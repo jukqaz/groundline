@@ -288,7 +288,7 @@ See [ClickHouse TTL](https://clickhouse.com/docs/concepts/features/operations/de
 ## 5. Configure each collector
 
 Upgrade the API before installing or enabling updated collectors. Its `/healthz`
-must advertise Basic schema 5 and ingest contract revision 4 or newer; enrollment
+must advertise Basic schema 5 and ingest contract revision 5 or newer; enrollment
 returns the active collection generation. Existing identities and tokens are
 reused. Keep unsupported local state for explicit owner review instead of
 deleting it to force a fresh enrollment.

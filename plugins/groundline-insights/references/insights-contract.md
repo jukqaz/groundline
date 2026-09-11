@@ -78,8 +78,9 @@ the updated executable on every collector process, including detached hooks.
 Every due worker cycle checks `/healthz` before enrollment or upload, even when
 a collector token is already cached. The API advertises Basic envelope schema
 versions and a semantic allowlist revision in `ingest_capabilities`. Collectors
-require schema 5 and revision 4 or newer, not an exact package version. Revision 4
-requires coherent usage totals and provenance counters. Enrollment includes the
+require schema 5 and revision 5 or newer, not an exact package version. Revision 5
+requires canonical cache ratios and bounded, disjoint ingestion windows as well
+as coherent usage totals and provenance counters. Enrollment includes the
 authoritative `current_generation`.
 Re-enroll once per due cycle with the existing identity and token, and use that
 generation when staging new events. Never infer zero from a cached credential
@@ -208,14 +209,34 @@ These views do not mutate or repair native Codex task databases.
 
 The producer and API reject token splits larger than their totals, cache or
 reasoning counts larger than their parents, and inconsistent usage provenance.
-A ClickHouse constraint also guards root token bounds against direct writes.
+A single declarative projection produces the 88 payload-derived storage columns
+and their ClickHouse consistency constraint. It covers metadata, all components,
+nullable metrics, timestamps, and model arrays, in addition to root token bounds.
+The API verifies the canonical SHA-256 digest and UUIDv5 before storing a row;
+`insights validate-event --input <file> --json` performs the same offline check.
+Cache ratios use the provider counters with four-decimal ties-to-even rounding;
+a zero input denominator requires JSON null, never a synthetic zero ratio.
 Total-only provider records remain valid; missing splits are never fabricated.
-All receipts retain the owner-configured TTL and quotas. Historical cleanup is
-an explicit owner operation: back up exact candidate rows and DDL on the NAS,
-verify their checksum and round trip, delete only captured event IDs, and prove
-the retained rows' count and content fingerprint are unchanged.
+Admission requires start < end <= generated time and rejects generated times
+more than five minutes ahead of receipt. Different IDs for overlapping periods
+in the same collector and generation are rejected. The check uses canonical
+microsecond boundaries; adjacent and out-of-order disjoint windows remain valid.
+The duplicate-ID check runs first, preserving ordinary delivery retries.
 
-The service applies an owner-configured retention TTL, retained per-collector
+Historical cleanup is an explicit owner operation. Before applying a stricter
+TTL, audit existing payloads, back up exact affected rows and DDL, and verify the
+backup checksum. Repair only deterministic derived values whose counters are
+available; changing a payload requires a new canonical digest and UUID. Preserve
+an old-to-new ID map and validate every replacement before writing. Remove only
+captured irrecoverable or superseded IDs, then prove untouched rows and all
+retained source counters are unchanged. Startup never silently rewrites history.
+
+Trusted records retain the owner-configured TTL (365 days by default).
+Quarantined receipts expire seven days after receipt. A single conditional TTL
+expression implements both deadlines; the `basic_retention` view exposes the
+same expression for reports and Grafana. Quarantine is bounded diagnostic
+storage, not a permanent archive of unusable measurements.
+The service also applies retained per-collector
 event and logical-payload quotas, and dataset row/byte watermarks. Ingest stops at
 90% of the configured dataset ceilings to reserve capacity for administration.
 Duplicate retries do not consume quota, and quota check plus insert is serialized

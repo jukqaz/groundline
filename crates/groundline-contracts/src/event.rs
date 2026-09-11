@@ -127,7 +127,7 @@ fn usage(component: &Map<String, Value>, include_non_cached: bool) -> Value {
         "output_tokens":count(source.get("output_tokens")),
         "reasoning_output_tokens":count(source.get("reasoning_output_tokens")),
         "total_tokens":count(source.get("total_tokens")),
-        "cached_input_ratio":optional_number(source.get("cached_input_ratio")),
+        "cached_input_ratio":crate::usage::ratio(cached, input),
     });
     if include_non_cached {
         result.as_object_mut().expect("object").insert(
@@ -338,6 +338,25 @@ pub fn build_basic_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cache_ratios_are_derived_from_provider_counters() {
+        for (input, cached, expected) in [
+            (0, 0, json!(null)),
+            (3, 1, json!(0.3333)),
+            (32, 1, json!(0.0312)),
+        ] {
+            let component = json!({"provider_reported_usage":{
+                "input_tokens":input, "cached_input_tokens":cached, "cached_input_ratio":0.99
+            }});
+            for include_non_cached in [true, false] {
+                assert_eq!(
+                    usage(component.as_object().unwrap(), include_non_cached)["cached_input_ratio"],
+                    expected
+                );
+            }
+        }
+    }
 
     #[test]
     fn astra_labels_use_the_same_allowlist_for_collection_and_validation() {

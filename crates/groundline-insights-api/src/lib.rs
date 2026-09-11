@@ -29,6 +29,8 @@ use tracing::Level;
 use url::Url;
 use uuid::Uuid;
 
+mod projection;
+
 const API_VERSION: &str = "3";
 const MAX_REQUEST_BYTES: usize = 64 * 1024;
 const MAX_CLICKHOUSE_BYTES: usize = 1024 * 1024;
@@ -44,6 +46,7 @@ const MAX_CONCURRENT_COLLECTOR_REQUESTS: usize = 64;
 const REQUEST_BODY_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_ACTIVE_RATE_SCOPES: usize = 4096;
 const DEFAULT_RETENTION_DAYS: u64 = 365;
+const QUARANTINE_RETENTION_DAYS: u64 = 7;
 const DEFAULT_COLLECTOR_MAX_EVENTS: u64 = 4096;
 const DEFAULT_COLLECTOR_MAX_PAYLOAD_BYTES: u64 = 256 * 1024 * 1024;
 const DEFAULT_DATASET_MAX_ROWS: u64 = 2_000_000;
@@ -574,15 +577,26 @@ impl ClickHouse {
         for (index, query) in STORAGE_MIGRATIONS.iter().enumerate() {
             self.request_at(query, &[], None, index != 0).await?;
         }
+        let consistency = projection::consistency_sql();
+        let trusted = format!("ifNull(({TRUSTED_EVENT_PREDICATE}) AND ({consistency}), 0)");
+        let expiry = format!(
+            "toDateTime(received_at) + toIntervalDay(if({trusted}, {}, {QUARANTINE_RETENTION_DAYS}))",
+            config.retention_days
+        );
         self.request(
-            &format!(
-                "ALTER TABLE groundline.basic_weekly MODIFY TTL received_at + toIntervalDay({})",
-                config.retention_days
-            ),
+            &format!("ALTER TABLE groundline.basic_weekly MODIFY TTL {expiry}"),
             &[],
             None,
         )
         .await?;
+        self.request(
+            &format!("ALTER TABLE groundline.basic_weekly ADD CONSTRAINT IF NOT EXISTS payload_projection_v5 CHECK {consistency}"),
+            &[], None,
+        ).await?;
+        self.request(
+            &format!("CREATE OR REPLACE VIEW groundline.basic_retention AS SELECT event_id, {expiry} AS expires_at FROM groundline.basic_weekly"),
+            &[], None,
+        ).await?;
         for query in [
             "ALTER TABLE groundline.basic_weekly ADD CONSTRAINT IF NOT EXISTS root_usage_bounds CHECK cached_input_tokens <= input_tokens AND reasoning_output_tokens <= output_tokens AND total_tokens >= input_tokens AND total_tokens - least(total_tokens, input_tokens) >= output_tokens",
             "CREATE OR REPLACE VIEW groundline.basic_current AS SELECT events.* FROM (SELECT * FROM groundline.basic_weekly FINAL) AS events INNER JOIN (SELECT collector_id, current_generation FROM groundline.collectors FINAL WHERE revoked = 0) AS active ON events.collector_id = active.collector_id AND events.collection_generation = active.current_generation",
@@ -592,11 +606,8 @@ impl ClickHouse {
             self.request(query, &[], None).await?;
         }
         for (name, condition) in [
-            ("basic_active", format!("({TRUSTED_EVENT_PREDICATE})")),
-            (
-                "basic_quarantined",
-                format!("NOT ({TRUSTED_EVENT_PREDICATE})"),
-            ),
+            ("basic_active", trusted.clone()),
+            ("basic_quarantined", format!("NOT ({trusted})")),
         ] {
             self.request(
                 &format!("CREATE OR REPLACE VIEW groundline.{name} AS SELECT * FROM groundline.basic_current WHERE {condition}"),
@@ -1207,146 +1218,24 @@ fn checked_u32_sum(left: u64, right: u64) -> Result<u64, ApiError> {
         .ok_or_else(|| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid_event"))
 }
 
-fn pointer_f64(value: &Value, pointer: &str) -> Value {
-    value
-        .pointer(pointer)
-        .and_then(Value::as_f64)
-        .filter(|value| value.is_finite() && *value >= 0.0)
-        .map(Value::from)
-        .unwrap_or(Value::Null)
-}
-
-fn pointer_str<'a>(value: &'a Value, pointer: &str, default: &'a str) -> &'a str {
-    value
-        .pointer(pointer)
-        .and_then(Value::as_str)
-        .unwrap_or(default)
-}
-
 pub fn event_row(event: &Value, received_at: DateTime<Utc>) -> Result<Value, ApiError> {
     let encoded = serde_json::to_vec(event)
         .map_err(|_| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid_event"))?;
     validate_basic_event_bytes(&encoded)
         .map_err(|_| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid_event"))?;
-    let metrics = event.get("metrics").unwrap_or(&Value::Null);
-    let root = metrics.get("root").unwrap_or(&Value::Null);
-    let delegated = metrics.get("delegated").unwrap_or(&Value::Null);
-    let guardian = metrics.get("guardian").unwrap_or(&Value::Null);
-    let model_effort = root
-        .get("model_effort")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let model_families = model_effort
-        .iter()
-        .filter_map(|item| item.get("model_family").and_then(Value::as_str))
-        .collect::<Vec<_>>();
-    let efforts = model_effort
-        .iter()
-        .filter_map(|item| item.get("effort").and_then(Value::as_str))
-        .collect::<Vec<_>>();
-    let model_counts = model_effort
-        .iter()
-        .filter_map(|item| item.get("count").and_then(Value::as_u64))
-        .collect::<Vec<_>>();
-    let payload_json = String::from_utf8(encoded)
-        .map_err(|_| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid_event"))?;
-    let truncated_count = checked_u32_sum(
-        pointer_u64(event, "/sample/delegated_truncated_count"),
-        pointer_u64(event, "/sample/guardian_truncated_count"),
-    )?;
-    Ok(json!({
-        "schema_version":5,
-        "event_id":event["event_id"],
-        "idempotency_key":event["idempotency_key"],
-        "collector_id":event["collector"]["instance_id"],
-        "collection_generation":pointer_u64(event, "/source/collection_generation"),
-        "collection_trigger":pointer_str(event, "/source/collection_trigger", "manual"),
-        "received_at":received_at.to_rfc3339_opts(SecondsFormat::Millis, true),
-        "groundline_version":event["source"]["groundline_version"],
-        "os_family":event["collector"]["os_family"],
-        "runtime_family":event["collector"]["runtime_family"],
-        "execution_mode":event["collector"]["execution_mode"],
-        "period_start":event["period"]["start_utc"],
-        "period_end":event["period"]["end_utc"],
-        "generated_at":event["period"]["generated_at_utc"],
-        "selection_mode":event["sample"]["selection_mode"],
-        "requested_days":pointer_u64(event, "/sample/requested_days"),
-        "root_count":pointer_u64(event, "/sample/root_count"),
-        "observed_root_count":pointer_u64(event, "/sample/observed_root_count"),
-        "eligible_root_count":pointer_u64(event, "/sample/eligible_root_count"),
-        "selected_root_count":pointer_u64(event, "/sample/selected_root_count"),
-        "root_truncated_count":pointer_u64(event, "/sample/root_truncated_count"),
-        "selection_coverage":pointer_f64(event, "/sample/selection_coverage"),
-        "selected_recency_start":event["sample"]["selected_recency_start_utc"],
-        "selected_recency_end":event["sample"]["selected_recency_end_utc"],
-        "minimum_root_count":pointer_u64(event, "/sample/minimum_root_count"),
-        "sample_sufficient":u8::from(event["sample"]["sample_sufficient"].as_bool().unwrap_or(false)),
-        "delegated_count":pointer_u64(event, "/sample/delegated_count"),
-        "guardian_count":pointer_u64(event, "/sample/guardian_count"),
-        "guardian_incomplete_excluded_count":pointer_u64(event, "/sample/guardian_incomplete_excluded_count"),
-        "unreadable_root_count":pointer_u64(event, "/sample/unreadable_completed_root_count"),
-        "originator_unclassified_excluded_root_count":pointer_u64(event, "/sample/originator_unclassified_excluded_root_count"),
-        "originator_source_fallback_root_count":pointer_u64(event, "/sample/originator_source_fallback_root_count"),
-        "truncated_count":truncated_count,
-        "capability_completed_root_coverage":u8::from(event["capabilities"]["completed_root_coverage"] == Value::Bool(true)),
-        "capability_latency_completed_count":u8::from(event["capabilities"]["latency_completed_count"] == Value::Bool(true)),
-        "capability_root_boundary_counts":u8::from(event["capabilities"]["root_boundary_counts"] == Value::Bool(true)),
-        "capability_guardian_workspace_attribution":u8::from(event["capabilities"]["guardian_workspace_attribution"] == Value::Bool(true)),
-        "root_status":root["status"],
-        "delegated_status":delegated["status"],
-        "guardian_status":guardian["status"],
-        "model_families":model_families,
-        "efforts":efforts,
-        "model_effort_counts":model_counts,
-        "usage_source":root["usage"]["source"],
-        "delegated_usage_source":delegated["usage"]["source"],
-        "guardian_usage_source":guardian["usage"]["source"],
-        "input_tokens":pointer_u64(root, "/usage/input_tokens"),
-        "cached_input_tokens":pointer_u64(root, "/usage/cached_input_tokens"),
-        "output_tokens":pointer_u64(root, "/usage/output_tokens"),
-        "reasoning_output_tokens":pointer_u64(root, "/usage/reasoning_output_tokens"),
-        "total_tokens":pointer_u64(root, "/usage/total_tokens"),
-        "non_cached_input_tokens":pointer_u64(root, "/usage/non_cached_input_tokens"),
-        "cached_input_ratio":pointer_f64(root, "/usage/cached_input_ratio"),
-        "cumulative_rollout_count":pointer_u64(root, "/usage/cumulative_rollout_count"),
-        "fallback_rollout_count":pointer_u64(root, "/usage/fallback_rollout_count"),
-        "delegated_fallback_rollout_count":pointer_u64(delegated, "/usage/fallback_rollout_count"),
-        "guardian_fallback_rollout_count":pointer_u64(guardian, "/usage/fallback_rollout_count"),
-        "task_started":pointer_u64(root, "/activity/task_started"),
-        "task_completed":pointer_u64(root, "/activity/task_completed"),
-        "turn_contexts":pointer_u64(root, "/activity/turn_contexts"),
-        "compactions":pointer_u64(root, "/activity/compactions"),
-        "user_messages_with_text":pointer_u64(root, "/activity/user_messages_with_text"),
-        "latency_median_ms":pointer_f64(root, "/latency/median_ms"),
-        "latency_p90_ms":pointer_f64(root, "/latency/p90_ms"),
-        "latency_max_ms":pointer_f64(root, "/latency/max_ms"),
-        "latency_completed_count":pointer_u64(root, "/latency/completed_count"),
-        "long_turn_count":pointer_u64(root, "/latency/long_turn_count"),
-        "verification_tool_calls":pointer_u64(root, "/quality_proxies/verification_tool_calls"),
-        "verification_success_count":pointer_u64(root, "/quality_proxies/verification_success_count"),
-        "verification_failure_count":pointer_u64(root, "/quality_proxies/verification_failure_count"),
-        "verification_unresolved_count":pointer_u64(root, "/quality_proxies/verification_unresolved_count"),
-        "tool_call_count":pointer_u64(root, "/quality_proxies/tool_call_count"),
-        "short_message_count":pointer_u64(root, "/quality_proxies/short_message_count"),
-        "broad_scope_message_count":pointer_u64(root, "/quality_proxies/broad_scope_message_count"),
-        "nonzero_exit_count":pointer_u64(root, "/quality_proxies/failure_signals/nonzero_exit"),
-        "timeout_count":pointer_u64(root, "/quality_proxies/failure_signals/timeout"),
-        "rejected_count":pointer_u64(root, "/quality_proxies/failure_signals/rejected"),
-        "exact_repeated_call_groups":pointer_u64(root, "/quality_proxies/exact_repeated_call_groups"),
-        "calls_in_exact_repeated_groups":pointer_u64(root, "/quality_proxies/calls_in_exact_repeated_groups"),
-        "boundary_review_recommended":u8::from(root["quality_proxies"]["task_boundary_review_recommended"].as_bool().unwrap_or(false)),
-        "long_lived_root_session":u8::from(root["quality_proxies"]["long_lived_root_session"].as_bool().unwrap_or(false)),
-        "boundary_review_root_count":pointer_u64(root, "/quality_proxies/boundary_review_root_count"),
-        "long_lived_root_count":pointer_u64(root, "/quality_proxies/long_lived_root_count"),
-        "delegated_total_tokens":pointer_u64(delegated, "/usage/total_tokens"),
-        "guardian_total_tokens":pointer_u64(guardian, "/usage/total_tokens"),
-        "guardian_review_count":pointer_u64(guardian, "/review_count"),
-        "guardian_workspace_attributed_review_count":pointer_u64(guardian, "/signals/workspace_attributed_review_count"),
-        "guardian_workspace_attribution_coverage":pointer_f64(guardian, "/signals/workspace_attribution_coverage"),
-        "consent_receipt_id":event["consent"]["receipt_id"],
-        "payload_json":payload_json,
-    }))
+    let mut row = projection::row(event)?;
+    row.insert(
+        "received_at".to_owned(),
+        Value::from(received_at.to_rfc3339_opts(SecondsFormat::Millis, true)),
+    );
+    row.insert(
+        "payload_json".to_owned(),
+        Value::from(
+            String::from_utf8(encoded)
+                .map_err(|_| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid_event"))?,
+        ),
+    );
+    Ok(Value::Object(row))
 }
 
 async fn event_exists(state: &AppState, event_id: Uuid) -> Result<bool, ApiError> {
@@ -1359,6 +1248,47 @@ async fn event_exists(state: &AppState, event_id: Uuid) -> Result<bool, ApiError
         )
         .await
         .map(|value| value != b"0\n" && value != b"0")
+}
+
+fn collection_window(event: &Value, now: DateTime<Utc>) -> Result<(String, String), ApiError> {
+    let invalid = || ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid_event");
+    let timestamp = |key: &str| {
+        event["period"][key]
+            .as_str()
+            .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+            .map(|value| value.with_timezone(&Utc))
+            .ok_or_else(invalid)
+    };
+    let start = timestamp("start_utc")?;
+    let end = timestamp("end_utc")?;
+    let generated = timestamp("generated_at_utc")?;
+    if start >= end || end > generated || generated > now + ChronoDuration::minutes(5) {
+        return Err(invalid());
+    }
+    Ok((start.to_rfc3339(), end.to_rfc3339()))
+}
+
+async fn reject_overlapping_window(
+    state: &AppState,
+    collector_id: Uuid,
+    generation: u64,
+    start: String,
+    end: String,
+) -> Result<(), ApiError> {
+    // Compare the canonical microsecond boundaries, not the millisecond display
+    // columns. Adjacent windows and out-of-order disjoint deliveries are valid.
+    let count = state.clickhouse.request(
+        "SELECT count() FROM groundline.basic_weekly FINAL WHERE collector_id={collector_id:UUID} AND collection_generation={generation:UInt32} AND parseDateTime64BestEffortOrNull(JSONExtractString(payload_json,'period','start_utc'),6,'UTC') < parseDateTime64BestEffort({end:String},6,'UTC') AND parseDateTime64BestEffortOrNull(JSONExtractString(payload_json,'period','end_utc'),6,'UTC') > parseDateTime64BestEffort({start:String},6,'UTC') FORMAT TabSeparated",
+        &[("collector_id",collector_id.to_string()),("generation",generation.to_string()),("start",start),("end",end)], None,
+    ).await?;
+    if count == b"0\n" || count == b"0" {
+        Ok(())
+    } else {
+        Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_event",
+        ))
+    }
 }
 
 fn reaches_ingestion_watermark(current: u64, candidate: u64, maximum: u64) -> bool {
@@ -1469,6 +1399,8 @@ async fn ingest_event(
     let _ingestion_guard = state.ingestion_gate.lock().await;
     let duplicate = event_exists(&state, event_id).await?;
     if !duplicate {
+        let (start, end) = collection_window(&event, Utc::now())?;
+        reject_overlapping_window(&state, collector_id, generation, start, end).await?;
         enforce_ingestion_capacity(&state, collector_id, candidate_payload_bytes).await?;
         let row = event_row(&event, Utc::now())?;
         let mut body = serde_json::to_vec(&row).map_err(|_| ApiError::storage())?;
@@ -1969,7 +1901,7 @@ fn validated_report_response(report: Value) -> Result<Response, ApiError> {
 
 const REPORT_SUMMARY_QUERY: &str = r#"SELECT count() AS event_count, sum(eligible_root_count) AS eligible_root_total, sum(selected_root_count) AS selected_root_total, sum(observed_root_count) AS observed_root_total, sum(task_completed) AS completed_turn_count, sum(unreadable_root_count) AS unreadable_root_count, sum(root_truncated_count) AS root_truncated_count, sum(truncated_count) AS non_root_truncated_count, sum(originator_unclassified_excluded_root_count) AS originator_unclassified_count, sum(originator_source_fallback_root_count) AS originator_source_fallback_count, countIf(observed_root_count > 0) AS root_usage_applicable_event_count, countIf(observed_root_count > 0 AND usage_source IN ('unavailable','unknown')) AS root_usage_missing_event_count, countIf(fallback_rollout_count > 0) AS root_usage_fallback_event_count, countIf(delegated_count > 0) AS delegated_usage_applicable_event_count, countIf(delegated_count > 0 AND delegated_usage_source IN ('unavailable','unknown')) AS delegated_usage_missing_event_count, countIf(delegated_fallback_rollout_count > 0) AS delegated_usage_fallback_event_count, countIf(guardian_count > 0) AS guardian_usage_applicable_event_count, countIf(guardian_count > 0 AND guardian_usage_source IN ('unavailable','unknown')) AS guardian_usage_missing_event_count, countIf(guardian_fallback_rollout_count > 0) AS guardian_usage_fallback_event_count, sum(guardian_incomplete_excluded_count) AS guardian_incomplete_excluded_count, countIf(selection_mode != 'activity_window') AS completed_root_coverage_applicable_event_count, countIf(capability_completed_root_coverage = 1 AND selection_mode != 'activity_window') AS completed_root_coverage_capable_event_count, countIf(capability_latency_completed_count = 1) AS latency_capable_event_count, countIf(capability_root_boundary_counts = 1) AS boundary_count_capable_event_count, countIf(guardian_review_count > 0) AS guardian_attribution_applicable_event_count, countIf(guardian_review_count > 0 AND capability_guardian_workspace_attribution = 1) AS guardian_attribution_capable_event_count, countIf(root_status != 'PASS' OR delegated_status != 'PASS' OR guardian_status != 'PASS') AS component_nonpass_event_count, countIf(sample_sufficient = 1) AS sample_sufficient_event_count, countIf(sample_sufficient = 0) AS sample_insufficient_event_count, countIf((observed_root_count > 0 AND usage_source IN ('unavailable','unknown')) OR (delegated_count > 0 AND delegated_usage_source IN ('unavailable','unknown')) OR (guardian_count > 0 AND guardian_usage_source IN ('unavailable','unknown'))) AS usage_missing_count, sum(fallback_rollout_count + delegated_fallback_rollout_count + guardian_fallback_rollout_count) AS usage_fallback_count, sum(input_tokens) AS input_tokens, sum(cached_input_tokens) AS cached_input_tokens, sum(non_cached_input_tokens) AS non_cached_input_tokens, sum(output_tokens) AS output_tokens, sum(reasoning_output_tokens) AS reasoning_output_tokens, sum(total_tokens) AS total_tokens, sum(delegated_total_tokens) AS delegated_total_tokens, sum(guardian_total_tokens) AS guardian_total_tokens, sum(compactions) AS compactions, sum(long_turn_count) AS long_turn_count, sum(exact_repeated_call_groups) AS exact_repeated_call_groups, sum(calls_in_exact_repeated_groups) AS calls_in_exact_repeated_groups, sum(nonzero_exit_count + timeout_count + rejected_count) AS failure_signal_count, sum(tool_call_count) AS tool_call_count, sum(user_messages_with_text) AS user_messages_with_text, sum(short_message_count) AS short_message_count, sum(broad_scope_message_count) AS broad_scope_message_count, sum(boundary_review_root_count) AS boundary_review_root_count, sum(long_lived_root_count) AS long_lived_root_count, sum(verification_tool_calls) AS verification_tool_call_count, sum(verification_success_count) AS verification_success_count, sum(verification_failure_count) AS verification_failure_count, sum(verification_unresolved_count) AS verification_unresolved_count, sum(guardian_review_count) AS guardian_review_total, sum(guardian_workspace_attributed_review_count) AS guardian_workspace_attributed_review_count FROM groundline.basic_active WHERE ifNull(period_end, generated_at) > parseDateTimeBestEffort({start:String}) AND ifNull(period_end, generated_at) <= parseDateTimeBestEffort({end:String}) FORMAT JSONEachRow"#;
 const REPORT_FLEET_QUERY: &str = r#"WITH policy AS (SELECT argMax(latest_version, updated_at) AS latest_version FROM groundline.release_policy FINAL WHERE policy_key='stable'), enrolled AS (SELECT collector_id, created_at, enrollment_schema_version, os_family, runtime_family, execution_mode, groundline_version FROM groundline.collectors FINAL WHERE revoked=0), any_events AS (SELECT collector_id, toUInt8(1) AS present, max(received_at) AS last_seen FROM groundline.basic_active GROUP BY collector_id), reporting AS (SELECT collector_id, toUInt8(1) AS present FROM groundline.basic_active WHERE ifNull(period_end, generated_at) > parseDateTimeBestEffort({start:String}) AND ifNull(period_end, generated_at) <= parseDateTimeBestEffort({end:String}) GROUP BY collector_id), current_events AS (SELECT collector_id, received_at, ifNull(period_end, generated_at) AS event_time FROM groundline.basic_active CROSS JOIN policy WHERE groundline_version=policy.latest_version), current_observed AS (SELECT collector_id, toUInt8(1) AS present, max(received_at) AS last_seen FROM current_events GROUP BY collector_id), current_reporting AS (SELECT collector_id, toUInt8(1) AS present FROM current_events WHERE event_time > parseDateTimeBestEffort({start:String}) AND event_time <= parseDateTimeBestEffort({end:String}) GROUP BY collector_id) SELECT policy.latest_version AS policy_latest_version, count() AS enrolled_installation_count, countIf(enrollment_schema_version=2 AND os_family!='unknown' AND runtime_family!='unknown' AND execution_mode!='unknown' AND groundline_version!='unknown') AS metadata_known_installation_count, count() - metadata_known_installation_count AS metadata_unknown_installation_count, countIf(ifNull(any_events.present,0)=1) AS observed_installation_count, countIf(ifNull(reporting.present,0)=1) AS reporting_installation_count, countIf(any_events.last_seen >= now('UTC') - INTERVAL 7 DAY) AS recent_installation_count, countIf(ifNull(any_events.present,0)=0) AS never_reported_installation_count, countIf(ifNull(any_events.present,0)=0 AND enrolled.created_at > now('UTC') - INTERVAL 24 HOUR) AS pending_initial_report_installation_count, countIf(ifNull(any_events.present,0)=0 AND enrolled.created_at <= now('UTC') - INTERVAL 24 HOUR) AS overdue_never_reported_installation_count, countIf(ifNull(any_events.present,0)=1 AND any_events.last_seen < now('UTC') - INTERVAL 7 DAY) AS stale_observed_installation_count, countIf(enrolled.groundline_version=policy.latest_version) AS current_package_claim_installation_count, countIf(enrolled.groundline_version=policy.latest_version AND ifNull(current_observed.present,0)=0) AS current_package_claim_unobserved_installation_count, countIf(ifNull(current_observed.present,0)=1) AS current_observed_installation_count, countIf(ifNull(current_reporting.present,0)=1) AS current_reporting_installation_count, countIf(current_observed.last_seen >= now('UTC') - INTERVAL 7 DAY) AS current_recent_installation_count, if(countIf(ifNull(any_events.present,0)=1)=0, CAST(NULL, 'Nullable(String)'), formatDateTime(max(any_events.last_seen), '%Y-%m-%dT%H:%i:%SZ', 'UTC')) AS latest_received_at_utc, toUInt8(max(any_events.last_seen) >= now('UTC') - INTERVAL 48 HOUR) AS fresh FROM enrolled CROSS JOIN policy LEFT JOIN any_events USING collector_id LEFT JOIN reporting USING collector_id LEFT JOIN current_observed USING collector_id LEFT JOIN current_reporting USING collector_id GROUP BY policy.latest_version FORMAT JSONEachRow"#;
-const REPORT_STORAGE_QUERY: &str = r#"WITH policy AS (SELECT argMax(retention_days,updated_at) AS retention_days FROM groundline.release_policy FINAL WHERE policy_key='stable'), logical AS (SELECT event_id, received_at, generated_at FROM groundline.basic_active WHERE ifNull(period_end, generated_at) > parseDateTimeBestEffort({start:String}) AND ifNull(period_end, generated_at) <= parseDateTimeBestEffort({end:String})), active AS (SELECT collector_id,current_generation FROM groundline.collectors FINAL WHERE revoked=0), stored AS (SELECT events.event_id FROM groundline.basic_weekly events INNER JOIN active ON events.collector_id=active.collector_id AND events.collection_generation=active.current_generation INNER JOIN logical USING event_id) SELECT (SELECT count() FROM stored) AS stored_event_row_count, (SELECT count() FROM logical) AS deduplicated_event_count, stored_event_row_count-deduplicated_event_count AS duplicate_event_row_count, (SELECT count() FROM groundline.basic_weekly CROSS JOIN policy WHERE received_at < now('UTC') - toIntervalDay(policy.retention_days)) AS ttl_expired_event_row_count, (SELECT countIf(dateDiff('second',generated_at,received_at)>21600) FROM logical) AS delayed_delivery_event_count, (SELECT countIf(dateDiff('second',generated_at,received_at)>86400) FROM logical) AS overdue_delivery_event_count, (SELECT countIf(generated_at>received_at+INTERVAL 5 MINUTE) FROM logical) AS clock_skew_event_count, (SELECT count() FROM groundline.basic_quarantined WHERE ifNull(period_end, generated_at) > parseDateTimeBestEffort({start:String}) AND ifNull(period_end, generated_at) <= parseDateTimeBestEffort({end:String})) AS quarantined_event_count FORMAT JSONEachRow"#;
+const REPORT_STORAGE_QUERY: &str = r#"WITH logical AS (SELECT event_id, received_at, generated_at FROM groundline.basic_active WHERE ifNull(period_end, generated_at) > parseDateTimeBestEffort({start:String}) AND ifNull(period_end, generated_at) <= parseDateTimeBestEffort({end:String})), active AS (SELECT collector_id,current_generation FROM groundline.collectors FINAL WHERE revoked=0), stored AS (SELECT events.event_id FROM groundline.basic_weekly events INNER JOIN active ON events.collector_id=active.collector_id AND events.collection_generation=active.current_generation INNER JOIN logical USING event_id) SELECT (SELECT count() FROM stored) AS stored_event_row_count, (SELECT count() FROM logical) AS deduplicated_event_count, stored_event_row_count-deduplicated_event_count AS duplicate_event_row_count, (SELECT count() FROM groundline.basic_retention WHERE expires_at < now('UTC')) AS ttl_expired_event_row_count, (SELECT countIf(dateDiff('second',generated_at,received_at)>21600) FROM logical) AS delayed_delivery_event_count, (SELECT countIf(dateDiff('second',generated_at,received_at)>86400) FROM logical) AS overdue_delivery_event_count, (SELECT countIf(generated_at>received_at+INTERVAL 5 MINUTE) FROM logical) AS clock_skew_event_count, (SELECT count() FROM groundline.basic_quarantined WHERE ifNull(period_end, generated_at) > parseDateTimeBestEffort({start:String}) AND ifNull(period_end, generated_at) <= parseDateTimeBestEffort({end:String})) AS quarantined_event_count FORMAT JSONEachRow"#;
 const REPORT_EVENT_COHORT_QUERY: &str = r#"SELECT dimension,value,count() AS count FROM (SELECT 'schema_version' dimension,toString(schema_version) value FROM groundline.basic_active WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) UNION ALL SELECT 'groundline_version',groundline_version FROM groundline.basic_active WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) UNION ALL SELECT 'os_family',os_family FROM groundline.basic_active WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) UNION ALL SELECT 'runtime_family',runtime_family FROM groundline.basic_active WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) UNION ALL SELECT 'execution_mode',execution_mode FROM groundline.basic_active WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String})) GROUP BY dimension,value ORDER BY dimension,value FORMAT JSONEachRow"#;
 const REPORT_INSTALL_COHORT_QUERY: &str = r#"SELECT dimension,value,count() AS count FROM (SELECT 'groundline_version' dimension,groundline_version value FROM groundline.collectors FINAL WHERE revoked=0 UNION ALL SELECT 'os_family',os_family FROM groundline.collectors FINAL WHERE revoked=0 UNION ALL SELECT 'runtime_family',runtime_family FROM groundline.collectors FINAL WHERE revoked=0 UNION ALL SELECT 'execution_mode',execution_mode FROM groundline.collectors FINAL WHERE revoked=0) GROUP BY dimension,value ORDER BY dimension,value FORMAT JSONEachRow"#;
 const REPORT_MODEL_EFFORT_QUERY: &str = r#"SELECT tupleElement(item,1) AS model_family, tupleElement(item,2) AS effort, sum(tupleElement(item,3)) AS context_count FROM groundline.basic_active ARRAY JOIN arrayZip(model_families,efforts,model_effort_counts) AS item WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) GROUP BY model_family,effort ORDER BY model_family,effort FORMAT JSONEachRow"#;
@@ -2453,6 +2385,26 @@ mod tests {
                 validate_basic_event_bytes(&serde_json::to_vec(&candidate).unwrap()).is_err(),
                 "{field}={value}"
             );
+        }
+    }
+
+    #[test]
+    fn admission_requires_bounded_non_future_collection() {
+        let original = integration_event(Uuid::new_v4(), 1);
+        assert!(collection_window(&original, Utc::now()).is_ok());
+        for (key, value) in [
+            ("start_utc", Value::Null),
+            ("end_utc", Value::Null),
+            ("start_utc", original["period"]["end_utc"].clone()),
+            ("generated_at_utc", original["period"]["start_utc"].clone()),
+            (
+                "generated_at_utc",
+                json!((Utc::now() + ChronoDuration::minutes(6)).to_rfc3339()),
+            ),
+        ] {
+            let mut event = original.clone();
+            event["period"][key] = value;
+            assert!(collection_window(&event, Utc::now()).is_err(), "{key}");
         }
     }
 
@@ -2955,7 +2907,7 @@ mod tests {
                 MAX_CONCURRENT_OPERATOR_STORAGE_REQUESTS,
             )),
         };
-        let router = app(state);
+        let router = app(state.clone());
         let collector_id = Uuid::new_v4();
         let collector_token = "c".repeat(32);
         let enrollment = json!({
@@ -3049,7 +3001,37 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response_json(response).await["outcome"], "duplicate");
 
-        let second_event = integration_event(collector_id, 7);
+        let mut second_event = integration_event(collector_id, 7);
+        // A different digest cannot count the same window twice, even when the
+        // collector's quota is already full. Same-ID retries above still pass.
+        second_event["period"] = event["period"].clone();
+        reseal_event(&mut second_event);
+        let overlapping_headers = [
+            ("x-groundline-collector-id", collector_id.to_string()),
+            (
+                "idempotency-key",
+                second_event["idempotency_key"].as_str().unwrap().to_owned(),
+            ),
+        ];
+        let response = router
+            .clone()
+            .oneshot(local_request(
+                Method::POST,
+                "/v1/events",
+                &collector_token,
+                Some(&second_event),
+                &overlapping_headers,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        // An adjacent earlier delivery is disjoint and reaches the quota guard.
+        let end =
+            DateTime::parse_from_rfc3339(event["period"]["start_utc"].as_str().unwrap()).unwrap();
+        second_event["period"]["end_utc"] = event["period"]["start_utc"].clone();
+        second_event["period"]["start_utc"] =
+            json!((end - ChronoDuration::minutes(1)).to_rfc3339_opts(SecondsFormat::Secs, true));
+        reseal_event(&mut second_event);
         let second_headers = [
             ("x-groundline-collector-id", collector_id.to_string()),
             (
@@ -3218,19 +3200,72 @@ mod tests {
         );
         assert_eq!(report["coverage"]["root_usage_missing_event_count"], 0);
 
-        // The storage constraint also rejects a direct write that bypasses HTTP.
-        row["event_id"] = json!(Uuid::new_v4());
-        row["cached_input_tokens"] = json!(1);
-        assert!(
+        // Direct writes must not drift away from the canonical payload, even
+        // when the changed value is individually legal for its column type.
+        for (column, value) in [
+            ("event_id", json!(Uuid::new_v4())),
+            ("idempotency_key", json!("sha256:changed")),
+            ("execution_mode", json!("desktop")),
+            ("collection_generation", json!(8)),
+            ("guardian_total_tokens", json!(1)),
+            ("cached_input_tokens", json!(1)),
+            ("sample_sufficient", json!(0)),
+            ("cached_input_ratio", json!(0.0)),
+            ("selected_recency_start", json!("2026-01-01T00:00:00Z")),
+            ("period_end", json!("2026-01-01T00:00:00Z")),
+            ("model_effort_counts", json!([2])),
+        ] {
+            let mut drifted = row.clone();
+            drifted[column] = value;
+            assert!(
+                clickhouse
+                    .request(
+                        "INSERT INTO groundline.basic_weekly FORMAT JSONEachRow",
+                        &[],
+                        Some(serde_json::to_vec(&drifted).unwrap())
+                    )
+                    .await
+                    .is_err(),
+                "accepted drift in {column}"
+            );
+        }
+
+        let expiry = clickhouse.json_rows(
+            "SELECT dateDiff('day',toDateTime(received_at),expires_at) AS days FROM groundline.basic_weekly INNER JOIN groundline.basic_retention USING event_id WHERE collector_id={id:UUID} ORDER BY days",
+            &[("id",collector_id.to_string())],
+        ).await.unwrap();
+        assert_eq!(expiry, vec![json!(7), json!(365)]);
+
+        // Only this isolated test database is forced to merge. The same-age
+        // measured record survives, while an expired quarantine receipt is gone.
+        let received = Utc::now() - ChronoDuration::days(8);
+        let old_end = Utc::now() - ChronoDuration::days(9);
+        let mut retained_id = String::new();
+        let mut expired_id = String::new();
+        for (candidate, id) in [(&event, &mut retained_id), (&unmeasured, &mut expired_id)] {
+            let mut old = candidate.clone();
+            old["period"] = json!({"start_utc":(old_end-ChronoDuration::minutes(1)).to_rfc3339_opts(SecondsFormat::Secs,true),
+                "end_utc":old_end.to_rfc3339_opts(SecondsFormat::Secs,true),
+                "generated_at_utc":old_end.to_rfc3339_opts(SecondsFormat::Secs,true)});
+            reseal_event(&mut old);
+            *id = old["event_id"].as_str().unwrap().to_owned();
+            row = event_row(&old, received).unwrap();
             clickhouse
                 .request(
                     "INSERT INTO groundline.basic_weekly FORMAT JSONEachRow",
                     &[],
-                    Some(serde_json::to_vec(&row).unwrap())
+                    Some(serde_json::to_vec(&row).unwrap()),
                 )
                 .await
-                .is_err()
-        );
+                .unwrap();
+        }
+        clickhouse
+            .request("OPTIMIZE TABLE groundline.basic_weekly FINAL", &[], None)
+            .await
+            .unwrap();
+        for (id, expected) in [(retained_id, b"1\n"), (expired_id, b"0\n")] {
+            assert_eq!(clickhouse.request("SELECT count() FROM groundline.basic_weekly FINAL WHERE event_id={id:UUID} FORMAT TabSeparated", &[("id",id)],None).await.unwrap(), expected);
+        }
 
         let response = router
             .clone()

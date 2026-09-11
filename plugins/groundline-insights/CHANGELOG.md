@@ -4,6 +4,13 @@ This package summary covers the current release line. The repository
 [changelog](https://github.com/jukqaz/groundline/blob/main/CHANGELOG.md) records shared changes. A source version entry
 does not prove that its image or `stable` distribution has been published.
 
+## 0.25.3
+
+- Derive and validate canonical cache ratios, including null for zero denominators.
+- Enforce the shared payload projection in ClickHouse and reject overlapping or unbounded ingestion windows.
+- Retain quarantined receipts for seven days; preserve the configured retention for trusted data.
+- Add offline event validation and require ingest contract revision 5. Review and repair historical data before upgrading the API, then upgrade the plugins.
+
 ## 0.25.2
 
 - Validate usage bounds and provenance in the producer, API, and root storage constraint.

@@ -31,6 +31,24 @@ fn path_argument(path: &Path) -> &str {
 }
 
 #[test]
+fn rejected_event_validation_never_echoes_input() {
+    let root = tempdir().unwrap();
+    let input = root.path().join("event.json");
+    fs::write(&input, br#"{"private":"PRIVATE_EVENT_SENTINEL"}"#).unwrap();
+    let output = run(&[
+        "insights",
+        "validate-event",
+        "--input",
+        path_argument(&input),
+        "--json",
+    ]);
+    assert!(!output.status.success());
+    assert_eq!(parse_stdout(&output)["status"], "FAIL");
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("PRIVATE_EVENT_SENTINEL"));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("PRIVATE_EVENT_SENTINEL"));
+}
+
+#[test]
 fn unsupported_runtime_environment_never_creates_checkpoint_state() {
     for (name, value) in [
         ("GROUNDLINE_RUNTIME_FAMILY", "claude_code"),

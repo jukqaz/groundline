@@ -961,13 +961,9 @@ pub fn audit_rollouts(
     );
     usage_json.insert(
         "cached_input_ratio".to_owned(),
-        if input_tokens == 0 {
-            Value::Null
-        } else {
-            Value::from(
-                ((cached_input_tokens as f64 / input_tokens as f64) * 10_000.0).round() / 10_000.0,
-            )
-        },
+        crate::usage::ratio(cached_input_tokens, input_tokens)
+            .map(Value::from)
+            .unwrap_or(Value::Null),
     );
 
     Ok(json!({

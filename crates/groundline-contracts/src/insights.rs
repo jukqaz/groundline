@@ -12,7 +12,7 @@ use crate::model::{EFFORTS, MAX_MODEL_CONTEXTS, MODEL_FAMILIES};
 pub const MAX_WEEKLY_REPORT_BYTES: usize = 128 * 1024;
 pub const MAX_BASIC_EVENT_BYTES: usize = 64 * 1024;
 /// Semantic allowlist revision, independent of the envelope schema version.
-pub const BASIC_CONTRACT_REVISION: u64 = 4;
+pub const BASIC_CONTRACT_REVISION: u64 = 5;
 
 pub fn ingest_capabilities() -> Value {
     serde_json::json!({"basic_schema_versions":[5], "basic_contract_revision":BASIC_CONTRACT_REVISION})
@@ -315,8 +315,7 @@ fn normalized_timestamp(value: &str) -> bool {
 }
 
 fn round_ratio(numerator: u64, denominator: u64) -> Option<f64> {
-    (denominator != 0)
-        .then(|| ((numerator as f64 / denominator as f64) * 10_000.0).round_ties_even() / 10_000.0)
+    crate::usage::ratio(numerator, denominator)
 }
 
 fn ratio_matches(value: Option<f64>, numerator: u64, denominator: u64) -> bool {
@@ -1048,10 +1047,8 @@ fn validate_usage(value: &Value, include_non_cached: bool) -> bool {
         && object
             .get("cached_input_ratio")
             .is_some_and(optional_non_negative_number)
-        && object
-            .get("cached_input_ratio")
-            .and_then(Value::as_f64)
-            .is_none_or(|value| value <= 1.0)
+        && object.get("cached_input_ratio").and_then(Value::as_f64)
+            == crate::usage::ratio(count("cached_input_tokens"), input)
         && (!include_non_cached
             || object
                 .get("input_tokens")
@@ -1582,6 +1579,26 @@ mod tests {
                 "reviewer_already_low_effort":false,"workspace_attributed_review_count":1,
                 "workspace_attribution_coverage":0.5}
         })
+    }
+
+    #[test]
+    fn cache_ratio_requires_null_for_unobserved_and_exact_counter_math() {
+        let mut metrics = session_metrics();
+        metrics["usage"]["cached_input_ratio"] = json!(0);
+        assert!(!validate_session_metrics(&metrics));
+        metrics["usage"]["source"] = json!("codex-response-usage-records");
+        metrics["usage"]["rollout_count_with_usage"] = json!(1);
+        metrics["usage"]["fallback_rollout_count"] = json!(1);
+        metrics["usage"]["input_tokens"] = json!(32);
+        metrics["usage"]["cached_input_tokens"] = json!(1);
+        metrics["usage"]["non_cached_input_tokens"] = json!(31);
+        metrics["usage"]["total_tokens"] = json!(32);
+        for ratio in [json!(null), json!(0.0), json!(0.0313)] {
+            metrics["usage"]["cached_input_ratio"] = ratio;
+            assert!(!validate_session_metrics(&metrics));
+        }
+        metrics["usage"]["cached_input_ratio"] = json!(0.0312);
+        assert!(validate_session_metrics(&metrics));
     }
 
     #[test]
