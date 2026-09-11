@@ -5,6 +5,7 @@ pub fn ratio(numerator: u64, denominator: u64) -> Option<f64> {
 }
 
 /// Bounded usage provenance shared by the producer and ingest validator.
+#[cfg(feature = "insights")]
 pub const SOURCES: &[&str] = &[
     "codex-cumulative-total-snapshots",
     "codex-cumulative-and-last-usage-fallback",

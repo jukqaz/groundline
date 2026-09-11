@@ -19,7 +19,7 @@ pub mod integrity;
 pub mod model;
 #[cfg(feature = "audit")]
 pub mod rollout;
-#[cfg(feature = "insights")]
+#[cfg(any(feature = "audit", feature = "insights"))]
 mod usage;
 #[cfg(feature = "version")]
 pub mod version;
