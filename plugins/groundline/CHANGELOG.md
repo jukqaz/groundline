@@ -3,6 +3,16 @@
 This package summary covers the current release line. See the repository
 [changelog](https://github.com/jukqaz/groundline/blob/main/CHANGELOG.md) for shared release and packaging changes.
 
+## 0.25.0
+
+- Separate model-guidance review from Insights-based personal trials; preserve
+  selected settings unless configuration setup is explicitly requested.
+- Load the detailed personal trial workflow only when that route is requested.
+- Scope reconciliation and live verification to the current outcome, reuse
+  evidence, and retain the task through steering. Batch advice recommends new
+  tasks or forks only for explicit requests and cannot complete a changed scope
+  using the previous verification.
+
 ## 0.22.2
 
 - Wait for authenticated API and Grafana readiness before the release stack
