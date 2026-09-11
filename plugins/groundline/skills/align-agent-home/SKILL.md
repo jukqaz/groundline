@@ -15,11 +15,12 @@ When asked to install and apply GroundLine, complete
 task: inspect existing settings and active instructions, fix evidenced mistakes
 within the requested scope, and verify the affected behavior. Do not stop after
 package installation or give only recommendations when repair was requested.
-Apply the packaged `setup` baseline (`gpt-6-astra`, `xhigh`, Fast off) as part of
-the documented install-and-apply flow, unless the user explicitly selects a
-different posture. Use the active host's native catalog; unsupported choices
-require a clear report, never a silent downgrade. The distribution installer
-already runs setup; inspect its result instead of repeating a completed write.
+Use the packaged `setup` baseline only when the request includes the documented
+configuration setup. A guidance review or ordinary alignment does not opt into
+that preset. Preserve an explicit different posture and use bounded repairs;
+`setup` cannot apply an alternative model policy. Use the active host's native
+catalog and report unsupported choices without substitution. The distribution
+installer already runs setup; reuse its result instead of repeating the write.
 Installation alone is package delivery; it does not run a repair hook or grant
 authority to reset settings. A review-only request remains read-only.
 

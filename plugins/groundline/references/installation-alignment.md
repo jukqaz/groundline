@@ -32,7 +32,11 @@ Codex's marketplace installer, run `setup --apply`, and finish with strict docto
 They require no additional chat request. Native GUI or bare `plugin add` still
 performs package delivery only; no post-install execution callback is assumed.
 
-For an already installed package, resolve its executable and the active Codex
+Only when the user also requests the declared configuration setup, use `setup`
+for an already installed package. A guidance review or general alignment request
+does not select the preset. If the user specifies a different model, effort, or
+service tier, preserve it and use bounded repairs instead; `setup` has no
+alternative-preset flag. Resolve the package executable and the active Codex
 executable with [platform commands](platform-commands.md). Obtain successful
 `codex debug models` output before invoking `groundline setup --catalog - --apply`
 with that JSON on stdin. Do not apply after a failed catalog command, even if it

@@ -13,20 +13,21 @@ future turn can execute without guessing the goal, boundaries, or proof needed.
 ## Workflow
 
 1. State the current conclusion in one sentence.
-2. Extract the native Goal objective and current GroundLine phase. If no Goal
-   was explicitly requested, record `Goal: none` rather than creating one.
+2. State the requested outcome and current progress. Include a native Goal only
+   if explicitly requested and relevant to continuation.
 3. Separate approved scope from deferred observations. Incorporate explicit
    user steering when it revises the same outcome; do not restart for unsolicited
    non-blocking ideas.
 4. List context that matters now and discard stale or unrelated detail.
 5. Define constraints, non-goals, mutation boundary, and approval needs.
 6. Name the expected artifacts, success criteria, and smallest credible checks.
-7. Keep the same task unless a boundary change requires a handoff. Describe a
-   fork or new task only when useful; do not create one without a user request.
-8. Assign a qualitative context budget: `lean`, `standard`, or `expanded`.
+7. Retain the current task and compatible approval through scope refinements.
+   Create a fork or new task only when the user requests it.
+8. Use a qualitative context budget only when it helps the recipient choose
+   what to load: `lean`, `standard`, or `expanded`.
 9. Name what to load first, what to defer or omit, and when to stop loading.
-10. Set a delegation budget: `single` or `bounded-parallel`, with independent
-   lanes and a stop-spawning condition.
+10. If delegation is explicitly requested, name independent lanes and a
+    stop-spawning condition. Otherwise continue with the current agent.
 11. Produce a handoff that another agent can continue from.
 
 ## Rules

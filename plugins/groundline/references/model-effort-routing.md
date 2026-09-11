@@ -2,7 +2,9 @@
 
 Let Codex choose its recommended model and effort by default. Recommend an
 override only for a concrete task benefit, using the active session's catalog.
-Do not install a separate model registry or pin a global default in GroundLine.
+Do not install a separate model registry or change global defaults during
+ordinary work. The explicitly selected installation `setup` preset is a
+separate configuration operation; see [installation alignment](installation-alignment.md).
 
 Choose from the models and efforts actually available on the execution host:
 
@@ -12,9 +14,9 @@ Choose from the models and efforts actually available on the execution host:
 - Difficult end-to-end work spanning tools and several dependent stages: favor
   sustained reasoning and completion capability.
 
-The official model guidance currently describes Luna, Terra, Sol, and Astra in
-those roles, respectively. These are examples, not a closed availability list.
-Preserve explicit user selections and intentional economy roles. Recommend the
+The current Astra guide emphasizes sustained work across code, browsers, and
+other tools. Use the active catalog for available alternatives, not a fixed
+family ladder. Preserve explicit user selections and intentional economy roles. Recommend the
 lowest supported effort appropriate to the difficulty, without requiring a
 low-effort trial for an obviously hard task. Max and Ultra are reasoning levels
 when supported; neither requires nor authorizes subagents. Codex delegation
@@ -37,10 +39,27 @@ over-broad verification. Optimize the workflow for these observed risks:
   detail out of skill entrypoints, and do not load unrelated skills.
 - For an implementation request, complete authorized local work and verify it;
   ask only for information or authority that can materially change the result.
+- Keep compatible approvals and completed work when the user steers a task.
+  Answer a side question and resume; revise the approach in place unless a new
+  task is requested. Prepare independent work before asking for a missing final
+  approval. The optional batch command offers advice, not orchestration.
+- Give the model a clear outcome, relevant evidence, constraints, and acceptance
+  criteria. Let native Codex choose the intervening steps. Reuse context and
+  inspect only new evidence needed after compaction; avoid replaying full logs.
 - Keep reports concise and evidence-backed; omit empty templates and repeated
   safety prose. Use lists only when they make the result easier to understand.
 - Choose meaningful checks by changed behavior. Broaden or repeat them only for
   a new change, failure, or unresolved risk; do not run a full suite by habit.
+
+Use available native async tools for independent work while a tool or question
+is pending. Await dependencies before acting on them. GroundLine does not add a
+second scheduler, model proxy, compaction engine, or unconditional delegation.
+
+For a guidance-only review, current official docs and affected instructions are
+sufficient inputs. Insights and private outcome samples are needed only for a
+requested data-driven trial. Source checks cannot establish that Astra became
+faster or more accurate: compare observable completion, correction, and failure
+outcomes under the same model/effort before claiming an improvement.
 
 Use [configuration review](codex-configuration.md) to compare explicit settings
 with native catalog evidence. `none` and `minimal` are not supported by the
@@ -49,8 +68,7 @@ catalog updates, use the returned support list. Do not equate an API example's
 parameters, context limit, or delegation prompt with Codex configuration or
 permission to spawn agents.
 
-Sources checked 2026-09-07:
-- [Official model guidance](https://learn.chatgpt.com/docs/models)
-- [Codex changelog](https://learn.chatgpt.com/docs/changelog)
-- [Subagent configuration](https://learn.chatgpt.com/docs/agent-configuration/subagents)
+Sources checked 2026-09-11:
 - [Astra instruction and testing guidance](https://developers.openai.com/api/docs/guides/latest-model)
+- [Codex best practices](https://learn.chatgpt.com/guides/best-practices)
+- [Focused skills and progressive disclosure](https://learn.chatgpt.com/docs/build-skills)

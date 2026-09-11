@@ -1,6 +1,6 @@
 interface:
   display_name: "Improve Personal Workflow"
-  short_description: "Review Insights and trial evidence-backed personal guidance"
-  default_prompt: "Use $improve-personal-workflow to review my usage evidence against current model guidance and evaluate one scoped improvement."
+  short_description: "Review model guidance or evaluate a personal workflow trial"
+  default_prompt: "Use $improve-personal-workflow to improve the requested guidance; use Insights and a personal trial only when that evidence is part of my request."
 policy:
   allow_implicit_invocation: false

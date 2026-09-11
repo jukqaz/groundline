@@ -48,6 +48,12 @@ fn next_phase<'a>(phase: &'a str, signals: &Map<String, Value>) -> &'a str {
 }
 
 fn boundary(signals: &Map<String, Value>) -> (&'static str, &'static str) {
+    if boolean(signals, "new_task_requested") {
+        return ("new_task", "the user explicitly requested a new task");
+    }
+    if boolean(signals, "fork_requested") {
+        return ("fork", "the user explicitly requested a fork");
+    }
     if [
         "primary_outcome_changed",
         "repository_changed",
@@ -57,18 +63,21 @@ fn boundary(signals: &Map<String, Value>) -> (&'static str, &'static str) {
     .any(|name| boolean(signals, name))
     {
         return (
-            "new_task",
-            "primary outcome, repository, or permission boundary changed",
+            "reconcile",
+            "reconcile the changed scope or authority within the current task",
         );
     }
     if boolean(signals, "alternative_approach") {
         return (
-            "fork",
-            "an alternative approach can reuse the same evidence",
+            "stay",
+            "revise the approach in the current task and reuse valid evidence",
         );
     }
     if boolean(signals, "side_question") {
-        return ("side", "the question does not change the frozen batch");
+        return (
+            "side",
+            "answer the side question, then resume the current task",
+        );
     }
     if boolean(signals, "context_pressure") {
         return (
@@ -122,14 +131,14 @@ pub fn assess(packet: &Value) -> Result<Value, ContractError> {
     };
 
     let mut recommended_phase = next_phase(phase, signals);
-    if recommended_phase == "complete" && goal_status == "active" {
-        goal_action = "complete";
-    }
     let (batch_boundary, boundary_reason) = boundary(signals);
-    if batch_boundary == "new_task"
-        && !matches!(recommended_phase, "verify" | "release" | "complete")
-    {
+    if matches!(batch_boundary, "reconcile" | "new_task" | "fork") {
         recommended_phase = "collect";
+    }
+    if status == "BLOCKED" {
+        recommended_phase = phase;
+    } else if recommended_phase == "complete" && goal_status == "active" {
+        goal_action = "complete";
     }
 
     Ok(json!({
@@ -151,6 +160,7 @@ pub fn assess(packet: &Value) -> Result<Value, ContractError> {
         "mutation_performed": false,
         "settings_changed": false,
         "raw_content_emitted": false,
+        "advisory_only": true,
     }))
 }
 
@@ -180,7 +190,7 @@ mod tests {
     }
 
     #[test]
-    fn outcome_change_resets_an_early_batch() {
+    fn outcome_change_reconciles_in_the_current_task() {
         let result = assess(&json!({
             "kind": "groundline-batch-input",
             "schema": 1,
@@ -189,7 +199,7 @@ mod tests {
             "signals": {"primary_outcome_changed": true}
         }))
         .expect("valid packet");
-        assert_eq!(result["boundary"], "new_task");
+        assert_eq!(result["boundary"], "reconcile");
         assert_eq!(result["recommended_phase"], "collect");
     }
 
@@ -204,6 +214,76 @@ mod tests {
         }))
         .expect("valid packet");
         assert_eq!(result["status"], "BLOCKED");
+        assert_eq!(result["goal"]["action"], "request_objective");
+    }
+
+    #[test]
+    fn boundary_changes_cannot_complete_the_previous_goal() {
+        for signal in [
+            "primary_outcome_changed",
+            "repository_changed",
+            "permission_boundary_changed",
+        ] {
+            let result = assess(&json!({
+                "kind": "groundline-batch-input", "schema": 1,
+                "phase": "verify",
+                "goal": {"status": "active", "objective_present": true},
+                "signals": {signal: true, "verification_complete": true}
+            }))
+            .unwrap();
+            assert_eq!(result["boundary"], "reconcile", "{signal}");
+            assert_eq!(result["recommended_phase"], "collect", "{signal}");
+            assert_eq!(result["goal"]["action"], "view", "{signal}");
+        }
+    }
+
+    #[test]
+    fn alternatives_questions_and_compaction_preserve_the_task() {
+        for (signal, boundary) in [
+            ("alternative_approach", "stay"),
+            ("side_question", "side"),
+            ("context_pressure", "compact_packet"),
+        ] {
+            let result = assess(&json!({
+                "kind": "groundline-batch-input", "schema": 1,
+                "phase": "implement", "goal": {}, "signals": {signal: true}
+            }))
+            .unwrap();
+            assert_eq!(result["boundary"], boundary);
+            assert_eq!(result["recommended_phase"], "implement");
+            assert_eq!(result["goal"]["action"], "none");
+            assert_eq!(result["mutation_performed"], false);
+        }
+    }
+
+    #[test]
+    fn new_tasks_and_forks_require_explicit_requests() {
+        for (signal, boundary) in [
+            ("new_task_requested", "new_task"),
+            ("fork_requested", "fork"),
+        ] {
+            let result = assess(&json!({
+                "kind": "groundline-batch-input", "schema": 1,
+                "phase": "verify", "goal": {},
+                "signals": {signal: true, "verification_complete": true}
+            }))
+            .unwrap();
+            assert_eq!(result["boundary"], boundary);
+            assert_eq!(result["recommended_phase"], "collect");
+            assert_eq!(result["advisory_only"], true);
+        }
+    }
+
+    #[test]
+    fn missing_objective_cannot_recommend_completion() {
+        let result = assess(&json!({
+            "kind": "groundline-batch-input", "schema": 1, "phase": "verify",
+            "goal": {"user_requested": true, "status": "active"},
+            "signals": {"verification_complete": true}
+        }))
+        .unwrap();
+        assert_eq!(result["status"], "BLOCKED");
+        assert_eq!(result["recommended_phase"], "verify");
         assert_eq!(result["goal"]["action"], "request_objective");
     }
 }
