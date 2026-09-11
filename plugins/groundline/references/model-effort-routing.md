@@ -29,6 +29,21 @@ Use `codex debug models` from the actual runtime for catalog evidence. A
 Never infer token price, quota, or savings from an effort label or a Fast badge.
 Check current official pricing only when a cost comparison is requested.
 
+## GPT-6 priority and GPT-5.6 support
+
+Use the same concise authority, continuity, and verification contract for both
+families. Prioritize Astra's instruction-conflict and interruption risks when
+reviewing GroundLine; do not introduce a model router or force GPT-5.6 users onto
+GPT-6. Model-specific advice supplements the common contract only where the
+active runtime and official guidance establish a relevant difference.
+
+For GPT-5.6, start with lean instructions: state each constraint once and retain
+the context needed to judge success. Its concise default still needs explicit
+acceptance evidence; a blanket brevity rule must not suppress material findings
+or unfinished work. Compare changes with the same selected effort before
+recommending another setting. API prompt or reasoning parameters are not native
+Codex configuration keys.
+
 ## Astra-specific review
 
 The official Astra guide calls out sensitivity to conflicting skills and
@@ -56,10 +71,13 @@ is pending. Await dependencies before acting on them. GroundLine does not add a
 second scheduler, model proxy, compaction engine, or unconditional delegation.
 
 For a guidance-only review, current official docs and affected instructions are
-sufficient inputs. Insights and private outcome samples are needed only for a
-requested data-driven trial. Source checks cannot establish that Astra became
-faster or more accurate: compare observable completion, correction, and failure
-outcomes under the same model/effort before claiming an improvement.
+sufficient inputs. A requested Insights review can also expose source defects
+or conflicting guidance that Codex may repair within existing authority. The
+personal trial's strict quality and outcome gates govern its automatic guidance
+application, not separately authorized source repairs. Source checks cannot
+establish that either model became faster or more accurate: compare observable
+completion, correction, and failure outcomes under the same model/effort before
+claiming an improvement.
 
 Use [configuration review](codex-configuration.md) to compare explicit settings
 with native catalog evidence. `none` and `minimal` are not supported by the
@@ -70,5 +88,7 @@ permission to spawn agents.
 
 Sources checked 2026-09-11:
 - [Astra instruction and testing guidance](https://developers.openai.com/api/docs/guides/latest-model)
+- [GPT-5.6 prompting guidance](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.6)
+- [GPT-5.6 Sol model reference](https://developers.openai.com/api/docs/models/gpt-5.6-sol)
 - [Codex best practices](https://learn.chatgpt.com/guides/best-practices)
 - [Focused skills and progressive disclosure](https://learn.chatgpt.com/docs/build-skills)

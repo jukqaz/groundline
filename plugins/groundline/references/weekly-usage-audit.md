@@ -5,6 +5,19 @@ Review counts, coverage, failure reason codes, and the proposed single workflow
 change. Keep source validation, installed runtime validation, and user-visible
 behavior as separate evidence lanes.
 
+`groundline efficiency recommend --audit weekly.json --json` proposes one
+advisory review within the current task and existing scoped authority. Boundary
+signals trigger in-place reconciliation, not a new task or mandatory planning
+cycle. Compatible user steering preserves completed work. A one-off review does
+not request another approval or schedule recurring work.
+
+Long turns, compactions, and high effort do not establish failure. Repeated-call
+and nonzero-exit ratios select diagnosis candidates, not proven waste: classify
+expected empty search results, normal polling, infrastructure failures, and
+actual code failures before changing behavior. Preserve selected model, effort,
+and service tier. Compare matched outcomes before recommending a setting change;
+an aggregate-only recommendation cannot establish high confidence in benefit.
+
 The command is read-only, performs no network request, and does not emit raw
 task content or private paths.
 

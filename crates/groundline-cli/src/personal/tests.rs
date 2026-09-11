@@ -104,6 +104,105 @@ fn current_native_catalog_accepts_future_models_but_rejects_stale_or_unofficial_
     let (e, c) = model();
     assert!(model_context(&e, &[c, b" ".to_vec()].concat(), Utc::now()).is_err());
 }
+
+#[test]
+fn failure_candidates_preserve_partial_evidence_for_astra_and_sol_without_applying() {
+    for selected in ["gpt-6-astra", "gpt-5.6-sol"] {
+        for native_failure in [false, true] {
+            let root = tempdir().unwrap();
+            let (mut e, _) = model();
+            e.selected_model = selected.into();
+            e.latest_reference_model = "gpt-6-astra".into();
+            e.selected_effort = "xhigh".into();
+            let c = serde_json::to_vec(&json!({"models": [
+                {"slug":"gpt-6-astra","supported_reasoning_levels":[{"effort":"xhigh"}]},
+                {"slug":"gpt-5.6-sol","supported_reasoning_levels":[{"effort":"xhigh"}]}
+            ]}))
+            .unwrap();
+            e.catalog_sha256 = hash(&c);
+            e.official_sources = ["gpt-6-astra", "gpt-5.6-sol"]
+                .map(|name| Source {
+                    applies_to_model: name.into(),
+                    url: format!("https://developers.openai.com/api/docs/models/{name}"),
+                    ..e.official_sources[0].clone()
+                })
+                .to_vec();
+            let mut report = report_fixture();
+            report["generated_at_utc"] =
+                json!(Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+            report["coverage"]["root_usage_missing_event_count"] = json!(1);
+            report["coverage"]["root_usage_fallback_event_count"] = json!(1);
+            report["data_quality"]["status"] = json!("PARTIAL");
+            report["data_quality"]["reason_codes"] =
+                json!(["usage_fallback_present", "usage_missing"]);
+            report["comparison_readiness"]["reason_codes"] =
+                json!(["comparison_baseline_not_included", "data_quality_not_pass"]);
+            report["cohorts"]["model_effort_context_distribution"] = json!([
+                {"model_family":"astra","effort":"xhigh","context_count":2},
+                {"model_family":"sol","effort":"high","context_count":3}
+            ]);
+            let mut audit = audit();
+            audit["root"]["tools"]["calls_in_exact_repeated_groups"] = json!(0);
+            if native_failure {
+                audit["root"]["tools"]["failure_signals"] = json!({"nonzero_exit":4});
+            } else {
+                let workflow = &mut report["weekly_metrics"]["workflow"];
+                workflow["tool_call_count"] = json!(100);
+                workflow["failure_signal_count"] = json!(4);
+                workflow["failure_signal_rate"] = json!(0.04);
+                workflow["repeated_call_rate"] = json!(0.0);
+            }
+            let report_path = root.path().join("report.json");
+            let audit_path = root.path().join("audit.json");
+            put(&report_path, &report);
+            put(&audit_path, &audit);
+            let out = review(
+                ReviewInputs {
+                    report: &report_path,
+                    audit: &audit_path,
+                    outcomes: None,
+                    state_dir: Some(root.path()),
+                    apply: true,
+                },
+                &e,
+                &c,
+            )
+            .unwrap();
+            assert_eq!(out["candidate"]["rule"], "diagnose_before_retry");
+            assert_eq!(out["status"], "OBSERVE");
+            assert_eq!(out["automatic_application_eligible"], false);
+            assert_eq!(out["mutation_performed"], false);
+            assert_eq!(out["insights"]["coverage"], report["coverage"]);
+            assert_eq!(out["insights"]["data_quality"], report["data_quality"]);
+            assert_eq!(
+                out["insights"]["model_effort_context_distribution"],
+                report["cohorts"]["model_effort_context_distribution"]
+            );
+            assert_eq!(
+                out["insights"]["model_performance_attribution_available"],
+                false
+            );
+            assert!(!root.path().join("trial.json").exists());
+            assert!(!root.path().join("personal-guidance.md").exists());
+        }
+    }
+}
+
+#[test]
+fn native_failure_threshold_requires_a_nonempty_denominator() {
+    let (e, _) = model();
+    let mut audit = audit();
+    audit["root"]["tools"]["calls_in_exact_repeated_groups"] = json!(0);
+    audit["root"]["tools"]["failure_signals"] = json!({"nonzero_exit":3});
+    assert_eq!(select_rule(&e, None, &audit), None);
+    audit["root"]["tools"]["failure_signals"]["nonzero_exit"] = json!(4);
+    assert_eq!(
+        select_rule(&e, None, &audit),
+        Some(Rule::DiagnoseBeforeRetry)
+    );
+    audit["root"]["tools"]["call_count"] = json!(0);
+    assert_eq!(select_rule(&e, None, &audit), None);
+}
 #[test]
 fn duplicate_unknown_and_misattributed_outcomes_cannot_become_verified_samples() {
     let mut s = sample(&"a".repeat(64), 4, "unit");
@@ -787,44 +886,59 @@ fn changed_nontrial_settings_cannot_be_retained_as_guidance_improvement() {
 }
 
 #[test]
-fn aggregate_repetition_alone_cannot_authorize_a_trial() {
-    let root = tempdir().unwrap();
-    let (e, c) = model();
-    let context = model_context(&e, &c, Utc::now()).unwrap();
-    let mut report = report_fixture();
-    report["generated_at_utc"] =
-        json!(Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
-    put(&root.path().join("report.json"), &report);
-    put(&root.path().join("audit.json"), &audit());
-    let mut s = sample(&context, 4, "baseline");
-    for u in &mut s.units {
-        u.redundant_approval_count = 0;
-        u.continuation_prompt_count = 0;
-        u.repeated_call_count = 0;
+fn aggregate_signals_alone_cannot_authorize_a_trial() {
+    for source in ["repetition", "native_failure", "insights_failure"] {
+        let root = tempdir().unwrap();
+        let (e, c) = model();
+        let context = model_context(&e, &c, Utc::now()).unwrap();
+        let mut report = report_fixture();
+        report["generated_at_utc"] =
+            json!(Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+        let mut audit = audit();
+        if source != "repetition" {
+            audit["root"]["tools"]["calls_in_exact_repeated_groups"] = json!(0);
+        }
+        if source == "native_failure" {
+            audit["root"]["tools"]["failure_signals"] = json!({"nonzero_exit":4});
+        } else if source == "insights_failure" {
+            let workflow = &mut report["weekly_metrics"]["workflow"];
+            workflow["tool_call_count"] = json!(100);
+            workflow["failure_signal_count"] = json!(4);
+            workflow["failure_signal_rate"] = json!(0.04);
+            workflow["repeated_call_rate"] = json!(0.0);
+        }
+        put(&root.path().join("report.json"), &report);
+        put(&root.path().join("audit.json"), &audit);
+        let mut s = sample(&context, 4, "baseline");
+        for u in &mut s.units {
+            u.redundant_approval_count = 0;
+            u.continuation_prompt_count = 0;
+            u.repeated_call_count = 0;
+        }
+        put(
+            &root.path().join("outcomes.json"),
+            &serde_json::to_value(s).unwrap(),
+        );
+        let out = review(
+            ReviewInputs {
+                report: &root.path().join("report.json"),
+                audit: &root.path().join("audit.json"),
+                outcomes: Some(&root.path().join("outcomes.json")),
+                state_dir: Some(root.path()),
+                apply: true,
+            },
+            &e,
+            &c,
+        )
+        .unwrap();
+        assert_eq!(out["status"], "OBSERVE");
+        assert_eq!(
+            out["reason_codes"],
+            json!(["candidate_signal_missing_in_outcomes"])
+        );
+        assert_eq!(out["mutation_performed"], false);
+        assert!(!root.path().join("trial.json").exists());
     }
-    put(
-        &root.path().join("outcomes.json"),
-        &serde_json::to_value(s).unwrap(),
-    );
-    let out = review(
-        ReviewInputs {
-            report: &root.path().join("report.json"),
-            audit: &root.path().join("audit.json"),
-            outcomes: Some(&root.path().join("outcomes.json")),
-            state_dir: Some(root.path()),
-            apply: true,
-        },
-        &e,
-        &c,
-    )
-    .unwrap();
-    assert_eq!(out["status"], "OBSERVE");
-    assert_eq!(
-        out["reason_codes"],
-        json!(["candidate_signal_missing_in_outcomes"])
-    );
-    assert_eq!(out["mutation_performed"], false);
-    assert!(!root.path().join("trial.json").exists());
 }
 
 #[test]
