@@ -4,6 +4,8 @@
 pub mod audit_store;
 #[cfg(feature = "insights-state")]
 pub mod checkpoint;
+#[cfg(any(feature = "audit-store", feature = "insights-client"))]
+pub mod environment;
 #[cfg(feature = "insights-client")]
 pub mod insights;
 #[cfg(feature = "insights-state")]

@@ -24,8 +24,8 @@ Insights는 자기 서비스 연결 방식입니다. 서로 다른 운영자는 
 
 ## 설치와 업그레이드
 
-**기본 설치는 Codex 플러그인입니다. GroundLine Desktop GUI는 별도 선택 설치입니다.**
-Codex App과 CLI에서 같은 플러그인을 사용하며 GUI를 설치하거나 켜 둘 필요가 없습니다.
+**GroundLine은 Codex 플러그인과 네이티브 CLI로 동작합니다.**
+Codex App과 CLI에서 같은 플러그인을 사용합니다.
 Git과 Codex만 있으면 됩니다. 아래 명령은 개인 모델·추론·권한 설정을 바꾸지 않습니다.
 수집은 Insights 연결 설정과 명시적 동의 후 Codex 훅이 실행될 때 동작합니다.
 
@@ -71,20 +71,21 @@ marketplace 갱신, 설치 package checksum, hook 신뢰, collector upload,
 ClickHouse 반영, Grafana frame, image 게시, 운영 배포, stable 승격은 서로 다른
 증거 lane입니다.
 
-### 선택 설치: GUI
+### Insights 연결과 보고서
 
-화면에서 서버 연결과 전송 상태를 관리하려면
-[GroundLine Desktop 설치 안내](apps/desktop/README.ko.md#선택-설치)를 따릅니다.
-플러그인 설치·업그레이드는 GUI를 설치하지 않으며, GUI를 제거해도 설치된 플러그인과
-기존 수집 동의는 유지됩니다. 현재 GUI는 **macOS Apple Silicon 미리보기**이며
-Apple 공증 전이므로 일반 배포의 실행 승인까지 보장하지 않습니다.
+Insights CLI에서 연결 설정, 수집 활성화·중지, 상태 확인을 수행합니다.
+Codex 훅도 같은 실행 파일을 호출합니다. 집계 보고서는 CLI 또는 운영자의
+Grafana 대시보드에서 확인합니다. [Insights 명령 안내](plugins/groundline-insights/README.ko.md)를 참고하세요.
+
+별도 GroundLine Desktop 앱은 제공을 종료했습니다. 기존 앱을 제거해도 플러그인,
+서버 설정, 수집 동의, 인증 정보, 커서와 미전송 이벤트는 유지됩니다.
 
 ### 선택 작업: 기존 Codex 설정 보정
 
 설치와 설정 보정을 함께 원할 때만 검토한 `stable` 배포본의 설치 스크립트를 실행합니다.
 이 스크립트는 Core를 설치하고 `gpt-6-astra / xhigh / Fast 끔`을 적용하며,
 수동 컨텍스트 제한과 퇴역한 Core hook 승인 기록 4종을 정리합니다.
-기존 파일은 비공개 백업을 남기며 다른 설정은 보존합니다. GUI와 Insights는 설치하지 않습니다.
+기존 파일은 비공개 백업을 남기며 다른 설정은 보존합니다. Insights는 설치하지 않습니다.
 
 ```console
 git clone --branch stable --single-branch https://github.com/jukqaz/groundline.git groundline-install

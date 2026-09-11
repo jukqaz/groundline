@@ -81,6 +81,15 @@ or make external writes merely to satisfy this document.
 | Intentional positive context override | Preserve unless native-default restoration is requested and justified |
 | Config/catalog changes after repair preview | Reject the stale plan before replacing settings |
 | Astra guide includes a delegation example but user forbids delegation | Preserve user policy; no subagent or agent-setting rewrite |
+| Research the selected model's guidance without requesting a personal trial | Fetch current official docs and inspect relevant instructions; no Insights credentials or usage-report prerequisite |
+| General guidance alignment with an intentional model/effort selection | Preserve the selection; do not run the opt-in `setup` preset |
+| Change approach or move between repositories within an authorized task | Reconcile the affected scope in place; no unsolicited task or fork |
+| Request a local app removal | Verify absence and stopped processes; no unrelated plugin upgrade or release pipeline |
+
+`groundline-contracts` batch tests exercise the deterministic task-boundary
+advice, including scope changes during final verification and explicit task/fork
+requests. They do not prove a model followed the skill text. Metadata validation
+and reduced instruction word counts likewise are not model-performance results.
 
 Record the source revision, installed fingerprint, model/effort, requested
 scope, actions, outcome, and unverified lanes. Keep raw transcripts, credentials,

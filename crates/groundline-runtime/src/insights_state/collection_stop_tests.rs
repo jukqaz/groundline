@@ -67,7 +67,7 @@ async fn respond(mut stream: TcpStream, body: Value) {
 
 async fn wait_for_revocation(home: &Path) {
     tokio::time::timeout(Duration::from_secs(5), async {
-        while policy_enabled(&state_directory(home)).unwrap() {
+        while policy_enabled(&state_directory(home).unwrap()).unwrap() {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
     })
@@ -118,7 +118,7 @@ async fn stop_during_health_or_enrollment_prevents_following_requests_and_collec
                 .await
                 .is_err()
         );
-        let directory = state_directory(home.path());
+        let directory = state_directory(home.path()).unwrap();
         assert_eq!(pending_events(&directory, 0).unwrap().observed_count, 0);
         assert!(collection::read(&directory).unwrap().is_none());
     }
@@ -128,7 +128,7 @@ async fn stop_during_health_or_enrollment_prevents_following_requests_and_collec
 async fn stop_after_first_upload_preserves_unsent_events_and_received_ack() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let home = setup(&format!("http://{}", listener.local_addr().unwrap()));
-    let directory = state_directory(home.path());
+    let directory = state_directory(home.path()).unwrap();
     let profile = load_profile(home.path()).unwrap();
     let (identity, _) = initialize(&directory, Utc::now()).unwrap();
     let paths: Vec<_> = (0..2)
@@ -160,7 +160,7 @@ async fn stop_after_first_upload_preserves_unsent_events_and_received_ack() {
     let receipt = worker.await.unwrap().unwrap();
     assert_eq!(receipt.uploaded_count, 1);
     assert_eq!(
-        delivery_confirmation::read(&state_directory(home.path()))
+        delivery_confirmation::read(&state_directory(home.path()).unwrap())
             .unwrap()
             .unwrap()
             .event_count,
@@ -181,7 +181,7 @@ async fn stop_after_first_upload_preserves_unsent_events_and_received_ack() {
 async fn rejected_upload_never_creates_a_server_confirmation() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let home = setup(&format!("http://{}", listener.local_addr().unwrap()));
-    let directory = state_directory(home.path());
+    let directory = state_directory(home.path()).unwrap();
     let profile = load_profile(home.path()).unwrap();
     let (identity, _) = initialize(&directory, Utc::now()).unwrap();
     let upload_dir = directory.clone();
@@ -251,7 +251,7 @@ fn terminated_worker_releases_cycle_lock_without_a_stale_timeout() {
     );
 }
 
-// Execute the real stop path in another process: GUI-only mutexes are insufficient.
+// Execute the real stop path in another process: in-process mutexes are insufficient.
 #[test]
 fn subprocess_stop_uses_the_same_control_lock() {
     const CHILD_HOME: &str = "GROUNDLINE_TEST_STOP_HOME";
@@ -260,7 +260,7 @@ fn subprocess_stop_uses_the_same_control_lock() {
         return;
     }
     let home = setup("http://127.0.0.1:18080");
-    let directory = state_directory(home.path());
+    let directory = state_directory(home.path()).unwrap();
     let permit = collection_permit(&directory).unwrap();
     let mut child = std::process::Command::new(std::env::current_exe().unwrap())
         .args([

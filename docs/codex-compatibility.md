@@ -39,6 +39,15 @@ is present; user steering retains the original task outcome and constraints.
 
 ## Known evidence limits
 
+- Codex may retain imported tasks with an explicit `Claude Code`, `Hermes`,
+  `Gemini CLI`, or `Antigravity` originator.
+  These are outside GroundLine's Codex-only collection scope, even when the
+  native database source is `vscode`. The local audit counts them in
+  `non_codex_excluded_rollout_count` without reading their activity, including
+  their tokens, changing native task data, or blocking Codex collection. The
+  count remains local and does not expand the Insights wire schema. Unknown
+  originators still make collection incomplete; this is not multi-provider
+  support or a fallback to database-source attribution.
 - Forked/shared-history prefixes are not reconstructed. Native paginated
   histories use explicit ordinal boundaries to count only the local suffix.
   Missing prefixes remain `PARTIAL`; legacy copied histories without a known

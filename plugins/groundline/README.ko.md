@@ -60,8 +60,9 @@ shell의 `PATH` 등록까지 보장하는 것은 아닙니다.
 
 ## 사용 패턴에 따른 개인 개선
 
-`$groundline:improve-personal-workflow`로 Insights·로컬 감사·현재 공식 모델 지침을
-검토하고, 직접 확인한 작업 결과를 기준으로 개선 후보를 평가합니다.
+`$groundline:improve-personal-workflow`로 현재 공식 모델 지침과 관련 지침 파일을
+검토합니다. 이 경로에는 Insights가 필요하지 않습니다. 사용량 기반 실험을
+요청한 경우에만 Insights·로컬 감사·직접 확인한 작업 결과로 개선 후보를 평가합니다.
 `personal review`는 기본 읽기 전용이며, 근거와 기존 권한이 충분할 때만 `--apply`로
 전용 개인 지침을 시험합니다. `personal evaluate`는 서로 겹치지 않는 동일 조건의
 작업을 비교하고, 결과가 나빠지면 복구합니다. `personal rollback`으로 직접 복구할

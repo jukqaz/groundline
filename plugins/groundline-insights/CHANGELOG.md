@@ -4,6 +4,18 @@ This package summary covers the current release line. The repository
 [changelog](https://github.com/jukqaz/groundline/blob/main/CHANGELOG.md) records shared changes. A source version entry
 does not prove that its image or `stable` distribution has been published.
 
+## 0.25.0
+
+- Share Codex App/CLI environment validation across collection and enrollment;
+  exclude foreign runtime records without rewriting native data.
+- Preserve unsupported stored state and reject invalid current metadata before
+  creating state or sending events.
+- Repair mixed-history report coverage reasons, retain business data, and bound
+  ClickHouse internal diagnostic logs to 7 or 30 days.
+- Verify existing JWT-authenticated Grafana deployments without changing login
+  policy or falling back to Basic authentication.
+- Retire the separate Desktop app; existing plugin and CLI collection continues.
+
 ## 0.22.2
 
 - Wait for authenticated API and Grafana readiness before the release stack

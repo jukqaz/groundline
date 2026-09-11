@@ -3,11 +3,11 @@
 GroundLine ships two independent Codex plugins from one marketplace. Installing
 one plugin never installs or activates the other.
 
-**Every installation profile works without GroundLine Desktop.** The GUI is a
-[separate optional download](../apps/desktop/README.ko.md#선택-설치) for graphical
-connection and delivery management. Quitting or removing it preserves plugins,
-collection consent, and server settings. Codex hooks invoke the installed Insights
-binary directly; no GUI background process or login item is required. There is
+**Every installation profile uses Codex plugins and native CLIs.** Manage the
+connection through `groundline-insights worker` and read reports through the CLI
+or Grafana. The separate GroundLine Desktop app is retired; removing an old copy
+preserves plugins, collection consent, and server settings. Codex hooks invoke
+the installed Insights binary directly. There is
 no periodic delivery without hook activity, and the computer must be awake and
 able to reach the selected server.
 
@@ -49,6 +49,20 @@ Restore native Codex startup separately if the wrapper left provider overrides;
 do not reset Insights identity, consent, cursors, or pending events as a shortcut.
 Use the same native `CODEX_HOME`; an explicitly different home is a different
 source, not an automatic state migration.
+
+App and CLI share the owner connection profile in the same Codex home. Runtime
+and execution-mode dimensions identify separate collection state and report
+attribution; they do not select a different integration implementation. Codex
+hooks supply their native origin. For manual operations, use the explicit
+runtime environment when selecting a source, as described below. Disabling one
+source does not imply the other source's consent changed.
+
+Explicit unsupported `GROUNDLINE_RUNTIME_FAMILY`, `GROUNDLINE_EXECUTION_MODE`,
+or unrecognized native originator overrides fail before checkpoint/state writes.
+Known imported foreign-origin tasks are excluded without modifying their native
+records. Unrecognized origins still block incomplete collection rather than being
+silently treated as Codex. New events require Codex App/CLI dimensions, and stored
+collector authorization requires enrollment schema 2 with supported metadata.
 
 `doctor` and `worker status` discover the highest numeric `state_<n>.sqlite`
 through the same native reader, rather than requiring `state_5.sqlite`.

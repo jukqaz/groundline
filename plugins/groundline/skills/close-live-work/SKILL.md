@@ -1,6 +1,6 @@
 ---
 name: close-live-work
-description: Use when local checks pass but a live result still needs proof.
+description: Verify a requested live outcome after local checks. Use only the runtime evidence needed for that outcome.
 ---
 
 # Close Live Work
@@ -13,17 +13,17 @@ outcome; this skill does not authorize deployment, installation, or other writes
 ## Workflow
 
 1. Name the target and expected artifact.
-2. Confirm the requested scope, source revision, and relevant existing checks.
-   A native Goal is optional: without an explicitly requested Goal, close the
-   ordinary task without creating one or requiring a Goal operation.
-3. Inspect relevant jobs, artifacts, logs, and queues.
-4. Probe live version, process, smoke, or user flow.
-5. For GroundLine, read
-   [installed command resolution](../../references/platform-commands.md), run
-   `groundline provider-smoke --require-installed --json` and
-   follow [the native upgrade contract](../../references/native-upgrade.md). For
-   any plugin, prove source, package, published ref, install, and fresh task.
-6. Complete an explicitly requested native Goal only after every required proof
+2. Reuse the relevant source revision and passing checks. Select the missing
+   runtime observation; do not reopen a completed source audit.
+3. Inspect the relevant artifact and probe its version, process, or user flow.
+   A local uninstall needs absence and process checks, not a release pipeline.
+4. For an installed GroundLine plugin check, resolve its executable through
+   [platform commands](../../references/platform-commands.md) and use that
+   product's `provider-smoke --require-installed --json`. For a requested
+   upgrade, follow [native upgrade](../../references/native-upgrade.md) and prove
+   source, package, published ref, install, and a fresh task. An ordinary runtime
+   check does not require publishing or installing anything.
+5. Complete an explicitly requested native Goal only after every required proof
    passes. Otherwise report the ordinary task's outcome. Reuse valid checks;
    retry failed probes only after a changed condition or within a bounded
    transient-retry policy. Keep new external mutations behind their approval.
@@ -37,19 +37,8 @@ Missing live proof is `PARTIAL`; wrong artifact or failed smoke is `FAIL`.
 
 ## Output Contract
 
-```text
-Status: PASS / PARTIAL / FAIL
-Expected artifact:
-Evidence:
-- pipeline: ...
-- runtime: ...
-- smoke: ...
-Gaps:
-- ...
-Next action:
-- ...
-```
-
-Include Goal status only when a Goal exists. Omit irrelevant evidence lanes.
+State the outcome, decisive runtime evidence, and remaining gap or next action.
+Separate source, package, install, and live claims only where relevant. Include
+Goal status only when a Goal was explicitly requested; do not create one here.
 Name the exact instruction if a skill causes a pause; never mark unfinished work
 complete or treat an unavailable probe as a demonstrated code failure.

@@ -122,7 +122,9 @@ See the repository [integration profiles](https://github.com/jukqaz/groundline/b
 
 ## Personal workflow improvement
 
-Use `$groundline:improve-personal-workflow` to combine Insights reports, native
-audits, current model guidance, and private completion evidence. Core personal
+Use `$groundline:improve-personal-workflow` to review current model guidance and
+affected instructions. That route does not require Insights. For a requested
+usage-based trial, combine Insights reports, native audits, and private
+completion evidence. Core personal
 commands review, trial, evaluate, and restore dedicated guidance while preserving
 user edits. Missing evidence never authorizes a change. See [the contract](references/personal-improvement.md).

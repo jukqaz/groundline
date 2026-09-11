@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use regex::Regex;
-use reqwest::header::{CONTENT_TYPE, HOST};
+use reqwest::header::{CONTENT_TYPE, HOST, HeaderName, HeaderValue};
 use secrecy::{ExposeSecret, SecretString};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -921,12 +921,93 @@ fn grafana_query_ready(value: &Value, plan: &GrafanaQueryPlan) -> bool {
     }) && grafana_semantic_response_ready(results, &plan.semantic_refs)
 }
 
+enum GrafanaAuth {
+    Basic(SecretString),
+    Jwt {
+        header: HeaderName,
+        token: HeaderValue,
+    },
+}
+
+impl GrafanaAuth {
+    fn jwt(config: &Value, token: &str) -> Result<Self, XtaskError> {
+        let environment = config.pointer("/services/grafana/environment");
+        let enabled = environment.and_then(|env| env.get("GF_AUTH_JWT_ENABLED"));
+        let name = environment
+            .and_then(|env| env.get("GF_AUTH_JWT_HEADER_NAME"))
+            .and_then(Value::as_str)
+            .ok_or(XtaskError::InvalidRuntimeConfiguration)?;
+        if enabled.and_then(Value::as_str) != Some("true")
+            || !(32..=4096).contains(&token.len())
+            || !token
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
+        {
+            return Err(XtaskError::InvalidRuntimeConfiguration);
+        }
+        let header = HeaderName::from_bytes(name.as_bytes())
+            .map_err(|_| XtaskError::InvalidRuntimeConfiguration)?;
+        // JWT must use a dedicated authentication header, never overwrite HTTP
+        // routing, content, proxy credentials, or a second authentication scheme.
+        if !header.as_str().starts_with("x-") && header.as_str() != "cf-access-jwt-assertion" {
+            return Err(XtaskError::InvalidRuntimeConfiguration);
+        }
+        if matches!(
+            header.as_str(),
+            "x-forwarded-host" | "x-forwarded-for" | "x-forwarded-proto"
+        ) {
+            return Err(XtaskError::InvalidRuntimeConfiguration);
+        }
+        let mut token =
+            HeaderValue::from_str(token).map_err(|_| XtaskError::InvalidRuntimeConfiguration)?;
+        token.set_sensitive(true);
+        Ok(Self::Jwt { header, token })
+    }
+
+    fn validate_config(&self, config: &Value) -> Result<(), XtaskError> {
+        let environment = config.pointer("/services/grafana/environment");
+        let valid = match self {
+            Self::Basic(_) => {
+                environment.is_some_and(|env| match env.get("GF_AUTH_BASIC_ENABLED") {
+                    None => true,
+                    Some(Value::String(value)) => value == "true",
+                    Some(_) => false,
+                })
+            }
+            Self::Jwt { header, .. } => {
+                environment
+                    .and_then(|env| env.get("GF_AUTH_JWT_ENABLED"))
+                    .and_then(Value::as_str)
+                    == Some("true")
+                    && environment
+                        .and_then(|env| env.get("GF_AUTH_JWT_HEADER_NAME"))
+                        .and_then(Value::as_str)
+                        .is_some_and(|name| name.eq_ignore_ascii_case(header.as_str()))
+            }
+        };
+        if valid {
+            Ok(())
+        } else {
+            Err(XtaskError::InvalidRuntimeConfiguration)
+        }
+    }
+
+    fn authorize(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        match self {
+            Self::Basic(password) => {
+                request.basic_auth("groundline-admin", Some(password.expose_secret()))
+            }
+            Self::Jwt { header, token } => request.header(header.clone(), token.clone()),
+        }
+    }
+}
+
 async fn grafana_datasource_healthy(
     client: &reqwest::Client,
     base: &Url,
     public_host: &str,
     template: &str,
-    admin_password: Option<&SecretString>,
+    auth: Option<&GrafanaAuth>,
 ) -> bool {
     let Ok(plan) = grafana_query_plan(template) else {
         return false;
@@ -951,8 +1032,8 @@ async fn grafana_datasource_healthy(
         .header(HOST, public_host)
         .header(CONTENT_TYPE, "application/json")
         .body(body);
-    if let Some(password) = admin_password {
-        request = request.basic_auth("groundline-admin", Some(password.expose_secret()));
+    if let Some(auth) = auth {
+        request = auth.authorize(request);
     }
     let Ok(response) = request.send().await else {
         return false;
@@ -980,7 +1061,7 @@ async fn service_healthy(
     public_host: &str,
     template: &str,
     require_datasource: bool,
-    grafana_admin_password: Option<&SecretString>,
+    grafana_auth: Option<&GrafanaAuth>,
 ) -> bool {
     let Ok(url) = Url::parse(url) else {
         return false;
@@ -1012,7 +1093,7 @@ async fn service_healthy(
                         &url,
                         public_host,
                         template,
-                        grafana_admin_password,
+                        grafana_auth,
                     )
                     .await)
         }
@@ -1075,7 +1156,7 @@ struct HealthInputs<'a> {
     access_url: &'a str,
     public_host: &'a str,
     template: &'a str,
-    grafana_admin_password: &'a SecretString,
+    grafana_auth: &'a GrafanaAuth,
 }
 
 async fn wait_for_health<S>(
@@ -1110,7 +1191,7 @@ where
                 inputs.public_host,
                 inputs.template,
                 require_datasource,
-                Some(inputs.grafana_admin_password),
+                Some(inputs.grafana_auth),
             )
             .await
             && access_gate_healthy(&client, inputs.access_url).await
@@ -1207,7 +1288,7 @@ struct RuntimeInputs {
     username: String,
     api_key: SecretString,
     enrollment_token: SecretString,
-    grafana_admin_password: SecretString,
+    grafana_auth: GrafanaAuth,
     app_name: String,
     api_health: String,
     grafana_health: String,
@@ -1224,10 +1305,21 @@ impl RuntimeInputs {
         let api_key = SecretString::from(required_env("GROUNDLINE_TRUENAS_API_KEY", 32)?);
         let enrollment_token =
             SecretString::from(required_env("GROUNDLINE_INSIGHTS_ENROLLMENT_TOKEN", 32)?);
-        let grafana_admin_password = SecretString::from(required_env(
-            "GROUNDLINE_INSIGHTS_GRAFANA_ADMIN_PASSWORD",
-            32,
-        )?);
+        let grafana_jwt = match std::env::var("GROUNDLINE_OWNER_GRAFANA_ACCESS_JWT") {
+            Ok(token) => Some(SecretString::from(token)),
+            Err(std::env::VarError::NotPresent) => None,
+            Err(std::env::VarError::NotUnicode(_)) => {
+                return Err(XtaskError::InvalidRuntimeConfiguration);
+            }
+        };
+        let grafana_password = if grafana_jwt.is_none() {
+            Some(SecretString::from(required_env(
+                "GROUNDLINE_INSIGHTS_GRAFANA_ADMIN_PASSWORD",
+                32,
+            )?))
+        } else {
+            None
+        };
         let app_name = std::env::var("GROUNDLINE_TRUENAS_APP_NAME")
             .unwrap_or_else(|_| "groundline-insights".to_owned());
         let api_health = required_env("GROUNDLINE_INSIGHTS_API_HEALTH_URL", 1)?;
@@ -1266,6 +1358,14 @@ impl RuntimeInputs {
         if template.len() > MAX_CONFIG_BYTES || unresolved_placeholder_regex().is_match(&template) {
             return Err(XtaskError::InvalidRuntimeConfiguration);
         }
+        let config: Value = serde_saphyr::from_str(&template)
+            .map_err(|_| XtaskError::InvalidRuntimeConfiguration)?;
+        let grafana_auth = match (grafana_jwt, grafana_password) {
+            (Some(token), None) => GrafanaAuth::jwt(&config, token.expose_secret())?,
+            (None, Some(password)) => GrafanaAuth::Basic(password),
+            _ => return Err(XtaskError::InvalidRuntimeConfiguration),
+        };
+        grafana_auth.validate_config(&config)?;
         let query_count = grafana_query_plan(&template)
             .map_err(|_| XtaskError::InvalidRuntimeConfiguration)?
             .queries
@@ -1275,7 +1375,7 @@ impl RuntimeInputs {
             username,
             api_key,
             enrollment_token,
-            grafana_admin_password,
+            grafana_auth,
             app_name,
             api_health,
             grafana_health,
@@ -1294,7 +1394,7 @@ impl RuntimeInputs {
             access_url: &self.access_url,
             public_host: &self.public_host,
             template: &self.template,
-            grafana_admin_password: &self.grafana_admin_password,
+            grafana_auth: &self.grafana_auth,
         }
     }
 }
@@ -1382,6 +1482,7 @@ async fn deploy_async(
     let inputs = RuntimeInputs::load(compose_template)?;
     let mut client = connect_authenticated(&inputs).await?;
     let current = inspect_current(&mut client, &inputs.app_name).await?;
+    inputs.grafana_auth.validate_config(&current)?;
     let current_config_sha256 = config_sha256(&current)?;
     if expected_current_config_sha256 != current_config_sha256 {
         return Err(XtaskError::InvalidCurrentConfiguration);
@@ -1427,6 +1528,7 @@ async fn preflight_async(compose_template: &Path) -> Result<Value, XtaskError> {
     let inputs = RuntimeInputs::load(compose_template)?;
     let mut client = connect_authenticated(&inputs).await?;
     let current = inspect_current(&mut client, &inputs.app_name).await?;
+    inputs.grafana_auth.validate_config(&current)?;
     let probe_image = format!(
         "ghcr.io/jukqaz/groundline-insights-api@sha256:{}",
         "0".repeat(64)
@@ -1507,9 +1609,10 @@ async fn verify_stack_async(
         .map_err(|_| XtaskError::InvalidRuntimeConfiguration)?;
     let plan =
         grafana_query_plan(&template).map_err(|_| XtaskError::InvalidRuntimeConfiguration)?;
-    let grafana_admin_password =
+    let grafana_auth = GrafanaAuth::Basic(
         crate::secret_store::load_private_secret(secrets_file, "GRAFANA_ADMIN_PASSWORD")
-            .map_err(|_| XtaskError::InvalidRuntimeConfiguration)?;
+            .map_err(|_| XtaskError::InvalidRuntimeConfiguration)?,
+    );
     let client = http_client().ok_or(XtaskError::RuntimeFailed)?;
     for attempt in 0..STACK_VERIFY_ATTEMPTS {
         let api_ready = service_healthy(
@@ -1530,7 +1633,7 @@ async fn verify_stack_async(
                 public_host,
                 &template,
                 true,
-                Some(&grafana_admin_password),
+                Some(&grafana_auth),
             )
             .await;
         if grafana_ready {
@@ -1624,14 +1727,93 @@ mod tests {
     use url::Url;
 
     use super::{
-        ApplyFailure, DeploymentOps, RpcClient, access_url_allowed, apply_with_rollback,
-        config_sha256, deploy, ensure_crypto_provider, grafana_query_plan, grafana_query_ready,
-        health_url_allowed, inspect_current, read_private_runtime_config, sha256_regex,
-        update_compose, verify_stack,
+        ApplyFailure, DeploymentOps, GrafanaAuth, RpcClient, access_url_allowed,
+        apply_with_rollback, config_sha256, deploy, ensure_crypto_provider, grafana_query_plan,
+        grafana_query_ready, health_url_allowed, inspect_current, read_private_runtime_config,
+        sha256_regex, update_compose, verify_stack,
     };
 
     fn enrollment_credential() -> SecretString {
         SecretString::from("e".repeat(32))
+    }
+
+    #[test]
+    fn grafana_jwt_uses_the_configured_sensitive_header_without_basic_auth() {
+        ensure_crypto_provider().unwrap();
+        let config = json!({"services":{"grafana":{"environment":{
+            "GF_AUTH_JWT_ENABLED":"true",
+            "GF_AUTH_JWT_HEADER_NAME":"Cf-Access-Jwt-Assertion",
+            "GF_AUTH_BASIC_ENABLED":"false"
+        }}}});
+        let token = "a".repeat(64);
+        let auth = GrafanaAuth::jwt(&config, &token).unwrap();
+        auth.validate_config(&config).unwrap();
+        let request = auth
+            .authorize(reqwest::Client::new().post("http://127.0.0.1/api/ds/query"))
+            .build()
+            .unwrap();
+        let header = &request.headers()["cf-access-jwt-assertion"];
+        assert_eq!(header, token.as_str());
+        assert!(header.is_sensitive());
+        assert!(!request.headers().contains_key("authorization"));
+        assert!(!format!("{request:?}").contains(&token));
+        assert!(
+            GrafanaAuth::Basic(enrollment_credential())
+                .validate_config(&config)
+                .is_err()
+        );
+        let mut changed = config.clone();
+        changed["services"]["grafana"]["environment"]["GF_AUTH_JWT_HEADER_NAME"] =
+            json!("X-JWT-Assertion");
+        assert!(auth.validate_config(&changed).is_err());
+        changed["services"]["grafana"]["environment"]["GF_AUTH_JWT_ENABLED"] = json!("false");
+        assert!(GrafanaAuth::jwt(&changed, &token).is_err());
+    }
+
+    #[test]
+    fn grafana_jwt_rejects_routing_headers_and_invalid_secret_inputs() {
+        let mut config = json!({"services":{"grafana":{"environment":{
+            "GF_AUTH_JWT_ENABLED":"true", "GF_AUTH_JWT_HEADER_NAME":"X-JWT-Assertion"
+        }}}});
+        for token in [
+            String::new(),
+            "short".into(),
+            "a".repeat(4097),
+            format!("{}\r\nX-Other: injected", "a".repeat(32)),
+            "é".repeat(32),
+        ] {
+            assert!(GrafanaAuth::jwt(&config, &token).is_err());
+        }
+        for header in [
+            "Host",
+            "Authorization",
+            "Cookie",
+            "Content-Type",
+            "X-Forwarded-Host",
+            "X-Forwarded-For",
+            "bad\r\nheader",
+        ] {
+            config["services"]["grafana"]["environment"]["GF_AUTH_JWT_HEADER_NAME"] = json!(header);
+            assert!(GrafanaAuth::jwt(&config, &"a".repeat(64)).is_err());
+        }
+    }
+
+    #[test]
+    fn grafana_basic_remains_supported_only_when_enabled() {
+        ensure_crypto_provider().unwrap();
+        let auth = GrafanaAuth::Basic(enrollment_credential());
+        let config =
+            json!({"services":{"grafana":{"environment":{"GF_AUTH_BASIC_ENABLED":"true"}}}});
+        auth.validate_config(&config).unwrap();
+        let request = auth
+            .authorize(reqwest::Client::new().post("http://127.0.0.1/api/ds/query"))
+            .build()
+            .unwrap();
+        assert!(request.headers()["authorization"].is_sensitive());
+        assert!(!request.headers().contains_key("cf-access-jwt-assertion"));
+        let mut invalid = config;
+        invalid["services"]["grafana"]["environment"]["GF_AUTH_BASIC_ENABLED"] = json!(false);
+        assert!(auth.validate_config(&invalid).is_err());
     }
 
     fn compose(image: &str, dashboard: &str) -> String {

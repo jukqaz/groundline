@@ -31,6 +31,35 @@ fn path_argument(path: &Path) -> &str {
 }
 
 #[test]
+fn unsupported_runtime_environment_never_creates_checkpoint_state() {
+    for (name, value) in [
+        ("GROUNDLINE_RUNTIME_FAMILY", "claude_code"),
+        ("GROUNDLINE_RUNTIME_FAMILY", "hermes"),
+        ("GROUNDLINE_RUNTIME_FAMILY", "gemini"),
+        ("GROUNDLINE_RUNTIME_FAMILY", ""),
+        ("GROUNDLINE_EXECUTION_MODE", "unsupported"),
+        ("CODEX_INTERNAL_ORIGINATOR_OVERRIDE", "noncodex-desktop"),
+    ] {
+        let home = tempdir().unwrap();
+        let output = Command::new(groundline())
+            .args([
+                "checkpoint",
+                "session_start_hook",
+                "--codex-home",
+                path_argument(home.path()),
+            ])
+            .env_remove("GROUNDLINE_RUNTIME_FAMILY")
+            .env_remove("GROUNDLINE_EXECUTION_MODE")
+            .env_remove("CODEX_INTERNAL_ORIGINATOR_OVERRIDE")
+            .env(name, value)
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{name}={value}");
+        assert!(fs::read_dir(home.path()).unwrap().next().is_none());
+    }
+}
+
+#[test]
 fn doctor_uses_native_store_discovery_without_model_configuration_or_executables() {
     let home = tempdir().unwrap();
     let empty_path = home.path().join("empty-path");
@@ -187,7 +216,7 @@ fn enable_rejects_unsupported_state_with_a_private_nonzero_receipt() {
         groundline_runtime::insights_state::configure_profile(home.path(), profile.as_bytes())
             .unwrap();
         groundline_runtime::insights_state::enable(home.path()).unwrap();
-        let directory = groundline_runtime::insights::state_directory(home.path());
+        let directory = groundline_runtime::insights::state_directory(home.path()).unwrap();
         let unsupported = br#"{"schema_version":0,"private_value":"PRIVATE_SENTINEL"}"#;
         groundline_runtime::local_file::atomic_write_private(&directory.join(file), unsupported)
             .unwrap();

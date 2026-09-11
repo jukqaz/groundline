@@ -254,26 +254,21 @@ fn has_window_records(contents: &str, start: DateTime<Utc>, end: DateTime<Utc>) 
 
 fn runtime_family(originator: Option<&str>, source: &str) -> Option<&'static str> {
     if let Some(originator) = originator {
-        let normalized = originator.trim().to_ascii_lowercase().replace('-', "_");
-        if matches!(
-            normalized.as_str(),
-            "codex desktop" | "codex_app" | "codex vscode" | "codex_vscode"
-        ) {
-            return Some("codex_app");
-        }
-        if matches!(
-            normalized.as_str(),
-            "codex_tui" | "codex_exec" | "codex_cli"
-        ) {
-            return Some("codex_cli");
-        }
-        return None;
+        return crate::environment::codex_originator(originator);
     }
     match source {
         "vscode" => Some("codex_app"),
         "cli" | "exec" => Some("codex_cli"),
         _ => None,
     }
+}
+
+fn is_non_codex_originator(originator: Option<&str>) -> bool {
+    // Codex can retain imported tasks from another application. Recognizing an
+    // explicit out-of-scope originator only excludes its data; it never enables
+    // another collector or falls back to the Codex-looking database source.
+    // Unrecognized explicit originators must still fail closed.
+    originator.is_some_and(crate::environment::foreign_originator)
 }
 
 fn guardian_from_session(session: Value, rollout_count: usize) -> Value {
@@ -339,6 +334,7 @@ pub fn collect_audit(
     let mut unreadable_delegated = 0_u64;
     let mut unreadable_guardian = 0_u64;
     let mut unclassified = 0_u64;
+    let mut non_codex_excluded = 0_u64;
     let mut source_fallback = 0_u64;
     let mut duplicates = 0_u64;
     let mut total_bytes = 0_u64;
@@ -358,6 +354,7 @@ pub fn collect_audit(
         }
         let before_read = total_bytes;
         let mut originator_missing = false;
+        let mut non_codex = false;
         let mut classified = None;
         let contents = match crate::rollout::read_audit_rollout(
             &row.rollout,
@@ -367,6 +364,7 @@ pub fn collect_audit(
             |metadata| {
                 let originator = metadata.get("originator").and_then(Value::as_str);
                 originator_missing = originator.is_none();
+                non_codex = is_non_codex_originator(originator);
                 classified = runtime_family(originator, &row.source);
                 classified
                     .is_some_and(|family| runtime_filter.is_none_or(|expected| family == expected))
@@ -374,7 +372,9 @@ pub fn collect_audit(
         ) {
             Ok(Some(contents)) => contents,
             Ok(None) => {
-                if classified.is_none() {
+                if non_codex {
+                    non_codex_excluded = non_codex_excluded.saturating_add(1);
+                } else if classified.is_none() {
                     unclassified = unclassified.saturating_add(1);
                 }
                 continue;
@@ -489,6 +489,7 @@ pub fn collect_audit(
             "minimum_root_sample_count":MINIMUM_ROOTS,"sample_sufficient":sample>=MINIMUM_ROOTS,"delegated_rollout_count":delegated.len(),
             "guardian_rollout_count":guardian.len(),"guardian_incomplete_excluded_count":0,"duplicate_rollout_reference_excluded_count":duplicates,
             "unreadable_completed_root_count":unreadable,"originator_unclassified_excluded_root_count":unclassified,
+            "non_codex_excluded_rollout_count":non_codex_excluded,
             "unreadable_delegated_count":unreadable_delegated,"unreadable_guardian_count":unreadable_guardian,
             "read_budget_exhausted":total_bytes>=crate::rollout::MAX_AUDIT_SCAN_BYTES || retained_bytes>=crate::rollout::MAX_AUDIT_BYTES,
             "source_read_bytes":total_bytes,"retained_audit_bytes":retained_bytes,
@@ -627,6 +628,96 @@ mod tests {
                 collect_audit(home.path(), time(10), time(20), None, false).unwrap()["collection_complete"],
                 false
             );
+        }
+    }
+
+    #[test]
+    fn non_codex_history_does_not_block_or_contaminate_codex_windows() {
+        let home = codex_home();
+        let sessions = home.path().join("sessions");
+        fs::create_dir(&sessions).unwrap();
+        let app = sessions.join("app.jsonl");
+        let db = fixture_database(home.path(), &app, "vscode");
+        let connection = Connection::open(&db).unwrap();
+        let mut originals = Vec::new();
+        for (name, originator, source, tokens) in [
+            ("app", "codex_app", "vscode", 7),
+            ("cli", "codex_cli", "cli", 11),
+            ("outside", "Claude Code", "vscode", 1000),
+            ("outside-hermes", "Hermes", "vscode", 2000),
+            ("outside-gemini", "Gemini CLI", "cli", 3000),
+            ("outside-antigravity", "Antigravity", "vscode", 4000),
+        ] {
+            let path = sessions.join(format!("{name}.jsonl"));
+            let contents = format!(
+                "{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"{name}\",\"originator\":\"{originator}\"}}}}\n\
+                 {{\"timestamp\":\"1970-01-01T00:00:05Z\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"token_count\",\"info\":{{\"total_token_usage\":{{\"total_tokens\":{tokens}}}}}}}}}\n"
+            );
+            fs::write(&path, &contents).unwrap();
+            if name != "app" {
+                connection
+                    .execute(
+                        "INSERT INTO threads VALUES (?1, ?2, 0, 1, 1)",
+                        params![path.to_string_lossy(), source],
+                    )
+                    .unwrap();
+            }
+            originals.push((path, contents));
+        }
+        drop(connection);
+        let database_before = fs::read(&db).unwrap();
+        let time = |n| chrono::DateTime::from_timestamp(n, 0).unwrap();
+        for (family, tokens, roots) in [
+            (Some("codex_app"), 7, 1),
+            (Some("codex_cli"), 11, 1),
+            (None, 18, 2),
+        ] {
+            let audit = collect_audit(home.path(), time(0), time(10), family, false).unwrap();
+            assert_eq!(audit["collection_complete"], true);
+            assert_eq!(audit["scope"]["non_codex_excluded_rollout_count"], 4);
+            assert_eq!(
+                audit["scope"]["originator_unclassified_excluded_root_count"],
+                0
+            );
+            assert_eq!(audit["scope"]["observed_root_sample_count"], roots);
+            assert_eq!(
+                audit["root"]["provider_reported_usage"]["total_tokens"],
+                tokens
+            );
+            assert!(!audit.to_string().contains("Claude"));
+        }
+        assert_eq!(fs::read(&db).unwrap(), database_before);
+        for (path, before) in originals {
+            assert_eq!(fs::read_to_string(path).unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn unknown_originators_still_block_instead_of_becoming_codex_data() {
+        let home = codex_home();
+        let sessions = home.path().join("sessions");
+        fs::create_dir(&sessions).unwrap();
+        let rollout = sessions.join("unknown.jsonl");
+        fixture_database(home.path(), &rollout, "vscode");
+        let time = |n| chrono::DateTime::from_timestamp(n, 0).unwrap();
+        for originator in ["future-originator", "Claude Code unknown", ""] {
+            fs::write(
+                &rollout,
+                serde_json::json!({
+                    "type":"session_meta", "payload":{"originator":originator}
+                })
+                .to_string(),
+            )
+            .unwrap();
+            let audit =
+                collect_audit(home.path(), time(0), time(10), Some("codex_app"), false).unwrap();
+            assert_eq!(audit["collection_complete"], false);
+            assert_eq!(
+                audit["scope"]["originator_unclassified_excluded_root_count"],
+                1
+            );
+            assert_eq!(audit["scope"]["non_codex_excluded_rollout_count"], 0);
+            assert_eq!(audit["scope"]["observed_root_sample_count"], 0);
         }
     }
 

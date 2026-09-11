@@ -97,8 +97,6 @@ fn source_scan_path(root: &Path, path: &Path) -> bool {
         Some(".git" | "target" | "dist")
     ) && !path.starts_with(root.join("plugins/groundline/bin"))
         && !path.starts_with(root.join("plugins/groundline-insights/bin"))
-        && !path.starts_with(root.join("apps/desktop/node_modules"))
-        && !path.starts_with(root.join("apps/desktop/src-tauri/gen"))
 }
 
 pub(super) fn contains_private_marker(bytes: &[u8]) -> bool {
@@ -340,7 +338,13 @@ fn verify_insights(root: &Path) -> Result<(), XtaskError> {
 
 pub fn verify_source(root: &Path) -> Result<Value, XtaskError> {
     let root = root.canonicalize().map_err(|_| XtaskError::InvalidSource)?;
-    for removed_duplicate in [".codex-plugin", "skills", "references", "assets"] {
+    for removed_duplicate in [
+        ".codex-plugin",
+        "skills",
+        "references",
+        "assets",
+        "apps/desktop",
+    ] {
         if root.join(removed_duplicate).exists() {
             return Err(XtaskError::InvalidSource);
         }

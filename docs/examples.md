@@ -44,3 +44,11 @@ Assess whether a frozen batch is ready for implementation:
 ```console
 groundline efficiency batch --input batch.json --json
 ```
+
+This command is advisory and performs no orchestration. A changed outcome,
+repository, or permission boundary returns `reconcile` for the current task.
+An alternative approach returns `stay`; a side question returns `side` so the
+agent can answer and resume. Only explicit `new_task_requested` or
+`fork_requested` signals recommend `new_task` or `fork`. These signals record
+the user's request; they do not authorize unrelated writes. Reconciled scope
+must be verified before an existing Goal can be marked complete.

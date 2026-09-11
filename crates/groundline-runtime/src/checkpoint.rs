@@ -20,6 +20,8 @@ const MAX_CAPTURE_BYTES: u64 = 4 * 1024;
 pub enum CheckpointError {
     #[error("invalid_trigger")]
     InvalidTrigger,
+    #[error(transparent)]
+    InvalidEnvironment(#[from] crate::environment::EnvironmentError),
     #[error("worker_spawn_failed")]
     SpawnFailed,
     #[error("checkpoint_capture_failed")]
@@ -30,7 +32,7 @@ fn capture_path(codex_home: &Path, trigger: &str) -> Result<std::path::PathBuf, 
     if !valid_trigger(trigger) {
         return Err(CheckpointError::InvalidTrigger);
     }
-    Ok(state_directory(codex_home)
+    Ok(state_directory(codex_home)?
         .join(CAPTURE_DIRECTORY)
         .join(format!("{trigger}.json")))
 }
@@ -39,13 +41,13 @@ fn claim_path(codex_home: &Path, trigger: &str) -> Result<std::path::PathBuf, Ch
     if !valid_trigger(trigger) {
         return Err(CheckpointError::InvalidTrigger);
     }
-    Ok(state_directory(codex_home)
+    Ok(state_directory(codex_home)?
         .join(CLAIM_DIRECTORY)
         .join(format!("{trigger}.json")))
 }
 
 fn capture_lock(codex_home: &Path) -> Result<std::fs::File, CheckpointError> {
-    let file = open_or_create_private_lock(&state_directory(codex_home).join(CAPTURE_LOCK_FILE))
+    let file = open_or_create_private_lock(&state_directory(codex_home)?.join(CAPTURE_LOCK_FILE))
         .map_err(|_| CheckpointError::CaptureFailed)?;
     file.lock().map_err(|_| CheckpointError::CaptureFailed)?;
     Ok(file)
