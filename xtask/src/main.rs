@@ -41,7 +41,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Check an already-built API or desktop binary before uploading it.
+    /// Check an already-built release binary before uploading it.
     VerifyBinaryPrivacy {
         #[arg(long)]
         binary: PathBuf,

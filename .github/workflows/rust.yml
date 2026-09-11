@@ -33,7 +33,6 @@ on:
       - "Cargo.lock"
       - "Cargo.toml"
       - "crates/**"
-      - "apps/desktop/**"
       - "deny.toml"
       - "docs/**"
       - "infrastructure/**"
@@ -201,11 +200,6 @@ jobs:
           for feature in insights-client insights-state tailnet-probe; do
             cargo check --locked -p groundline-runtime --no-default-features --features "$feature"
           done
-      - name: Check desktop dependency policy
-        run: |
-          "$RUNNER_TEMP/groundline-tools/cargo-deny" --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --all-features --config apps/desktop/deny.toml check --show-stats
-      - name: Validate desktop frontend dependency advisories
-        run: npm audit --omit=dev --audit-level=high --prefix apps/desktop
       - name: Validate the release-tested and selected compatibility profiles
         env:
           COMPATIBILITY_PROFILE: ${{ steps.compatibility.outputs.path }}
@@ -394,7 +388,7 @@ jobs:
       (github.event_name == 'workflow_dispatch' &&
        inputs.build_release_artifacts &&
        github.ref == 'refs/heads/main')
-    needs: [qualification, desktop]
+    needs: qualification
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
     strategy:
@@ -515,60 +509,10 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  desktop:
-    name: qualify and package macOS desktop preview
-    needs: fast
-    runs-on: macos-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/setup-rust-stable
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: apps/desktop/package-lock.json
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          workspaces: apps/desktop/src-tauri
-          shared-key: desktop-macos
-      - name: Verify matching desktop and workspace versions
-        run: |
-          version="$(jq -r .version plugins/groundline/.codex-plugin/plugin.json)"
-          test "$(jq -r .version apps/desktop/package.json)" = "$version"
-          test "$(jq -r .version apps/desktop/src-tauri/tauri.conf.json)" = "$version"
-      - name: Check desktop frontend and native commands
-        working-directory: apps/desktop
-        run: |
-          npm ci
-          npm test
-          npm run build
-          cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-          cargo test --locked --manifest-path src-tauri/Cargo.toml
-      - name: Build desktop preview from the release source
-        if: startsWith(github.ref, 'refs/tags/v')
-        working-directory: apps/desktop
-        run: |
-          export RUSTFLAGS="--remap-path-prefix=$GITHUB_WORKSPACE=/_groundline --remap-path-prefix=$HOME=/_cargo_home"
-          npm run tauri -- build --bundles app
-          codesign --force --sign - --timestamp=none "src-tauri/target/release/bundle/macos/GroundLine Desktop.app"
-          codesign --verify --deep --strict "src-tauri/target/release/bundle/macos/GroundLine Desktop.app"
-          cargo run --locked --manifest-path ../../Cargo.toml -p xtask -- verify-binary-privacy --binary "src-tauri/target/release/bundle/macos/GroundLine Desktop.app/Contents/MacOS/groundline-desktop"
-          mkdir -p ../../desktop-assets
-          ditto -c -k --sequesterRsrc --keepParent "src-tauri/target/release/bundle/macos/GroundLine Desktop.app" ../../desktop-assets/groundline-desktop-aarch64-apple-darwin.zip
-      - name: Upload desktop preview separately from plugin packages
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: desktop-preview
-          path: desktop-assets/*
-          if-no-files-found: error
-          retention-days: 14
-
   publish-release:
     name: publish versioned two-product release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [artifacts, desktop]
+    needs: artifacts
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -600,15 +544,6 @@ jobs:
           done
           cd release-assets
           sha256sum groundline-*.tar.gz | LC_ALL=C sort > SHA256SUMS
-      - name: Download the macOS desktop preview
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: desktop-preview
-          path: release-assets
-      - name: Include the desktop preview in release checksums
-        run: |
-          cd release-assets
-          sha256sum groundline-*.tar.gz groundline-desktop-*.zip | LC_ALL=C sort > SHA256SUMS
       - name: Attest every versioned binary release asset
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
@@ -625,7 +560,7 @@ jobs:
           gh release create "$RELEASE_TAG" release-assets/* \
             --verify-tag \
             --title "GroundLine ${RELEASE_TAG}" \
-            --notes "Core·Insights와 API를 같은 소스에서 빌드한 릴리스입니다. 일반 HTTPS와 선택형 Tailscale, 등록키 확인 API, 통합 서버 설정을 지원합니다. macOS Apple Silicon Desktop은 공증되지 않은 미리보기 빌드입니다. 새 앱 연결 전에 서버 API를 업데이트하세요."
+            --notes "Core·Insights와 API를 같은 소스에서 빌드한 릴리스입니다. 일반 HTTPS와 선택형 Tailscale, 등록키 확인 API, 통합 서버 설정을 지원합니다. Codex 플러그인과 CLI로 연결하며, collector 업그레이드 전에 서버 API 호환성을 확인하세요."
 
   publish-image:
     name: publish attested multi-architecture Insights API image

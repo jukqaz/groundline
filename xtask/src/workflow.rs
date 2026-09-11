@@ -139,11 +139,9 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
         "CARGO_DENY_VERSION: \"0.20.2\"",
         "CARGO_DENY_SHA256: \"9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f\"",
         "\"$RUNNER_TEMP/groundline-tools/cargo-deny\" --locked --all-features check --show-stats",
-        "\"$RUNNER_TEMP/groundline-tools/cargo-deny\" --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --all-features --config apps/desktop/deny.toml check --show-stats",
         "Verify collection stop across native processes",
         "--all-features --target \"${{ matrix.target }}\" collection_stop_tests",
         "target/debug/xtask verify-binary-privacy --binary \"target/$TARGET/release/groundline-insights-api\"",
-        "-p xtask -- verify-binary-privacy --binary \"src-tauri/target/release/bundle/macos/GroundLine Desktop.app/Contents/MacOS/groundline-desktop\"",
         "--test setup_cli --test config_repair_cli --test install_cli",
         "cargo test --locked -p groundline-insights-cli --test cli_contract",
         "cargo test --workspace --all-features --locked",
@@ -195,6 +193,9 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
         || rust.contains("self-hosted")
         || rust.contains("pull_request_target:")
         || rust.contains("schedule:")
+        || rust.contains("apps/desktop")
+        || rust.contains("groundline-desktop")
+        || rust.contains("\n  desktop:")
         || rust.contains("permissions: write-all")
         || rust.contains("GROUNDLINE_TRUSTED")
         || rust.contains("RUSTUP_TOOLCHAIN: \"1.")

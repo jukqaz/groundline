@@ -25,9 +25,8 @@ in the maintainer's service. See the [private-owner boundary](docs/integrations.
 
 ## Install and upgrade
 
-**The default installation is a Codex plugin. GroundLine Desktop is an optional,
-separate GUI download.** Codex App and CLI use the same plugins; neither requires
-the GUI to be installed or running. Only Git and Codex are required. These native
+**GroundLine runs as Codex plugins and native CLIs.** Codex App and CLI use the
+same plugins. Only Git and Codex are required. These native
 commands preserve personal model, reasoning, and permission settings. Insights
 collection starts only after connection setup and explicit consent, on Codex hooks.
 
@@ -74,14 +73,14 @@ Marketplace refresh, installed package checksums, hook
 trust, collector upload, ClickHouse visibility, Grafana frames, image
 publication, deployment, and stable promotion are separate evidence lanes.
 
-### Optional GUI
+### Insights connection and reports
 
-For a graphical connection and delivery status interface, follow the
-[GroundLine Desktop installation guide](apps/desktop/README.ko.md#선택-설치).
-Plugin installation and upgrades do not install the GUI. Removing the GUI leaves
-the plugins and collection consent intact. The GUI is currently a **macOS Apple
-Silicon preview** without Apple notarization; normal distribution approval is
-not yet qualified.
+Use the Insights CLI to configure, enable, inspect, or stop collection. Codex
+lifecycle hooks invoke that same executable. Read aggregate reports through the
+CLI or the owner's Grafana dashboard. See the [Insights commands](plugins/groundline-insights/README.md).
+
+The separate GroundLine Desktop app is retired. Removing an old copy preserves
+the plugins, server profile, consent, credentials, cursor, and pending events.
 
 ### Optional Codex configuration repair
 
@@ -89,7 +88,7 @@ Use a reviewed `stable` distribution's installer only when you also want setting
 repair. It installs Core, applies `gpt-6-astra`, `xhigh`, and Fast off, restores
 native context limits, removes four retired Core hook approval entries, and runs
 strict doctor. Existing configuration is privately backed up; unrelated settings
-remain intact. It installs neither Insights nor the GUI.
+remain intact. It does not install Insights.
 
 ```console
 git clone --branch stable --single-branch https://github.com/jukqaz/groundline.git groundline-install
