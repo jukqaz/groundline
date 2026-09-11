@@ -409,7 +409,14 @@ fn select_rule(e: &ModelEvidence, s: Option<&Sample>, audit: &Value) -> Option<R
         .and_then(|root| root.pointer("/tools/calls_in_exact_repeated_groups"))
         .and_then(Value::as_u64)
         .unwrap_or(0);
-    if calls > 0 && repeated as f64 / calls as f64 >= 0.10 {
+    let failures = audit
+        .get("root")
+        .and_then(|root| root.pointer("/tools/failure_signals/nonzero_exit"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    if calls > 0
+        && (repeated as f64 / calls as f64 >= 0.10 || failures as f64 / calls as f64 >= 0.04)
+    {
         candidates.push(Rule::DiagnoseBeforeRetry);
     }
     candidates
@@ -780,7 +787,10 @@ fn review(
     let rule = loop {
         let candidate = select_rule(&remaining, sample.as_ref(), &audit).or_else(|| {
             let workflow = &report.weekly_metrics.workflow;
-            (workflow.repeated_call_rate.is_some_and(|rate| rate >= 0.10)
+            ((workflow.repeated_call_rate.is_some_and(|rate| rate >= 0.10)
+                || workflow
+                    .failure_signal_rate
+                    .is_some_and(|rate| rate >= 0.04))
                 && remaining
                     .behavior_focus
                     .contains(&Rule::DiagnoseBeforeRetry))
@@ -854,13 +864,34 @@ fn review(
     out["model_context_sha256"] = json!(context);
     out["model_evidence_fresh"] = json!(true);
     out["latest_model_independently_verified"] = json!(false);
-    out["insights"] = json!({"requested_days":report.requested_days,"event_count":report.coverage.event_count,
-        "root_observations":report.coverage.observed_root_count,"unique_task_count_available":false,
-        "quality":report.data_quality.status,"workflow":report.weekly_metrics.workflow,
-        "tokens":report.weekly_metrics.tokens,"verification":report.weekly_metrics.verification,"model_effort_tokens_available":false});
+    out["insights"] = json!({
+        "requested_days": report.requested_days,
+        "event_count": report.coverage.event_count,
+        "root_observations": report.coverage.observed_root_count,
+        "unique_task_count_available": false,
+        "quality": report.data_quality.status,
+        "data_quality": report.data_quality,
+        "coverage": report.coverage,
+        "freshness_status": report.collection_health.freshness_status,
+        "groundline_versions": report.cohorts.event_distributions.groundline_version,
+        "model_effort_context_distribution": report.cohorts.model_effort_context_distribution,
+        "workflow": report.weekly_metrics.workflow,
+        "tokens": report.weekly_metrics.tokens,
+        "verification": report.weekly_metrics.verification,
+        "model_effort_tokens_available": false,
+        "model_performance_attribution_available": false,
+    });
     out["outcomes"] = sample.as_ref().map(metrics).unwrap_or(Value::Null);
     out["candidate"] = rule
-        .map(|r| json!({"rule":r,"instruction":r.instruction()}))
+        .map(|r| json!({
+            "rule": r,
+            "instruction": r.instruction(),
+            "evidence_class": "review_candidate_not_measured_improvement",
+            "review_note": match r {
+                Rule::DiagnoseBeforeRetry => "Classify expected nonzero results, legitimate polling, and environment failures before treating aggregate signals as wasted work. Confirm avoidable retries in direct outcomes before applying a trial.",
+                Rule::ApprovalContinuity => "Distinguish redundant approval pauses from material missing choices or new authority.",
+            },
+        }))
         .unwrap_or(Value::Null);
     out["automatic_application_eligible"] = json!(reasons.is_empty());
     out["state_preflight_checked"] = json!(state_checked);

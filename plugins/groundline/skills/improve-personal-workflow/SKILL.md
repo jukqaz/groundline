@@ -23,3 +23,6 @@ When the user requests improvement from their usage data or a personal trial,
 read [the workflow and contract](../../references/personal-improvement.md) and
 [platform commands](../../references/platform-commands.md). Insights supplies
 owner reports, Core validates offline, and native Codex reviews the result.
+Keep partial evidence visible. A trial's unmet evidence gate does not block
+separately authorized repairs to source defects or conflicting guidance found
+during the review; use the guidance-review route for those repairs.

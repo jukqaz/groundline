@@ -84,12 +84,22 @@ or make external writes merely to satisfy this document.
 | Research the selected model's guidance without requesting a personal trial | Fetch current official docs and inspect relevant instructions; no Insights credentials or usage-report prerequisite |
 | General guidance alignment with an intentional model/effort selection | Preserve the selection; do not run the opt-in `setup` preset |
 | Change approach or move between repositories within an authorized task | Reconcile the affected scope in place; no unsolicited task or fork |
+| Review Insights with GPT-6 or GPT-5.6 selected | Preserve model/effort/tier; show cohort and coverage limits; no model-performance claim from aggregate counters |
+| Failure signals are high but exact repetition is low | Propose bounded diagnosis; classify expected results and environment failures before treating retries as waste |
+| Partial historical report exposes a source-guidance conflict | Keep the trial OBSERVE gate; complete separately authorized source repair without deleting data or fabricating outcomes |
+| Long tasks or compactions trigger weekly advice | Reconcile within the current task; no inferred new task, extra approval, or recurring schedule |
 | Request a local app removal | Verify absence and stopped processes; no unrelated plugin upgrade or release pipeline |
 
 `groundline-contracts` batch tests exercise the deterministic task-boundary
 advice, including scope changes during final verification and explicit task/fork
 requests. They do not prove a model followed the skill text. Metadata validation
 and reduced instruction word counts likewise are not model-performance results.
+
+The contracts and CLI suites also exercise Astra/Sol catalog inputs, advisory
+failure candidates from each aggregate source, missing/fallback evidence
+preservation, and refusal to apply without matching direct outcomes. An offline
+replay with real reports validates routing and contracts; it is not an inference
+run with either model or evidence of improved completion time.
 
 Record the source revision, installed fingerprint, model/effort, requested
 scope, actions, outcome, and unverified lanes. Keep raw transcripts, credentials,

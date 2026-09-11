@@ -59,6 +59,19 @@ observations sum collection windows and are not unique completed tasks. Mixed
 versions, missing usage, and historical gaps must not be hidden. Model/effort
 context counts cannot attribute tokens or establish model efficiency.
 
+Review output retains the report's quality reasons, coverage denominators,
+missing/fallback usage counts, package versions, and model/effort context counts.
+Small collection-window samples are distinct from missing usage; neither proves
+database row loss. Preserve incomplete history and nullable metrics. Mixed
+cohorts do not establish GPT-6 or GPT-5.6 performance.
+
+Repeated calls at 10% or failure signals at 4% can propose diagnosis for review
+from either the native audit or Insights. These are triage thresholds, not model
+performance targets or evidence of avoidable retries. Classify expected nonzero
+results and environment failures first. A candidate remains OBSERVE until the
+existing trial gates and relevant direct outcomes are satisfied. Separately
+authorized fixes to recommendation code or guidance can proceed without a trial.
+
 When stored history cannot satisfy the strict current report contract, the API
 returns HTTP 422 report_contract_rejected. This is separate from a storage
 outage. Preserve that history and report the unavailable window explicitly;
@@ -181,7 +194,7 @@ Instructions come from reviewed source, never remote text. Short/broad messages
 and high effort alone do not select a rule. A trial requires fresh evidence,
 PASS report quality/native audit, ten directly evidenced outcomes, and a
 matching intervention/retry problem inside those outcomes. Aggregated repetition
-alone cannot authorize application. Existing baseline guidance must have verified
+or failure signals alone cannot authorize application. Existing baseline guidance must have verified
 activation. Ten is a
 minimum gate, not statistical significance. Missing evidence yields OBSERVE and
 never writes guidance, even with --apply.

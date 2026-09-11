@@ -60,37 +60,37 @@ const RATIO_METRIC_FIELDS: &[&str] = &[
 
 const OPTIMIZATION_ACTIONS: &[(&str, &[&str])] = &[
     (
-        "collect_synthesize_freeze",
+        "reconcile_in_current_task",
         &[
-            "collect_observations",
-            "synthesize_once",
-            "freeze_one_batch",
-            "finish_frozen_batch",
+            "reuse_completed_work_and_relevant_evidence",
+            "reconcile_scope_and_existing_authority",
+            "settle_next_action_in_current_task",
+            "complete_authorized_work",
             "defer_nonblocking_additions",
-            "open_new_task_on_outcome_change",
         ],
     ),
     (
         "diagnose_before_retry",
         &[
-            "stop_same_condition_after_two_failures",
-            "require_new_evidence_before_retry",
+            "classify_expected_results_and_environment_failures",
+            "require_changed_condition_or_bounded_transient_retry",
+            "reuse_passing_verification_until_relevant_change",
             "keep_verification_bounded",
         ],
     ),
     (
         "measure_outcomes_before_effort_change",
         &[
-            "keep_active_task_model_unchanged",
+            "preserve_selected_model_effort_and_service_tier",
             "record_task_shape_and_outcome",
-            "compare_effort_at_next_task_boundary",
+            "compare_only_matching_outcome_cohorts",
         ],
     ),
     (
         "preserve_current_workflow",
         &[
-            "keep_current_batch_boundary",
-            "review_again_after_five_completed_roots",
+            "continue_authorized_work_in_current_task",
+            "reassess_when_relevant_evidence_changes",
         ],
     ),
 ];
@@ -359,10 +359,11 @@ fn chronicle_signals(packet: &Value) -> Result<BTreeMap<&'static str, u64>, Cont
 pub fn fuse(audit: &Value, chronicle: &Value) -> Result<Value, ContractError> {
     let metrics = audit_metrics(audit)?;
     let signals = chronicle_signals(chronicle)?;
-    let recommendation = if signals["goal_switches"] > 0 {
-        "open_new_task_at_goal_boundary"
-    } else if signals["implementation_restarts"] >= 2 || signals["user_corrections"] >= 3 {
-        "collect_synthesize_freeze_before_implementation"
+    let recommendation = if signals["goal_switches"] > 0
+        || signals["implementation_restarts"] >= 2
+        || signals["user_corrections"] >= 3
+    {
+        "reconcile_in_current_task"
     } else if signals["app_context_switches"] >= 5 {
         "review_task_boundary"
     } else {
@@ -842,7 +843,7 @@ pub fn recommend_weekly_optimization(audit: &Value) -> Result<Value, ContractErr
             || (signal_number("short_message_ratio") >= 0.50
                 && broad_messages >= (root_count * 2).max(1));
         if boundary_pressure {
-            candidates.push("collect_synthesize_freeze");
+            candidates.push("reconcile_in_current_task");
         }
         if signal_number("repeated_call_ratio") >= 0.10
             || signal_number("nonzero_exit_ratio") >= 0.04
@@ -857,13 +858,8 @@ pub fn recommend_weekly_optimization(audit: &Value) -> Result<Value, ContractErr
         .first()
         .copied()
         .unwrap_or("preserve_current_workflow");
-    let confidence = if evidence_quality == "sufficient"
-        && recommended == "collect_synthesize_freeze"
-        && boundary_review
-        && signal_number("compactions_per_root") >= 2.0
-    {
-        "high"
-    } else if evidence_quality == "sufficient" {
+    // Aggregate activity supports a review candidate, not measured harm or benefit.
+    let confidence = if evidence_quality == "sufficient" {
         "medium"
     } else {
         "low"
@@ -886,7 +882,8 @@ pub fn recommend_weekly_optimization(audit: &Value) -> Result<Value, ContractErr
             "confidence": confidence,
             "proposed_agent_actions": actions,
             "user_behavior_change_required": false,
-            "user_decision_required": true,
+            "user_decision_required": false,
+            "authority_basis": "existing_scoped_approval",
         },
         "deferred_candidate_codes": candidates.into_iter().skip(1).collect::<Vec<_>>(),
         "quality_contract": {
@@ -894,13 +891,15 @@ pub fn recommend_weekly_optimization(audit: &Value) -> Result<Value, ContractErr
             "verification_outcome_is_a_tool_result_proxy": true,
             "direct_completion_outcome_observed": false,
             "direct_rework_observed": false,
+            "failure_signals_require_classification": true,
+            "long_work_is_not_failure": true,
             "model_or_effort_change_allowed": false,
             "one_candidate_only": true,
             "bounded_partial_sample_used": bounded_partial,
             "generalization_to_unselected_roots_allowed": evidence_quality == "sufficient",
         },
         "automatic_application_allowed": false,
-        "weekly_review_required": true,
+        "weekly_review_required": false,
         "settings_changed": false,
         "mutation_performed": false,
         "raw_content_emitted": false,
@@ -978,10 +977,7 @@ mod tests {
             }),
         )
         .expect("valid evidence");
-        assert_eq!(
-            result["recommendation"],
-            "collect_synthesize_freeze_before_implementation"
-        );
+        assert_eq!(result["recommendation"], "reconcile_in_current_task");
         assert_eq!(result["chronicle_role"], "behavior_boundary_only");
         assert_eq!(result["token_conversion_performed"], false);
     }
@@ -1083,9 +1079,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn weekly_recommendation_matches_the_existing_quality_contract() {
-        let result = recommend_weekly_optimization(&json!({
+    fn weekly_audit() -> serde_json::Value {
+        json!({
             "kind": "groundline-codex-weekly-audit",
             "schema": 1,
             "status": "PASS",
@@ -1116,13 +1111,27 @@ mod tests {
             "thread_ids_emitted": false,
             "rollout_paths_emitted": false,
             "secret_value_printed": false
-        }))
-        .expect("valid weekly audit");
+        })
+    }
+
+    #[test]
+    fn weekly_recommendation_preserves_authority_and_evidence_limits() {
+        let result = recommend_weekly_optimization(&weekly_audit()).unwrap();
         assert_eq!(
             result["recommended_change"]["code"],
-            "collect_synthesize_freeze"
+            "reconcile_in_current_task"
         );
-        assert_eq!(result["recommended_change"]["confidence"], "high");
+        assert_eq!(result["recommended_change"]["confidence"], "medium");
+        assert_eq!(
+            result["recommended_change"]["user_decision_required"],
+            false
+        );
+        assert_eq!(result["automatic_application_allowed"], false);
+        assert_eq!(result["weekly_review_required"], false);
+        assert_eq!(
+            result["quality_contract"]["direct_completion_outcome_observed"],
+            false
+        );
         assert_eq!(result["signals"]["verification_outcome_coverage"], 0.9);
         assert_eq!(result["signals"]["verification_success_ratio"], 0.7778);
         assert_eq!(
@@ -1132,5 +1141,67 @@ mod tests {
                 "measure_outcomes_before_effort_change"
             ])
         );
+    }
+
+    #[test]
+    fn model_and_effort_labels_do_not_authorize_task_or_setting_changes() {
+        for model in ["gpt-6-astra", "gpt-5.6-sol"] {
+            for effort in ["high", "xhigh", "max", "ultra"] {
+                let mut audit = weekly_audit();
+                audit["root"]["model_effort"]["counts"] = json!({format!("{model}|{effort}"): 20});
+                let result = recommend_weekly_optimization(&audit).unwrap();
+                assert_eq!(
+                    result["recommended_change"]["code"],
+                    "reconcile_in_current_task"
+                );
+                assert!(
+                    result["recommended_change"]["proposed_agent_actions"]
+                        .as_array()
+                        .unwrap()
+                        .contains(&json!("complete_authorized_work"))
+                );
+                assert!(!result.to_string().contains("open_new_task"));
+                assert_eq!(result["settings_changed"], false);
+                assert_eq!(
+                    result["quality_contract"]["model_or_effort_change_allowed"],
+                    false
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn partial_activity_does_not_require_a_new_decision_or_recurring_review() {
+        let mut audit = weekly_audit();
+        audit["status"] = json!("PARTIAL");
+        let result = recommend_weekly_optimization(&audit).unwrap();
+        assert_eq!(
+            result["recommended_change"]["code"],
+            "preserve_current_workflow"
+        );
+        assert_eq!(
+            result["recommended_change"]["user_decision_required"],
+            false
+        );
+        assert_eq!(result["automatic_application_allowed"], false);
+        assert_eq!(result["weekly_review_required"], false);
+    }
+
+    #[test]
+    fn observed_goal_switches_only_reconcile_the_current_task() {
+        let result = fuse(
+            &audit(),
+            &json!({
+                "kind": "groundline-chronicle-aggregate", "schema": 1,
+                "raw_content_excluded": true, "chronicle_state_changed": false,
+                "experiment_ledger_changed": false,
+                "signals": {"goal_switches": 1, "implementation_restarts": 0,
+                    "user_corrections": 0, "app_context_switches": 0,
+                    "completed_outcome_observations": 0}
+            }),
+        )
+        .unwrap();
+        assert_eq!(result["recommendation"], "reconcile_in_current_task");
+        assert_eq!(result["mutation_performed"], false);
     }
 }
