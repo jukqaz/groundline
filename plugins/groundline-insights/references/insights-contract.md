@@ -78,8 +78,9 @@ the updated executable on every collector process, including detached hooks.
 Every due worker cycle checks `/healthz` before enrollment or upload, even when
 a collector token is already cached. The API advertises Basic envelope schema
 versions and a semantic allowlist revision in `ingest_capabilities`. Collectors
-require schema 5 and revision 3 or newer, not an exact package version. Revision 3
-includes the authoritative `current_generation` in the enrollment response.
+require schema 5 and revision 4 or newer, not an exact package version. Revision 4
+requires coherent usage totals and provenance counters. Enrollment includes the
+authoritative `current_generation`.
 Re-enroll once per due cycle with the existing identity and token, and use that
 generation when staging new events. Never infer zero from a cached credential
 or overwrite a prepared event after a generation changes. Missing
@@ -193,6 +194,26 @@ tables. Reports and Grafana read the `basic_active` view with `FINAL`, while
 storage counters expose any physical duplicate excess caused by a race or
 external writer. Logical deduplication is therefore part of the read contract;
 physical duplicates remain an observable quality signal.
+
+`basic_current` contains receipts for the current collector generations.
+`basic_active` selects only current Codex aggregates with observed usage for each
+present component, coherent counters, and readable, classified input.
+`basic_quarantined` contains the complementary current receipts. A lifecycle
+window can legitimately have activity before provider usage appears; receiving
+that window must not stall collection or turn unknown usage into measured zero.
+Its receipt remains idempotent, but it does not enter analytical metrics.
+Reports expose `collection_health.quarantined_event_count` and the
+`events_quarantined` quality reason rather than hiding exclusions behind PASS.
+These views do not mutate or repair native Codex task databases.
+
+The producer and API reject token splits larger than their totals, cache or
+reasoning counts larger than their parents, and inconsistent usage provenance.
+A ClickHouse constraint also guards root token bounds against direct writes.
+Total-only provider records remain valid; missing splits are never fabricated.
+All receipts retain the owner-configured TTL and quotas. Historical cleanup is
+an explicit owner operation: back up exact candidate rows and DDL on the NAS,
+verify their checksum and round trip, delete only captured event IDs, and prove
+the retained rows' count and content fingerprint are unchanged.
 
 The service applies an owner-configured retention TTL, retained per-collector
 event and logical-payload quotas, and dataset row/byte watermarks. Ingest stops at

@@ -57,6 +57,7 @@ const REPORT_DELIVERY_OVERDUE_HOURS: u64 = 24;
 const REPORT_CLOCK_SKEW_TOLERANCE_MINUTES: u64 = 5;
 const REPORT_MINIMUM_EVENTS: u64 = 2;
 const REPORT_MINIMUM_ROOTS: u64 = 5;
+const TRUSTED_EVENT_PREDICATE: &str = include_str!("trusted-event.sql");
 const STORAGE_MIGRATIONS: &[&str] = &[
     "CREATE DATABASE IF NOT EXISTS groundline",
     r#"CREATE TABLE IF NOT EXISTS groundline.basic_weekly
@@ -583,11 +584,26 @@ impl ClickHouse {
         )
         .await?;
         for query in [
-            "CREATE OR REPLACE VIEW groundline.basic_active AS SELECT events.* FROM (SELECT * FROM groundline.basic_weekly FINAL) AS events INNER JOIN (SELECT collector_id, current_generation FROM groundline.collectors FINAL WHERE revoked = 0) AS active ON events.collector_id = active.collector_id AND events.collection_generation = active.current_generation",
+            "ALTER TABLE groundline.basic_weekly ADD CONSTRAINT IF NOT EXISTS root_usage_bounds CHECK cached_input_tokens <= input_tokens AND reasoning_output_tokens <= output_tokens AND total_tokens >= input_tokens AND total_tokens - least(total_tokens, input_tokens) >= output_tokens",
+            "CREATE OR REPLACE VIEW groundline.basic_current AS SELECT events.* FROM (SELECT * FROM groundline.basic_weekly FINAL) AS events INNER JOIN (SELECT collector_id, current_generation FROM groundline.collectors FINAL WHERE revoked = 0) AS active ON events.collector_id = active.collector_id AND events.collection_generation = active.current_generation",
             "CREATE TABLE IF NOT EXISTS groundline.release_policy (policy_key LowCardinality(String), latest_version String, minimum_supported_version String, updated_at DateTime64(3, 'UTC')) ENGINE = ReplacingMergeTree(updated_at) ORDER BY policy_key",
             "ALTER TABLE groundline.release_policy ADD COLUMN IF NOT EXISTS retention_days UInt16 DEFAULT 365",
         ] {
             self.request(query, &[], None).await?;
+        }
+        for (name, condition) in [
+            ("basic_active", format!("({TRUSTED_EVENT_PREDICATE})")),
+            (
+                "basic_quarantined",
+                format!("NOT ({TRUSTED_EVENT_PREDICATE})"),
+            ),
+        ] {
+            self.request(
+                &format!("CREATE OR REPLACE VIEW groundline.{name} AS SELECT * FROM groundline.basic_current WHERE {condition}"),
+                &[],
+                None,
+            )
+            .await?;
         }
         let policy = json!({
             "policy_key":"stable",
@@ -1808,6 +1824,9 @@ fn build_report(days: u16, end: DateTime<Utc>, latest_version: &str, rows: &Repo
     if count(storage, "ttl_expired_event_row_count") > 0 {
         quality.insert("retention_cleanup_pending".to_owned());
     }
+    if count(storage, "quarantined_event_count") > 0 {
+        quality.insert("events_quarantined".to_owned());
+    }
     if count(storage, "overdue_delivery_event_count") > 0 {
         quality.insert("event_delivery_overdue".to_owned());
     } else if count(storage, "delayed_delivery_event_count") > 0 {
@@ -1877,7 +1896,7 @@ fn build_report(days: u16, end: DateTime<Utc>, latest_version: &str, rows: &Repo
             "roster_status":"AVAILABLE","latest_received_at_utc":latest_received,"freshness_status":freshness,
             "freshness_threshold_hours":REPORT_FRESHNESS_HOURS,"initial_report_grace_hours":INITIAL_REPORT_GRACE_HOURS,
             "stored_event_row_count":count(storage,"stored_event_row_count"),"deduplicated_event_count":count(storage,"deduplicated_event_count"),
-            "duplicate_event_row_count":count(storage,"duplicate_event_row_count"),"ttl_expired_event_row_count":count(storage,"ttl_expired_event_row_count"),"delayed_delivery_event_count":count(storage,"delayed_delivery_event_count"),
+            "duplicate_event_row_count":count(storage,"duplicate_event_row_count"),"ttl_expired_event_row_count":count(storage,"ttl_expired_event_row_count"),"quarantined_event_count":count(storage,"quarantined_event_count"),"delayed_delivery_event_count":count(storage,"delayed_delivery_event_count"),
             "overdue_delivery_event_count":count(storage,"overdue_delivery_event_count"),"clock_skew_event_count":count(storage,"clock_skew_event_count"),
             "delivery_delay_threshold_hours":REPORT_DELIVERY_DELAY_HOURS,"delivery_overdue_threshold_hours":REPORT_DELIVERY_OVERDUE_HOURS,
             "clock_skew_tolerance_minutes":REPORT_CLOCK_SKEW_TOLERANCE_MINUTES
@@ -1950,7 +1969,7 @@ fn validated_report_response(report: Value) -> Result<Response, ApiError> {
 
 const REPORT_SUMMARY_QUERY: &str = r#"SELECT count() AS event_count, sum(eligible_root_count) AS eligible_root_total, sum(selected_root_count) AS selected_root_total, sum(observed_root_count) AS observed_root_total, sum(task_completed) AS completed_turn_count, sum(unreadable_root_count) AS unreadable_root_count, sum(root_truncated_count) AS root_truncated_count, sum(truncated_count) AS non_root_truncated_count, sum(originator_unclassified_excluded_root_count) AS originator_unclassified_count, sum(originator_source_fallback_root_count) AS originator_source_fallback_count, countIf(observed_root_count > 0) AS root_usage_applicable_event_count, countIf(observed_root_count > 0 AND usage_source IN ('unavailable','unknown')) AS root_usage_missing_event_count, countIf(fallback_rollout_count > 0) AS root_usage_fallback_event_count, countIf(delegated_count > 0) AS delegated_usage_applicable_event_count, countIf(delegated_count > 0 AND delegated_usage_source IN ('unavailable','unknown')) AS delegated_usage_missing_event_count, countIf(delegated_fallback_rollout_count > 0) AS delegated_usage_fallback_event_count, countIf(guardian_count > 0) AS guardian_usage_applicable_event_count, countIf(guardian_count > 0 AND guardian_usage_source IN ('unavailable','unknown')) AS guardian_usage_missing_event_count, countIf(guardian_fallback_rollout_count > 0) AS guardian_usage_fallback_event_count, sum(guardian_incomplete_excluded_count) AS guardian_incomplete_excluded_count, countIf(selection_mode != 'activity_window') AS completed_root_coverage_applicable_event_count, countIf(capability_completed_root_coverage = 1 AND selection_mode != 'activity_window') AS completed_root_coverage_capable_event_count, countIf(capability_latency_completed_count = 1) AS latency_capable_event_count, countIf(capability_root_boundary_counts = 1) AS boundary_count_capable_event_count, countIf(guardian_review_count > 0) AS guardian_attribution_applicable_event_count, countIf(guardian_review_count > 0 AND capability_guardian_workspace_attribution = 1) AS guardian_attribution_capable_event_count, countIf(root_status != 'PASS' OR delegated_status != 'PASS' OR guardian_status != 'PASS') AS component_nonpass_event_count, countIf(sample_sufficient = 1) AS sample_sufficient_event_count, countIf(sample_sufficient = 0) AS sample_insufficient_event_count, countIf((observed_root_count > 0 AND usage_source IN ('unavailable','unknown')) OR (delegated_count > 0 AND delegated_usage_source IN ('unavailable','unknown')) OR (guardian_count > 0 AND guardian_usage_source IN ('unavailable','unknown'))) AS usage_missing_count, sum(fallback_rollout_count + delegated_fallback_rollout_count + guardian_fallback_rollout_count) AS usage_fallback_count, sum(input_tokens) AS input_tokens, sum(cached_input_tokens) AS cached_input_tokens, sum(non_cached_input_tokens) AS non_cached_input_tokens, sum(output_tokens) AS output_tokens, sum(reasoning_output_tokens) AS reasoning_output_tokens, sum(total_tokens) AS total_tokens, sum(delegated_total_tokens) AS delegated_total_tokens, sum(guardian_total_tokens) AS guardian_total_tokens, sum(compactions) AS compactions, sum(long_turn_count) AS long_turn_count, sum(exact_repeated_call_groups) AS exact_repeated_call_groups, sum(calls_in_exact_repeated_groups) AS calls_in_exact_repeated_groups, sum(nonzero_exit_count + timeout_count + rejected_count) AS failure_signal_count, sum(tool_call_count) AS tool_call_count, sum(user_messages_with_text) AS user_messages_with_text, sum(short_message_count) AS short_message_count, sum(broad_scope_message_count) AS broad_scope_message_count, sum(boundary_review_root_count) AS boundary_review_root_count, sum(long_lived_root_count) AS long_lived_root_count, sum(verification_tool_calls) AS verification_tool_call_count, sum(verification_success_count) AS verification_success_count, sum(verification_failure_count) AS verification_failure_count, sum(verification_unresolved_count) AS verification_unresolved_count, sum(guardian_review_count) AS guardian_review_total, sum(guardian_workspace_attributed_review_count) AS guardian_workspace_attributed_review_count FROM groundline.basic_active WHERE ifNull(period_end, generated_at) > parseDateTimeBestEffort({start:String}) AND ifNull(period_end, generated_at) <= parseDateTimeBestEffort({end:String}) FORMAT JSONEachRow"#;
 const REPORT_FLEET_QUERY: &str = r#"WITH policy AS (SELECT argMax(latest_version, updated_at) AS latest_version FROM groundline.release_policy FINAL WHERE policy_key='stable'), enrolled AS (SELECT collector_id, created_at, enrollment_schema_version, os_family, runtime_family, execution_mode, groundline_version FROM groundline.collectors FINAL WHERE revoked=0), any_events AS (SELECT collector_id, toUInt8(1) AS present, max(received_at) AS last_seen FROM groundline.basic_active GROUP BY collector_id), reporting AS (SELECT collector_id, toUInt8(1) AS present FROM groundline.basic_active WHERE ifNull(period_end, generated_at) > parseDateTimeBestEffort({start:String}) AND ifNull(period_end, generated_at) <= parseDateTimeBestEffort({end:String}) GROUP BY collector_id), current_events AS (SELECT collector_id, received_at, ifNull(period_end, generated_at) AS event_time FROM groundline.basic_active CROSS JOIN policy WHERE groundline_version=policy.latest_version), current_observed AS (SELECT collector_id, toUInt8(1) AS present, max(received_at) AS last_seen FROM current_events GROUP BY collector_id), current_reporting AS (SELECT collector_id, toUInt8(1) AS present FROM current_events WHERE event_time > parseDateTimeBestEffort({start:String}) AND event_time <= parseDateTimeBestEffort({end:String}) GROUP BY collector_id) SELECT policy.latest_version AS policy_latest_version, count() AS enrolled_installation_count, countIf(enrollment_schema_version=2 AND os_family!='unknown' AND runtime_family!='unknown' AND execution_mode!='unknown' AND groundline_version!='unknown') AS metadata_known_installation_count, count() - metadata_known_installation_count AS metadata_unknown_installation_count, countIf(ifNull(any_events.present,0)=1) AS observed_installation_count, countIf(ifNull(reporting.present,0)=1) AS reporting_installation_count, countIf(any_events.last_seen >= now('UTC') - INTERVAL 7 DAY) AS recent_installation_count, countIf(ifNull(any_events.present,0)=0) AS never_reported_installation_count, countIf(ifNull(any_events.present,0)=0 AND enrolled.created_at > now('UTC') - INTERVAL 24 HOUR) AS pending_initial_report_installation_count, countIf(ifNull(any_events.present,0)=0 AND enrolled.created_at <= now('UTC') - INTERVAL 24 HOUR) AS overdue_never_reported_installation_count, countIf(ifNull(any_events.present,0)=1 AND any_events.last_seen < now('UTC') - INTERVAL 7 DAY) AS stale_observed_installation_count, countIf(enrolled.groundline_version=policy.latest_version) AS current_package_claim_installation_count, countIf(enrolled.groundline_version=policy.latest_version AND ifNull(current_observed.present,0)=0) AS current_package_claim_unobserved_installation_count, countIf(ifNull(current_observed.present,0)=1) AS current_observed_installation_count, countIf(ifNull(current_reporting.present,0)=1) AS current_reporting_installation_count, countIf(current_observed.last_seen >= now('UTC') - INTERVAL 7 DAY) AS current_recent_installation_count, if(countIf(ifNull(any_events.present,0)=1)=0, CAST(NULL, 'Nullable(String)'), formatDateTime(max(any_events.last_seen), '%Y-%m-%dT%H:%i:%SZ', 'UTC')) AS latest_received_at_utc, toUInt8(max(any_events.last_seen) >= now('UTC') - INTERVAL 48 HOUR) AS fresh FROM enrolled CROSS JOIN policy LEFT JOIN any_events USING collector_id LEFT JOIN reporting USING collector_id LEFT JOIN current_observed USING collector_id LEFT JOIN current_reporting USING collector_id GROUP BY policy.latest_version FORMAT JSONEachRow"#;
-const REPORT_STORAGE_QUERY: &str = r#"WITH policy AS (SELECT argMax(retention_days,updated_at) AS retention_days FROM groundline.release_policy FINAL WHERE policy_key='stable'), logical AS (SELECT event_id, received_at, generated_at FROM groundline.basic_active WHERE ifNull(period_end, generated_at) > parseDateTimeBestEffort({start:String}) AND ifNull(period_end, generated_at) <= parseDateTimeBestEffort({end:String})), active AS (SELECT collector_id,current_generation FROM groundline.collectors FINAL WHERE revoked=0), stored AS (SELECT events.event_id FROM groundline.basic_weekly events INNER JOIN active ON events.collector_id=active.collector_id AND events.collection_generation=active.current_generation INNER JOIN logical USING event_id) SELECT (SELECT count() FROM stored) AS stored_event_row_count, (SELECT count() FROM logical) AS deduplicated_event_count, stored_event_row_count-deduplicated_event_count AS duplicate_event_row_count, (SELECT count() FROM groundline.basic_weekly CROSS JOIN policy WHERE received_at < now('UTC') - toIntervalDay(policy.retention_days)) AS ttl_expired_event_row_count, (SELECT countIf(dateDiff('second',generated_at,received_at)>21600) FROM logical) AS delayed_delivery_event_count, (SELECT countIf(dateDiff('second',generated_at,received_at)>86400) FROM logical) AS overdue_delivery_event_count, (SELECT countIf(generated_at>received_at+INTERVAL 5 MINUTE) FROM logical) AS clock_skew_event_count FORMAT JSONEachRow"#;
+const REPORT_STORAGE_QUERY: &str = r#"WITH policy AS (SELECT argMax(retention_days,updated_at) AS retention_days FROM groundline.release_policy FINAL WHERE policy_key='stable'), logical AS (SELECT event_id, received_at, generated_at FROM groundline.basic_active WHERE ifNull(period_end, generated_at) > parseDateTimeBestEffort({start:String}) AND ifNull(period_end, generated_at) <= parseDateTimeBestEffort({end:String})), active AS (SELECT collector_id,current_generation FROM groundline.collectors FINAL WHERE revoked=0), stored AS (SELECT events.event_id FROM groundline.basic_weekly events INNER JOIN active ON events.collector_id=active.collector_id AND events.collection_generation=active.current_generation INNER JOIN logical USING event_id) SELECT (SELECT count() FROM stored) AS stored_event_row_count, (SELECT count() FROM logical) AS deduplicated_event_count, stored_event_row_count-deduplicated_event_count AS duplicate_event_row_count, (SELECT count() FROM groundline.basic_weekly CROSS JOIN policy WHERE received_at < now('UTC') - toIntervalDay(policy.retention_days)) AS ttl_expired_event_row_count, (SELECT countIf(dateDiff('second',generated_at,received_at)>21600) FROM logical) AS delayed_delivery_event_count, (SELECT countIf(dateDiff('second',generated_at,received_at)>86400) FROM logical) AS overdue_delivery_event_count, (SELECT countIf(generated_at>received_at+INTERVAL 5 MINUTE) FROM logical) AS clock_skew_event_count, (SELECT count() FROM groundline.basic_quarantined WHERE ifNull(period_end, generated_at) > parseDateTimeBestEffort({start:String}) AND ifNull(period_end, generated_at) <= parseDateTimeBestEffort({end:String})) AS quarantined_event_count FORMAT JSONEachRow"#;
 const REPORT_EVENT_COHORT_QUERY: &str = r#"SELECT dimension,value,count() AS count FROM (SELECT 'schema_version' dimension,toString(schema_version) value FROM groundline.basic_active WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) UNION ALL SELECT 'groundline_version',groundline_version FROM groundline.basic_active WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) UNION ALL SELECT 'os_family',os_family FROM groundline.basic_active WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) UNION ALL SELECT 'runtime_family',runtime_family FROM groundline.basic_active WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) UNION ALL SELECT 'execution_mode',execution_mode FROM groundline.basic_active WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String})) GROUP BY dimension,value ORDER BY dimension,value FORMAT JSONEachRow"#;
 const REPORT_INSTALL_COHORT_QUERY: &str = r#"SELECT dimension,value,count() AS count FROM (SELECT 'groundline_version' dimension,groundline_version value FROM groundline.collectors FINAL WHERE revoked=0 UNION ALL SELECT 'os_family',os_family FROM groundline.collectors FINAL WHERE revoked=0 UNION ALL SELECT 'runtime_family',runtime_family FROM groundline.collectors FINAL WHERE revoked=0 UNION ALL SELECT 'execution_mode',execution_mode FROM groundline.collectors FINAL WHERE revoked=0) GROUP BY dimension,value ORDER BY dimension,value FORMAT JSONEachRow"#;
 const REPORT_MODEL_EFFORT_QUERY: &str = r#"SELECT tupleElement(item,1) AS model_family, tupleElement(item,2) AS effort, sum(tupleElement(item,3)) AS context_count FROM groundline.basic_active ARRAY JOIN arrayZip(model_families,efforts,model_effort_counts) AS item WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) GROUP BY model_family,effort ORDER BY model_family,effort FORMAT JSONEachRow"#;
@@ -2451,6 +2470,40 @@ mod tests {
         assert_eq!(row["collection_generation"], 7);
     }
 
+    fn reseal_event(event: &mut Value) {
+        let object = event.as_object_mut().unwrap();
+        object.remove("event_id");
+        object.remove("idempotency_key");
+        let digest = format!("{:x}", Sha256::digest(serde_json::to_vec(event).unwrap()));
+        event["event_id"] = json!(Uuid::new_v5(&Uuid::NAMESPACE_URL, digest.as_bytes()));
+        event["idempotency_key"] = json!(format!("sha256:{digest}"));
+    }
+
+    #[test]
+    fn ingest_rejects_incoherent_usage_even_with_a_valid_digest() {
+        for component in ["root", "delegated", "guardian"] {
+            for (field, value) in [
+                ("cached_input_tokens", json!(1)),
+                ("reasoning_output_tokens", json!(1)),
+                ("input_tokens", json!(1)),
+                ("cumulative_rollout_count", json!(1)),
+            ] {
+                let mut event = integration_event(Uuid::new_v4(), 0);
+                event["metrics"][component]["usage"][field] = value;
+                reseal_event(&mut event);
+                assert!(
+                    validate_basic_event_bytes(&serde_json::to_vec(&event).unwrap()).is_err(),
+                    "{component}.{field}"
+                );
+            }
+        }
+        // A total-only native record remains valid; an absent split is not zero usage.
+        let mut total_only = integration_event(Uuid::new_v4(), 0);
+        total_only["metrics"]["root"]["usage"]["total_tokens"] = json!(7);
+        reseal_event(&mut total_only);
+        assert!(validate_basic_event_bytes(&serde_json::to_vec(&total_only).unwrap()).is_ok());
+    }
+
     fn expand_grafana_time_filter(query: &str) -> Option<String> {
         let marker = "$$__timeFilter(";
         let mut remaining = query;
@@ -2518,6 +2571,17 @@ mod tests {
         let mut queries = Vec::new();
         collect_dashboard_queries(&dashboard, &mut queries);
         queries
+    }
+
+    #[test]
+    fn dashboard_time_filters_are_compose_escaped() {
+        for (index, query) in dashboard_queries().iter().enumerate() {
+            let expanded = expand_grafana_time_filter(query).expect("bounded Grafana macro");
+            assert!(
+                !expanded.contains("$__timeFilter"),
+                "dashboard query {index} contains an unescaped time filter"
+            );
+        }
     }
 
     #[test]
@@ -2858,9 +2922,12 @@ mod tests {
         }
         let queries = dashboard_queries();
         assert!(queries.len() >= 10, "dashboard query inventory shrank");
-        for query in queries {
-            let query = expand_grafana_time_filter(&query).expect("bounded Grafana macro");
-            clickhouse.request(&query, &[], None).await.unwrap();
+        for (index, query) in queries.iter().enumerate() {
+            let query = expand_grafana_time_filter(query).expect("bounded Grafana macro");
+            clickhouse
+                .request(&query, &[], None)
+                .await
+                .unwrap_or_else(|error| panic!("dashboard query {index} failed: {error:?}"));
         }
     }
 
@@ -3097,6 +3164,72 @@ mod tests {
                 .unwrap_or(0)
                 >= 1,
             "{report}"
+        );
+
+        // A complete lifecycle read can contain no provider usage yet. Keep its
+        // durable receipt for retries, but exclude it from analytical metrics.
+        let mut unmeasured = integration_event(collector_id, 7);
+        unmeasured["metrics"]["root"]["usage"]["source"] = json!("unavailable");
+        unmeasured["metrics"]["root"]["usage"]["rollout_count_with_usage"] = json!(0);
+        unmeasured["metrics"]["root"]["usage"]["fallback_rollout_count"] = json!(0);
+        reseal_event(&mut unmeasured);
+        assert!(validate_basic_event_bytes(&serde_json::to_vec(&unmeasured).unwrap()).is_ok());
+        let mut row = event_row(&unmeasured, Utc::now()).unwrap();
+        clickhouse
+            .request(
+                "INSERT INTO groundline.basic_weekly FORMAT JSONEachRow",
+                &[],
+                Some(serde_json::to_vec(&row).unwrap()),
+            )
+            .await
+            .unwrap();
+        for (view, expected) in [
+            ("basic_current", b"2\n"),
+            ("basic_active", b"1\n"),
+            ("basic_quarantined", b"1\n"),
+        ] {
+            let result = clickhouse.request(&format!("SELECT count() FROM groundline.{view} WHERE collector_id={{id:UUID}} FORMAT TabSeparated"), &[("id", collector_id.to_string())], None).await.unwrap();
+            assert_eq!(result, expected, "{view}");
+        }
+        let response = router
+            .clone()
+            .oneshot(local_request(
+                Method::GET,
+                "/v3/reports/weekly?days=7",
+                &"a".repeat(32),
+                None,
+                &[],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let report = response_json(response).await;
+        assert!(
+            report["collection_health"]["quarantined_event_count"]
+                .as_u64()
+                .unwrap()
+                >= 1
+        );
+        assert!(
+            report["data_quality"]["reason_codes"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("events_quarantined"))
+        );
+        assert_eq!(report["coverage"]["root_usage_missing_event_count"], 0);
+
+        // The storage constraint also rejects a direct write that bypasses HTTP.
+        row["event_id"] = json!(Uuid::new_v4());
+        row["cached_input_tokens"] = json!(1);
+        assert!(
+            clickhouse
+                .request(
+                    "INSERT INTO groundline.basic_weekly FORMAT JSONEachRow",
+                    &[],
+                    Some(serde_json::to_vec(&row).unwrap())
+                )
+                .await
+                .is_err()
         );
 
         let response = router

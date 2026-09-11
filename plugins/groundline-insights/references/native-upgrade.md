@@ -36,7 +36,7 @@ verify the installed checksum. Preserve any deliberately pinned source; a
 source-only tag needs an explicitly selected, verified binary distribution.
 
 Before collection, upgrade the owner API and check Basic schema 5 plus ingest
-contract revision 3 or newer. Enrollment must return the current generation;
+contract revision 4 or newer. Enrollment must return the current generation;
 reuse the existing collector identity and token. A package upgrade does not
 convert unsupported local state or skip an incomplete collection window.
 

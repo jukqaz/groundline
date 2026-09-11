@@ -872,6 +872,7 @@ fn review(
         "quality": report.data_quality.status,
         "data_quality": report.data_quality,
         "coverage": report.coverage,
+        "quarantined_event_count": report.collection_health.quarantined_event_count,
         "freshness_status": report.collection_health.freshness_status,
         "groundline_versions": report.cohorts.event_distributions.groundline_version,
         "model_effort_context_distribution": report.cohorts.model_effort_context_distribution,

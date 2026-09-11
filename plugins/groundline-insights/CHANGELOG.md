@@ -4,6 +4,13 @@ This package summary covers the current release line. The repository
 [changelog](https://github.com/jukqaz/groundline/blob/main/CHANGELOG.md) records shared changes. A source version entry
 does not prove that its image or `stable` distribution has been published.
 
+## 0.25.2
+
+- Validate usage bounds and provenance in the producer, API, and root storage constraint.
+- Keep trusted analysis separate from incomplete receipts; expose quarantine counts in reports and Grafana.
+- Preserve no-usage lifecycle receipts, idempotency, consent, cursors, and configured retention.
+- Require ingest contract revision 4. Upgrade the API before the plugins.
+
 ## 0.25.1
 
 - Align the shared release with Core's evidence-based GPT-6/GPT-5.6 workflow review.
