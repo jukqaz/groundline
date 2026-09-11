@@ -199,6 +199,7 @@ services:
       GF_USERS_ALLOW_ORG_CREATE: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_AUTH_BASIC_ENABLED: "true"
+      GF_AUTH_DISABLE_LOGIN_FORM: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
       GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
@@ -248,6 +249,15 @@ configs:
         <query_log remove="remove"/>
         <metric_log remove="remove"/>
         <asynchronous_metric_log remove="remove"/>
+        <text_log>
+          <ttl>event_date + INTERVAL 7 DAY DELETE WHERE level IN ('Trace', 'Debug', 'Information'), event_date + INTERVAL 30 DAY DELETE</ttl>
+        </text_log>
+        <trace_log>
+          <ttl>event_date + INTERVAL 7 DAY DELETE</ttl>
+        </trace_log>
+        <processors_profile_log>
+          <ttl>event_date + INTERVAL 7 DAY DELETE</ttl>
+        </processors_profile_log>
       </clickhouse>
 
   clickhouse_grafana_user:

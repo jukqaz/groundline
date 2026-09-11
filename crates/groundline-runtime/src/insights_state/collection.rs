@@ -206,7 +206,7 @@ mod tests {
             params![rollout.to_str(), at(20).timestamp()],
         )
         .unwrap();
-        let directory = state_directory(&root);
+        let directory = state_directory(&root).unwrap();
         let consent = grant_consent(&directory, at(0)).unwrap();
         let identity = Identity {
             schema_version: 1,
@@ -236,7 +236,7 @@ mod tests {
     #[test]
     fn partial_recovery_freezes_window_and_never_enqueues_partial_or_duplicate_events() {
         let (_temp, root, rollout, identity, consent) = fixture();
-        let dir = state_directory(&root);
+        let dir = state_directory(&root).unwrap();
         let cursor = at(0).to_rfc3339();
         assert!(matches!(
             stage(
@@ -328,7 +328,7 @@ mod tests {
     #[test]
     fn initial_window_uses_seven_days_not_latest_thread_update() {
         let (_temp, root, rollout, identity, consent) = fixture();
-        let dir = state_directory(&root);
+        let dir = state_directory(&root).unwrap();
         write_usage(&rollout, 5, 12);
         stage(
             &dir,
@@ -366,7 +366,7 @@ mod tests {
             !root.join("plugins").exists(),
             "Core is not a collection dependency"
         );
-        let dir = state_directory(&root);
+        let dir = state_directory(&root).unwrap();
         let cursor = at(0).to_rfc3339();
         stage(
             &dir,
@@ -397,7 +397,7 @@ mod tests {
     #[test]
     fn failed_windows_stop_after_three_attempts_and_require_explicit_retry() {
         let (_temp, root, rollout, identity, consent) = fixture();
-        let dir = state_directory(&root);
+        let dir = state_directory(&root).unwrap();
         let cursor = at(0).to_rfc3339();
         for _ in 0..MAX_ATTEMPTS {
             assert!(
@@ -452,7 +452,7 @@ mod tests {
     #[test]
     fn empty_complete_window_can_commit_but_invalid_state_cannot_restart_history() {
         let (_temp, root, _, identity, consent) = fixture();
-        let dir = state_directory(&root);
+        let dir = state_directory(&root).unwrap();
         let end = stage(
             &dir,
             None,

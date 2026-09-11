@@ -60,6 +60,10 @@ Interpret the lanes independently:
   cursor has not advanced. Inspect bounded audit counts, restore missing or
   malformed inputs, and retry once with `worker run-once`. Never edit Codex's
   database or delete the collection receipt to skip evidence.
+  Explicit imported non-Codex tasks are reported locally as
+  `non_codex_excluded_rollout_count` and do not block the Codex window. Unknown
+  originators remain blockers. An older collector may count imported tasks as
+  unclassified; update the collector before retrying the preserved window.
 - `collection_operator_action_required`: three read attempts failed (including
   interrupted attempts). Automatic hooks stop reading this window. Fix the
   cause, then explicitly run `worker run-once`; this does not reset history.

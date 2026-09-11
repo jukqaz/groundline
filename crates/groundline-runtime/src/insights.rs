@@ -181,50 +181,12 @@ pub fn report_url(endpoint: &str, days: u16) -> Result<Url, InsightsRuntimeError
     Ok(url)
 }
 
-fn runtime_family() -> &'static str {
-    match std::env::var("GROUNDLINE_RUNTIME_FAMILY")
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "codex_app" => "codex_app",
-        "codex_cli" => "codex_cli",
-        _ => {
-            let originator = std::env::var("CODEX_INTERNAL_ORIGINATOR_OVERRIDE")
-                .unwrap_or_default()
-                .to_ascii_lowercase();
-            if ["app", "chatgpt", "desktop"]
-                .iter()
-                .any(|marker| originator.contains(marker))
-            {
-                "codex_app"
-            } else {
-                "codex_cli"
-            }
-        }
-    }
-}
-
-fn execution_mode(runtime: &str) -> &'static str {
-    match std::env::var("GROUNDLINE_EXECUTION_MODE")
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "desktop" => "desktop",
-        "remote_headless" => "remote_headless",
-        "local_headless" => "local_headless",
-        _ if runtime == "codex_app" => "desktop",
-        _ => "local_headless",
-    }
-}
-
-pub fn state_directory(codex_home: &Path) -> PathBuf {
-    let runtime = runtime_family();
-    codex_home
+pub fn state_directory(codex_home: &Path) -> Result<PathBuf, crate::environment::EnvironmentError> {
+    let environment = crate::environment::Environment::current()?;
+    Ok(codex_home
         .join("groundline")
         .join("insights")
-        .join(format!("{runtime}-{}", execution_mode(runtime)))
+        .join(format!("{}-{}", environment.runtime, environment.mode)))
 }
 
 pub fn default_codex_home() -> Result<PathBuf, InsightsRuntimeError> {

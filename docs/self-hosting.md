@@ -19,14 +19,14 @@ Only for Tailscale, pass `--require-tailnet --bind-ip 100.64.0.1` with the actua
 
 ## Choose the Insights enrollment credential
 
-Use the API container's `GROUNDLINE_ENROLLMENT_TOKEN` for the desktop enrollment
+Use the API container's `GROUNDLINE_ENROLLMENT_TOKEN` for the collector enrollment
 key. The Compose generator names the same value `ENROLLMENT_TOKEN` in its private
 `secrets.json`. A TrueNAS management API key is for NAS administration, and a
 Grafana administrator password is for dashboard sign-in. Give collectors the
 Insights enrollment key.
 
-If connection checking returns `api_upgrade_required`, update the server to an
-Insights API distribution that supports `/v1/enroll/check` first. A TrueNAS custom
+If collection returns `api_upgrade_required`, update the server to an Insights
+API distribution that advertises the collector's current ingest contract. A TrueNAS custom
 app's `1.0.0` or up-to-date label does not identify the API product version. Verify
 server startup, enrollment credentials, and accepted stored uploads separately.
 
@@ -267,6 +267,23 @@ Sign in as `groundline-admin` with the owner-private
 `GRAFANA_ADMIN_PASSWORD` stored in `SECRETS_FILE`, then confirm the GroundLine
 Insights dashboard loads. Never paste that password into Git, CI, an issue, or a
 shared shell transcript.
+
+Keep `GF_AUTH_BASIC_ENABLED=true` for the stack verifier and
+`GF_AUTH_DISABLE_LOGIN_FORM=false` for interactive owner login. A healthy
+`/api/health` response does not prove either authenticated access or datasource
+queries. Diagnose deployment overrides before resetting a stored password.
+Operator deployments with JWT-only authentication must be checked through their
+configured authenticated access path; Basic or password-login failures alone do
+not establish an outage. Preserve that access boundary instead of enabling an
+alternate login method merely to make a verifier pass.
+
+The Compose template bounds diagnostic logs: `trace_log` and
+`processors_profile_log` keep seven days; `text_log` keeps Trace, Debug, and
+Information entries for seven days and the remaining severities for thirty days.
+This does not change the separate GroundLine event retention policy. Existing
+deployments need explicit configuration application and TTL verification; a
+source-template change alone does not clean an already running database.
+See [ClickHouse TTL](https://clickhouse.com/docs/concepts/features/operations/delete/ttl).
 
 ## 5. Configure each collector
 

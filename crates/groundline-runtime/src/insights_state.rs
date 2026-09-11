@@ -66,6 +66,8 @@ static CRYPTO_PROVIDER: OnceLock<Result<(), ()>> = OnceLock::new();
 pub enum StateError {
     #[error("invalid_owner_profile")]
     InvalidProfile,
+    #[error(transparent)]
+    InvalidEnvironment(#[from] crate::environment::EnvironmentError),
     #[error("local_state_failed")]
     LocalState,
     #[error("unsupported_local_state")]
@@ -130,7 +132,10 @@ impl StateError {
 
     pub fn mutation_performed(&self) -> Option<bool> {
         match self {
-            Self::InvalidProfile | Self::AlreadyRunning | Self::ReconsentRequired => Some(false),
+            Self::InvalidProfile
+            | Self::InvalidEnvironment(_)
+            | Self::AlreadyRunning
+            | Self::ReconsentRequired => Some(false),
             Self::TailnetDisconnected => Some(true),
             Self::Disabled
             | Self::LocalState
@@ -300,40 +305,6 @@ fn parse_timestamp(value: &str) -> Result<DateTime<Utc>, StateError> {
         .map_err(|_| StateError::LocalState)
 }
 
-fn runtime_family() -> String {
-    let explicit = std::env::var("GROUNDLINE_RUNTIME_FAMILY")
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    if matches!(explicit.as_str(), "codex_app" | "codex_cli") {
-        return explicit;
-    }
-    let originator = std::env::var("CODEX_INTERNAL_ORIGINATOR_OVERRIDE")
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    if ["app", "chatgpt", "desktop"]
-        .iter()
-        .any(|marker| originator.contains(marker))
-    {
-        "codex_app".to_owned()
-    } else {
-        "codex_cli".to_owned()
-    }
-}
-
-fn execution_mode(runtime: &str) -> String {
-    match std::env::var("GROUNDLINE_EXECUTION_MODE")
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "desktop" => "desktop".to_owned(),
-        "remote_headless" => "remote_headless".to_owned(),
-        "local_headless" => "local_headless".to_owned(),
-        _ if runtime == "codex_app" => "desktop".to_owned(),
-        _ => "local_headless".to_owned(),
-    }
-}
-
 fn valid_profile(profile: &Profile) -> bool {
     profile.schema_version == 7
         && profile.kind == "groundline-insights-owner-profile"
@@ -360,6 +331,7 @@ fn load_profile(codex_home: &Path) -> Result<Profile, StateError> {
 }
 
 pub fn configure_profile(codex_home: &Path, bytes: &[u8]) -> Result<Value, StateError> {
+    crate::environment::Environment::current()?;
     if bytes.is_empty() || bytes.len() > 16 * 1024 {
         return Err(StateError::InvalidProfile);
     }
@@ -398,16 +370,19 @@ pub fn configure_profile(codex_home: &Path, bytes: &[u8]) -> Result<Value, State
     }))
 }
 
-fn environment() -> (&'static str, String, String) {
+fn environment() -> Result<(&'static str, String, String), StateError> {
     let os = match std::env::consts::OS {
         "macos" => "macos",
         "windows" => "windows",
         "linux" => "linux",
         _ => "unknown",
     };
-    let runtime = runtime_family();
-    let mode = execution_mode(&runtime);
-    (os, runtime, mode)
+    let environment = crate::environment::Environment::current()?;
+    Ok((
+        os,
+        environment.runtime.to_owned(),
+        environment.mode.to_owned(),
+    ))
 }
 
 fn valid_active_consent(value: &Consent) -> bool {
@@ -481,7 +456,7 @@ fn grant_consent(directory: &Path, now: DateTime<Utc>) -> Result<Consent, StateE
 
 fn initialize(directory: &Path, now: DateTime<Utc>) -> Result<(Identity, Consent), StateError> {
     let consent = active_consent(directory)?;
-    let (os, runtime, mode) = environment();
+    let (os, runtime, mode) = environment()?;
     if os == "unknown" {
         return Err(StateError::LocalState);
     }
@@ -563,7 +538,7 @@ fn set_policy(directory: &Path, enabled: bool, now: DateTime<Utc>) -> Result<(),
 }
 
 // Keep this inode: unlinking an advisory lock would let another process lock a
-// different file. The OS releases it if a CLI, desktop, or hook worker exits.
+// different file. The OS releases it if a CLI or hook worker exits.
 fn collection_control_lock(directory: &Path) -> Result<File, StateError> {
     open_or_create_private_lock(&directory.join(COLLECTION_CONTROL_LOCK))
         .map_err(|_| StateError::LocalState)
@@ -763,33 +738,6 @@ async fn check_api_capabilities(profile: &Profile) -> Result<(), StateError> {
     check_api_capabilities_url(endpoint(profile, "/healthz")?).await
 }
 
-/// Explicit, unauthenticated readiness check; never enrolls or uploads data.
-pub async fn server_health(endpoint: &str) -> Result<Value, StateError> {
-    let mut url = report_url(endpoint, 7).map_err(|_| StateError::InvalidProfile)?;
-    url.set_query(None);
-    url.set_path("/healthz");
-    let response = client()?
-        .get(url)
-        .send()
-        .await
-        .map_err(|_| StateError::UploadFailed)?;
-    let status = response.status();
-    if status == reqwest::StatusCode::NOT_FOUND {
-        return Err(StateError::ApiUpgradeRequired);
-    }
-    let (_, value) = bounded_response(response).await?;
-    if !matches!(status.as_u16(), 200 | 503) {
-        return Err(StateError::RemoteRejected);
-    }
-    Ok(json!({
-        "checked_at_utc":Utc::now().to_rfc3339(),
-        "reachable":true,
-        "storage_ready":value["storage_ready"].as_bool(),
-        "contract_compatible":groundline_contracts::insights::supports_current_ingest(&value["ingest_capabilities"]),
-        "authentication_verified":false,"network_performed":true,"mutation_performed":false
-    }))
-}
-
 async fn check_api_capabilities_url(url: Url) -> Result<(), StateError> {
     let response = client()?
         .get(url)
@@ -802,41 +750,6 @@ async fn check_api_capabilities_url(url: Url) -> Result<(), StateError> {
     }
     let (status, value) = checked_response(response).await?;
     validate_api_capabilities(status, &value)
-}
-
-/// Verify a newly supplied enrollment key without storing it or enrolling a collector.
-pub async fn check_connection(endpoint: &str, token: &SecretString) -> Result<Value, StateError> {
-    if !(32..=4096).contains(&token.expose_secret().len()) {
-        return Err(StateError::InvalidProfile);
-    }
-    let mut url = report_url(endpoint, 7).map_err(|_| StateError::InvalidProfile)?;
-    url.set_query(None);
-    url.set_path("/healthz");
-    check_api_capabilities_url(url.clone()).await?;
-    url.set_path("/v1/enroll/check");
-    let response = client()?
-        .post(url)
-        .bearer_auth(token.expose_secret())
-        .send()
-        .await
-        .map_err(|_| StateError::EnrollmentFailed)?;
-    if response.status() == reqwest::StatusCode::NOT_FOUND {
-        return Err(StateError::ApiUpgradeRequired);
-    }
-    let (status, value) = checked_response(response).await?;
-    if !status.is_success()
-        || value["kind"] != "groundline-insights-enrollment-check"
-        || value["schema"] != 1
-        || value["status"] != "PASS"
-        || value["enrollment_credential_verified"] != true
-        || value["mutation_performed"] != false
-    {
-        return Err(StateError::EnrollmentFailed);
-    }
-    Ok(
-        json!({"status":"PASS","storage_ready":true,"enrollment_credential_verified":true,
-        "mutation_performed":false,"secret_value_printed":false}),
-    )
 }
 
 fn enrollment_generation(value: &Value) -> Result<u32, StateError> {
@@ -1408,7 +1321,7 @@ fn write_status(directory: &Path, status: &Status) -> Result<(), StateError> {
 }
 
 pub fn enable(codex_home: &Path) -> Result<Value, StateError> {
-    let directory = state_directory(codex_home);
+    let directory = state_directory(codex_home)?;
     let now = Utc::now();
     load_profile(codex_home)?;
     enrollment_token(codex_home).map_err(|_| StateError::InvalidProfile)?;
@@ -1427,7 +1340,7 @@ pub fn enable(codex_home: &Path) -> Result<Value, StateError> {
 }
 
 pub fn disable(codex_home: &Path) -> Result<Value, StateError> {
-    let directory = state_directory(codex_home);
+    let directory = state_directory(codex_home)?;
     set_policy(&directory, false, Utc::now())?;
     // Revoke first so an in-flight request cannot start the next batch item.
     // Success waits for its bounded request/read to finish. A previously sent
@@ -1453,7 +1366,7 @@ fn status_with_tailnet_at(
     tailnet: Value,
     now: DateTime<Utc>,
 ) -> Result<Value, StateError> {
-    let directory = state_directory(codex_home);
+    let directory = state_directory(codex_home)?;
     let policy_configured = tailnet::is_regular_file(&directory.join(POLICY_FILE));
     let enabled = policy_enabled(&directory)?;
     let outbox = pending_events(&directory, 0)?;
@@ -1617,7 +1530,7 @@ fn connection_probe(tailnet_required: bool) -> Value {
 }
 
 pub fn checkpoint_enabled(codex_home: &Path) -> Result<bool, StateError> {
-    policy_enabled(&state_directory(codex_home))
+    policy_enabled(&state_directory(codex_home)?)
 }
 
 struct StatusUpdate<'a> {
@@ -1667,7 +1580,7 @@ pub async fn run_once(
     if !valid_status_trigger(trigger) {
         return Err(StateError::LocalState);
     }
-    let directory = state_directory(codex_home);
+    let directory = state_directory(codex_home)?;
     if !policy_enabled(&directory)? {
         return Err(StateError::Disabled);
     }
@@ -2081,7 +1994,7 @@ mod tests {
         assert!(!output.contains("second-owner-enrollment"));
         for home in [&first, &second] {
             assert!(!checkpoint_enabled(home.path()).expect("read collection policy"));
-            assert!(!state_directory(home.path()).exists());
+            assert!(!state_directory(home.path()).unwrap().exists());
         }
     }
 
@@ -2239,7 +2152,7 @@ mod tests {
     #[test]
     fn enabled_but_incomplete_configuration_is_not_reported_as_pass() {
         let home = tempdir().expect("temporary Codex home");
-        let directory = state_directory(home.path());
+        let directory = state_directory(home.path()).unwrap();
         set_policy(&directory, true, Utc::now()).expect("write policy fixture");
         let result = status_with_tailnet(
             home.path(),
@@ -2257,7 +2170,7 @@ mod tests {
     #[test]
     fn malformed_policy_and_outbox_state_are_not_silently_ignored() {
         let home = tempdir().expect("temporary Codex home");
-        let directory = state_directory(home.path());
+        let directory = state_directory(home.path()).unwrap();
         write_json(
             &directory.join(POLICY_FILE),
             &json!({
@@ -2291,7 +2204,7 @@ mod tests {
 
     fn assert_unsupported_state_is_preserved(file_name: &str, value: &Value) {
         let home = tempdir().expect("temporary Codex home");
-        let directory = state_directory(home.path());
+        let directory = state_directory(home.path()).unwrap();
         configure_profile(home.path(), &profile("")).expect("configure profile");
         write_json(&directory.join(file_name), value).expect("unsupported state fixture");
         write_json(
@@ -2401,7 +2314,7 @@ mod tests {
         configure_profile(home.path(), &profile("")).expect("configure profile");
         enable(home.path()).expect("enable collection");
         native_store(home.path());
-        let directory = state_directory(home.path());
+        let directory = state_directory(home.path()).unwrap();
         let now = DateTime::parse_from_rfc3339("2026-08-31T00:00:00Z")
             .expect("fixed now")
             .with_timezone(&Utc);
@@ -2523,7 +2436,7 @@ mod tests {
         let home = tempdir().expect("temporary Codex home");
         configure_profile(home.path(), &profile("")).unwrap();
         enable(home.path()).unwrap();
-        let directory = state_directory(home.path());
+        let directory = state_directory(home.path()).unwrap();
         let status = Status {
             schema_version: 4,
             kind: "groundline-insights-owner-auto-status".to_owned(),
@@ -2556,7 +2469,7 @@ mod tests {
     #[test]
     fn current_consent_is_reused_and_unconsented_pending_events_are_quarantined() {
         let home = tempdir().expect("temporary Codex home");
-        let directory = state_directory(home.path());
+        let directory = state_directory(home.path()).unwrap();
         configure_profile(home.path(), &profile("")).unwrap();
         write_json(
             &directory.join(OUTBOX_DIR).join("pending.json"),
@@ -2600,7 +2513,7 @@ mod tests {
     #[test]
     fn outbox_inventory_and_retry_state_are_bounded() {
         let home = tempdir().expect("temporary Codex home");
-        let directory = state_directory(home.path());
+        let directory = state_directory(home.path()).unwrap();
         for index in 0..=MAX_OUTBOX_EVENTS {
             write_json(
                 &directory.join(OUTBOX_DIR).join(format!("{index:04}.json")),
@@ -2791,104 +2704,6 @@ async fn capability_preflight_handles_real_http_new_old_and_unready_servers() {
         });
         let result=check_api_capabilities_url(url).await;
         assert_eq!(result.err().map(|e|e.to_string()).as_deref().unwrap_or("ok"),expected);
-        server.await.unwrap();
-    }
-}
-
-#[cfg(test)]
-#[tokio::test]
-async fn desktop_health_distinguishes_storage_readiness_without_authentication_or_redirects() {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    for status in [200, 503, 404, 302] {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let endpoint = format!("http://{}", listener.local_addr().unwrap());
-        let server = tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.unwrap();
-            let mut request = [0; 4096];
-            let size = stream.read(&mut request).await.unwrap();
-            let request = String::from_utf8_lossy(&request[..size]).to_ascii_lowercase();
-            assert!(request.starts_with("get /healthz "));
-            assert!(!request.contains("authorization:"));
-            let body = json!({"storage_ready":status == 200,
-                "ingest_capabilities":groundline_contracts::insights::ingest_capabilities(),
-                "private_detail":"PRIVATE_SENTINEL"})
-            .to_string();
-            let response = format!(
-                "HTTP/1.1 {status} Test\r\nContent-Length: {}\r\nLocation: http://127.0.0.1:1/redirect\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            );
-            stream.write_all(response.as_bytes()).await.unwrap();
-        });
-        let result = server_health(&endpoint).await;
-        match status {
-            200 | 503 => {
-                let value = result.unwrap();
-                assert_eq!(value["reachable"], true);
-                assert_eq!(value["storage_ready"], status == 200);
-                assert_eq!(value["contract_compatible"], true);
-                assert_eq!(value["authentication_verified"], false);
-                assert_eq!(value["mutation_performed"], false);
-                assert!(!value.to_string().contains("PRIVATE_SENTINEL"));
-            }
-            404 => assert!(matches!(result, Err(StateError::ApiUpgradeRequired))),
-            302 => assert!(matches!(result, Err(StateError::RemoteRejected))),
-            _ => unreachable!(),
-        }
-        server.await.unwrap();
-    }
-}
-
-#[cfg(test)]
-#[tokio::test]
-async fn connection_check_uses_read_only_routes_and_never_follows_auth_redirects() {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    for status in [200, 401, 302] {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let endpoint = format!("http://{}", listener.local_addr().unwrap());
-        let server = tokio::spawn(async move {
-            for step in 0..2 {
-                let (mut stream, _) = listener.accept().await.unwrap();
-                let mut request = [0; 8192];
-                let size = stream.read(&mut request).await.unwrap();
-                let request = String::from_utf8_lossy(&request[..size]).to_ascii_lowercase();
-                let (code, body) = if step == 0 {
-                    assert!(request.starts_with("get /healthz"));
-                    assert!(!request.contains("authorization:"));
-                    (
-                        200,
-                        json!({"storage_ready":true,"ingest_capabilities":groundline_contracts::insights::ingest_capabilities()}),
-                    )
-                } else {
-                    assert!(request.starts_with("post /v1/enroll/check "));
-                    assert!(request.contains(&format!("authorization: bearer {}", "e".repeat(32))));
-                    (
-                        status,
-                        if status == 200 {
-                            json!({"kind":"groundline-insights-enrollment-check","schema":1,"status":"PASS",
-                            "enrollment_credential_verified":true,"mutation_performed":false})
-                        } else {
-                            json!({"reason_code":"enrollment_credential_rejected","detail":"PRIVATE_SENTINEL"})
-                        },
-                    )
-                };
-                let body = body.to_string();
-                let response = format!(
-                    "HTTP/1.1 {code} Test\r\nContent-Length: {}\r\nLocation: https://invalid.example.com\r\nConnection: close\r\n\r\n{body}",
-                    body.len()
-                );
-                stream.write_all(response.as_bytes()).await.unwrap();
-            }
-        });
-        let result = check_connection(&endpoint, &SecretString::from("e".repeat(32))).await;
-        if status == 200 {
-            let receipt = result.unwrap();
-            assert_eq!(receipt["mutation_performed"], false);
-            assert!(!receipt.to_string().contains(&"e".repeat(32)));
-        } else {
-            let code = result.unwrap_err().to_string();
-            assert!(!code.contains("PRIVATE_SENTINEL"));
-            assert!(!code.contains(&"e".repeat(32)));
-        }
         server.await.unwrap();
     }
 }

@@ -30,8 +30,8 @@ pub fn supports_current_ingest(capabilities: &Value) -> bool {
 }
 const VALID_DAYS: &[u16] = &[7, 30, 90];
 const OS_FAMILIES: &[&str] = &["linux", "macos", "unknown", "windows"];
-const RUNTIME_FAMILIES: &[&str] = &["codex_app", "codex_cli", "unknown"];
-const EXECUTION_MODES: &[&str] = &["desktop", "local_headless", "remote_headless", "unknown"];
+const RUNTIME_FAMILIES: &[&str] = &["codex_app", "codex_cli"];
+const EXECUTION_MODES: &[&str] = &["desktop", "local_headless", "remote_headless"];
 const BASIC_TOP_LEVEL_KEYS: &[&str] = &[
     "capabilities",
     "collector",
@@ -1391,6 +1391,7 @@ fn validate_basic_semantics(event: &Value) -> bool {
             collector.get("os_family").unwrap_or(&Value::Null),
             OS_FAMILIES,
         )
+        || collector.get("os_family").and_then(Value::as_str) == Some("unknown")
         || !allowed_string(
             collector.get("runtime_family").unwrap_or(&Value::Null),
             RUNTIME_FAMILIES,
@@ -1482,7 +1483,7 @@ fn validate_basic_semantics(event: &Value) -> bool {
         && valid_period
 }
 
-/// Validate the only accepted 0.18 Basic upload contract. Legacy schemas are
+/// Validate the current Basic upload contract. Retired schemas are
 /// deliberately rejected at this boundary.
 pub fn validate_basic_event_bytes(bytes: &[u8]) -> Result<Value, ContractError> {
     if bytes.is_empty() || bytes.len() > MAX_BASIC_EVENT_BYTES {

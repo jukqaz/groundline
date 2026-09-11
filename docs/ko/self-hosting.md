@@ -20,13 +20,13 @@ API 자체는 TLS를 종료하지 않습니다. 외부에는 유효한 인증서
 
 ## 기기 연결에 사용할 등록키
 
-데스크톱의 기기 등록키에는 Insights API 컨테이너의
+수집기의 등록키에는 Insights API 컨테이너의
 `GROUNDLINE_ENROLLMENT_TOKEN` 값을 사용합니다. Compose 생성 도구가 만든
 비공개 `secrets.json`에서는 같은 값의 이름이 `ENROLLMENT_TOKEN`입니다.
 TrueNAS 관리 API 키는 NAS 앱 조회·배포용이고, Grafana 관리자 비밀번호는
 대시보드 로그인용입니다. 기기 등록에는 Insights 등록키를 전달하세요.
 
-연결 확인에서 `api_upgrade_required`가 나오면 `/v1/enroll/check`를 지원하는
+수집에서 `api_upgrade_required`가 나오면 현재 수집 계약을 지원한다고 응답하는
 Insights API 배포본으로 서버를 먼저 업데이트해야 합니다. TrueNAS custom app의
 `1.0.0`이나 `최신` 표기만으로 API 제품 버전을 확인할 수는 없습니다.
 서버 기동, 등록키 확인, 실제 수신·저장을 각각 확인하세요.

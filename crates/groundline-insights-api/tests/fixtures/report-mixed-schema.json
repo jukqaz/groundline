@@ -1,0 +1,149 @@
+{
+  "summary": {
+    "event_count": 2,
+    "eligible_root_total": 2,
+    "selected_root_total": 2,
+    "observed_root_total": 10,
+    "completed_turn_count": 2,
+    "unreadable_root_count": 0,
+    "root_truncated_count": 0,
+    "non_root_truncated_count": 0,
+    "originator_unclassified_count": 0,
+    "originator_source_fallback_count": 0,
+    "root_usage_applicable_event_count": 2,
+    "root_usage_missing_event_count": 0,
+    "root_usage_fallback_event_count": 0,
+    "delegated_usage_applicable_event_count": 0,
+    "delegated_usage_missing_event_count": 0,
+    "delegated_usage_fallback_event_count": 0,
+    "guardian_usage_applicable_event_count": 0,
+    "guardian_usage_missing_event_count": 0,
+    "guardian_usage_fallback_event_count": 0,
+    "guardian_incomplete_excluded_count": 0,
+    "completed_root_coverage_applicable_event_count": 1,
+    "completed_root_coverage_capable_event_count": 0,
+    "latency_capable_event_count": 1,
+    "boundary_count_capable_event_count": 1,
+    "guardian_attribution_applicable_event_count": 0,
+    "guardian_attribution_capable_event_count": 0,
+    "component_nonpass_event_count": 0,
+    "sample_sufficient_event_count": 2,
+    "sample_insufficient_event_count": 0,
+    "usage_missing_count": 0,
+    "usage_fallback_count": 0,
+    "input_tokens": 0,
+    "cached_input_tokens": 0,
+    "non_cached_input_tokens": 0,
+    "output_tokens": 0,
+    "reasoning_output_tokens": 0,
+    "total_tokens": 0,
+    "delegated_total_tokens": 0,
+    "guardian_total_tokens": 0,
+    "compactions": 0,
+    "long_turn_count": 0,
+    "exact_repeated_call_groups": 0,
+    "calls_in_exact_repeated_groups": 0,
+    "failure_signal_count": 0,
+    "tool_call_count": 0,
+    "user_messages_with_text": 0,
+    "short_message_count": 0,
+    "broad_scope_message_count": 0,
+    "boundary_review_root_count": 0,
+    "long_lived_root_count": 0,
+    "verification_tool_call_count": 0,
+    "verification_success_count": 0,
+    "verification_failure_count": 0,
+    "verification_unresolved_count": 0,
+    "guardian_review_total": 0,
+    "guardian_workspace_attributed_review_count": 0
+  },
+  "fleet": {
+    "policy_latest_version": "0.24.6",
+    "enrolled_installation_count": 1,
+    "metadata_known_installation_count": 1,
+    "metadata_unknown_installation_count": 0,
+    "observed_installation_count": 1,
+    "reporting_installation_count": 1,
+    "recent_installation_count": 1,
+    "never_reported_installation_count": 0,
+    "pending_initial_report_installation_count": 0,
+    "overdue_never_reported_installation_count": 0,
+    "stale_observed_installation_count": 0,
+    "current_package_claim_installation_count": 1,
+    "current_package_claim_unobserved_installation_count": 0,
+    "current_observed_installation_count": 1,
+    "current_reporting_installation_count": 1,
+    "current_recent_installation_count": 1,
+    "latest_received_at_utc": "2026-09-11T00:00:00Z",
+    "fresh": 1
+  },
+  "storage": {
+    "stored_event_row_count": 2,
+    "deduplicated_event_count": 2,
+    "duplicate_event_row_count": 0,
+    "ttl_expired_event_row_count": 0,
+    "delayed_delivery_event_count": 0,
+    "overdue_delivery_event_count": 0,
+    "clock_skew_event_count": 0
+  },
+  "event_cohorts": [
+    {
+      "dimension": "execution_mode",
+      "value": "desktop",
+      "count": 2
+    },
+    {
+      "dimension": "groundline_version",
+      "value": "0.11.1",
+      "count": 1
+    },
+    {
+      "dimension": "groundline_version",
+      "value": "0.24.6",
+      "count": 1
+    },
+    {
+      "dimension": "os_family",
+      "value": "macos",
+      "count": 2
+    },
+    {
+      "dimension": "runtime_family",
+      "value": "codex_app",
+      "count": 2
+    },
+    {
+      "dimension": "schema_version",
+      "value": "1",
+      "count": 1
+    },
+    {
+      "dimension": "schema_version",
+      "value": "5",
+      "count": 1
+    }
+  ],
+  "install_cohorts": [
+    {
+      "dimension": "execution_mode",
+      "value": "desktop",
+      "count": 1
+    },
+    {
+      "dimension": "groundline_version",
+      "value": "0.24.6",
+      "count": 1
+    },
+    {
+      "dimension": "os_family",
+      "value": "macos",
+      "count": 1
+    },
+    {
+      "dimension": "runtime_family",
+      "value": "codex_app",
+      "count": 1
+    }
+  ],
+  "model_effort": []
+}

@@ -696,7 +696,22 @@ impl Collector {
             || token_hash.len() != 64
             || !token_hash.bytes().all(|value| value.is_ascii_hexdigit())
             || current_generation.is_none()
-            || !matches!(enrollment_schema_version, Some(1 | 2))
+            || enrollment_schema_version != Some(2)
+            || !matches!(
+                value["os_family"].as_str(),
+                Some("linux" | "macos" | "windows")
+            )
+            || !matches!(
+                value["runtime_family"].as_str(),
+                Some("codex_app" | "codex_cli")
+            )
+            || !matches!(
+                value["execution_mode"].as_str(),
+                Some("desktop" | "local_headless" | "remote_headless")
+            )
+            || value["groundline_version"].as_str().is_none_or(|version| {
+                groundline_contracts::version::strict_version(version).is_err()
+            })
         {
             return Err(ApiError::storage());
         }
@@ -1683,17 +1698,51 @@ async fn weekly_report(
         .clickhouse
         .json_rows(REPORT_MODEL_EFFORT_QUERY, &params)
         .await?;
-    let event_count = count(&summary, "event_count");
-    let observed_roots = count(&summary, "observed_root_total");
-    let selected_roots = count(&summary, "selected_root_total");
-    let eligible_roots = count(&summary, "eligible_root_total");
-    let completed_turns = count(&summary, "completed_turn_count");
-    let verification_calls = count(&summary, "verification_tool_call_count");
-    let verification_success = count(&summary, "verification_success_count");
-    let verification_failure = count(&summary, "verification_failure_count");
-    let verification_unresolved = count(&summary, "verification_unresolved_count");
-    let tool_calls = count(&summary, "tool_call_count");
-    let user_messages = count(&summary, "user_messages_with_text");
+    validated_report_response(build_report(
+        query.days,
+        end,
+        &state.config.latest_version,
+        &ReportRows {
+            summary,
+            fleet,
+            storage,
+            event_cohorts,
+            install_cohorts,
+            model_effort,
+        },
+    ))
+}
+
+#[derive(Deserialize)]
+struct ReportRows {
+    summary: Value,
+    fleet: Value,
+    storage: Value,
+    event_cohorts: Vec<Value>,
+    install_cohorts: Vec<Value>,
+    model_effort: Vec<Value>,
+}
+
+fn build_report(days: u16, end: DateTime<Utc>, latest_version: &str, rows: &ReportRows) -> Value {
+    let ReportRows {
+        summary,
+        fleet,
+        storage,
+        event_cohorts,
+        install_cohorts,
+        model_effort,
+    } = rows;
+    let event_count = count(summary, "event_count");
+    let observed_roots = count(summary, "observed_root_total");
+    let selected_roots = count(summary, "selected_root_total");
+    let eligible_roots = count(summary, "eligible_root_total");
+    let completed_turns = count(summary, "completed_turn_count");
+    let verification_calls = count(summary, "verification_tool_call_count");
+    let verification_success = count(summary, "verification_success_count");
+    let verification_failure = count(summary, "verification_failure_count");
+    let verification_unresolved = count(summary, "verification_unresolved_count");
+    let tool_calls = count(summary, "tool_call_count");
+    let user_messages = count(summary, "user_messages_with_text");
     let mut quality = BTreeSet::<String>::new();
     if event_count == 0 {
         quality.insert("no_events".to_owned());
@@ -1712,62 +1761,63 @@ async fn weekly_report(
         ),
         ("component_nonpass_event_count", "component_nonpass_present"),
     ] {
-        if count(&summary, field) > 0 {
+        if count(summary, field) > 0 {
             quality.insert(reason.to_owned());
         }
     }
     if event_count > 0 && observed_roots < REPORT_MINIMUM_ROOTS {
         quality.insert("insufficient_root_sample".to_owned());
     }
+    if count(summary, "completed_root_coverage_capable_event_count")
+        < count(summary, "completed_root_coverage_applicable_event_count")
+    {
+        quality.insert("completed_root_coverage_unavailable".to_owned());
+    }
     if event_count > 0
-        && (count(&summary, "latency_capable_event_count") < event_count || completed_turns == 0)
+        && (count(summary, "latency_capable_event_count") < event_count || completed_turns == 0)
     {
         quality.insert("latency_denominator_unavailable".to_owned());
     }
-    if event_count > 0 && count(&summary, "boundary_count_capable_event_count") < event_count {
+    if event_count > 0 && count(summary, "boundary_count_capable_event_count") < event_count {
         quality.insert("boundary_counts_unavailable".to_owned());
     }
-    if count(&summary, "guardian_attribution_capable_event_count")
-        < count(&summary, "guardian_attribution_applicable_event_count")
+    if count(summary, "guardian_attribution_capable_event_count")
+        < count(summary, "guardian_attribution_applicable_event_count")
     {
         quality.insert("guardian_attribution_unavailable".to_owned());
     }
     if verification_unresolved > 0 {
         quality.insert("verification_outcome_incomplete".to_owned());
     }
-    if count(&fleet, "metadata_unknown_installation_count") > 0 {
+    if count(fleet, "metadata_unknown_installation_count") > 0 {
         quality.insert("enrollment_metadata_incomplete".to_owned());
     }
-    if count(&fleet, "overdue_never_reported_installation_count") > 0 {
+    if count(fleet, "overdue_never_reported_installation_count") > 0 {
         quality.insert("fleet_reporting_incomplete".to_owned());
         quality.insert("initial_report_overdue".to_owned());
     }
-    if count(&fleet, "stale_observed_installation_count") > 0 {
+    if count(fleet, "stale_observed_installation_count") > 0 {
         quality.insert("stale_installation_reporting".to_owned());
     }
-    if count(
-        &fleet,
-        "current_package_claim_unobserved_installation_count",
-    ) > 0
-    {
+    if count(fleet, "current_package_claim_unobserved_installation_count") > 0 {
         quality.insert("current_package_observation_incomplete".to_owned());
     }
-    if count(&storage, "duplicate_event_row_count") > 0 {
+    if count(storage, "duplicate_event_row_count") > 0 {
         quality.insert("physical_event_duplicates_detected".to_owned());
     }
-    if count(&storage, "ttl_expired_event_row_count") > 0 {
+    if count(storage, "ttl_expired_event_row_count") > 0 {
         quality.insert("retention_cleanup_pending".to_owned());
     }
-    if count(&storage, "overdue_delivery_event_count") > 0 {
+    if count(storage, "overdue_delivery_event_count") > 0 {
         quality.insert("event_delivery_overdue".to_owned());
-    } else if count(&storage, "delayed_delivery_event_count") > 0 {
+    } else if count(storage, "delayed_delivery_event_count") > 0 {
         quality.insert("event_delivery_delayed".to_owned());
     }
-    if count(&storage, "clock_skew_event_count") > 0 {
+    if count(storage, "clock_skew_event_count") > 0 {
         quality.insert("event_clock_skew_detected".to_owned());
     }
-    let sample_sufficient = count(&summary, "sample_sufficient_event_count");
-    let sample_insufficient = count(&summary, "sample_insufficient_event_count");
+    let sample_sufficient = count(summary, "sample_sufficient_event_count");
+    let sample_insufficient = count(summary, "sample_insufficient_event_count");
     let mut comparison = BTreeSet::from(["comparison_baseline_not_included".to_owned()]);
     if !quality.is_empty() {
         comparison.insert("data_quality_not_pass".to_owned());
@@ -1778,10 +1828,10 @@ async fn weekly_report(
     if observed_roots < REPORT_MINIMUM_ROOTS {
         comparison.insert("too_few_observed_roots".to_owned());
     }
-    if distributions(&event_cohorts, "schema_version", "event_count").len() > 1 {
+    if distributions(event_cohorts, "schema_version", "event_count").len() > 1 {
         comparison.insert("mixed_schema_versions".to_owned());
     }
-    if distributions(&event_cohorts, "groundline_version", "event_count").len() > 1 {
+    if distributions(event_cohorts, "groundline_version", "event_count").len() > 1 {
         comparison.insert("mixed_groundline_versions".to_owned());
     }
     let latest_received = fleet
@@ -1801,82 +1851,82 @@ async fn weekly_report(
         "status":"PASS",
         "reason_code":"accepted",
         "generated_at_utc":end.to_rfc3339_opts(SecondsFormat::Secs, true),
-        "requested_days":query.days,
+        "requested_days":days,
         "source_contract":{
             "dataset":"basic_active","time_basis":"utc","metric_time_field":"period_end_or_generated_at",
             "freshness_time_field":"received_at","roster_source":"enrolled_installation_registry",
             "analysis_mode":"descriptive_single_period","query_set_version":3,"basic_aggregate_only":true
         },
         "collection_health":{
-            "enrolled_installation_count":count(&fleet,"enrolled_installation_count"),
-            "metadata_known_installation_count":count(&fleet,"metadata_known_installation_count"),
-            "metadata_unknown_installation_count":count(&fleet,"metadata_unknown_installation_count"),
-            "observed_installation_count":count(&fleet,"observed_installation_count"),
-            "reporting_installation_count":count(&fleet,"reporting_installation_count"),
-            "recent_installation_count":count(&fleet,"recent_installation_count"),
-            "never_reported_installation_count":count(&fleet,"never_reported_installation_count"),
-            "pending_initial_report_installation_count":count(&fleet,"pending_initial_report_installation_count"),
-            "overdue_never_reported_installation_count":count(&fleet,"overdue_never_reported_installation_count"),
-            "stale_observed_installation_count":count(&fleet,"stale_observed_installation_count"),
-            "current_package_claim_installation_count":count(&fleet,"current_package_claim_installation_count"),
-            "current_package_claim_unobserved_installation_count":count(&fleet,"current_package_claim_unobserved_installation_count"),
-            "current_observed_installation_count":count(&fleet,"current_observed_installation_count"),
-            "current_reporting_installation_count":count(&fleet,"current_reporting_installation_count"),
-            "current_recent_installation_count":count(&fleet,"current_recent_installation_count"),
-            "policy_latest_version":fleet.get("policy_latest_version").and_then(Value::as_str).unwrap_or(&state.config.latest_version),
+            "enrolled_installation_count":count(fleet,"enrolled_installation_count"),
+            "metadata_known_installation_count":count(fleet,"metadata_known_installation_count"),
+            "metadata_unknown_installation_count":count(fleet,"metadata_unknown_installation_count"),
+            "observed_installation_count":count(fleet,"observed_installation_count"),
+            "reporting_installation_count":count(fleet,"reporting_installation_count"),
+            "recent_installation_count":count(fleet,"recent_installation_count"),
+            "never_reported_installation_count":count(fleet,"never_reported_installation_count"),
+            "pending_initial_report_installation_count":count(fleet,"pending_initial_report_installation_count"),
+            "overdue_never_reported_installation_count":count(fleet,"overdue_never_reported_installation_count"),
+            "stale_observed_installation_count":count(fleet,"stale_observed_installation_count"),
+            "current_package_claim_installation_count":count(fleet,"current_package_claim_installation_count"),
+            "current_package_claim_unobserved_installation_count":count(fleet,"current_package_claim_unobserved_installation_count"),
+            "current_observed_installation_count":count(fleet,"current_observed_installation_count"),
+            "current_reporting_installation_count":count(fleet,"current_reporting_installation_count"),
+            "current_recent_installation_count":count(fleet,"current_recent_installation_count"),
+            "policy_latest_version":fleet.get("policy_latest_version").and_then(Value::as_str).unwrap_or(latest_version),
             "roster_status":"AVAILABLE","latest_received_at_utc":latest_received,"freshness_status":freshness,
             "freshness_threshold_hours":REPORT_FRESHNESS_HOURS,"initial_report_grace_hours":INITIAL_REPORT_GRACE_HOURS,
-            "stored_event_row_count":count(&storage,"stored_event_row_count"),"deduplicated_event_count":count(&storage,"deduplicated_event_count"),
-            "duplicate_event_row_count":count(&storage,"duplicate_event_row_count"),"ttl_expired_event_row_count":count(&storage,"ttl_expired_event_row_count"),"delayed_delivery_event_count":count(&storage,"delayed_delivery_event_count"),
-            "overdue_delivery_event_count":count(&storage,"overdue_delivery_event_count"),"clock_skew_event_count":count(&storage,"clock_skew_event_count"),
+            "stored_event_row_count":count(storage,"stored_event_row_count"),"deduplicated_event_count":count(storage,"deduplicated_event_count"),
+            "duplicate_event_row_count":count(storage,"duplicate_event_row_count"),"ttl_expired_event_row_count":count(storage,"ttl_expired_event_row_count"),"delayed_delivery_event_count":count(storage,"delayed_delivery_event_count"),
+            "overdue_delivery_event_count":count(storage,"overdue_delivery_event_count"),"clock_skew_event_count":count(storage,"clock_skew_event_count"),
             "delivery_delay_threshold_hours":REPORT_DELIVERY_DELAY_HOURS,"delivery_overdue_threshold_hours":REPORT_DELIVERY_OVERDUE_HOURS,
             "clock_skew_tolerance_minutes":REPORT_CLOCK_SKEW_TOLERANCE_MINUTES
         },
         "coverage":{
             "event_count":event_count,"eligible_root_count":eligible_roots,"selected_root_count":selected_roots,"observed_root_count":observed_roots,
-            "completed_turn_count":completed_turns,"unreadable_root_count":count(&summary,"unreadable_root_count"),
-            "root_truncated_count":count(&summary,"root_truncated_count"),"non_root_truncated_count":count(&summary,"non_root_truncated_count"),
-            "originator_unclassified_count":count(&summary,"originator_unclassified_count"),"originator_source_fallback_count":count(&summary,"originator_source_fallback_count"),
-            "root_usage_applicable_event_count":count(&summary,"root_usage_applicable_event_count"),"root_usage_missing_event_count":count(&summary,"root_usage_missing_event_count"),
-            "root_usage_fallback_event_count":count(&summary,"root_usage_fallback_event_count"),"delegated_usage_applicable_event_count":count(&summary,"delegated_usage_applicable_event_count"),
-            "delegated_usage_missing_event_count":count(&summary,"delegated_usage_missing_event_count"),"delegated_usage_fallback_event_count":count(&summary,"delegated_usage_fallback_event_count"),
-            "guardian_usage_applicable_event_count":count(&summary,"guardian_usage_applicable_event_count"),"guardian_usage_missing_event_count":count(&summary,"guardian_usage_missing_event_count"),
-            "guardian_usage_fallback_event_count":count(&summary,"guardian_usage_fallback_event_count"),"guardian_incomplete_excluded_count":count(&summary,"guardian_incomplete_excluded_count"),
-            "completed_root_coverage_applicable_event_count":count(&summary,"completed_root_coverage_applicable_event_count"),
-            "completed_root_coverage_capable_event_count":count(&summary,"completed_root_coverage_capable_event_count"),
-            "completed_root_selection_coverage":ratio(selected_roots,eligible_roots),"latency_capable_event_count":count(&summary,"latency_capable_event_count"),
-            "boundary_count_capable_event_count":count(&summary,"boundary_count_capable_event_count"),
-            "guardian_attribution_applicable_event_count":count(&summary,"guardian_attribution_applicable_event_count"),
-            "guardian_attribution_capable_event_count":count(&summary,"guardian_attribution_capable_event_count"),
-            "component_nonpass_event_count":count(&summary,"component_nonpass_event_count")
+            "completed_turn_count":completed_turns,"unreadable_root_count":count(summary,"unreadable_root_count"),
+            "root_truncated_count":count(summary,"root_truncated_count"),"non_root_truncated_count":count(summary,"non_root_truncated_count"),
+            "originator_unclassified_count":count(summary,"originator_unclassified_count"),"originator_source_fallback_count":count(summary,"originator_source_fallback_count"),
+            "root_usage_applicable_event_count":count(summary,"root_usage_applicable_event_count"),"root_usage_missing_event_count":count(summary,"root_usage_missing_event_count"),
+            "root_usage_fallback_event_count":count(summary,"root_usage_fallback_event_count"),"delegated_usage_applicable_event_count":count(summary,"delegated_usage_applicable_event_count"),
+            "delegated_usage_missing_event_count":count(summary,"delegated_usage_missing_event_count"),"delegated_usage_fallback_event_count":count(summary,"delegated_usage_fallback_event_count"),
+            "guardian_usage_applicable_event_count":count(summary,"guardian_usage_applicable_event_count"),"guardian_usage_missing_event_count":count(summary,"guardian_usage_missing_event_count"),
+            "guardian_usage_fallback_event_count":count(summary,"guardian_usage_fallback_event_count"),"guardian_incomplete_excluded_count":count(summary,"guardian_incomplete_excluded_count"),
+            "completed_root_coverage_applicable_event_count":count(summary,"completed_root_coverage_applicable_event_count"),
+            "completed_root_coverage_capable_event_count":count(summary,"completed_root_coverage_capable_event_count"),
+            "completed_root_selection_coverage":ratio(selected_roots,eligible_roots),"latency_capable_event_count":count(summary,"latency_capable_event_count"),
+            "boundary_count_capable_event_count":count(summary,"boundary_count_capable_event_count"),
+            "guardian_attribution_applicable_event_count":count(summary,"guardian_attribution_applicable_event_count"),
+            "guardian_attribution_capable_event_count":count(summary,"guardian_attribution_capable_event_count"),
+            "component_nonpass_event_count":count(summary,"component_nonpass_event_count")
         },
         "weekly_metrics":{
-            "tokens":{"input":count(&summary,"input_tokens"),"cached_input":count(&summary,"cached_input_tokens"),
-                "non_cached_input":count(&summary,"non_cached_input_tokens"),"output":count(&summary,"output_tokens"),
-                "reasoning_output":count(&summary,"reasoning_output_tokens"),"total":count(&summary,"total_tokens"),
-                "delegated_total":count(&summary,"delegated_total_tokens"),"guardian_total":count(&summary,"guardian_total_tokens")},
-            "workflow":{"compactions":count(&summary,"compactions"),"compactions_per_observed_root":ratio(count(&summary,"compactions"),observed_roots),
-                "long_turn_count":count(&summary,"long_turn_count"),"long_turn_rate":ratio(count(&summary,"long_turn_count"),completed_turns),
-                "exact_repeated_call_groups":count(&summary,"exact_repeated_call_groups"),"calls_in_exact_repeated_groups":count(&summary,"calls_in_exact_repeated_groups"),
-                "repeated_call_rate":ratio(count(&summary,"calls_in_exact_repeated_groups"),tool_calls),"failure_signal_count":count(&summary,"failure_signal_count"),
-                "failure_signal_rate":ratio(count(&summary,"failure_signal_count"),tool_calls),"tool_call_count":tool_calls,
-                "user_messages_with_text":user_messages,"short_message_count":count(&summary,"short_message_count"),
-                "short_message_rate":ratio(count(&summary,"short_message_count"),user_messages),"broad_scope_message_count":count(&summary,"broad_scope_message_count"),
-                "broad_scope_message_rate":ratio(count(&summary,"broad_scope_message_count"),user_messages),
-                "boundary_review_root_count":count(&summary,"boundary_review_root_count"),"long_lived_root_count":count(&summary,"long_lived_root_count")},
+            "tokens":{"input":count(summary,"input_tokens"),"cached_input":count(summary,"cached_input_tokens"),
+                "non_cached_input":count(summary,"non_cached_input_tokens"),"output":count(summary,"output_tokens"),
+                "reasoning_output":count(summary,"reasoning_output_tokens"),"total":count(summary,"total_tokens"),
+                "delegated_total":count(summary,"delegated_total_tokens"),"guardian_total":count(summary,"guardian_total_tokens")},
+            "workflow":{"compactions":count(summary,"compactions"),"compactions_per_observed_root":ratio(count(summary,"compactions"),observed_roots),
+                "long_turn_count":count(summary,"long_turn_count"),"long_turn_rate":ratio(count(summary,"long_turn_count"),completed_turns),
+                "exact_repeated_call_groups":count(summary,"exact_repeated_call_groups"),"calls_in_exact_repeated_groups":count(summary,"calls_in_exact_repeated_groups"),
+                "repeated_call_rate":ratio(count(summary,"calls_in_exact_repeated_groups"),tool_calls),"failure_signal_count":count(summary,"failure_signal_count"),
+                "failure_signal_rate":ratio(count(summary,"failure_signal_count"),tool_calls),"tool_call_count":tool_calls,
+                "user_messages_with_text":user_messages,"short_message_count":count(summary,"short_message_count"),
+                "short_message_rate":ratio(count(summary,"short_message_count"),user_messages),"broad_scope_message_count":count(summary,"broad_scope_message_count"),
+                "broad_scope_message_rate":ratio(count(summary,"broad_scope_message_count"),user_messages),
+                "boundary_review_root_count":count(summary,"boundary_review_root_count"),"long_lived_root_count":count(summary,"long_lived_root_count")},
             "verification":{"tool_call_count":verification_calls,"success_count":verification_success,"failure_count":verification_failure,
                 "unresolved_count":verification_unresolved,"outcome_coverage":ratio(verification_success.saturating_add(verification_failure),verification_calls)},
-            "guardian":{"review_count":count(&summary,"guardian_review_total"),"workspace_attributed_review_count":count(&summary,"guardian_workspace_attributed_review_count"),
-                "workspace_attribution_coverage":ratio(count(&summary,"guardian_workspace_attributed_review_count"),count(&summary,"guardian_review_total"))}
+            "guardian":{"review_count":count(summary,"guardian_review_total"),"workspace_attributed_review_count":count(summary,"guardian_workspace_attributed_review_count"),
+                "workspace_attribution_coverage":ratio(count(summary,"guardian_workspace_attributed_review_count"),count(summary,"guardian_review_total"))}
         },
         "cohorts":{
-            "event_distributions":{"schema_version":distributions(&event_cohorts,"schema_version","event_count"),
-                "groundline_version":distributions(&event_cohorts,"groundline_version","event_count"),
-                "os_family":distributions(&event_cohorts,"os_family","event_count"),"runtime_family":distributions(&event_cohorts,"runtime_family","event_count"),
-                "execution_mode":distributions(&event_cohorts,"execution_mode","event_count")},
-            "installation_distributions":{"groundline_version":distributions(&install_cohorts,"groundline_version","installation_count"),
-                "os_family":distributions(&install_cohorts,"os_family","installation_count"),"runtime_family":distributions(&install_cohorts,"runtime_family","installation_count"),
-                "execution_mode":distributions(&install_cohorts,"execution_mode","installation_count")},
+            "event_distributions":{"schema_version":distributions(event_cohorts,"schema_version","event_count"),
+                "groundline_version":distributions(event_cohorts,"groundline_version","event_count"),
+                "os_family":distributions(event_cohorts,"os_family","event_count"),"runtime_family":distributions(event_cohorts,"runtime_family","event_count"),
+                "execution_mode":distributions(event_cohorts,"execution_mode","event_count")},
+            "installation_distributions":{"groundline_version":distributions(install_cohorts,"groundline_version","installation_count"),
+                "os_family":distributions(install_cohorts,"os_family","installation_count"),"runtime_family":distributions(install_cohorts,"runtime_family","installation_count"),
+                "execution_mode":distributions(install_cohorts,"execution_mode","installation_count")},
             "model_effort_context_distribution":model_effort,
             "model_effort_token_efficiency":{"status":"UNAVAILABLE","reason_code":"token_usage_not_attributed_to_model_effort","context_distribution_only":true}
         },
@@ -1884,7 +1934,7 @@ async fn weekly_report(
             "reason_codes":quality,"sample_sufficient_event_count":sample_sufficient,"sample_insufficient_event_count":sample_insufficient},
         "comparison_readiness":{"status":"INSUFFICIENT","reason_codes":comparison,"minimum_event_count":REPORT_MINIMUM_EVENTS,"minimum_observed_root_count":REPORT_MINIMUM_ROOTS}
     });
-    validated_report_response(report)
+    report
 }
 
 fn validated_report_response(report: Value) -> Result<Response, ApiError> {
@@ -2339,6 +2389,55 @@ mod tests {
     }
 
     #[test]
+    fn stored_collector_requires_current_codex_metadata() {
+        let original = json!({"collector_id":Uuid::new_v4(),"token_hash":"a".repeat(64),"current_generation":1,
+            "enrollment_schema_version":2,"created_at":"2026-09-11T00:00:00Z","os_family":"macos",
+            "runtime_family":"codex_app","execution_mode":"desktop","groundline_version":"0.24.6"});
+        assert!(Collector::from_value(original.clone()).is_ok());
+        for (field, value) in [
+            ("enrollment_schema_version", json!(1)),
+            ("runtime_family", json!("claude_code")),
+            ("runtime_family", json!("unknown")),
+            ("execution_mode", json!("unknown")),
+            ("os_family", json!("unknown")),
+            ("groundline_version", json!("unknown")),
+        ] {
+            let mut row = original.clone();
+            row[field] = value;
+            assert!(Collector::from_value(row).is_err(), "{field}");
+        }
+    }
+
+    #[test]
+    fn current_event_rejects_foreign_or_unknown_runtime_even_with_valid_hash() {
+        let event = integration_event(Uuid::new_v4(), 1);
+        assert!(validate_basic_event_bytes(&serde_json::to_vec(&event).unwrap()).is_ok());
+        for (field, value) in [
+            ("runtime_family", "claude_code"),
+            ("runtime_family", "hermes"),
+            ("runtime_family", "unknown"),
+            ("execution_mode", "unknown"),
+            ("os_family", "unknown"),
+        ] {
+            let mut candidate = event.clone();
+            candidate["collector"][field] = json!(value);
+            let object = candidate.as_object_mut().unwrap();
+            object.remove("event_id");
+            object.remove("idempotency_key");
+            let digest = format!(
+                "{:x}",
+                Sha256::digest(serde_json::to_vec(&candidate).unwrap())
+            );
+            candidate["event_id"] = json!(Uuid::new_v5(&Uuid::NAMESPACE_URL, digest.as_bytes()));
+            candidate["idempotency_key"] = json!(format!("sha256:{digest}"));
+            assert!(
+                validate_basic_event_bytes(&serde_json::to_vec(&candidate).unwrap()).is_err(),
+                "{field}={value}"
+            );
+        }
+    }
+
+    #[test]
     fn event_row_preserves_all_metric_groups() {
         let event = integration_event(Uuid::new_v4(), 7);
         let row = event_row(&event, Utc::now()).unwrap();
@@ -2672,6 +2771,24 @@ mod tests {
             u64::from(u32::MAX)
         );
         assert_eq!(u32::MAX.checked_add(1), None);
+    }
+
+    #[tokio::test]
+    async fn mixed_schema_report_preserves_history_and_explains_unavailable_coverage() {
+        let rows: ReportRows =
+            serde_json::from_str(include_str!("../tests/fixtures/report-mixed-schema.json"))
+                .unwrap();
+        let report = build_report(90, "2026-09-11T06:00:00Z".parse().unwrap(), "0.24.6", &rows);
+        assert_eq!(report["coverage"]["event_count"], 2);
+        let response = validated_report_response(report.clone())
+            .expect("mixed historical coverage must remain reportable");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(
+            report["data_quality"]["reason_codes"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("completed_root_coverage_unavailable"))
+        );
     }
 
     #[tokio::test]

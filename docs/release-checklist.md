@@ -2,10 +2,6 @@
 
 1. Freeze scope and update the workspace plus both plugin manifests to the same
    strict semantic version.
-   Keep the desktop package, Tauri configuration, and native workspace at that
-   version. Qualify its frontend tests and native commands before packaging the
-   macOS Apple Silicon preview. Include its archive in checksums and provenance;
-   label the preview's notarization and platform support accurately.
 2. Run formatting and targeted CLI/xtask tests while editing. On final source,
    run workspace tests, Clippy, dependency policy, source verification, and
    `git diff --check` once.
@@ -23,12 +19,10 @@
    has exactly four fail-open hooks using `groundline-insights`. Confirm public
    metadata and documentation describe Core-only, Insights-only, and combined
    installation without implying an automatic sibling dependency.
-   Keep Desktop a separate opt-in archive: plugin installers must not install,
-   launch, or depend on the GUI. Verify the installed native collector and a real
-   Codex lifecycle hook with Desktop absent, preserving existing settings and
-   consent. Record an accepted receipt and matching storage query. Qualify
-   Developer ID signing and Gatekeeper acceptance separately before calling the
-   optional macOS GUI ready for ordinary users.
+   Ship only Core, Insights, and the API; no separate GUI artifact or build job.
+   Verify the installed native collector and a real Codex lifecycle hook,
+   preserving existing settings and consent. Record an accepted receipt and
+   matching storage query.
 5. Confirm current source and every Git object reachable from branches, remote
    refs, and tags contain no production endpoint, credential, personal path,
    infrastructure inventory, deployment receipt, Python runtime dependency, or
@@ -70,7 +64,13 @@
    production deployment credentials into release jobs.
 10. Before an owner-run TrueNAS preflight or apply, provide
    `GROUNDLINE_INSIGHTS_ENROLLMENT_TOKEN` and
-   `GROUNDLINE_INSIGHTS_GRAFANA_ADMIN_PASSWORD` from owner-private local state.
+   `GROUNDLINE_INSIGHTS_GRAFANA_ADMIN_PASSWORD` from owner-private local state
+   for a Basic-enabled Grafana deployment. For an existing JWT deployment, pass
+   a current owner-authenticated token in `GROUNDLINE_OWNER_GRAFANA_ACCESS_JWT`
+   instead. Its dedicated `X-*` or `Cf-Access-Jwt-Assertion` header must match the
+   private Compose file and current Grafana configuration. The controller sends
+   it only to the bounded Grafana datasource probe, follows no redirects, and
+   rejects disabled or mismatched authentication without changing Grafana login.
    Pass the exact owner-rendered private Compose file explicitly, confirm it is
    a bounded regular file private to the current user rather than a symlink, and
    that the authenticated, redacted preflight passes before any mutation.
