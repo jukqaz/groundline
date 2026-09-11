@@ -12,7 +12,7 @@ use crate::model::{EFFORTS, MAX_MODEL_CONTEXTS, MODEL_FAMILIES};
 pub const MAX_WEEKLY_REPORT_BYTES: usize = 128 * 1024;
 pub const MAX_BASIC_EVENT_BYTES: usize = 64 * 1024;
 /// Semantic allowlist revision, independent of the envelope schema version.
-pub const BASIC_CONTRACT_REVISION: u64 = 3;
+pub const BASIC_CONTRACT_REVISION: u64 = 4;
 
 pub fn ingest_capabilities() -> Value {
     serde_json::json!({"basic_schema_versions":[5], "basic_contract_revision":BASIC_CONTRACT_REVISION})
@@ -118,6 +118,7 @@ pub struct CollectionHealth {
     pub deduplicated_event_count: u64,
     pub duplicate_event_row_count: u64,
     pub ttl_expired_event_row_count: u64,
+    pub quarantined_event_count: u64,
     pub delayed_delivery_event_count: u64,
     pub overdue_delivery_event_count: u64,
     pub clock_skew_event_count: u64,
@@ -749,6 +750,9 @@ impl WeeklyReport {
         if health.ttl_expired_event_row_count > 0 {
             quality_reasons.insert("retention_cleanup_pending");
         }
+        if health.quarantined_event_count > 0 {
+            quality_reasons.insert("events_quarantined");
+        }
         if health.overdue_delivery_event_count > 0 {
             quality_reasons.insert("event_delivery_overdue");
         } else if health.delayed_delivery_event_count > 0 {
@@ -996,7 +1000,34 @@ fn validate_usage(value: &Value, include_non_cached: bool) -> bool {
     let object = value.as_object().expect("validated object");
     let source = object.get("source").and_then(Value::as_str);
     let valid_source = source.is_some_and(|source| crate::usage::SOURCES.contains(&source));
+    let count = |key| object.get(key).and_then(Value::as_u64).unwrap_or(0);
+    let input = count("input_tokens");
+    let output = count("output_tokens");
+    let measured = count("rollout_count_with_usage");
+    // Native records may report only a total. Never invent the missing split,
+    // but reject a reported split that exceeds that total or its parent count.
+    let coherent = count("cached_input_tokens") <= input
+        && count("reasoning_output_tokens") <= output
+        && input
+            .checked_add(output)
+            .is_some_and(|minimum| count("total_tokens") >= minimum)
+        && count("cumulative_rollout_count").checked_add(count("fallback_rollout_count"))
+            == Some(measured)
+        && if matches!(source, Some("unavailable" | "unknown")) {
+            measured == 0
+                && [
+                    "input_tokens",
+                    "output_tokens",
+                    "total_tokens",
+                    "cache_write_input_tokens",
+                ]
+                .iter()
+                .all(|key| count(key) == 0)
+        } else {
+            measured > 0
+        };
     valid_source
+        && coherent
         && keys
             .iter()
             .filter(|key| !matches!(**key, "source" | "cached_input_ratio"))
@@ -1636,6 +1667,7 @@ mod tests {
                 "deduplicated_event_count": 2,
                 "duplicate_event_row_count": 0,
                 "ttl_expired_event_row_count": 0,
+                "quarantined_event_count": 0,
                 "delayed_delivery_event_count": 0,
                 "overdue_delivery_event_count": 0,
                 "clock_skew_event_count": 0,

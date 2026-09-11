@@ -261,7 +261,7 @@ case "$http_status" in 302|401) ;; *) echo "unexpected unauthenticated status: $
 ## 5. collector별 설정
 
 새 수집기를 설치하거나 켜기 전에 API를 먼저 올립니다. `/healthz`는 Basic
-schema 5와 ingest contract revision 3 이상을 제공해야 하며, 등록 응답에서
+schema 5와 ingest contract revision 4 이상을 제공해야 하며, 등록 응답에서
 현재 수집 generation을 받습니다. 기존 identity와 token은 재사용합니다.
 지원하지 않는 로컬 상태는 삭제해서 새 등록을 강제하지 않고 운영자 검토를 위해
 보존합니다.

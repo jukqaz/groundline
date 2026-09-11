@@ -354,6 +354,35 @@ mod tests {
     }
 
     #[test]
+    fn incoherent_usage_never_enters_outbox_or_commits_the_window() {
+        let (_temp, root, rollout, identity, consent) = fixture();
+        let dir = state_directory(&root).unwrap();
+        write_usage(&rollout, 5, 12);
+        let cursor = at(0).to_rfc3339();
+        let result = stage(
+            &dir,
+            Some(&cursor),
+            at(10),
+            &identity,
+            &consent,
+            Source {
+                generation: 7,
+                trigger: "manual",
+            },
+            |s, e| {
+                let mut result = audit(&root, s, e)?;
+                result["root"]["provider_reported_usage"]["input_tokens"] = json!(10);
+                result["root"]["provider_reported_usage"]["cached_input_tokens"] = json!(11);
+                Ok(result)
+            },
+        );
+        assert!(matches!(result, Err(StateError::AuditFailed)));
+        assert_eq!(pending_events(&dir, 0).unwrap().observed_count, 0);
+        assert!(!read(&dir).unwrap().unwrap().prepared);
+        assert!(!dir.join(STATUS_FILE).exists());
+    }
+
+    #[test]
     fn native_codex_activity_reaches_outbox_without_config_catalog_or_proxy() {
         let (_temp, root, rollout, identity, consent) = fixture();
         std::fs::rename(root.join("state_5.sqlite"), root.join("state_42.sqlite")).unwrap();

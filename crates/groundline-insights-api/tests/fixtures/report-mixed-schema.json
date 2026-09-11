@@ -82,6 +82,7 @@
     "deduplicated_event_count": 2,
     "duplicate_event_row_count": 0,
     "ttl_expired_event_row_count": 0,
+    "quarantined_event_count": 0,
     "delayed_delivery_event_count": 0,
     "overdue_delivery_event_count": 0,
     "clock_skew_event_count": 0

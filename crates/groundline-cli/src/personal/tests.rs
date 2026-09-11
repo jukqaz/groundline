@@ -132,9 +132,10 @@ fn failure_candidates_preserve_partial_evidence_for_astra_and_sol_without_applyi
                 json!(Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
             report["coverage"]["root_usage_missing_event_count"] = json!(1);
             report["coverage"]["root_usage_fallback_event_count"] = json!(1);
+            report["collection_health"]["quarantined_event_count"] = json!(3);
             report["data_quality"]["status"] = json!("PARTIAL");
             report["data_quality"]["reason_codes"] =
-                json!(["usage_fallback_present", "usage_missing"]);
+                json!(["events_quarantined", "usage_fallback_present", "usage_missing"]);
             report["comparison_readiness"]["reason_codes"] =
                 json!(["comparison_baseline_not_included", "data_quality_not_pass"]);
             report["cohorts"]["model_effort_context_distribution"] = json!([
@@ -174,6 +175,7 @@ fn failure_candidates_preserve_partial_evidence_for_astra_and_sol_without_applyi
             assert_eq!(out["mutation_performed"], false);
             assert_eq!(out["insights"]["coverage"], report["coverage"]);
             assert_eq!(out["insights"]["data_quality"], report["data_quality"]);
+            assert_eq!(out["insights"]["quarantined_event_count"], 3);
             assert_eq!(
                 out["insights"]["model_effort_context_distribution"],
                 report["cohorts"]["model_effort_context_distribution"]
@@ -732,6 +734,7 @@ fn report_fixture() -> Value {
             "deduplicated_event_count": 2,
             "duplicate_event_row_count": 0,
             "ttl_expired_event_row_count": 0,
+            "quarantined_event_count": 0,
             "delayed_delivery_event_count": 0,
             "overdue_delivery_event_count": 0,
             "clock_skew_event_count": 0,
