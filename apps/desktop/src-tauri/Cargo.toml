@@ -1,6 +1,6 @@
 [package]
 name = "groundline-desktop"
-version = "0.24.5"
+version = "0.24.6"
 edition = "2024"
 publish = false
 license = "MIT"
@@ -15,8 +15,8 @@ tauri-build = { version = "2.6.3", features = [] }
 tauri = { version = "2.11.5", features = ["tray-icon"] }
 tauri-plugin-single-instance = "2.4.4"
 tauri-plugin-opener = "2"
-groundline-runtime = { version = "0.24.5", path = "../../../crates/groundline-runtime", features = ["insights-state"] }
-xtask = { version = "0.24.5", path = "../../../xtask" }
+groundline-runtime = { version = "0.24.6", path = "../../../crates/groundline-runtime", features = ["insights-state"] }
+xtask = { version = "0.24.6", path = "../../../xtask" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 secrecy = "0.10.3"
@@ -26,8 +26,6 @@ tokio-util = { version = "0.7.19", features = ["rt"] }
 uuid = { version = "1.26.0", features = ["v4"] }
 tempfile = "3.23.0"
 url = "2.5.8"
-sha2 = "0.10.9"
-semver = "1"
 dirs = "6"
 chrono = "0.4.45"
 tauri-plugin-notification = "2.4.0"

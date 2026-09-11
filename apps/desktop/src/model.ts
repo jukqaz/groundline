@@ -47,12 +47,6 @@ export type Status = {
     event_count: number;
   } | null;
 };
-export type CoreStatus = {
-  version: string;
-  status: string;
-  checksum_verified: boolean;
-  live_hooks_verified: boolean;
-};
 export function formatTime(value?: string): string {
   if (!value) return "기록 없음";
   const date = new Date(value);
@@ -318,8 +312,6 @@ const errors: Record<string, string> = {
     "확인이 만료되었습니다. 등록키를 입력해 연결을 다시 확인하세요.",
   unsupported_local_state:
     "지원하지 않는 기존 상태가 있습니다. 원본을 보존한 채 버전을 확인해야 합니다.",
-  core_not_installed: "Core 설치를 찾지 못했습니다.",
-  invalid_core_package: "Core 패키지 무결성 확인에 실패했습니다.",
   worker_timeout: "작업 시간이 초과되었습니다. 현재 상태를 새로 확인하세요.",
   consent_required: "수집 범위를 읽고 동의해 주세요.",
   invalid_grafana_url:

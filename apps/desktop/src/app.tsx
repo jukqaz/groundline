@@ -15,7 +15,6 @@ import {
   ArrowRight,
   Check,
   CircleHelp,
-  Globe2,
   Home,
   RefreshCw,
   Server,
@@ -32,7 +31,6 @@ import {
   type Runtime,
   type Theme,
   type Status,
-  type CoreStatus,
   defaultPreferences,
   type AppPreferences,
 } from "./model";
@@ -76,7 +74,6 @@ export function App() {
   const [preferencesError, setPreferencesError] = useState("");
   const [themeError, setThemeError] = useState("");
   const [status, setStatus] = useState<Status | null>(null);
-  const [core, setCore] = useState<CoreStatus | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -505,31 +502,14 @@ export function App() {
             </div>
           </header>
           <div className="page-body">
-            {page === "server" && (
-              <div
-                className="server-switcher"
-                role="group"
-                aria-label="서버 설정 작업"
-              >
+            {page === "server" && serverView === "compose" && (
+              <div className="server-back">
                 <Button
-                  aria-pressed={serverView === "connection"}
+                  className="text-button"
                   disabled={!!busy || loading}
                   onClick={() => navigate("server", "connection")}
                 >
-                  <Globe2 size={20} />
-                  <span>
-                    <strong>연결 관리</strong>
-                  </span>
-                </Button>
-                <Button
-                  aria-pressed={serverView === "compose"}
-                  disabled={!!busy || loading}
-                  onClick={() => navigate("server", "compose")}
-                >
-                  <Server size={20} />
-                  <span>
-                    <strong>새 서버 구성</strong>
-                  </span>
+                  ← 연결 관리
                 </Button>
               </div>
             )}
@@ -546,22 +526,20 @@ export function App() {
                 {success}
               </Notice>
             )}
-            {busy &&
-              ["check", "connect", "run", "core", "export"].includes(busy) && (
-                <Notice>
-                  {
-                    (
-                      {
-                        check: "서버와 등록키를 확인하고 있습니다…",
-                        connect: "연결 설정과 수집 동의를 저장하고 있습니다…",
-                        run: "수집하고 서버 수신 결과를 확인하고 있습니다…",
-                        core: "설치된 Core 패키지를 진단하고 있습니다…",
-                        export: "설정 파일을 생성하고 있습니다…",
-                      } as Record<string, string>
-                    )[busy]
-                  }
-                </Notice>
-              )}
+            {busy && ["check", "connect", "run", "export"].includes(busy) && (
+              <Notice>
+                {
+                  (
+                    {
+                      check: "서버와 등록키를 확인하고 있습니다…",
+                      connect: "연결 설정과 수집 동의를 저장하고 있습니다…",
+                      run: "수집하고 서버 수신 결과를 확인하고 있습니다…",
+                      export: "설정 파일을 생성하고 있습니다…",
+                    } as Record<string, string>
+                  )[busy]
+                }
+              </Notice>
+            )}
             <div hidden={page !== "server" || serverView !== "compose"}>
               <ServerPage
                 setup={setup}
@@ -853,6 +831,17 @@ export function App() {
                 )}
               </>
             )}
+            {page === "server" && serverView === "connection" && (
+              <div className="server-tools">
+                <Button
+                  className="text-button"
+                  disabled={!!busy || loading}
+                  onClick={() => navigate("server", "compose")}
+                >
+                  <Server size={15} />새 서버 구성
+                </Button>
+              </div>
+            )}
             {page === "overview" && (
               <Overview
                 runtime={runtime}
@@ -878,20 +867,6 @@ export function App() {
             )}
             {page === "settings" && (
               <SettingsPage
-                key={runtime}
-                diagnose={() =>
-                  void action("core", async () => {
-                    const result = await invoke<CoreStatus>("core_diagnostic");
-                    setCore(result);
-                    setSuccess(
-                      result.status === "PASS"
-                        ? "Core 패키지 무결성과 실행 진단을 통과했습니다. 실제 훅 실행은 별도 확인이 필요합니다."
-                        : "Core 진단에서 확인이 필요한 항목이 있습니다.",
-                    );
-                  })
-                }
-                core={core}
-                runtime={runtime}
                 setAlerts={(alerts_enabled) =>
                   void savePreferences({ alerts_enabled })
                 }

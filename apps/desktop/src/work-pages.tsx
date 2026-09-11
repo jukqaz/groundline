@@ -27,7 +27,6 @@ import {
   formatTime,
   nextStep,
   reasonHelp,
-  type CoreStatus,
   type Status,
   type Theme,
   type AppPreferences,
@@ -201,9 +200,6 @@ export function ConnectionManager({
           <div>
             <h2>Insights 서버</h2>
           </div>
-          <span className="tag" data-active={status.collection_enabled}>
-            {status.tailnet_required ? "Tailscale" : "일반 연결"}
-          </span>
         </div>
         <p className="endpoint">{status.endpoint}</p>
         <p className="helper">
@@ -329,6 +325,7 @@ export function ConnectionManager({
         <Button className="secondary" disabled={busy} onClick={repair}>
           등록키 다시 확인
         </Button>
+        <DiagnosticExport runtime={runtime} native={native} disabled={busy} />
       </details>
     </>
   );
@@ -397,7 +394,7 @@ function CollectionSettings({
       >
         <div className="section-title">
           <h3>자동 수집</h3>
-          <span className="tag">
+          <span className="tag" data-active={status?.collection_enabled}>
             {status
               ? status.collection_enabled
                 ? "수집 켜짐"
@@ -503,9 +500,6 @@ function CollectionSettings({
 }
 
 export function SettingsPage({
-  runtime,
-  core,
-  diagnose,
   setAlerts,
   theme,
   setTheme,
@@ -515,9 +509,6 @@ export function SettingsPage({
   busy,
   native,
 }: {
-  runtime: Runtime;
-  core: CoreStatus | null;
-  diagnose: () => void;
   setAlerts: (enabled: boolean) => void;
   theme: Theme;
   setTheme: (v: Theme) => void;
@@ -546,6 +537,17 @@ export function SettingsPage({
             setCloseAction(value as AppPreferences["close_action"])
           }
         />
+        {preferences.close_action === "tray" && (
+          <label className="tray-alert-option">
+            <input
+              type="checkbox"
+              checked={!!preferences.alerts_enabled}
+              disabled={!native || busy || !!preferencesError}
+              onChange={(event) => setAlerts(event.target.checked)}
+            />
+            전송에 문제가 생기면 알림 받기
+          </label>
+        )}
         {preferencesError && (
           <p className="preference-error" role="alert">
             {preferencesError}
@@ -553,10 +555,7 @@ export function SettingsPage({
         )}
       </section>
       <section className="settings-block preference-row">
-        <div>
-          <h2>테마</h2>
-          <p className="helper">시스템을 선택하면 기기 설정을 따릅니다.</p>
-        </div>
+        <h2>테마</h2>
         <div className="theme-segment" role="group" aria-label="화면 테마">
           {(
             [
@@ -576,84 +575,6 @@ export function SettingsPage({
           ))}
         </div>
       </section>
-      <section className="settings-block preference-row">
-        <div>
-          <h2>문제 알림</h2>
-          <p className="helper">트레이 실행 중 반복 실패·조치 필요 시 알림</p>
-        </div>
-        <Choice
-          label="문제 알림"
-          value={preferences.alerts_enabled ? "on" : "off"}
-          disabled={!native || busy || !!preferencesError}
-          options={[
-            ["off", "꺼짐"],
-            ["on", "켜짐"],
-          ]}
-          onValueChange={(v) => setAlerts(v === "on")}
-        />
-      </section>
-      <details className="diagnostic-details settings-diagnostics">
-        <summary>문제 해결</summary>
-        <section className="settings-block core-settings">
-          <div className="section-title">
-            <h2>GroundLine Core</h2>
-            <ShieldCheck size={20} />
-            <strong
-              className="metric"
-              data-state={
-                core
-                  ? core.status === "PASS"
-                    ? "success"
-                    : "attention"
-                  : "unknown"
-              }
-            >
-              {core
-                ? core.status === "PASS"
-                  ? "실행 진단 통과"
-                  : "확인 필요"
-                : "진단 전"}
-            </strong>
-            <Button
-              className="secondary"
-              disabled={!native || busy}
-              onClick={diagnose}
-            >
-              <RefreshCw size={16} />
-              Core 진단
-            </Button>
-          </div>
-          {core && (
-            <details className="core-details">
-              <summary>
-                진단 상세 <ChevronDown size={14} />
-              </summary>
-              <dl className="facts compact">
-                <div>
-                  <dt>패키지 버전</dt>
-                  <dd>{core.version}</dd>
-                </div>
-                <div>
-                  <dt>패키지 무결성</dt>
-                  <dd>{core.checksum_verified ? "확인 완료" : "확인 필요"}</dd>
-                </div>
-                <div>
-                  <dt>실제 훅 실행</dt>
-                  <dd>
-                    {core.live_hooks_verified ? "확인 완료" : "별도 확인 필요"}
-                  </dd>
-                </div>
-              </dl>
-            </details>
-          )}
-        </section>
-        <DiagnosticExport
-          key={runtime}
-          runtime={runtime}
-          native={native}
-          disabled={busy}
-        />
-      </details>
     </div>
   );
 }

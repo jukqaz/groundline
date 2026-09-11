@@ -45,7 +45,6 @@ fn main() {
             commands::connect,
             commands::set_collection,
             commands::export_compose,
-            commands::core_diagnostic,
             commands::open_dashboard,
             commands::cancel_connection,
             commands::resume_collection,

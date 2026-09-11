@@ -14,7 +14,6 @@ fn main() {
             "connect",
             "set_collection",
             "export_compose",
-            "core_diagnostic",
             "open_dashboard",
             "cancel_connection",
             "resume_collection",

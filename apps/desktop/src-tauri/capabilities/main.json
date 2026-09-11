@@ -10,7 +10,6 @@
     "allow-connect",
     "allow-set-collection",
     "allow-export-compose",
-    "allow-core-diagnostic",
     "allow-open-dashboard",
     "allow-cancel-connection",
     "allow-resume-collection",

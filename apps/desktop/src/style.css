@@ -553,32 +553,6 @@ main {
   margin-top: var(--space-5);
   font-size: var(--font-size-1);
 }
-.core-settings .section-title {
-  justify-content: flex-start;
-}
-.core-settings .section-title > svg {
-  order: -1;
-  width: 18px;
-}
-.core-settings .metric {
-  margin-right: auto;
-  font-size: var(--font-size-1);
-  color: var(--muted);
-  font-weight: 500;
-}
-.core-settings .metric[data-state="success"] {
-  color: var(--teal);
-}
-.core-settings .metric[data-state="attention"] {
-  color: var(--amber-11);
-}
-.core-details {
-  margin-top: var(--space-5);
-}
-.core-details summary {
-  justify-content: flex-end;
-}
-.core-details summary,
 .privacy-details summary,
 .diagnostic-details summary,
 .advanced summary,
@@ -588,9 +562,6 @@ main {
   gap: var(--space-2);
   color: var(--muted);
   font-size: var(--font-size-2);
-}
-.core-details[open] summary {
-  margin-bottom: var(--space-5);
 }
 .facts {
   margin: var(--space-5) 0;
@@ -704,35 +675,6 @@ main {
   color: var(--muted);
   font-size: var(--font-size-2);
   margin-top: var(--space-2);
-}
-.server-switcher {
-  display: flex;
-  gap: var(--space-5);
-  border-bottom: 1px solid var(--border);
-  margin: calc(-1 * var(--space-3)) 0 var(--space-6);
-}
-.server-switcher .rt-Button {
-  height: 44px;
-  border-radius: 0;
-  padding: 0 var(--space-1);
-  background: transparent;
-  box-shadow: none;
-  color: var(--muted);
-  border-bottom: 2px solid transparent;
-}
-.server-switcher .rt-Button[aria-pressed="true"] {
-  color: var(--text);
-  border-bottom-color: var(--gray-12);
-}
-.server-switcher strong {
-  font-weight: 500;
-  font-size: var(--font-size-2);
-}
-.server-switcher small {
-  display: none;
-}
-.server-switcher svg {
-  width: 17px;
 }
 .connection-summary {
   padding-bottom: var(--space-6);
@@ -1225,9 +1167,6 @@ main {
   .preference-row {
     gap: var(--space-4);
   }
-  .server-switcher {
-    gap: var(--space-4);
-  }
   .stepper,
   .workflow-steps {
     gap: var(--space-3);
@@ -1266,6 +1205,27 @@ main {
   color: var(--muted);
   background: var(--gray-3);
 }
-.settings-diagnostics .settings-block:last-child {
+
+.tray-alert-option {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-size-2);
+}
+.tray-alert-option input {
+  accent-color: var(--teal);
+}
+.server-tools {
+  margin-top: var(--space-6);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+.server-back {
+  margin-bottom: var(--space-5);
+}
+.diagnostic-details .settings-block:last-child {
+  margin-top: var(--space-5);
   border-bottom: 0;
 }

@@ -1565,7 +1565,7 @@ dependencies = [
 
 [[package]]
 name = "groundline-contracts"
-version = "0.24.5"
+version = "0.24.6"
 dependencies = [
  "chrono",
  "semver",
@@ -1579,16 +1579,14 @@ dependencies = [
 
 [[package]]
 name = "groundline-desktop"
-version = "0.24.5"
+version = "0.24.6"
 dependencies = [
  "chrono",
  "dirs",
  "groundline-runtime",
  "secrecy",
- "semver",
  "serde",
  "serde_json",
- "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-notification",
@@ -1605,7 +1603,7 @@ dependencies = [
 
 [[package]]
 name = "groundline-runtime"
-version = "0.24.5"
+version = "0.24.6"
 dependencies = [
  "chrono",
  "command-group",
@@ -5760,7 +5758,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.24.5"
+version = "0.24.6"
 dependencies = [
  "aho-corasick",
  "chrono",

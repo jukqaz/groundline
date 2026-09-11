@@ -149,6 +149,34 @@ describe("메뉴에서 끝내는 사용자 작업", () => {
     nav("서버");
     expect(screen.getByRole("region", { name: "연결 관리" })).toBeTruthy();
   });
+  it("앱 설정에서 진단을 제거하고 트레이 알림 선택은 종료 방식에 맞게 표시한다", async () => {
+    preferences = {
+      ...defaultPreferences,
+      close_action: "quit",
+      alerts_enabled: true,
+    };
+    await mount();
+    nav("설정");
+    expect(screen.queryByText("문제 해결")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Core 진단" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "진단 내보내기" })).toBeNull();
+    expect(
+      screen.queryByRole("checkbox", {
+        name: "전송에 문제가 생기면 알림 받기",
+      }),
+    ).toBeNull();
+    await choose("창 닫기", "트레이에 숨기기");
+    const checkbox = await screen.findByRole("checkbox", {
+      name: "전송에 문제가 생기면 알림 받기",
+    });
+    expect((checkbox as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(checkbox);
+    await waitFor(() => expect(preferences.alerts_enabled).toBe(false));
+    expect(preferences.runtime).toBe("codex_app");
+    nav("서버");
+    fireEvent.click(screen.getByText("연결 점검과 전송 상세"));
+    expect(screen.getByRole("button", { name: "진단 내보내기" })).toBeTruthy();
+  });
   it("Grafana 주소가 없는 상세 분석은 대시보드 주소 항목으로 이동한다", async () => {
     current = { ...enrolled, grafana_url: "" };
     await mount();
