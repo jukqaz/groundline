@@ -122,6 +122,13 @@ enum WorkerCommand {
 
 #[derive(Debug, Subcommand)]
 enum InsightsCommand {
+    /// Validate one current basic event, including its canonical digest and ID.
+    ValidateEvent {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
     /// Fetch one strict privacy-safe report from the configured HTTPS or optional Tailnet service.
     FetchReport {
         #[arg(long, value_parser = parse_report_days, default_value_t = 7)]
@@ -328,6 +335,25 @@ async fn run(cli: Cli) -> Result<(), ExitCode> {
                 }
             }
         }
+        Command::Insights {
+            command: InsightsCommand::ValidateEvent { input, json },
+        } => match load_bounded(&input, insights::MAX_BASIC_EVENT_BYTES as u64)
+            .and_then(|bytes| insights::validate_basic_event_bytes(&bytes))
+        {
+            Ok(_) => {
+                emit(
+                    &json!({"kind":"groundline-basic-event-validation", "status":"PASS",
+                    "basic_contract_revision":insights::BASIC_CONTRACT_REVISION,
+                    "mutation_performed":false, "raw_content_emitted":false}),
+                    json,
+                );
+                Ok(())
+            }
+            Err(error) => {
+                emit(&failure(error), json);
+                Err(ExitCode::FAILURE)
+            }
+        },
         Command::Insights {
             command: InsightsCommand::ValidateReport { input, json },
         } => match load_bounded(&input, insights::MAX_WEEKLY_REPORT_BYTES as u64)

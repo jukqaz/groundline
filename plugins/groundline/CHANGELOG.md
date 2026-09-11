@@ -3,6 +3,11 @@
 This package summary covers the current release line. See the repository
 [changelog](https://github.com/jukqaz/groundline/blob/main/CHANGELOG.md) for shared release and packaging changes.
 
+## 0.25.3
+
+- Use the shared canonical cache-ratio calculation and strict event validator.
+- Align packaging with Insights storage integrity and bounded quarantine retention.
+
 ## 0.25.2
 
 - Preserve quarantined-event counts and quality reasons when reviewing Insights reports.

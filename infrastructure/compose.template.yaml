@@ -683,7 +683,7 @@ configs:
             "gridPos": {"h": 6, "w": 12, "x": 12, "y": 18},
             "id": 19,
             "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
-            "targets": [{"datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"}, "editorType": "sql", "format": 1, "queryType": "table", "rawSql": "WITH policy AS (SELECT argMax(retention_days, updated_at) AS retention_days FROM groundline.release_policy FINAL WHERE policy_key = 'stable') SELECT count() AS value FROM groundline.basic_weekly CROSS JOIN policy WHERE received_at < now('UTC') - toIntervalDay(policy.retention_days)", "refId": "A"}],
+            "targets": [{"datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"}, "editorType": "sql", "format": 1, "queryType": "table", "rawSql": "SELECT count() AS value FROM groundline.basic_retention WHERE expires_at < now('UTC')", "refId": "A"}],
             "title": "ClickHouse TTL 정리 대기 row",
             "type": "stat"
           }

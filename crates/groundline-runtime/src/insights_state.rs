@@ -2658,6 +2658,7 @@ fn api_capability_matrix_requires_semantic_contract_without_version_pinning() {
         Value::Null,
         json!({"basic_schema_versions":[5],"basic_contract_revision":1}),
         json!({"basic_schema_versions":[5],"basic_contract_revision":2}),
+        json!({"basic_schema_versions":[5],"basic_contract_revision":4}),
         json!({"basic_schema_versions":[6],"basic_contract_revision":99}),
     ] {
         let value = json!({"storage_ready":true,"ingest_capabilities":capabilities});

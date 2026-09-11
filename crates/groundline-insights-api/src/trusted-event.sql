@@ -17,14 +17,18 @@ AND root_truncated_count = 0
 AND truncated_count = 0
 AND originator_unclassified_excluded_root_count = 0
 AND verification_tool_calls = toUInt64(verification_success_count) + verification_failure_count + verification_unresolved_count
-AND ((period_start IS NULL AND period_end IS NULL)
-     OR (period_start IS NOT NULL AND period_end IS NOT NULL AND period_start < period_end))
+AND period_start IS NOT NULL AND period_end IS NOT NULL
+AND period_start < period_end AND period_end <= generated_at
+AND generated_at <= received_at + INTERVAL 5 MINUTE
 AND arrayAll(usage ->
     JSONExtractUInt(usage, 'cached_input_tokens') <= JSONExtractUInt(usage, 'input_tokens')
     AND JSONExtractUInt(usage, 'reasoning_output_tokens') <= JSONExtractUInt(usage, 'output_tokens')
     AND JSONExtractUInt(usage, 'total_tokens') >= JSONExtractUInt(usage, 'input_tokens')
     AND JSONExtractUInt(usage, 'total_tokens') - least(JSONExtractUInt(usage, 'total_tokens'), JSONExtractUInt(usage, 'input_tokens')) >= JSONExtractUInt(usage, 'output_tokens')
-    AND JSONExtractUInt(usage, 'cumulative_rollout_count') + JSONExtractUInt(usage, 'fallback_rollout_count') = JSONExtractUInt(usage, 'rollout_count_with_usage'),
+    AND JSONExtractUInt(usage, 'cumulative_rollout_count') + JSONExtractUInt(usage, 'fallback_rollout_count') = JSONExtractUInt(usage, 'rollout_count_with_usage')
+    AND if(JSONExtractUInt(usage, 'input_tokens') = 0,
+        JSONExtractRaw(usage, 'cached_input_ratio') = 'null',
+        ifNull(JSONExtract(usage, 'cached_input_ratio', 'Nullable(Float64)') = round(JSONExtractUInt(usage, 'cached_input_tokens') / JSONExtractUInt(usage, 'input_tokens') * 10000) / 10000, 0)),
     [JSONExtractRaw(payload_json, 'metrics', 'root', 'usage'),
      JSONExtractRaw(payload_json, 'metrics', 'delegated', 'usage'),
      JSONExtractRaw(payload_json, 'metrics', 'guardian', 'usage')])
