@@ -134,8 +134,11 @@ fn failure_candidates_preserve_partial_evidence_for_astra_and_sol_without_applyi
             report["coverage"]["root_usage_fallback_event_count"] = json!(1);
             report["collection_health"]["quarantined_event_count"] = json!(3);
             report["data_quality"]["status"] = json!("PARTIAL");
-            report["data_quality"]["reason_codes"] =
-                json!(["events_quarantined", "usage_fallback_present", "usage_missing"]);
+            report["data_quality"]["reason_codes"] = json!([
+                "events_quarantined",
+                "usage_fallback_present",
+                "usage_missing"
+            ]);
             report["comparison_readiness"]["reason_codes"] =
                 json!(["comparison_baseline_not_included", "data_quality_not_pass"]);
             report["cohorts"]["model_effort_context_distribution"] = json!([
