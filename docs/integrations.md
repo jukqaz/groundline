@@ -3,6 +3,14 @@
 GroundLine ships two independent Codex plugins from one marketplace. Installing
 one plugin never installs or activates the other.
 
+**Every installation profile works without GroundLine Desktop.** The GUI is a
+[separate optional download](../apps/desktop/README.ko.md#선택-설치) for graphical
+connection and delivery management. Quitting or removing it preserves plugins,
+collection consent, and server settings. Codex hooks invoke the installed Insights
+binary directly; no GUI background process or login item is required. There is
+no periodic delivery without hook activity, and the computer must be awake and
+able to reach the selected server.
+
 ## Choose a profile
 
 | Profile | Install | External service | Intended use |

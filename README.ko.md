@@ -24,25 +24,14 @@ Insights는 자기 서비스 연결 방식입니다. 서로 다른 운영자는 
 
 ## 설치와 업그레이드
 
-**설치와 기존 설정 보정을 함께** 하려면 검토한 `stable` 배포본의 설치 스크립트를
-실행합니다. `gpt-6-astra / xhigh / Fast 끔`을 적용하고, 수동 컨텍스트 제한을
-네이티브 기본값으로 되돌리고, 퇴역한 Core hook 승인 기록 4종을 정리합니다.
-기존 파일은 비공개 백업을 남기며 다른 설정은 보존합니다. Git과 Codex가 필요하고,
-Python이나 Rust 개발 도구는 필요하지 않습니다.
+**기본 설치는 Codex 플러그인입니다. GroundLine Desktop GUI는 별도 선택 설치입니다.**
+Codex App과 CLI에서 같은 플러그인을 사용하며 GUI를 설치하거나 켜 둘 필요가 없습니다.
+Git과 Codex만 있으면 됩니다. 아래 명령은 개인 모델·추론·권한 설정을 바꾸지 않습니다.
+수집은 Insights 연결 설정과 명시적 동의 후 Codex 훅이 실행될 때 동작합니다.
 
-```console
-git clone --branch stable --single-branch https://github.com/jukqaz/groundline.git groundline-install
-bash groundline-install/install.sh
-```
-
-Windows에서는 두 번째 줄 대신 `powershell -File groundline-install/install.ps1`을
-실행합니다. 자동 탐지한 CLI가 실제 App 런타임과 다르면 shell 스크립트의 첫 인자,
-PowerShell의 `-Codex` 인자로 실행 파일 경로를 전달합니다. 설치부터 설정 보정,
-네이티브 strict doctor까지 한 번에 실행하며, 같은 설정에 재적용하면 쓰기와
-추가 백업이 없습니다. 업그레이드에는 새로 받은 검토한 stable 배포본을 사용합니다.
-배포본과 설치된 실행 파일이 다르면 중단합니다.
-
-**개인 설정을 바꾸지 않고 package만 설치**하려면 아래 native 명령을 사용합니다.
+아래 `codex`는 실제 사용하는 Codex의 CLI를 뜻합니다. macOS에서 Codex App만
+설치했다면 `/Applications/ChatGPT.app/Contents/Resources/codex` 전체 경로로
+바꿔 실행할 수 있습니다. App과 CLI가 같은 설정을 사용하려면 같은 `CODEX_HOME`을 유지합니다.
 
 moving `stable` branch를 한 번 등록한 뒤 설치 프로필을 선택합니다. 두 플러그인은
 독립적이며 하나를 설치해도 다른 플러그인이 자동 설치·활성화되지 않습니다.
@@ -81,6 +70,31 @@ codex plugin list --json
 marketplace 갱신, 설치 package checksum, hook 신뢰, collector upload,
 ClickHouse 반영, Grafana frame, image 게시, 운영 배포, stable 승격은 서로 다른
 증거 lane입니다.
+
+### 선택 설치: GUI
+
+화면에서 서버 연결과 전송 상태를 관리하려면
+[GroundLine Desktop 설치 안내](apps/desktop/README.ko.md#선택-설치)를 따릅니다.
+플러그인 설치·업그레이드는 GUI를 설치하지 않으며, GUI를 제거해도 설치된 플러그인과
+기존 수집 동의는 유지됩니다. 현재 GUI는 **macOS Apple Silicon 미리보기**이며
+Apple 공증 전이므로 일반 배포의 실행 승인까지 보장하지 않습니다.
+
+### 선택 작업: 기존 Codex 설정 보정
+
+설치와 설정 보정을 함께 원할 때만 검토한 `stable` 배포본의 설치 스크립트를 실행합니다.
+이 스크립트는 Core를 설치하고 `gpt-6-astra / xhigh / Fast 끔`을 적용하며,
+수동 컨텍스트 제한과 퇴역한 Core hook 승인 기록 4종을 정리합니다.
+기존 파일은 비공개 백업을 남기며 다른 설정은 보존합니다. GUI와 Insights는 설치하지 않습니다.
+
+```console
+git clone --branch stable --single-branch https://github.com/jukqaz/groundline.git groundline-install
+bash groundline-install/install.sh
+```
+
+Windows에서는 두 번째 줄 대신 `powershell -File groundline-install/install.ps1`을
+실행합니다. 실제 App 런타임의 CLI가 자동 탐지와 다르면 shell 스크립트의 첫 인자,
+PowerShell의 `-Codex` 인자로 경로를 전달합니다. 같은 설정에 재적용하면 쓰기와
+추가 백업이 없습니다. 배포본과 설치된 실행 파일이 다르면 중단합니다.
 
 ## 개인 스킬 관리
 

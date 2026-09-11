@@ -25,27 +25,16 @@ in the maintainer's service. See the [private-owner boundary](docs/integrations.
 
 ## Install and upgrade
 
-For installation **with configuration repair**, use a reviewed `stable`
-distribution. This applies `gpt-6-astra`, `xhigh`, and Fast off, restores native
-context limits, removes four retired Core hook approval entries, and runs native
-strict doctor. Existing configuration is privately backed up; unrelated settings
-remain intact. Git and Codex are required; no Python or Rust toolchain is needed.
+**The default installation is a Codex plugin. GroundLine Desktop is an optional,
+separate GUI download.** Codex App and CLI use the same plugins; neither requires
+the GUI to be installed or running. Only Git and Codex are required. These native
+commands preserve personal model, reasoning, and permission settings. Insights
+collection starts only after connection setup and explicit consent, on Codex hooks.
 
-```console
-git clone --branch stable --single-branch https://github.com/jukqaz/groundline.git groundline-install
-bash groundline-install/install.sh
-```
-
-On Windows, run `powershell -File groundline-install/install.ps1` instead.
-Pass the actual App-bundled Codex executable as the shell script's first argument
-or PowerShell's `-Codex` argument when it differs from the detected CLI. Repeating
-setup with unchanged settings creates no extra backup or configuration write.
-Use a newly fetched reviewed stable distribution for an upgrade; stale or
-mismatched native artifacts are rejected. The scripts use Codex's native
-marketplace commands and finish setup in the same invocation.
-
-For **package delivery only**, use the native commands below; they do not run
-setup or change personal defaults.
+Here, `codex` means the CLI belonging to the Codex installation you use. On macOS
+with only Codex App installed, replace it with the full executable path
+`/Applications/ChatGPT.app/Contents/Resources/codex`. Keep the same `CODEX_HOME`
+when sharing configuration between App and CLI.
 
 Register this repository once on the moving `stable` branch, then choose a
 profile. The plugin IDs are independent; installing one never installs or
@@ -84,6 +73,34 @@ again for that same plugin ID, then verify its version and checksum.
 Marketplace refresh, installed package checksums, hook
 trust, collector upload, ClickHouse visibility, Grafana frames, image
 publication, deployment, and stable promotion are separate evidence lanes.
+
+### Optional GUI
+
+For a graphical connection and delivery status interface, follow the
+[GroundLine Desktop installation guide](apps/desktop/README.ko.md#선택-설치).
+Plugin installation and upgrades do not install the GUI. Removing the GUI leaves
+the plugins and collection consent intact. The GUI is currently a **macOS Apple
+Silicon preview** without Apple notarization; normal distribution approval is
+not yet qualified.
+
+### Optional Codex configuration repair
+
+Use a reviewed `stable` distribution's installer only when you also want settings
+repair. It installs Core, applies `gpt-6-astra`, `xhigh`, and Fast off, restores
+native context limits, removes four retired Core hook approval entries, and runs
+strict doctor. Existing configuration is privately backed up; unrelated settings
+remain intact. It installs neither Insights nor the GUI.
+
+```console
+git clone --branch stable --single-branch https://github.com/jukqaz/groundline.git groundline-install
+bash groundline-install/install.sh
+```
+
+On Windows, run `powershell -File groundline-install/install.ps1` instead. Pass the
+actual App-bundled Codex executable as the shell script's first argument or
+PowerShell's `-Codex` argument when it differs from the detected CLI. Repeating
+unchanged setup creates no extra backup or write. Stale or mismatched artifacts
+are rejected.
 
 ## Maintain personal skills
 

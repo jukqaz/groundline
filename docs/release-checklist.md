@@ -23,6 +23,12 @@
    has exactly four fail-open hooks using `groundline-insights`. Confirm public
    metadata and documentation describe Core-only, Insights-only, and combined
    installation without implying an automatic sibling dependency.
+   Keep Desktop a separate opt-in archive: plugin installers must not install,
+   launch, or depend on the GUI. Verify the installed native collector and a real
+   Codex lifecycle hook with Desktop absent, preserving existing settings and
+   consent. Record an accepted receipt and matching storage query. Qualify
+   Developer ID signing and Gatekeeper acceptance separately before calling the
+   optional macOS GUI ready for ordinary users.
 5. Confirm current source and every Git object reachable from branches, remote
    refs, and tags contain no production endpoint, credential, personal path,
    infrastructure inventory, deployment receipt, Python runtime dependency, or
