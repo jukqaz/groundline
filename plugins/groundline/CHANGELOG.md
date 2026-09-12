@@ -3,6 +3,11 @@
 This package summary covers the current release line. See the repository
 [changelog](https://github.com/jukqaz/groundline/blob/main/CHANGELOG.md) for shared release and packaging changes.
 
+## 0.25.5
+
+- Preserve explicit missing-usage quality reasons while reviewing valid lifecycle data.
+- Align packaging with the Insights lifecycle-retention correction.
+
 ## 0.25.4
 
 - Preserve independent tool-output signal counts across collection windows.

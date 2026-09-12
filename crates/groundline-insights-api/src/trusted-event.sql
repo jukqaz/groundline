@@ -2,9 +2,6 @@ schema_version = 5
 AND runtime_family IN ('codex_app', 'codex_cli')
 AND os_family IN ('macos', 'linux', 'windows')
 AND execution_mode IN ('desktop', 'local_headless', 'remote_headless')
-AND (observed_root_count = 0 OR usage_source NOT IN ('unknown', 'unavailable'))
-AND (delegated_count = 0 OR delegated_usage_source NOT IN ('unknown', 'unavailable'))
-AND (guardian_count = 0 OR guardian_usage_source NOT IN ('unknown', 'unavailable'))
 AND cached_input_tokens <= input_tokens
 AND reasoning_output_tokens <= output_tokens
 AND total_tokens >= input_tokens
@@ -26,6 +23,13 @@ AND arrayAll(usage ->
     AND JSONExtractUInt(usage, 'total_tokens') >= JSONExtractUInt(usage, 'input_tokens')
     AND JSONExtractUInt(usage, 'total_tokens') - least(JSONExtractUInt(usage, 'total_tokens'), JSONExtractUInt(usage, 'input_tokens')) >= JSONExtractUInt(usage, 'output_tokens')
     AND JSONExtractUInt(usage, 'cumulative_rollout_count') + JSONExtractUInt(usage, 'fallback_rollout_count') = JSONExtractUInt(usage, 'rollout_count_with_usage')
+    AND if(JSONExtractString(usage, 'source') IN ('unknown', 'unavailable'),
+        JSONExtractUInt(usage, 'rollout_count_with_usage') = 0
+        AND JSONExtractUInt(usage, 'input_tokens') = 0
+        AND JSONExtractUInt(usage, 'output_tokens') = 0
+        AND JSONExtractUInt(usage, 'total_tokens') = 0
+        AND JSONExtractUInt(usage, 'cache_write_input_tokens') = 0,
+        JSONExtractUInt(usage, 'rollout_count_with_usage') > 0)
     AND if(JSONExtractUInt(usage, 'input_tokens') = 0,
         JSONExtractRaw(usage, 'cached_input_ratio') = 'null',
         ifNull(JSONExtract(usage, 'cached_input_ratio', 'Nullable(Float64)') = round(JSONExtractUInt(usage, 'cached_input_tokens') / JSONExtractUInt(usage, 'input_tokens') * 10000) / 10000, 0)),

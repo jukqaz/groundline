@@ -249,6 +249,15 @@ must not be rewritten into fabricated current-contract measurements. Removing
 history requires the owner's approval of the concrete scope. Check that no new
 receipts arrived between inventory and replacement.
 
+A complete lifecycle read can precede provider usage, especially at
+`SessionStart`. Preserve these events for the normal retention period and keep
+their observed start/completion counters in reports. An `unavailable` usage
+source remains explicitly unmeasured; zero storage counters must not be read as
+a measured zero-cost task. Reports retain the `usage_missing` quality reason.
+Incomplete source reads and incoherent usage provenance remain quarantined
+with the short quarantine TTL. Updating this classification does not rewrite
+stored event IDs, payloads, counters, or collection periods.
+
 After migration, verify API storage readiness, all provisioned Grafana queries,
 the installed datasource version, and a fresh collector receipt matched to a
 database row. Preserve enrollment credentials, collection consent, network
