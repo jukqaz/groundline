@@ -66,8 +66,9 @@ minimal relevant non-secret excerpts, not whole private files. Core has no
 lifecycle hooks; optional Insights has a separate consented checkpoint contract.
 Hook trust alone does not prove installation, dispatch, or collection consent.
 
-Verify affected behavior once, then broaden only for new changes or unresolved
-risk. Report the result, useful evidence, and remaining gaps without empty
-templates. Distinguish source changes, package validation, installed runtime,
+Complete the required checks for affected behavior. Reuse passing results;
+broaden or repeat for relevant changes, failures, or unresolved risk. Report
+the result, useful evidence, and remaining gaps without empty templates.
+Distinguish source changes, package validation, installed runtime,
 and live behavior. Name and link the exact skill instruction if it causes a
 pause or changes the requested direction.
