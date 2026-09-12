@@ -3,6 +3,11 @@
 This package summary covers the current release line. See the repository
 [changelog](https://github.com/jukqaz/groundline/blob/main/CHANGELOG.md) for shared release and packaging changes.
 
+## 0.25.4
+
+- Preserve independent tool-output signal counts across collection windows.
+- Keep report, usage, and privacy validation aligned with Insights.
+
 ## 0.25.3
 
 - Use the shared canonical cache-ratio calculation and strict event validator.

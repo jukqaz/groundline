@@ -228,6 +228,58 @@ mod tests {
         );
         std::fs::write(path, data).unwrap();
     }
+
+    #[test]
+    fn native_output_signals_survive_overlapping_labels_and_window_boundaries() {
+        for start in [0, 5] {
+            let (_temp, root, rollout, identity, consent) = fixture();
+            let records = [
+                json!({"type":"session_meta","payload":{"id":"owner"}}),
+                json!({"timestamp":at(5).to_rfc3339(),"type":"response_item","payload":{
+                    "type":"function_call","name":"exec_command","call_id":"call-1",
+                    "arguments":"{\"cmd\":\"echo check\"}"
+                }}),
+                json!({"timestamp":at(6).to_rfc3339(),"type":"response_item","payload":{
+                    "type":"function_call_output","call_id":"call-1",
+                    "output":"permission denied after timeout"
+                }}),
+            ];
+            std::fs::write(
+                &rollout,
+                records
+                    .iter()
+                    .map(Value::to_string)
+                    .collect::<Vec<_>>()
+                    .join("\n")
+                    + "\n",
+            )
+            .unwrap();
+            let directory = state_directory(&root).unwrap();
+            let cursor = at(start).to_rfc3339();
+            stage(
+                &directory,
+                Some(&cursor),
+                at(10),
+                &identity,
+                &consent,
+                Source {
+                    generation: 1,
+                    trigger: "manual",
+                },
+                |s, e| audit(&root, s, e),
+            )
+            .expect("valid native output must not pause collection");
+            let events = pending_events(&directory, 16).unwrap();
+            assert_eq!(events.observed_count, 1);
+            let quality = &events.batch[0].1["metrics"]["root"]["quality_proxies"];
+            assert_eq!(quality["tool_call_count"], u64::from(start == 0));
+            assert_eq!(
+                quality["failure_signals"],
+                json!({"rejected":1,"timeout":1})
+            );
+        }
+    }
+
     fn audit(root: &Path, start: DateTime<Utc>, end: DateTime<Utc>) -> Result<Value, StateError> {
         collect_audit(root, start, end, Some("codex_cli"), false)
             .map_err(|_| StateError::AuditFailed)
