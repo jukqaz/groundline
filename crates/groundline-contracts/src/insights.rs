@@ -12,7 +12,7 @@ use crate::model::{EFFORTS, MAX_MODEL_CONTEXTS, MODEL_FAMILIES};
 pub const MAX_WEEKLY_REPORT_BYTES: usize = 128 * 1024;
 pub const MAX_BASIC_EVENT_BYTES: usize = 64 * 1024;
 /// Semantic allowlist revision, independent of the envelope schema version.
-pub const BASIC_CONTRACT_REVISION: u64 = 5;
+pub const BASIC_CONTRACT_REVISION: u64 = 6;
 
 pub fn ingest_capabilities() -> Value {
     serde_json::json!({"basic_schema_versions":[5], "basic_contract_revision":BASIC_CONTRACT_REVISION})
@@ -1241,20 +1241,13 @@ fn validate_session_metrics(value: &Value) -> bool {
     let completed_turns = count(activity, "task_completed");
     let latency_completed = count(latency, "completed_count");
     let long_turns = count(latency, "long_turn_count");
-    let failure_signals = quality
-        .get("failure_signals")
-        .and_then(Value::as_object)
-        .and_then(|signals| {
-            signals
-                .values()
-                .try_fold(0_u64, |total, value| total.checked_add(value.as_u64()?))
-        });
-
+    // Signals count output records, not calls. One output can carry multiple
+    // labels, and a call before this window can produce an output inside it.
+    // Their fixed keys and u32 bounds are validated above.
     latency_completed <= completed_turns
         && long_turns <= latency_completed
         && repeated_groups <= repeated_calls
         && repeated_calls <= tool_calls
-        && failure_signals.is_some_and(|total| total <= tool_calls)
         && count(quality, "verification_tool_calls") <= tool_calls
         && count(quality, "short_message_count") <= user_messages
         && count(quality, "broad_scope_message_count") <= user_messages
@@ -1622,7 +1615,7 @@ mod tests {
             assert!(!validate_session_metrics(&metrics), "accepted {pointer}");
         }
         let mut metrics = session_metrics();
-        metrics["quality_proxies"]["failure_signals"] = json!({"nonzero_exit":3,"timeout":2});
+        metrics["quality_proxies"]["failure_signals"] = json!({"timeout":u64::from(u32::MAX) + 1});
         assert!(!validate_session_metrics(&metrics));
         let mut metrics = session_metrics();
         metrics["quality_proxies"]["failure_signals"] = json!({"private_path":1});

@@ -4,6 +4,12 @@ This package summary covers the current release line. The repository
 [changelog](https://github.com/jukqaz/groundline/blob/main/CHANGELOG.md) records shared changes. A source version entry
 does not prove that its image or `stable` distribution has been published.
 
+## 0.25.4
+
+- Accept overlapping failure labels and outputs from calls in an earlier window.
+- Preserve bounded signal keys and counts, strict event integrity, and durable retry windows. Upgrade the API before the collector and use an explicit retry to recover paused collection.
+- Require ingest contract revision 6 before sending events to prevent rejection by an older API.
+
 ## 0.25.3
 
 - Derive and validate canonical cache ratios, including null for zero denominators.

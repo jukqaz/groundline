@@ -78,9 +78,12 @@ the updated executable on every collector process, including detached hooks.
 Every due worker cycle checks `/healthz` before enrollment or upload, even when
 a collector token is already cached. The API advertises Basic envelope schema
 versions and a semantic allowlist revision in `ingest_capabilities`. Collectors
-require schema 5 and revision 5 or newer, not an exact package version. Revision 5
-requires canonical cache ratios and bounded, disjoint ingestion windows as well
-as coherent usage totals and provenance counters. Enrollment includes the
+require schema 5 and revision 6 or newer, not an exact package version. Revision 6
+accepts independent output-signal counts, including overlapping labels and results
+from calls in an earlier window. These fixed-key, bounded counts are output
+proxies, not counts of failed calls. Canonical cache ratios, bounded and disjoint
+ingestion windows, coherent usage totals, and provenance checks remain required.
+Enrollment includes the
 authoritative `current_generation`.
 Re-enroll once per due cycle with the existing identity and token, and use that
 generation when staging new events. Never infer zero from a cached credential
