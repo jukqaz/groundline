@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "kind": "groundline-binary-artifact",
+  "groundline_version": "0.25.5",
+  "target": "aarch64-pc-windows-msvc",
+  "executable": "groundline-insights.exe",
+  "size_bytes": 3897344,
+  "sha256": "9ed4db841bf0579028480478668f387835781f07e897014cca1f1cdc6ff0cdbe"
+}
