@@ -23,6 +23,22 @@ Insights is bring-your-own service: independent owners use separate private
 instances, storage, and credentials. Public installation does not enroll a user
 in the maintainer's service. See the [private-owner boundary](docs/integrations.md#private-owner-deployment-boundary).
 
+## Token cost and value
+
+Core skill descriptions and loaded guidance add model input. Model-led audits,
+verification, and report analysis can also consume additional tokens. Automatic
+Insights collection runs native code to aggregate existing activity and send it
+to the owner's service; it does not call a language model.
+
+Evaluate comparable completed tasks using verified outcomes, rework, user
+intervention, elapsed time, and measured tokens. Additional tokens can be a
+reasonable cost when the resulting quality or reliability justifies them. Net
+token savings are not guaranteed, and successful installation or delivery checks
+do not establish an efficiency benefit. Keep guidance compact, scale verification
+to the task's risk, and reuse valid evidence. Personal guidance trials retain the
+explicit comparison and rollback rules in the
+[personal improvement contract](plugins/groundline/references/personal-improvement.md).
+
 ## Install and upgrade
 
 **GroundLine runs as Codex plugins and native CLIs.** Codex App and CLI use the
