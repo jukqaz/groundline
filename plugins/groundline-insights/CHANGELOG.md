@@ -4,6 +4,12 @@ This package summary covers the current release line. The repository
 [changelog](https://github.com/jukqaz/groundline/blob/main/CHANGELOG.md) records shared changes. A source version entry
 does not prove that its image or `stable` distribution has been published.
 
+## 0.25.5
+
+- Preserve complete lifecycle records when provider usage has not arrived yet, including CLI SessionStart counters and receipt visibility.
+- Keep missing usage explicit in reports and retain normal records for the configured period. Incomplete reads and incoherent usage provenance remain quarantined with the short TTL.
+- Correct existing view and retention classification without rewriting payloads, IDs, counters, or collection periods. The ingest contract remains revision 6.
+
 ## 0.25.4
 
 - Accept overlapping failure labels and outputs from calls in an earlier window.

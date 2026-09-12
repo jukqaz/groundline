@@ -3148,9 +3148,11 @@ mod tests {
             "{report}"
         );
 
-        // A complete lifecycle read can contain no provider usage yet. Keep its
-        // durable receipt for retries, but exclude it from analytical metrics.
+        // SessionStart precedes the first provider usage record. Its lifecycle
+        // counters are valid even though token measurements are unavailable.
         let mut unmeasured = integration_event(collector_id, 7);
+        unmeasured["source"]["collection_trigger"] = json!("session_start_hook");
+        unmeasured["metrics"]["root"]["activity"]["task_started"] = json!(1);
         unmeasured["metrics"]["root"]["usage"]["source"] = json!("unavailable");
         unmeasured["metrics"]["root"]["usage"]["rollout_count_with_usage"] = json!(0);
         unmeasured["metrics"]["root"]["usage"]["fallback_rollout_count"] = json!(0);
@@ -3165,9 +3167,22 @@ mod tests {
             )
             .await
             .unwrap();
+        // An incomplete source read remains quarantined independently of
+        // whether usage is present. Never turn missing measurements into zero.
+        let mut incomplete = unmeasured.clone();
+        incomplete["sample"]["unreadable_completed_root_count"] = json!(1);
+        reseal_event(&mut incomplete);
+        clickhouse
+            .request(
+                "INSERT INTO groundline.basic_weekly FORMAT JSONEachRow",
+                &[],
+                Some(serde_json::to_vec(&event_row(&incomplete, Utc::now()).unwrap()).unwrap()),
+            )
+            .await
+            .unwrap();
         for (view, expected) in [
-            ("basic_current", b"2\n"),
-            ("basic_active", b"1\n"),
+            ("basic_current", b"3\n"),
+            ("basic_active", b"2\n"),
             ("basic_quarantined", b"1\n"),
         ] {
             let result = clickhouse.request(&format!("SELECT count() FROM groundline.{view} WHERE collector_id={{id:UUID}} FORMAT TabSeparated"), &[("id", collector_id.to_string())], None).await.unwrap();
@@ -3198,7 +3213,24 @@ mod tests {
                 .unwrap()
                 .contains(&json!("events_quarantined"))
         );
-        assert_eq!(report["coverage"]["root_usage_missing_event_count"], 0);
+        assert_eq!(report["coverage"]["root_usage_missing_event_count"], 1);
+        assert!(
+            report["data_quality"]["reason_codes"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("usage_missing"))
+        );
+        assert_eq!(
+            clickhouse
+                .request(
+                    "SELECT sum(task_started) FROM groundline.basic_active WHERE collector_id={id:UUID} FORMAT TabSeparated",
+                    &[("id", collector_id.to_string())],
+                    None,
+                )
+                .await
+                .unwrap(),
+            b"1\n"
+        );
 
         // Direct writes must not drift away from the canonical payload, even
         // when the changed value is individually legal for its column type.
@@ -3234,15 +3266,20 @@ mod tests {
             "SELECT dateDiff('day',toDateTime(received_at),expires_at) AS days FROM groundline.basic_weekly INNER JOIN groundline.basic_retention USING event_id WHERE collector_id={id:UUID} ORDER BY days",
             &[("id",collector_id.to_string())],
         ).await.unwrap();
-        assert_eq!(expiry, vec![json!(7), json!(365)]);
+        assert_eq!(expiry, vec![json!(7), json!(365), json!(365)]);
 
         // Only this isolated test database is forced to merge. The same-age
-        // measured record survives, while an expired quarantine receipt is gone.
+        // measured and unmeasured records survive; incomplete reads expire.
         let received = Utc::now() - ChronoDuration::days(8);
         let old_end = Utc::now() - ChronoDuration::days(9);
         let mut retained_id = String::new();
+        let mut unmeasured_id = String::new();
         let mut expired_id = String::new();
-        for (candidate, id) in [(&event, &mut retained_id), (&unmeasured, &mut expired_id)] {
+        for (candidate, id) in [
+            (&event, &mut retained_id),
+            (&unmeasured, &mut unmeasured_id),
+            (&incomplete, &mut expired_id),
+        ] {
             let mut old = candidate.clone();
             old["period"] = json!({"start_utc":(old_end-ChronoDuration::minutes(1)).to_rfc3339_opts(SecondsFormat::Secs,true),
                 "end_utc":old_end.to_rfc3339_opts(SecondsFormat::Secs,true),
@@ -3263,8 +3300,40 @@ mod tests {
             .request("OPTIMIZE TABLE groundline.basic_weekly FINAL", &[], None)
             .await
             .unwrap();
-        for (id, expected) in [(retained_id, b"1\n"), (expired_id, b"0\n")] {
+        for (id, expected) in [
+            (retained_id, b"1\n"),
+            (unmeasured_id, b"1\n"),
+            (expired_id, b"0\n"),
+        ] {
             assert_eq!(clickhouse.request("SELECT count() FROM groundline.basic_weekly FINAL WHERE event_id={id:UUID} FORMAT TabSeparated", &[("id",id)],None).await.unwrap(), expected);
+        }
+
+        // Unmeasured does not permit fabricated usage. API validation rejects
+        // incoherent provenance, and even a direct storage write is quarantined.
+        for source in ["unavailable", "codex-cumulative-window-delta"] {
+            let mut forged = unmeasured.clone();
+            forged["metrics"]["root"]["usage"]["source"] = json!(source);
+            if source == "unavailable" {
+                forged["metrics"]["root"]["usage"]["rollout_count_with_usage"] = json!(1);
+                forged["metrics"]["root"]["usage"]["fallback_rollout_count"] = json!(1);
+            }
+            reseal_event(&mut forged);
+            assert!(validate_basic_event_bytes(&serde_json::to_vec(&forged).unwrap()).is_err());
+            let mut raw = projection::row(&forged).unwrap();
+            raw.insert(
+                "payload_json".to_owned(),
+                json!(serde_json::to_string(&forged).unwrap()),
+            );
+            raw.insert("received_at".to_owned(), json!(Utc::now().to_rfc3339()));
+            clickhouse
+                .request(
+                    "INSERT INTO groundline.basic_weekly FORMAT JSONEachRow",
+                    &[],
+                    Some(serde_json::to_vec(&raw).unwrap()),
+                )
+                .await
+                .unwrap();
+            assert_eq!(clickhouse.request("SELECT count() FROM groundline.basic_quarantined WHERE event_id={id:UUID} FORMAT TabSeparated", &[("id", forged["event_id"].as_str().unwrap().to_owned())], None).await.unwrap(), b"1\n");
         }
 
         let response = router
