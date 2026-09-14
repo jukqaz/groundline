@@ -4,6 +4,7 @@ use thiserror::Error;
 
 pub mod compose;
 pub mod deploy;
+mod deploy_dashboard;
 pub mod secret_store;
 
 #[derive(Debug, Error)]
