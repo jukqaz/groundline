@@ -38,7 +38,7 @@ regex = "1.12.3"
 proptest = { version = "1.11.0", default-features = false, features = ["std"] }
 reqwest = { version = "0.13.4", default-features = false, features = ["rustls-no-provider"] }
 rusqlite = { version = "0.38.0", features = ["bundled"] }
-rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "tls12"] }
+rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
 rustix = { version = "1.1.4", features = ["fs", "process"] }
 semver = "1.0.27"
 secrecy = "0.10.3"
