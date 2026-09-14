@@ -7,9 +7,10 @@
   Reject unsupported state explicitly without rewriting or deleting it. Keep
   data-loss protections, bounded delivery retries, and current native input
   variants; these are not legacy support. A state reset needs separate approval.
-- Use `$groundline:reconcile-current-state` for stale or resumed work and before
-  non-trivial broad, ambiguous, current-fact-dependent, or high-impact changes.
-  Use `$groundline:close-live-work` when deployed or user-visible proof matters.
+- Use `$groundline:reconcile-current-state` when stale evidence or uncertain
+  scope affects the next action, including broad or high-impact changes.
+  A resumed turn with current evidence and a clear next step needs no repeated
+  skill invocation. Use `$groundline:close-live-work` for requested live proof.
 - Treat Codex App and its bundled CLI as the primary runtime. Use PATH CLI for
   packaging, automation, and secondary-channel evidence.
 - GroundLine ships Core and Insights plugins/CLIs plus the Insights API. Keep

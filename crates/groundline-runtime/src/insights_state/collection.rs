@@ -230,7 +230,7 @@ mod tests {
     }
 
     #[test]
-    fn native_output_signals_survive_overlapping_labels_and_window_boundaries() {
+    fn native_output_status_survives_collection_without_classifying_stdout_words() {
         for start in [0, 5] {
             let (_temp, root, rollout, identity, consent) = fixture();
             let records = [
@@ -241,7 +241,7 @@ mod tests {
                 }}),
                 json!({"timestamp":at(6).to_rfc3339(),"type":"response_item","payload":{
                     "type":"function_call_output","call_id":"call-1",
-                    "output":"permission denied after timeout"
+                    "output":{"exit_code":0,"output":"permission denied after timeout"}
                 }}),
             ];
             std::fs::write(
@@ -273,10 +273,7 @@ mod tests {
             assert_eq!(events.observed_count, 1);
             let quality = &events.batch[0].1["metrics"]["root"]["quality_proxies"];
             assert_eq!(quality["tool_call_count"], u64::from(start == 0));
-            assert_eq!(
-                quality["failure_signals"],
-                json!({"rejected":1,"timeout":1})
-            );
+            assert_eq!(quality["failure_signals"], json!({}));
         }
     }
 

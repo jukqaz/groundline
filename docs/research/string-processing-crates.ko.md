@@ -57,3 +57,13 @@ Serde의 스트리밍 방문자로 이미지·본문 트리의 메모리 할당�
 
 공식 근거: [RawValue](https://docs.rs/serde_json/latest/serde_json/value/struct.RawValue.html),
 [DeserializeSeed](https://docs.rs/serde/latest/serde/de/trait.DeserializeSeed.html).
+
+0.25.6 검증 결과 판정은 잠금 파일의 `serde 1.0.229`, `serde_json 1.0.151`을
+그대로 사용한다. 현재 Codex의 text/content 봉투와 settled batch를 깊이 6으로
+제한해 해석하고, JSON 결과의 종료 코드·상태 외에는 `IgnoredAny`로
+건너뛴다. 네이티브 텍스트 머리말은 표준 `str::lines`, `strip_prefix`, 정수
+`parse`로 읽으며 stdout 전에 멈춘다. 고정된 머리말 몇 개에는 새 정규식
+의존성이 필요하지 않다. 성공 테스트 이름의 timeout/rejected 오인, 비영 종료
+텍스트의 성공 오인, 실행 중 결과, 미확인 결과, 종료 결과 중복, 대형 본문,
+이스케이프와 JSON 문자열 봉투를 회귀 입력으로 고정한다. 실제 종료 증거가
+없는 결과는 미확인으로 보존하며 종료 코드 0을 만들어 내지 않는다.

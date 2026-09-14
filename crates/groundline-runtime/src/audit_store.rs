@@ -281,14 +281,20 @@ fn guardian_from_session(session: Value, rollout_count: usize) -> Value {
         "collection_complete":session.get("collection_complete").and_then(Value::as_bool).unwrap_or(false),
         "rollout_count":rollout_count,
         "review_count":session.pointer("/activity/task_completed").and_then(Value::as_u64).unwrap_or(0),
+        "review_count_unit":"completed_review_turn",
+        "scope_exclusion_count":session.get("scope_exclusion_count").cloned().unwrap_or(Value::Null),
+        "collection_issue_count":session.get("collection_issue_count").cloned().unwrap_or(Value::Null),
         "provider_reported_usage":usage,
         "outcomes":{},
         "risk_levels":{},
+        "availability":{
+            "outcomes":false,"risk_levels":false,"reviewer_effort":false,"workspace_attribution":false
+        },
         "signals":{
             "outside_workspace_action_rate":null,
             "temporary_workspace_action_rate":null,
-            "reviewer_already_low_effort":false,
-            "workspace_attributed_review_count":0,
+            "reviewer_already_low_effort":null,
+            "workspace_attributed_review_count":null,
             "workspace_attribution_coverage":null,
         },
         "raw_content_emitted":false,
@@ -544,6 +550,30 @@ mod tests {
 
     fn codex_home() -> TempDir {
         tempdir_in(env!("CARGO_MANIFEST_DIR")).expect("Codex home")
+    }
+
+    #[test]
+    fn guardian_unobserved_properties_remain_unknown() {
+        let session = serde_json::json!({
+            "status":"PARTIAL", "collection_complete":true,
+            "scope_exclusion_count":2, "collection_issue_count":0,
+            "activity":{"task_completed":3}
+        });
+        let guardian = super::guardian_from_session(session, 2);
+        assert_eq!(guardian["review_count"], 3);
+        assert_eq!(guardian["review_count_unit"], "completed_review_turn");
+        assert_eq!(
+            guardian["signals"]["reviewer_already_low_effort"],
+            Value::Null
+        );
+        assert_eq!(
+            guardian["signals"]["workspace_attributed_review_count"],
+            Value::Null
+        );
+        assert_eq!(guardian["availability"]["workspace_attribution"], false);
+        assert_eq!(guardian["scope_exclusion_count"], 2);
+        assert_eq!(guardian["collection_issue_count"], 0);
+        assert_eq!(guardian["collection_complete"], true);
     }
 
     #[test]

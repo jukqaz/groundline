@@ -63,8 +63,10 @@ over-broad verification. Optimize the workflow for these observed risks:
   inspect only new evidence needed after compaction; avoid replaying full logs.
 - Keep reports concise and evidence-backed; omit empty templates and repeated
   safety prose. Use lists only when they make the result easier to understand.
-- Choose meaningful checks by changed behavior. Broaden or repeat them only for
-  a new change, failure, or unresolved risk; do not run a full suite by habit.
+- Complete meaningful checks for changed behavior before claiming success.
+  Token economy, a small diff, or reversibility does not justify skipping
+  acceptance evidence. Reuse passing results while their inputs and scope
+  remain valid; broaden or repeat for a change, failure, or unresolved risk.
 
 Use available native async tools for independent work while a tool or question
 is pending. Await dependencies before acting on them. GroundLine does not add a

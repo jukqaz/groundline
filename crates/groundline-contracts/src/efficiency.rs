@@ -789,7 +789,7 @@ pub fn recommend_weekly_optimization(audit: &Value) -> Result<Value, ContractErr
         "long_turn_ratio": bounded_ratio(long_turns, completed_turns),
         "repeated_call_ratio": bounded_ratio(repeated_calls, call_count),
         "nonzero_exit_ratio": bounded_ratio(nonzero_exits, call_count),
-        "short_message_ratio": bounded_ratio(short_messages, message_count),
+        "short_message_ratio": if message_count > 0 { Some(bounded_ratio(short_messages, message_count)) } else { None },
         "broad_scope_message_count": broad_messages,
         "high_depth_effort_ratio": bounded_ratio(high_depth_contexts, turn_contexts),
         "verification_tool_calls": verification_calls,

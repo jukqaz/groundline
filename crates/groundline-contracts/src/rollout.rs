@@ -284,7 +284,10 @@ mod tests {
             .audit_projection()
             .unwrap();
         assert!(projected.len() < 300);
-        assert!(projected.contains("permission denied"));
+        let record: Value = serde_json::from_str(&projected).unwrap();
+        assert_eq!(record["payload"]["output"]["exit_code"], Value::Null);
+        assert_eq!(record["payload"]["output"]["status"], Value::Null);
+        assert!(!projected.contains("permission denied"));
         assert!(!projected.contains("xxxxx"));
         let many = format!(
             "{{{}}}",

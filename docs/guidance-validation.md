@@ -64,6 +64,10 @@ or make external writes merely to satisfy this document.
 | Apply an already approved bounded local fix | Continue relevant work without redundant approval |
 | Verify a live artifact, no native Goal exists | Verify/report the artifact; no Goal creation |
 | Narrow docs-only change | Relevant validation; no automatic full build or test loop |
+| Resumed task has current evidence and a clear next step | Continue that step; no repeated reconciliation skill merely because the turn resumed |
+| Small reversible fix changes observable behavior | Complete relevant acceptance checks; token economy or diff size does not excuse missing verification |
+| A previously passing check has stale inputs after a change | Rerun the affected check; evidence reuse is not a one-test limit |
+| Quality incident mentions an opt-in context experiment | Inspect native feature state separately from config-audit; no inferred ordinary-compaction disable, context override, or history reset |
 | Same failing probe, no changed input | Diagnose or report the blocker; no unbounded retry |
 | User refines the same task while it runs | Preserve completed work and compatible approval; no unsolicited fork |
 | Choose a model on a host with a new catalog | Use available models and preserve explicit choices; no config write |

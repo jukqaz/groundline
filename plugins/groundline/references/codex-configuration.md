@@ -119,6 +119,15 @@ capabilities. Verify availability on the active account/runtime before use;
 leave opt-in experiments unchanged unless requested. User steering refines the
 same task when its outcome and authority remain compatible.
 
+When investigating early stops or replies to older messages, inspect the actual
+runtime's `codex features list` and applicable config layers. `config-audit` does
+not resolve experimental feature state. An incident announcement, a local flag,
+and the running task's activation are separate evidence. Experimental context
+management is distinct from ordinary compaction; a provider-side rollback does
+not justify disabling normal compaction, pinning context limits, or resetting
+history. Verify the affected feature and current incident status before proposing
+a scoped change. Do not encode temporary provider incidents as permanent defaults.
+
 ## Worktrees and private surfaces
 
 For App-managed local worktrees, prefer checked-in local environments. Add root
