@@ -29,7 +29,9 @@ use tracing::Level;
 use url::Url;
 use uuid::Uuid;
 
+mod analysis;
 mod projection;
+mod telemetry;
 
 const API_VERSION: &str = "3";
 const MAX_REQUEST_BYTES: usize = 64 * 1024;
@@ -61,8 +63,14 @@ const REPORT_CLOCK_SKEW_TOLERANCE_MINUTES: u64 = 5;
 const REPORT_MINIMUM_EVENTS: u64 = 2;
 const REPORT_MINIMUM_ROOTS: u64 = 5;
 const TRUSTED_EVENT_PREDICATE: &str = include_str!("trusted-event.sql");
+// Shared by the API report and every Grafana quality panel. An absent optional
+// component has no evidence; a failed/unreadable component must remain nonpass.
+const METRIC_PROJECTION: &str = include_str!("metric-projection.sql");
 const STORAGE_MIGRATIONS: &[&str] = &[
     "CREATE DATABASE IF NOT EXISTS groundline",
+    // Retain no enrollment token or device metadata after deletion. This small
+    // deny record prevents an old installation from silently re-enrolling.
+    "CREATE TABLE IF NOT EXISTS groundline.retired_collectors (collector_hash FixedString(64), retired_at DateTime64(3, 'UTC')) ENGINE = ReplacingMergeTree(retired_at) ORDER BY collector_hash",
     r#"CREATE TABLE IF NOT EXISTS groundline.basic_weekly
     (
         schema_version UInt16,
@@ -217,7 +225,8 @@ const STORAGE_MIGRATIONS: &[&str] = &[
     ADD COLUMN IF NOT EXISTS os_family LowCardinality(String) DEFAULT 'unknown',
     ADD COLUMN IF NOT EXISTS runtime_family LowCardinality(String) DEFAULT 'unknown',
     ADD COLUMN IF NOT EXISTS execution_mode LowCardinality(String) DEFAULT 'unknown',
-    ADD COLUMN IF NOT EXISTS groundline_version LowCardinality(String) DEFAULT 'unknown'"#,
+    ADD COLUMN IF NOT EXISTS groundline_version LowCardinality(String) DEFAULT 'unknown',
+    ADD COLUMN IF NOT EXISTS device_id Nullable(UUID)"#,
     r#"ALTER TABLE groundline.basic_weekly
     MODIFY COLUMN requested_days UInt32,
     MODIFY COLUMN root_count UInt32,
@@ -532,6 +541,8 @@ impl ClickHouse {
             }
             pairs.append_pair("query", query);
             pairs.append_pair("date_time_input_format", "best_effort");
+            pairs.append_pair("input_format_skip_unknown_fields", "0");
+            pairs.append_pair("insert_allow_materialized_columns", "0");
             for (key, value) in parameters {
                 pairs.append_pair(&format!("param_{key}"), value);
             }
@@ -578,7 +589,30 @@ impl ClickHouse {
             self.request_at(query, &[], None, index != 0).await?;
         }
         let consistency = projection::consistency_sql();
-        let trusted = format!("ifNull(({TRUSTED_EVENT_PREDICATE}) AND ({consistency}), 0)");
+        let analysis_valid = analysis::predicate();
+        let trust_expression = format!(
+            "ifNull(({TRUSTED_EVENT_PREDICATE}) AND ({consistency}) AND ({analysis_valid}), 0)"
+        );
+        let trust_fingerprint = format!("{:x}", Sha256::digest(trust_expression.as_bytes()));
+        self.request(
+            &format!("ALTER TABLE groundline.basic_weekly ADD COLUMN IF NOT EXISTS trusted_event_v5 UInt8 MATERIALIZED {trust_expression} COMMENT '{trust_fingerprint}'"),
+            &[], None,
+        ).await?;
+        // A changed validation contract requires an explicit migration, never a
+        // silent reuse of previously stored trust decisions.
+        let trust_column = self.json_row(
+            "SELECT type, default_kind, comment FROM system.columns WHERE database = 'groundline' AND table = 'basic_weekly' AND name = 'trusted_event_v5' FORMAT JSONEachRow",
+            &[],
+        ).await?.ok_or_else(ApiError::storage)?;
+        if trust_column["type"] != "UInt8"
+            || trust_column["default_kind"] != "MATERIALIZED"
+            || trust_column["comment"] != trust_fingerprint
+        {
+            return Err(ApiError::storage());
+        }
+        // Existing parts compute missing values lazily; materializing them is a
+        // separately verified maintenance operation, not an unbounded startup job.
+        let trusted = "trusted_event_v5 = 1".to_owned();
         let expiry = format!(
             "toDateTime(received_at) + toIntervalDay(if({trusted}, {}, {QUARANTINE_RETENTION_DAYS}))",
             config.retention_days
@@ -599,7 +633,7 @@ impl ClickHouse {
         ).await?;
         for query in [
             "ALTER TABLE groundline.basic_weekly ADD CONSTRAINT IF NOT EXISTS root_usage_bounds CHECK cached_input_tokens <= input_tokens AND reasoning_output_tokens <= output_tokens AND total_tokens >= input_tokens AND total_tokens - least(total_tokens, input_tokens) >= output_tokens",
-            "CREATE OR REPLACE VIEW groundline.basic_current AS SELECT events.* FROM (SELECT * FROM groundline.basic_weekly FINAL) AS events INNER JOIN (SELECT collector_id, current_generation FROM groundline.collectors FINAL WHERE revoked = 0) AS active ON events.collector_id = active.collector_id AND events.collection_generation = active.current_generation",
+            "CREATE OR REPLACE VIEW groundline.basic_current AS SELECT events.* FROM (SELECT *, trusted_event_v5 FROM groundline.basic_weekly FINAL) AS events INNER JOIN (SELECT collector_id, current_generation FROM groundline.collectors FINAL WHERE revoked = 0 AND lower(hex(SHA256(toString(collector_id)))) NOT IN (SELECT collector_hash FROM groundline.retired_collectors)) AS active ON events.collector_id = active.collector_id AND events.collection_generation = active.current_generation",
             "CREATE TABLE IF NOT EXISTS groundline.release_policy (policy_key LowCardinality(String), latest_version String, minimum_supported_version String, updated_at DateTime64(3, 'UTC')) ENGINE = ReplacingMergeTree(updated_at) ORDER BY policy_key",
             "ALTER TABLE groundline.release_policy ADD COLUMN IF NOT EXISTS retention_days UInt16 DEFAULT 365",
         ] {
@@ -609,13 +643,20 @@ impl ClickHouse {
             ("basic_active", trusted.clone()),
             ("basic_quarantined", format!("NOT ({trusted})")),
         ] {
+            let projection = if name == "basic_active" {
+                format!("*, {METRIC_PROJECTION}")
+            } else {
+                "*".to_owned()
+            };
             self.request(
-                &format!("CREATE OR REPLACE VIEW groundline.{name} AS SELECT * FROM groundline.basic_current WHERE {condition}"),
+                &format!("CREATE OR REPLACE VIEW groundline.{name} AS SELECT {projection} FROM groundline.basic_current WHERE {condition}"),
                 &[],
                 None,
             )
             .await?;
         }
+        self.request(&analysis::usage_view(), &[], None).await?;
+        telemetry::ensure(self).await?;
         let policy = json!({
             "policy_key":"stable",
             "latest_version":config.latest_version,
@@ -665,11 +706,23 @@ impl ClickHouse {
     }
 
     async fn collector(&self, collector_id: Uuid) -> Result<Option<Collector>, ApiError> {
-        let query = "SELECT collector_id, token_hash, current_generation, created_at, enrollment_schema_version, os_family, runtime_family, execution_mode, groundline_version FROM groundline.collectors FINAL WHERE collector_id = {collector_id:UUID} AND revoked = 0 ORDER BY updated_at DESC LIMIT 1 FORMAT JSONEachRow";
+        let query = "SELECT collector_id, device_id, token_hash, current_generation, created_at, enrollment_schema_version, os_family, runtime_family, execution_mode, groundline_version FROM groundline.collectors FINAL WHERE collector_id = {collector_id:UUID} AND revoked = 0 AND lower(hex(SHA256(toString(collector_id)))) NOT IN (SELECT collector_hash FROM groundline.retired_collectors) ORDER BY updated_at DESC LIMIT 1 FORMAT JSONEachRow";
         self.json_row(query, &[("collector_id", collector_id.to_string())])
             .await?
             .map(Collector::from_value)
             .transpose()
+    }
+
+    async fn retired(&self, collector_id: Uuid) -> Result<bool, ApiError> {
+        let row = self.json_row(
+            "SELECT count() > 0 AS retired FROM groundline.retired_collectors WHERE collector_hash = {hash:String} FORMAT JSONEachRow",
+            &[("hash", format!("{:x}", Sha256::digest(collector_id.to_string().as_bytes())))],
+        ).await?.ok_or_else(ApiError::storage)?;
+        match row.get("retired").and_then(Value::as_u64) {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(ApiError::storage()),
+        }
     }
 
     async fn write_collector(&self, collector: &Collector) -> Result<(), ApiError> {
@@ -688,6 +741,7 @@ impl ClickHouse {
 #[derive(Clone)]
 struct Collector {
     collector_id: Uuid,
+    device_id: Option<Uuid>,
     token_hash: String,
     current_generation: u32,
     enrollment_schema_version: u8,
@@ -744,6 +798,16 @@ impl Collector {
         }
         Ok(Self {
             collector_id,
+            device_id: value
+                .get("device_id")
+                .filter(|v| !v.is_null())
+                .map(|v| {
+                    v.as_str()
+                        .and_then(|v| Uuid::parse_str(v).ok())
+                        .filter(|id| !id.is_nil())
+                        .ok_or_else(ApiError::storage)
+                })
+                .transpose()?,
             token_hash,
             current_generation: current_generation.expect("checked"),
             enrollment_schema_version: enrollment_schema_version.expect("checked"),
@@ -779,6 +843,7 @@ impl Collector {
     fn as_row(&self) -> Value {
         json!({
             "collector_id":self.collector_id,
+            "device_id":self.device_id,
             "token_hash":self.token_hash,
             "current_generation":self.current_generation,
             "enrollment_schema_version":self.enrollment_schema_version,
@@ -795,6 +860,7 @@ impl Collector {
 
 #[derive(Clone)]
 struct AppState {
+    metrics: Arc<Mutex<telemetry::Metrics>>,
     config: Config,
     clickhouse: ClickHouse,
     rate_limits: Arc<Mutex<BTreeMap<RateLimitScope, VecDeque<Instant>>>>,
@@ -1110,6 +1176,18 @@ struct Enrollment {
     runtime_family: String,
     execution_mode: String,
     groundline_version: String,
+    #[serde(default)]
+    device_id: Option<Uuid>,
+    #[serde(default)]
+    diagnostics: Option<CollectorDiagnostics>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CollectorDiagnostics {
+    retry_attempts: u8,
+    operator_required: bool,
+    previous_cycle_pending: u64,
 }
 
 async fn check_enrollment(
@@ -1142,6 +1220,11 @@ async fn enroll(
     state.rate_limit(RateLimitScope::Enrollment, MAX_ENROLLMENTS_PER_MINUTE)?;
     let _storage_permit = state.storage_permit(StorageClass::Operator)?;
     if input.schema_version != 2
+        || input.device_id.is_some_and(|id| id.is_nil())
+        || input
+            .diagnostics
+            .as_ref()
+            .is_some_and(|d| d.retry_attempts > 32 || d.previous_cycle_pending > 1_000_000)
         || input.kind != "groundline-insights-owner-enrollment"
         || !(TOKEN_MIN_BYTES..=4096).contains(&input.collector_token.len())
         || !matches!(input.os_family.as_str(), "macos" | "windows" | "linux")
@@ -1155,11 +1238,33 @@ async fn enroll(
         return Err(ApiError::new(StatusCode::BAD_REQUEST, "invalid_request"));
     }
     let token_hash = format!("{:x}", Sha256::digest(input.collector_token.as_bytes()));
+    let _ingestion_guard = state.ingestion_gate.lock().await;
+    if state
+        .clickhouse
+        .retired(input.collector_instance_id)
+        .await?
+    {
+        return Err(ApiError::new(StatusCode::FORBIDDEN, "collector_retired"));
+    }
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
     let existing = state
         .clickhouse
         .collector(input.collector_instance_id)
         .await?;
+    let device_id = input
+        .device_id
+        .or_else(|| existing.as_ref().and_then(|c| c.device_id));
+    if existing
+        .as_ref()
+        .and_then(|c| c.device_id)
+        .zip(input.device_id)
+        .is_some_and(|(old, new)| old != new)
+    {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "device_identity_conflict",
+        ));
+    }
     let (outcome, status, created_at, generation) = match existing {
         Some(existing) => {
             if !constant_time_equal(&existing.token_hash, &token_hash) {
@@ -1171,7 +1276,8 @@ async fn enroll(
             let same = existing.os_family == input.os_family
                 && existing.runtime_family == input.runtime_family
                 && existing.execution_mode == input.execution_mode
-                && existing.groundline_version == input.groundline_version;
+                && existing.groundline_version == input.groundline_version
+                && existing.device_id == device_id;
             (
                 if same { "duplicate" } else { "updated" },
                 StatusCode::OK,
@@ -1181,10 +1287,12 @@ async fn enroll(
         }
         None => ("accepted", StatusCode::CREATED, now, 0),
     };
+    let observed_version = input.groundline_version.clone();
     state
         .clickhouse
         .write_collector(&Collector {
             collector_id: input.collector_instance_id,
+            device_id,
             token_hash,
             current_generation: generation,
             enrollment_schema_version: 2,
@@ -1196,6 +1304,19 @@ async fn enroll(
             revoked: 0,
         })
         .await?;
+    // This is the first authenticated registration of this package version,
+    // not an inferred installation timestamp or a deployment attempt.
+    let entry_id = Uuid::new_v5(&input.collector_instance_id, observed_version.as_bytes());
+    state.clickhouse.request(
+        "INSERT INTO groundline.lifecycle SELECT {entry_id:UUID}, now64(3,'UTC'), 'collector_version_registered', {collector_id:UUID}, {version:String} WHERE NOT EXISTS (SELECT 1 FROM groundline.lifecycle WHERE entry_id = {entry_id:UUID})",
+        &[("entry_id", entry_id.to_string()), ("collector_id",input.collector_instance_id.to_string()), ("version",observed_version)], None,
+    ).await?;
+    if let Some(d) = input.diagnostics {
+        state.clickhouse.request(
+            "INSERT INTO groundline.collector_diagnostics VALUES ({collector_id:UUID}, now64(3,'UTC'), {attempts:UInt8}, {operator:UInt8}, {pending:UInt64})",
+            &[("collector_id",input.collector_instance_id.to_string()),("attempts",d.retry_attempts.to_string()),("operator",u8::from(d.operator_required).to_string()),("pending",d.previous_cycle_pending.to_string())], None,
+        ).await?;
+    }
     Ok(safe_response(
         status,
         json!({
@@ -1355,6 +1476,7 @@ async fn ingest_event(
         .and_then(|value| Uuid::parse_str(value).ok())
         .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "invalid_auth"))?;
     let _storage_permit = state.storage_permit(StorageClass::Collector)?;
+    let _ingestion_guard = state.ingestion_gate.lock().await;
     let collector = require_collector_token(&state, &headers, collector_header).await?;
     state.rate_limit(
         RateLimitScope::Collector(collector_header),
@@ -1396,7 +1518,6 @@ async fn ingest_event(
         return Err(ApiError::new(StatusCode::CONFLICT, "invalid_generation"));
     }
     let candidate_payload_bytes = u64::try_from(body.len()).map_err(|_| ApiError::storage())?;
-    let _ingestion_guard = state.ingestion_gate.lock().await;
     let duplicate = event_exists(&state, event_id).await?;
     if !duplicate {
         let (start, end) = collection_window(&event, Utc::now())?;
@@ -1486,6 +1607,7 @@ async fn activate_generation(
         return Err(ApiError::new(StatusCode::BAD_REQUEST, "invalid_request"));
     }
     let _storage_permit = state.storage_permit(StorageClass::Collector)?;
+    let _ingestion_guard = state.ingestion_gate.lock().await;
     let mut collector =
         require_collector_token(&state, &headers, input.collector_instance_id).await?;
     state.rate_limit(
@@ -1550,7 +1672,22 @@ async fn delete_collector(
             "invalid_delete_confirmation",
         ));
     }
-    for table in ["collectors", "basic_weekly"] {
+    let _ingestion_guard = state.ingestion_gate.lock().await;
+    // Repeated DELETE is safe, including after a partially completed deletion.
+    // Write the deny record first so failure cannot reactivate the collector.
+    if !state.clickhouse.retired(collector_id).await? {
+        state.clickhouse.request(
+            "INSERT INTO groundline.retired_collectors (collector_hash, retired_at) VALUES ({hash:String}, now64(3, 'UTC'))",
+            &[("hash", format!("{:x}", Sha256::digest(collector_id.to_string().as_bytes())))],
+            None,
+        ).await?;
+    }
+    for table in [
+        "collectors",
+        "basic_weekly",
+        "lifecycle",
+        "collector_diagnostics",
+    ] {
         state
             .clickhouse
             .request(
@@ -1646,6 +1783,10 @@ async fn weekly_report(
         .clickhouse
         .json_rows(REPORT_MODEL_EFFORT_QUERY, &params)
         .await?;
+    let model_tokens = state
+        .clickhouse
+        .json_rows(REPORT_MODEL_TOKENS_QUERY, &params)
+        .await?;
     validated_report_response(build_report(
         query.days,
         end,
@@ -1657,12 +1798,15 @@ async fn weekly_report(
             event_cohorts,
             install_cohorts,
             model_effort,
+            model_tokens: Some(model_tokens),
         },
     ))
 }
 
 #[derive(Deserialize)]
 struct ReportRows {
+    #[serde(default)]
+    model_tokens: Option<Vec<Value>>,
     summary: Value,
     fleet: Value,
     storage: Value,
@@ -1673,6 +1817,7 @@ struct ReportRows {
 
 fn build_report(days: u16, end: DateTime<Utc>, latest_version: &str, rows: &ReportRows) -> Value {
     let ReportRows {
+        model_tokens,
         summary,
         fleet,
         storage,
@@ -1879,7 +2024,10 @@ fn build_report(days: u16, end: DateTime<Utc>, latest_version: &str, rows: &Repo
                 "os_family":distributions(install_cohorts,"os_family","installation_count"),"runtime_family":distributions(install_cohorts,"runtime_family","installation_count"),
                 "execution_mode":distributions(install_cohorts,"execution_mode","installation_count")},
             "model_effort_context_distribution":model_effort,
-            "model_effort_token_efficiency":{"status":"UNAVAILABLE","reason_code":"token_usage_not_attributed_to_model_effort","context_distribution_only":true}
+            "model_effort_token_efficiency":if model_tokens.is_some() {
+                json!({"status":"DESCRIPTIVE","reason_code":"completed_turns_not_attributed_to_model_effort","context_distribution_only":false})
+            } else {json!({"status":"UNAVAILABLE","reason_code":"token_usage_not_attributed_to_model_effort","context_distribution_only":true})},
+            "model_token_distribution":model_tokens
         },
         "data_quality":{"status":if quality.is_empty(){"PASS"}else if quality.contains("no_events"){"FAIL"}else{"PARTIAL"},
             "reason_codes":quality,"sample_sufficient_event_count":sample_sufficient,"sample_insufficient_event_count":sample_insufficient},
@@ -1899,12 +2047,13 @@ fn validated_report_response(report: Value) -> Result<Response, ApiError> {
     Ok(safe_response(StatusCode::OK, report, "accepted"))
 }
 
-const REPORT_SUMMARY_QUERY: &str = r#"SELECT count() AS event_count, sum(eligible_root_count) AS eligible_root_total, sum(selected_root_count) AS selected_root_total, sum(observed_root_count) AS observed_root_total, sum(task_completed) AS completed_turn_count, sum(unreadable_root_count) AS unreadable_root_count, sum(root_truncated_count) AS root_truncated_count, sum(truncated_count) AS non_root_truncated_count, sum(originator_unclassified_excluded_root_count) AS originator_unclassified_count, sum(originator_source_fallback_root_count) AS originator_source_fallback_count, countIf(observed_root_count > 0) AS root_usage_applicable_event_count, countIf(observed_root_count > 0 AND usage_source IN ('unavailable','unknown')) AS root_usage_missing_event_count, countIf(fallback_rollout_count > 0) AS root_usage_fallback_event_count, countIf(delegated_count > 0) AS delegated_usage_applicable_event_count, countIf(delegated_count > 0 AND delegated_usage_source IN ('unavailable','unknown')) AS delegated_usage_missing_event_count, countIf(delegated_fallback_rollout_count > 0) AS delegated_usage_fallback_event_count, countIf(guardian_count > 0) AS guardian_usage_applicable_event_count, countIf(guardian_count > 0 AND guardian_usage_source IN ('unavailable','unknown')) AS guardian_usage_missing_event_count, countIf(guardian_fallback_rollout_count > 0) AS guardian_usage_fallback_event_count, sum(guardian_incomplete_excluded_count) AS guardian_incomplete_excluded_count, countIf(selection_mode != 'activity_window') AS completed_root_coverage_applicable_event_count, countIf(capability_completed_root_coverage = 1 AND selection_mode != 'activity_window') AS completed_root_coverage_capable_event_count, countIf(capability_latency_completed_count = 1) AS latency_capable_event_count, countIf(capability_root_boundary_counts = 1) AS boundary_count_capable_event_count, countIf(guardian_review_count > 0) AS guardian_attribution_applicable_event_count, countIf(guardian_review_count > 0 AND capability_guardian_workspace_attribution = 1) AS guardian_attribution_capable_event_count, countIf(root_status != 'PASS' OR delegated_status != 'PASS' OR guardian_status != 'PASS') AS component_nonpass_event_count, countIf(sample_sufficient = 1) AS sample_sufficient_event_count, countIf(sample_sufficient = 0) AS sample_insufficient_event_count, countIf((observed_root_count > 0 AND usage_source IN ('unavailable','unknown')) OR (delegated_count > 0 AND delegated_usage_source IN ('unavailable','unknown')) OR (guardian_count > 0 AND guardian_usage_source IN ('unavailable','unknown'))) AS usage_missing_count, sum(fallback_rollout_count + delegated_fallback_rollout_count + guardian_fallback_rollout_count) AS usage_fallback_count, sum(input_tokens) AS input_tokens, sum(cached_input_tokens) AS cached_input_tokens, sum(non_cached_input_tokens) AS non_cached_input_tokens, sum(output_tokens) AS output_tokens, sum(reasoning_output_tokens) AS reasoning_output_tokens, sum(total_tokens) AS total_tokens, sum(delegated_total_tokens) AS delegated_total_tokens, sum(guardian_total_tokens) AS guardian_total_tokens, sum(compactions) AS compactions, sum(long_turn_count) AS long_turn_count, sum(exact_repeated_call_groups) AS exact_repeated_call_groups, sum(calls_in_exact_repeated_groups) AS calls_in_exact_repeated_groups, sum(nonzero_exit_count + timeout_count + rejected_count) AS failure_signal_count, sum(tool_call_count) AS tool_call_count, sum(user_messages_with_text) AS user_messages_with_text, sum(short_message_count) AS short_message_count, sum(broad_scope_message_count) AS broad_scope_message_count, sum(boundary_review_root_count) AS boundary_review_root_count, sum(long_lived_root_count) AS long_lived_root_count, sum(verification_tool_calls) AS verification_tool_call_count, sum(verification_success_count) AS verification_success_count, sum(verification_failure_count) AS verification_failure_count, sum(verification_unresolved_count) AS verification_unresolved_count, sum(guardian_review_count) AS guardian_review_total, sum(guardian_workspace_attributed_review_count) AS guardian_workspace_attributed_review_count FROM groundline.basic_active WHERE ifNull(period_end, generated_at) > parseDateTimeBestEffort({start:String}) AND ifNull(period_end, generated_at) <= parseDateTimeBestEffort({end:String}) FORMAT JSONEachRow"#;
+const REPORT_SUMMARY_QUERY: &str = r#"SELECT count() AS event_count, sum(eligible_root_count) AS eligible_root_total, sum(selected_root_count) AS selected_root_total, sum(observed_root_count) AS observed_root_total, sum(task_completed) AS completed_turn_count, sum(unreadable_root_count) AS unreadable_root_count, sum(root_truncated_count) AS root_truncated_count, sum(truncated_count) AS non_root_truncated_count, sum(originator_unclassified_excluded_root_count) AS originator_unclassified_count, sum(originator_source_fallback_root_count) AS originator_source_fallback_count, countIf(observed_root_count > 0) AS root_usage_applicable_event_count, countIf(observed_root_count > 0 AND usage_source IN ('unavailable','unknown')) AS root_usage_missing_event_count, countIf(fallback_rollout_count > 0) AS root_usage_fallback_event_count, countIf(delegated_count > 0) AS delegated_usage_applicable_event_count, countIf(delegated_count > 0 AND delegated_usage_source IN ('unavailable','unknown')) AS delegated_usage_missing_event_count, countIf(delegated_fallback_rollout_count > 0) AS delegated_usage_fallback_event_count, countIf(guardian_count > 0) AS guardian_usage_applicable_event_count, countIf(guardian_count > 0 AND guardian_usage_source IN ('unavailable','unknown')) AS guardian_usage_missing_event_count, countIf(guardian_fallback_rollout_count > 0) AS guardian_usage_fallback_event_count, sum(guardian_incomplete_excluded_count) AS guardian_incomplete_excluded_count, countIf(selection_mode != 'activity_window') AS completed_root_coverage_applicable_event_count, countIf(capability_completed_root_coverage = 1 AND selection_mode != 'activity_window') AS completed_root_coverage_capable_event_count, countIf(capability_latency_completed_count = 1) AS latency_capable_event_count, countIf(capability_root_boundary_counts = 1) AS boundary_count_capable_event_count, countIf(guardian_review_count > 0) AS guardian_attribution_applicable_event_count, countIf(guardian_review_count > 0 AND capability_guardian_workspace_attribution = 1) AS guardian_attribution_capable_event_count, countIf(component_nonpass = 1) AS component_nonpass_event_count, countIf(sample_sufficient = 1) AS sample_sufficient_event_count, countIf(sample_sufficient = 0) AS sample_insufficient_event_count, countIf((observed_root_count > 0 AND usage_source IN ('unavailable','unknown')) OR (delegated_count > 0 AND delegated_usage_source IN ('unavailable','unknown')) OR (guardian_count > 0 AND guardian_usage_source IN ('unavailable','unknown'))) AS usage_missing_count, sum(fallback_rollout_count + delegated_fallback_rollout_count + guardian_fallback_rollout_count) AS usage_fallback_count, sum(input_tokens) AS input_tokens, sum(cached_input_tokens) AS cached_input_tokens, sum(non_cached_input_tokens) AS non_cached_input_tokens, sum(output_tokens) AS output_tokens, sum(reasoning_output_tokens) AS reasoning_output_tokens, sum(total_tokens) AS total_tokens, sum(delegated_total_tokens) AS delegated_total_tokens, sum(guardian_total_tokens) AS guardian_total_tokens, sum(compactions) AS compactions, sum(long_turn_count) AS long_turn_count, sum(exact_repeated_call_groups) AS exact_repeated_call_groups, sum(calls_in_exact_repeated_groups) AS calls_in_exact_repeated_groups, sum(nonzero_exit_count + timeout_count + rejected_count) AS failure_signal_count, sum(tool_call_count) AS tool_call_count, sum(user_messages_with_text) AS user_messages_with_text, sum(short_message_count) AS short_message_count, sum(broad_scope_message_count) AS broad_scope_message_count, sum(boundary_review_root_count) AS boundary_review_root_count, sum(long_lived_root_count) AS long_lived_root_count, sum(verification_tool_calls) AS verification_tool_call_count, sum(verification_success_count) AS verification_success_count, sum(verification_failure_count) AS verification_failure_count, sum(verification_unresolved_count) AS verification_unresolved_count, sum(guardian_review_count) AS guardian_review_total, sum(guardian_workspace_attributed_review_count) AS guardian_workspace_attributed_review_count FROM groundline.basic_active WHERE ifNull(period_end, generated_at) > parseDateTimeBestEffort({start:String}) AND ifNull(period_end, generated_at) <= parseDateTimeBestEffort({end:String}) FORMAT JSONEachRow"#;
 const REPORT_FLEET_QUERY: &str = r#"WITH policy AS (SELECT argMax(latest_version, updated_at) AS latest_version FROM groundline.release_policy FINAL WHERE policy_key='stable'), enrolled AS (SELECT collector_id, created_at, enrollment_schema_version, os_family, runtime_family, execution_mode, groundline_version FROM groundline.collectors FINAL WHERE revoked=0), any_events AS (SELECT collector_id, toUInt8(1) AS present, max(received_at) AS last_seen FROM groundline.basic_active GROUP BY collector_id), reporting AS (SELECT collector_id, toUInt8(1) AS present FROM groundline.basic_active WHERE ifNull(period_end, generated_at) > parseDateTimeBestEffort({start:String}) AND ifNull(period_end, generated_at) <= parseDateTimeBestEffort({end:String}) GROUP BY collector_id), current_events AS (SELECT collector_id, received_at, ifNull(period_end, generated_at) AS event_time FROM groundline.basic_active CROSS JOIN policy WHERE groundline_version=policy.latest_version), current_observed AS (SELECT collector_id, toUInt8(1) AS present, max(received_at) AS last_seen FROM current_events GROUP BY collector_id), current_reporting AS (SELECT collector_id, toUInt8(1) AS present FROM current_events WHERE event_time > parseDateTimeBestEffort({start:String}) AND event_time <= parseDateTimeBestEffort({end:String}) GROUP BY collector_id) SELECT policy.latest_version AS policy_latest_version, count() AS enrolled_installation_count, countIf(enrollment_schema_version=2 AND os_family!='unknown' AND runtime_family!='unknown' AND execution_mode!='unknown' AND groundline_version!='unknown') AS metadata_known_installation_count, count() - metadata_known_installation_count AS metadata_unknown_installation_count, countIf(ifNull(any_events.present,0)=1) AS observed_installation_count, countIf(ifNull(reporting.present,0)=1) AS reporting_installation_count, countIf(any_events.last_seen >= now('UTC') - INTERVAL 7 DAY) AS recent_installation_count, countIf(ifNull(any_events.present,0)=0) AS never_reported_installation_count, countIf(ifNull(any_events.present,0)=0 AND enrolled.created_at > now('UTC') - INTERVAL 24 HOUR) AS pending_initial_report_installation_count, countIf(ifNull(any_events.present,0)=0 AND enrolled.created_at <= now('UTC') - INTERVAL 24 HOUR) AS overdue_never_reported_installation_count, countIf(ifNull(any_events.present,0)=1 AND any_events.last_seen < now('UTC') - INTERVAL 7 DAY) AS stale_observed_installation_count, countIf(enrolled.groundline_version=policy.latest_version) AS current_package_claim_installation_count, countIf(enrolled.groundline_version=policy.latest_version AND ifNull(current_observed.present,0)=0) AS current_package_claim_unobserved_installation_count, countIf(ifNull(current_observed.present,0)=1) AS current_observed_installation_count, countIf(ifNull(current_reporting.present,0)=1) AS current_reporting_installation_count, countIf(current_observed.last_seen >= now('UTC') - INTERVAL 7 DAY) AS current_recent_installation_count, if(countIf(ifNull(any_events.present,0)=1)=0, CAST(NULL, 'Nullable(String)'), formatDateTime(max(any_events.last_seen), '%Y-%m-%dT%H:%i:%SZ', 'UTC')) AS latest_received_at_utc, toUInt8(max(any_events.last_seen) >= now('UTC') - INTERVAL 48 HOUR) AS fresh FROM enrolled CROSS JOIN policy LEFT JOIN any_events USING collector_id LEFT JOIN reporting USING collector_id LEFT JOIN current_observed USING collector_id LEFT JOIN current_reporting USING collector_id GROUP BY policy.latest_version FORMAT JSONEachRow"#;
 const REPORT_STORAGE_QUERY: &str = r#"WITH logical AS (SELECT event_id, received_at, generated_at FROM groundline.basic_active WHERE ifNull(period_end, generated_at) > parseDateTimeBestEffort({start:String}) AND ifNull(period_end, generated_at) <= parseDateTimeBestEffort({end:String})), active AS (SELECT collector_id,current_generation FROM groundline.collectors FINAL WHERE revoked=0), stored AS (SELECT events.event_id FROM groundline.basic_weekly events INNER JOIN active ON events.collector_id=active.collector_id AND events.collection_generation=active.current_generation INNER JOIN logical USING event_id) SELECT (SELECT count() FROM stored) AS stored_event_row_count, (SELECT count() FROM logical) AS deduplicated_event_count, stored_event_row_count-deduplicated_event_count AS duplicate_event_row_count, (SELECT count() FROM groundline.basic_retention WHERE expires_at < now('UTC')) AS ttl_expired_event_row_count, (SELECT countIf(dateDiff('second',generated_at,received_at)>21600) FROM logical) AS delayed_delivery_event_count, (SELECT countIf(dateDiff('second',generated_at,received_at)>86400) FROM logical) AS overdue_delivery_event_count, (SELECT countIf(generated_at>received_at+INTERVAL 5 MINUTE) FROM logical) AS clock_skew_event_count, (SELECT count() FROM groundline.basic_quarantined WHERE ifNull(period_end, generated_at) > parseDateTimeBestEffort({start:String}) AND ifNull(period_end, generated_at) <= parseDateTimeBestEffort({end:String})) AS quarantined_event_count FORMAT JSONEachRow"#;
 const REPORT_EVENT_COHORT_QUERY: &str = r#"SELECT dimension,value,count() AS count FROM (SELECT 'schema_version' dimension,toString(schema_version) value FROM groundline.basic_active WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) UNION ALL SELECT 'groundline_version',groundline_version FROM groundline.basic_active WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) UNION ALL SELECT 'os_family',os_family FROM groundline.basic_active WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) UNION ALL SELECT 'runtime_family',runtime_family FROM groundline.basic_active WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) UNION ALL SELECT 'execution_mode',execution_mode FROM groundline.basic_active WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String})) GROUP BY dimension,value ORDER BY dimension,value FORMAT JSONEachRow"#;
 const REPORT_INSTALL_COHORT_QUERY: &str = r#"SELECT dimension,value,count() AS count FROM (SELECT 'groundline_version' dimension,groundline_version value FROM groundline.collectors FINAL WHERE revoked=0 UNION ALL SELECT 'os_family',os_family FROM groundline.collectors FINAL WHERE revoked=0 UNION ALL SELECT 'runtime_family',runtime_family FROM groundline.collectors FINAL WHERE revoked=0 UNION ALL SELECT 'execution_mode',execution_mode FROM groundline.collectors FINAL WHERE revoked=0) GROUP BY dimension,value ORDER BY dimension,value FORMAT JSONEachRow"#;
 const REPORT_MODEL_EFFORT_QUERY: &str = r#"SELECT tupleElement(item,1) AS model_family, tupleElement(item,2) AS effort, sum(tupleElement(item,3)) AS context_count FROM groundline.basic_active ARRAY JOIN arrayZip(model_families,efforts,model_effort_counts) AS item WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) GROUP BY model_family,effort ORDER BY model_family,effort FORMAT JSONEachRow"#;
+const REPORT_MODEL_TOKENS_QUERY: &str = r#"SELECT component,model_family,effort,sum(input_tokens) AS input_tokens,sum(cached_input_tokens) AS cached_input_tokens,sum(output_tokens) AS output_tokens,sum(reasoning_output_tokens) AS reasoning_output_tokens,sum(total_tokens) AS total_tokens FROM groundline.model_usage WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) GROUP BY component,model_family,effort ORDER BY component,model_family,effort FORMAT JSONEachRow"#;
 
 #[derive(Debug, Error)]
 pub enum RunError {
@@ -1931,6 +2080,7 @@ fn app(state: AppState) -> Router {
         .route("/v1/collectors/{collector_id}", delete(delete_collector))
         .merge(collector_routes)
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BYTES))
+        .layer(from_fn_with_state(state.clone(), telemetry::observe))
         .with_state(state)
 }
 
@@ -1943,6 +2093,7 @@ pub async fn run() -> Result<(), RunError> {
         .map_err(|_| RunError::Storage)?;
     let listen = config.listen;
     let state = AppState {
+        metrics: Arc::default(),
         config,
         clickhouse,
         rate_limits: Arc::new(Mutex::new(BTreeMap::new())),
@@ -1967,12 +2118,23 @@ pub async fn run() -> Result<(), RunError> {
         .without_time()
         .try_init()
         .ok();
-    let app = app(state);
     let listener = tokio::net::TcpListener::bind(listen)
         .await
         .map_err(|_| RunError::Listen)?;
+    telemetry::lifecycle(
+        &state.clickhouse,
+        "api_started",
+        None,
+        env!("CARGO_PKG_VERSION"),
+        Uuid::new_v4(),
+        &Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+    )
+    .await
+    .map_err(|_| RunError::Storage)?;
+    let metrics_task = tokio::spawn(telemetry::run(state.clone()));
+    let app = app(state);
     tracing::info!(event = "server_started");
-    serve(
+    let result = serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
@@ -1980,7 +2142,9 @@ pub async fn run() -> Result<(), RunError> {
         let _ = tokio::signal::ctrl_c().await;
     })
     .await
-    .map_err(|_| RunError::Server)
+    .map_err(|_| RunError::Server);
+    metrics_task.abort();
+    result
 }
 
 #[cfg(test)]
@@ -2189,6 +2353,7 @@ mod tests {
     fn unit_state(collector_permits: usize, operator_permits: usize) -> AppState {
         let config = unit_config();
         AppState {
+            metrics: Arc::default(),
             clickhouse: ClickHouse::new(&config).expect("ClickHouse client"),
             config,
             rate_limits: Arc::new(Mutex::new(BTreeMap::new())),
@@ -2452,13 +2617,18 @@ mod tests {
         // A total-only native record remains valid; an absent split is not zero usage.
         let mut total_only = integration_event(Uuid::new_v4(), 0);
         total_only["metrics"]["root"]["usage"]["total_tokens"] = json!(7);
+        total_only["analysis"]["root"]["unattributed"]["total_tokens"] = json!(7);
         reseal_event(&mut total_only);
         assert!(validate_basic_event_bytes(&serde_json::to_vec(&total_only).unwrap()).is_ok());
     }
 
     fn expand_grafana_time_filter(query: &str) -> Option<String> {
-        let marker = "$$__timeFilter(";
-        let mut remaining = query;
+        let query = groundline_contracts::grafana::verification_sql(query)?.replace(
+            "$__timeInterval(ifNull(period_end, generated_at))",
+            "toStartOfHour(ifNull(period_end, generated_at))",
+        );
+        let marker = "$__timeFilter(";
+        let mut remaining = query.as_str();
         let mut output = String::new();
         while let Some(start) = remaining.find(marker) {
             output.push_str(&remaining[..start]);
@@ -2510,29 +2680,77 @@ mod tests {
 
     fn dashboard_queries() -> Vec<String> {
         let template = include_str!("../../../infrastructure/compose.template.yaml");
-        let dashboard = template
-            .split_once("  grafana_dashboard:\n    content: |\n")
-            .expect("Grafana dashboard config")
-            .1;
-        let dashboard = dashboard
-            .lines()
-            .map(|line| line.strip_prefix("      ").expect("dashboard indentation"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let dashboard: Value = serde_json::from_str(&dashboard).expect("dashboard JSON");
+        let template: Value = serde_saphyr::from_str(template).expect("Compose YAML");
         let mut queries = Vec::new();
-        collect_dashboard_queries(&dashboard, &mut queries);
+        for name in ["grafana_dashboard", "grafana_analysis_dashboard"] {
+            let body = template["configs"][name]["content"]
+                .as_str()
+                .expect("dashboard content");
+            let dashboard: Value = serde_json::from_str(body).expect("dashboard JSON");
+            collect_dashboard_queries(&dashboard, &mut queries);
+        }
         queries
     }
 
     #[test]
     fn dashboard_time_filters_are_compose_escaped() {
         for (index, query) in dashboard_queries().iter().enumerate() {
+            let unescaped = query.replace("$$", "");
+            assert!(
+                !unescaped.contains("$__") && !unescaped.contains("${"),
+                "dashboard query {index} contains an unescaped Compose variable"
+            );
             let expanded = expand_grafana_time_filter(query).expect("bounded Grafana macro");
             assert!(
-                !expanded.contains("$__timeFilter"),
-                "dashboard query {index} contains an unescaped time filter"
+                !expanded.contains("$__") && !expanded.contains("${"),
+                "dashboard query {index} contains an unsupported macro"
             );
+        }
+    }
+
+    #[test]
+    fn dashboards_preserve_filter_scope_and_visible_panel_bounds() {
+        let template: Value = serde_saphyr::from_str(include_str!(
+            "../../../infrastructure/compose.template.yaml"
+        ))
+        .unwrap();
+        for name in ["grafana_dashboard", "grafana_analysis_dashboard"] {
+            let dashboard: Value =
+                serde_json::from_str(template["configs"][name]["content"].as_str().unwrap())
+                    .unwrap();
+            let panels = dashboard["panels"].as_array().unwrap();
+            for (index, panel) in panels.iter().enumerate() {
+                let bounds = |panel: &Value| {
+                    let grid = &panel["gridPos"];
+                    (
+                        grid["x"].as_u64().unwrap(),
+                        grid["y"].as_u64().unwrap(),
+                        grid["w"].as_u64().unwrap(),
+                        grid["h"].as_u64().unwrap(),
+                    )
+                };
+                let (x, y, w, h) = bounds(panel);
+                assert!(w > 0 && h > 0 && x + w <= 24);
+                for other in &panels[index + 1..] {
+                    let (ox, oy, ow, oh) = bounds(other);
+                    assert!(
+                        x >= ox + ow || ox >= x + w || y >= oy + oh || oy >= y + h,
+                        "{name} panels {} and {} overlap",
+                        panel["id"],
+                        other["id"]
+                    );
+                }
+                if name == "grafana_analysis_dashboard" {
+                    for target in panel["targets"].as_array().unwrap() {
+                        let sql = target["rawSql"].as_str().unwrap();
+                        for variable in ["os", "runtime", "version", "install", "device", "purpose"]
+                        {
+                            assert!(sql.contains(&format!("$${{{variable}:sqlstring}}")));
+                        }
+                        assert!(sql.contains("$$__timeFilter("));
+                    }
+                }
+            }
         }
     }
 
@@ -2829,6 +3047,35 @@ mod tests {
         let config = clickhouse_test_config();
         let clickhouse = ClickHouse::new(&config).unwrap();
         clickhouse.ensure_storage(&config).await.unwrap();
+        // Empty optional components are inapplicable, but missing reads and
+        // nonpass observed components still count. Execute the production SQL.
+        for (
+            delegated_count,
+            delegated_status,
+            guardian_count,
+            guardian_status,
+            excluded,
+            expected,
+        ) in [
+            (0, "INSUFFICIENT_EVIDENCE", 0, "INSUFFICIENT_EVIDENCE", 0, 0),
+            (1, "PASS", 1, "PASS", 0, 0),
+            (1, "INSUFFICIENT_EVIDENCE", 0, "PASS", 0, 1),
+            (0, "PARTIAL", 0, "PASS", 0, 1),
+            (0, "FAIL", 0, "PASS", 0, 1),
+            (0, "UNKNOWN", 0, "PASS", 0, 1),
+            (0, "PASS", 1, "INSUFFICIENT_EVIDENCE", 0, 1),
+            (0, "PASS", 0, "PARTIAL", 0, 1),
+            (0, "PASS", 0, "INSUFFICIENT_EVIDENCE", 1, 1),
+        ] {
+            let fixture = format!(
+                "SELECT {METRIC_PROJECTION} FROM (SELECT 'PASS' AS root_status, \
+                 {delegated_count} AS delegated_count, '{delegated_status}' AS delegated_status, \
+                 {guardian_count} AS guardian_count, '{guardian_status}' AS guardian_status, \
+                 0 AS guardian_review_count, {excluded} AS guardian_incomplete_excluded_count, '{{}}' AS payload_json) FORMAT JSONEachRow"
+            );
+            let row = clickhouse.json_row(&fixture, &[]).await.unwrap().unwrap();
+            assert_eq!(count(&row, "component_nonpass"), expected, "{fixture}");
+        }
         let params = [
             ("start", "2026-01-01T00:00:00Z".to_owned()),
             ("end", "2026-02-01T00:00:00Z".to_owned()),
@@ -2885,12 +3132,164 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires an isolated loopback ClickHouse and explicit mutation opt-in"]
+    async fn clickhouse_model_device_and_diagnostic_observations_preserve_evidence() {
+        let config = clickhouse_test_config();
+        let db = ClickHouse::new(&config).unwrap();
+        db.ensure_storage(&config).await.unwrap();
+        let mut state = unit_state(28, 4);
+        state.config = config;
+        state.clickhouse = db.clone();
+        let router = app(state.clone());
+        let device = Uuid::new_v4();
+        let ids = [Uuid::new_v4(), Uuid::new_v4()];
+        let mut enrollment = json!({"schema_version":2,"kind":"groundline-insights-owner-enrollment",
+            "collector_token":"c".repeat(32),"os_family":"linux","runtime_family":"codex_cli","execution_mode":"local_headless",
+            "groundline_version":env!("CARGO_PKG_VERSION"),"device_id":device,
+            "diagnostics":{"retry_attempts":2,"operator_required":false,"previous_cycle_pending":3}});
+        for id in ids {
+            enrollment["collector_instance_id"] = json!(id);
+            let response = router
+                .clone()
+                .oneshot(local_request(
+                    Method::POST,
+                    "/v1/enroll",
+                    &"e".repeat(32),
+                    Some(&enrollment),
+                    &[],
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::CREATED);
+        }
+        let params = [("device", device.to_string())];
+        assert_eq!(db.request("SELECT count() FROM groundline.collectors FINAL WHERE device_id={device:UUID} FORMAT TabSeparated",&params,None).await.unwrap(),b"2\n");
+        enrollment["device_id"] = json!(Uuid::new_v4());
+        let conflict = router
+            .clone()
+            .oneshot(local_request(
+                Method::POST,
+                "/v1/enroll",
+                &"e".repeat(32),
+                Some(&enrollment),
+                &[],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(conflict.status(), StatusCode::CONFLICT);
+        let mut event = integration_event(ids[0], 0);
+        event["metrics"]["root"]["usage"]["total_tokens"] = json!(10);
+        let zero = event["analysis"]["root"]["unattributed"].clone();
+        let bucket = |model: &str, n: u64| {
+            let mut t = zero.clone();
+            t["total_tokens"] = json!(n);
+            json!({"model_family":model,"effort":"high","tokens":t})
+        };
+        event["analysis"]["root"]["buckets"] = json!([bucket("astra", 6), bucket("sol", 3)]);
+        event["analysis"]["root"]["unattributed"]["total_tokens"] = json!(1);
+        event["analysis"]["purpose"] = json!("verification");
+        reseal_event(&mut event);
+        let headers = [
+            ("x-groundline-collector-id", ids[0].to_string()),
+            ("x-groundline-version", env!("CARGO_PKG_VERSION").to_owned()),
+            (
+                "idempotency-key",
+                event["idempotency_key"].as_str().unwrap().to_owned(),
+            ),
+        ];
+        for expected in ["accepted", "duplicate"] {
+            let response = router
+                .clone()
+                .oneshot(local_request(
+                    Method::POST,
+                    "/v1/events",
+                    &"c".repeat(32),
+                    Some(&event),
+                    &headers,
+                ))
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                if expected == "accepted" {
+                    StatusCode::ACCEPTED
+                } else {
+                    StatusCode::OK
+                }
+            );
+            assert_eq!(response_json(response).await["outcome"], expected);
+        }
+        let rows=db.json_rows("SELECT model_family,sum(total_tokens) AS tokens FROM groundline.model_usage WHERE collector_id={id:UUID} AND component='root' GROUP BY model_family ORDER BY model_family FORMAT JSONEachRow",&[("id",ids[0].to_string())]).await.unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                json!({"model_family":"astra","tokens":6}),
+                json!({"model_family":"sol","tokens":3}),
+                json!({"model_family":"unknown","tokens":1})
+            ]
+        );
+        let response = router
+            .clone()
+            .oneshot(local_request(
+                Method::GET,
+                "/v3/reports/weekly?days=7",
+                &"a".repeat(32),
+                None,
+                &[],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let report = response_json(response).await;
+        assert_eq!(
+            report["cohorts"]["model_effort_token_efficiency"]["status"],
+            "DESCRIPTIVE"
+        );
+        let rows=db.json_rows("SELECT retry_attempts,previous_cycle_pending FROM groundline.collector_diagnostics FINAL WHERE collector_id={id:UUID} FORMAT JSONEachRow",&[("id",ids[0].to_string())]).await.unwrap();
+        assert_eq!(
+            rows,
+            vec![json!({"retry_attempts":2,"previous_cycle_pending":3})]
+        );
+        // The database also excludes a directly inserted analysis whose token
+        // split no longer matches the intact authoritative counters.
+        let mut row = event_row(&event, Utc::now()).unwrap();
+        event["analysis"]["root"]["unattributed"]["total_tokens"] = json!(2);
+        row["payload_json"] = json!(serde_json::to_string(&event).unwrap());
+        db.request(
+            "INSERT INTO groundline.basic_weekly FORMAT JSONEachRow",
+            &[],
+            Some(serde_json::to_vec(&row).unwrap()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(db.request("SELECT count() FROM groundline.basic_quarantined WHERE collector_id={id:UUID} FORMAT TabSeparated",&[("id",ids[0].to_string())],None).await.unwrap(),b"1\n");
+        for id in ids {
+            let response = router
+                .clone()
+                .oneshot(local_request(
+                    Method::DELETE,
+                    &format!("/v1/collectors/{id}"),
+                    &"a".repeat(32),
+                    None,
+                    &[("x-groundline-delete-confirm", id.to_string())],
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            for table in ["lifecycle", "collector_diagnostics"] {
+                assert_eq!(db.request(&format!("SELECT count() FROM groundline.{table} WHERE collector_id={{id:UUID}} FORMAT TabSeparated"),&[("id",id.to_string())],None).await.unwrap(),b"0\n");
+            }
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "requires an isolated loopback ClickHouse and explicit mutation opt-in"]
     async fn clickhouse_collection_duplicate_report_and_deletion_are_end_to_end() {
         let mut config = clickhouse_test_config();
         config.collector_max_events = 1;
         let clickhouse = ClickHouse::new(&config).expect("ClickHouse client");
         clickhouse.ensure_storage(&config).await.expect("schema");
         let state = AppState {
+            metrics: Arc::default(),
             config: config.clone(),
             clickhouse: clickhouse.clone(),
             rate_limits: Arc::new(Mutex::new(BTreeMap::new())),
@@ -3188,6 +3587,49 @@ mod tests {
             let result = clickhouse.request(&format!("SELECT count() FROM groundline.{view} WHERE collector_id={{id:UUID}} FORMAT TabSeparated"), &[("id", collector_id.to_string())], None).await.unwrap();
             assert_eq!(result, expected, "{view}");
         }
+        let preservation_query = "SELECT event_id, hex(SHA256(toJSONString(tuple(*)))) AS row_hash FROM groundline.basic_weekly FINAL WHERE collector_id={id:UUID} ORDER BY event_id FORMAT JSONEachRow";
+        let identity_params = [("id", collector_id.to_string())];
+        let before = clickhouse
+            .request(preservation_query, &identity_params, None)
+            .await
+            .unwrap();
+        clickhouse.request(
+            "ALTER TABLE groundline.basic_weekly MATERIALIZE COLUMN trusted_event_v5 SETTINGS mutations_sync=1",
+            &[], None,
+        ).await.unwrap();
+        assert_eq!(
+            clickhouse
+                .request(preservation_query, &identity_params, None)
+                .await
+                .unwrap(),
+            before
+        );
+        let trust_expression = format!(
+            "ifNull(({TRUSTED_EVENT_PREDICATE}) AND ({}) AND ({}), 0)",
+            projection::consistency_sql(),
+            analysis::predicate()
+        );
+        assert_eq!(clickhouse.request(
+            &format!("SELECT countIf(trusted_event_v5 != ({trust_expression})) FROM groundline.basic_weekly WHERE collector_id={{id:UUID}} FORMAT TabSeparated"),
+            &identity_params, None,
+        ).await.unwrap(), b"0\n");
+        let mut forged_trust = event_row(&incomplete, Utc::now()).unwrap();
+        forged_trust["trusted_event_v5"] = json!(1);
+        // Reject an attempted override instead of silently ignoring the field.
+        assert!(
+            clickhouse
+                .request(
+                    "INSERT INTO groundline.basic_weekly FORMAT JSONEachRow",
+                    &[],
+                    Some(serde_json::to_vec(&forged_trust).unwrap()),
+                )
+                .await
+                .is_err()
+        );
+        assert_eq!(clickhouse.request(
+            "SELECT countIf(trusted_event_v5 != 0) FROM groundline.basic_weekly WHERE event_id={id:UUID} FORMAT TabSeparated",
+            &[("id", incomplete["event_id"].as_str().unwrap().to_owned())], None,
+        ).await.unwrap(), b"0\n", "clients must not override the calculated trust decision");
         let response = router
             .clone()
             .oneshot(local_request(
@@ -3356,5 +3798,54 @@ mod tests {
                 .expect("collector lookup")
                 .is_none()
         );
+        assert!(clickhouse.retired(collector_id).await.unwrap());
+        let response = router
+            .clone()
+            .oneshot(local_request(
+                Method::POST,
+                "/v1/enroll",
+                &"e".repeat(32),
+                Some(&enrollment),
+                &[],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(response).await["reason_code"],
+            "collector_retired"
+        );
+        // Retrying a completed or interrupted deletion must not create another
+        // deny record or re-enable the old installation.
+        let response = router
+            .clone()
+            .oneshot(local_request(
+                Method::DELETE,
+                &format!("/v1/collectors/{collector_id}"),
+                &"a".repeat(32),
+                None,
+                &[("x-groundline-delete-confirm", collector_id.to_string())],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let hash = format!("{:x}", Sha256::digest(collector_id.to_string().as_bytes()));
+        assert_eq!(clickhouse.request(
+            "SELECT count() FROM groundline.retired_collectors WHERE collector_hash={hash:String} FORMAT TabSeparated",
+            &[("hash", hash)], None,
+        ).await.unwrap(), b"1\n");
+        let mut replacement = enrollment.clone();
+        replacement["collector_instance_id"] = json!(Uuid::new_v4());
+        let response = router
+            .oneshot(local_request(
+                Method::POST,
+                "/v1/enroll",
+                &"e".repeat(32),
+                Some(&replacement),
+                &[],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
     }
 }
