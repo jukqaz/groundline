@@ -23,6 +23,8 @@ pub mod rollout;
 mod usage;
 #[cfg(feature = "version")]
 pub mod version;
+#[cfg(feature = "efficiency")]
+pub mod weekly_review;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{0}")]

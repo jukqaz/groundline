@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 use serde::Deserializer;
 use serde::de::{IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde_json::{Map, Value, json, value::RawValue};
+use sha2::{Digest, Sha256};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) enum State {
@@ -14,13 +15,31 @@ pub(super) enum State {
     Unknown,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct Outcome {
     exit_code: Option<i64>,
     is_error: bool,
     status: Option<&'static str>,
     has_session: bool,
     ignored: bool,
+    pub(super) pending_keys: BTreeSet<String>,
+    unknown_parts: bool,
+    batch: bool,
+    header: bool,
+    pub(super) emissions: Option<Vec<Self>>,
+}
+
+pub(super) fn handle_key(kind: &str, value: &str) -> Option<String> {
+    if value.is_empty()
+        || value.len() > 128
+        || !value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        return None;
+    }
+    let digest = Sha256::digest(format!("{kind}:{value}").as_bytes());
+    Some(format!("{kind}_{digest:x}"))
 }
 
 fn status(value: &str) -> Option<&'static str> {
@@ -44,10 +63,15 @@ impl Outcome {
             )
         {
             State::Failure
+        } else if !self.pending_keys.is_empty()
+            || self.has_session
+            || self.status == Some("running")
+        {
+            State::Running
+        } else if self.unknown_parts {
+            State::Unknown
         } else if self.exit_code == Some(0) {
             State::Success
-        } else if self.has_session || self.status == Some("running") {
-            State::Running
         } else {
             State::Unknown
         }
@@ -72,10 +96,73 @@ impl Outcome {
 
     pub(super) fn projection(&self) -> Value {
         json!({
+            "_groundline_outcome": 2,
             "exit_code": self.exit_code,
             "is_error": self.is_error,
             "status": self.status.or(if self.has_session { Some("running") } else { None }),
+            "pending_keys": self.pending_keys,
+            "unknown_parts": self.unknown_parts,
+            "batch": self.batch,
+            "emissions": self.emissions.as_ref().map(|parts| parts.iter().map(Self::projection).collect::<Vec<_>>()),
         })
+    }
+
+    pub(super) fn unresolved_reason(&self) -> &'static str {
+        match self.state() {
+            State::Running if self.pending_keys.is_empty() => "running_without_handle",
+            State::Running => "pending_completion",
+            State::Unknown if self.batch => "mixed_batch_evidence",
+            _ => "status_metadata_unavailable",
+        }
+    }
+
+    pub(super) fn selected(parts: impl IntoIterator<Item = Self>) -> Option<Self> {
+        let mut parts = parts.into_iter();
+        let mut result = parts.next()?;
+        for next in parts {
+            result.combine(next);
+            result.batch = true;
+        }
+        result.emissions = None;
+        Some(result)
+    }
+
+    /// Replace only the explicitly polled handle; all other batch obligations remain.
+    pub(super) fn complete_handle(&mut self, key: &str, next: &Self) {
+        if !self.pending_keys.remove(key) {
+            return;
+        }
+        if self.pending_keys.is_empty() {
+            self.has_session = false;
+            if self.status == Some("running") {
+                self.status = None;
+            }
+        }
+        // The consumed pending obligation is neutral, not a new missing result.
+        if self.exit_code.is_none() {
+            self.exit_code = Some(0);
+        }
+        self.combine(next.clone());
+    }
+
+    fn combine(&mut self, next: Self) {
+        let was_unknown = self.state() == State::Unknown && self.exit_code.is_none();
+        let next_unknown = next.state() == State::Unknown;
+        self.is_error |= next.is_error;
+        if next.exit_code.is_some_and(|code| code != 0) || self.exit_code.is_none() {
+            self.exit_code = next.exit_code;
+        }
+        if next.status.is_some_and(|s| s != "running") || self.status.is_none() {
+            self.status = next.status;
+        }
+        self.has_session |= next.has_session;
+        self.pending_keys.extend(next.pending_keys);
+        self.unknown_parts |= next.unknown_parts || was_unknown || next_unknown;
+        self.batch |= next.batch;
+        if self.pending_keys.len() > 128 {
+            self.pending_keys.clear();
+            self.has_session = true;
+        }
     }
 
     fn with_payload(mut self, payload: &Map<String, Value>) -> Self {
@@ -96,6 +183,12 @@ impl Outcome {
 // quotes an exit status. Orchestrator completion does not prove nested test success.
 fn text_outcome(text: &str) -> Outcome {
     let mut result = Outcome::default();
+    if text.starts_with("Script failed\nWall time ")
+        || text.starts_with("Script failed\nWall time:")
+    {
+        result.status = Some("failed");
+        return result;
+    }
     let mut header = text.lines();
     if header.next() == Some("Script completed")
         && header
@@ -105,6 +198,7 @@ fn text_outcome(text: &str) -> Outcome {
         && header.next().is_none()
     {
         result.ignored = true;
+        result.header = true;
         return result;
     }
     for line in text.lines().take(32) {
@@ -112,17 +206,15 @@ fn text_outcome(text: &str) -> Outcome {
             result.exit_code = code.trim().parse().ok();
             return result;
         }
-        if [
-            "Process running with session ID ",
-            "Script running with cell ID ",
-        ]
-        .iter()
-        .any(|prefix| {
-            line.strip_prefix(prefix)
-                .is_some_and(|id| !id.trim().is_empty())
-        }) {
-            result.has_session = true;
-            return result;
+        for (prefix, kind) in [
+            ("Process running with session ID ", "process"),
+            ("Script running with cell ID ", "cell"),
+        ] {
+            if let Some(id) = line.strip_prefix(prefix).filter(|id| !id.trim().is_empty()) {
+                result.has_session = true;
+                result.pending_keys.extend(handle_key(kind, id.trim()));
+                return result;
+            }
         }
         if !["Chunk ID:", "Wall time:", "Original token count:"]
             .iter()
@@ -168,6 +260,12 @@ impl<'de> Visitor<'de> for NativeOutcome {
         let mut content = None;
         let mut fulfilled = false;
         let mut value_field = None;
+        let mut session = None;
+        let mut projection = false;
+        let mut pending_raw = None;
+        let mut unknown_raw = None;
+        let mut batch_raw = None;
+        let mut emissions_raw = None;
         while let Some(key) = map.next_key::<String>()? {
             count += 1;
             if count > 128 {
@@ -185,7 +283,7 @@ impl<'de> Visitor<'de> for NativeOutcome {
                 };
                 match key.as_str() {
                     "exit_code" => result.exit_code = value.as_i64(),
-                    "is_error" | "isError" => result.is_error = value.as_bool() == Some(true),
+                    "is_error" | "isError" => result.is_error |= value.as_bool() == Some(true),
                     "status" => {
                         result.status = value.as_str().and_then(status);
                         fulfilled = value.as_str() == Some("fulfilled");
@@ -193,12 +291,23 @@ impl<'de> Visitor<'de> for NativeOutcome {
                     "type" => kind = value.as_str().map(str::to_owned),
                     "session_id" => {
                         result.has_session =
-                            value.is_u64() || value.as_str().is_some_and(|id| !id.is_empty())
+                            value.is_u64() || value.as_str().is_some_and(|id| !id.is_empty());
+                        session = value
+                            .as_u64()
+                            .map(|id| id.to_string())
+                            .or_else(|| value.as_str().map(str::to_owned));
                     }
                     _ => unreachable!(),
                 }
             } else {
                 match key.as_str() {
+                    "_groundline_outcome" => {
+                        projection = map.next_value::<&RawValue>()?.get() == "2"
+                    }
+                    "pending_keys" => pending_raw = Some(map.next_value::<&RawValue>()?),
+                    "unknown_parts" => unknown_raw = Some(map.next_value::<&RawValue>()?),
+                    "batch" => batch_raw = Some(map.next_value::<&RawValue>()?),
+                    "emissions" => emissions_raw = Some(map.next_value::<&RawValue>()?),
                     "text" => text = Some(map.next_value::<&RawValue>()?),
                     "content" => content = Some(map.next_value::<&RawValue>()?),
                     "value" => value_field = Some(map.next_value::<&RawValue>()?),
@@ -207,6 +316,43 @@ impl<'de> Visitor<'de> for NativeOutcome {
                     }
                 }
             }
+        }
+        if projection {
+            if let Some(raw) = pending_raw {
+                if raw.get().len() > 11_000 {
+                    return Err(serde::de::Error::custom("native handle limit exceeded"));
+                }
+                let keys: Vec<String> =
+                    serde_json::from_str(raw.get()).map_err(serde::de::Error::custom)?;
+                if keys.len() > 128 || keys.iter().any(|key| key.len() > 80) {
+                    return Err(serde::de::Error::custom("native handle limit exceeded"));
+                }
+                result.pending_keys.extend(keys);
+            }
+            result.unknown_parts = unknown_raw.is_some_and(|raw| raw.get() == "true");
+            result.batch = batch_raw.is_some_and(|raw| raw.get() == "true");
+            if let Some(raw) = emissions_raw.filter(|raw| raw.get() != "null") {
+                if raw.get().len() > 2 * 1024 * 1024 {
+                    return Err(serde::de::Error::custom("native emission limit exceeded"));
+                }
+                let values: Vec<&RawValue> =
+                    serde_json::from_str(raw.get()).map_err(serde::de::Error::custom)?;
+                if values.len() > 128 {
+                    return Err(serde::de::Error::custom("native emission limit exceeded"));
+                }
+                result.emissions = Some(
+                    values
+                        .into_iter()
+                        .map(|raw| fragment(raw, self.depth + 1))
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(serde::de::Error::custom)?,
+                );
+            }
+        }
+        if result.exit_code.is_some() {
+            result.has_session = false;
+        } else if let Some(session) = session {
+            result.pending_keys.extend(handle_key("process", &session));
         }
         if result.state() != State::Unknown {
             return Ok(result);
@@ -228,6 +374,7 @@ impl<'de> Visitor<'de> for NativeOutcome {
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Outcome, A::Error> {
         let mut combined: Option<Outcome> = None;
         let mut count = 0;
+        let mut emissions = None;
         while let Some(raw) = seq.next_element::<&RawValue>()? {
             count += 1;
             if count > 128 {
@@ -236,22 +383,24 @@ impl<'de> Visitor<'de> for NativeOutcome {
                 ));
             }
             let next = fragment(raw, self.depth + 1).map_err(serde::de::Error::custom)?;
+            if self.depth == 0 && count == 1 && next.header {
+                emissions = Some(Vec::new());
+            } else if let Some(parts) = &mut emissions {
+                parts.push(next.clone());
+            }
             if next.ignored {
                 continue;
             }
-            // A batch succeeds only when every substantive result is a proven
-            // success. Failures dominate, followed by pending/unknown evidence.
-            let rank = |outcome: &Outcome| match outcome.state() {
-                State::Failure => 3,
-                State::Running => 2,
-                State::Unknown => 1,
-                State::Success => 0,
-            };
-            if combined.as_ref().is_none_or(|old| rank(&next) > rank(old)) {
+            if let Some(old) = combined.as_mut() {
+                old.combine(next);
+                old.batch = true;
+            } else {
                 combined = Some(next);
             }
         }
-        Ok(combined.unwrap_or_default())
+        let mut result = combined.unwrap_or_default();
+        result.emissions = emissions;
+        Ok(result)
     }
     fn visit_unit<E: serde::de::Error>(self) -> Result<Outcome, E> {
         Ok(Outcome::default())

@@ -24,6 +24,13 @@ allow = [
 ]
 confidence-threshold = 0.8
 
+# Oxc's numeric conversion dependency offers the reviewed Boost license.
+# Keep this choice scoped to the exact transitive version, not all dependencies.
+[[licenses.exceptions]]
+name = "dragonbox_ecma"
+version = "=0.1.12"
+allow = ["BSL-1.0"]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"

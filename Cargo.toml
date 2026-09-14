@@ -10,7 +10,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.25.6"
+version = "0.25.7"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/jukqaz/groundline"
@@ -27,6 +27,10 @@ divan = "0.1.21"
 futures-util = "0.3.31"
 hmac = "0.12.1"
 ipnet = "2.12.1"
+oxc_allocator = "=0.149.0"
+oxc_ast = "=0.149.0"
+oxc_parser = { version = "=0.149.0", default-features = false }
+oxc_span = "=0.149.0"
 percent-encoding = "2.3.2"
 proc-macro2 = { version = "1.0.107", default-features = false, features = ["span-locations"] }
 pulldown-cmark = { version = "0.13.4", default-features = false }

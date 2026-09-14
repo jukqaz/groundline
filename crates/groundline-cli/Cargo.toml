@@ -27,6 +27,7 @@ walkdir.workspace = true
 url.workspace = true
 
 [dev-dependencies]
+rusqlite.workspace = true
 divan.workspace = true
 proptest.workspace = true
 tempfile.workspace = true

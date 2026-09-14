@@ -1117,6 +1117,9 @@ mod tests {
     #[test]
     fn weekly_recommendation_preserves_authority_and_evidence_limits() {
         let result = recommend_weekly_optimization(&weekly_audit()).unwrap();
+        let review = crate::weekly_review::review(weekly_audit()).unwrap();
+        assert_eq!(review["recommendation"], result);
+        assert_eq!(review["execution"]["recommendation_completed"], true);
         assert_eq!(
             result["recommended_change"]["code"],
             "reconcile_in_current_task"

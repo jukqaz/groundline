@@ -1,6 +1,12 @@
 # Weekly local audit
 
-Use `groundline audit weekly --days 7 --json` for aggregate local evidence.
+Use `groundline audit weekly --days 7 --review --json` for one audit, one
+recommendation, and a deterministic Korean readout. Use `report_ko` and `readout`
+for the report, preserving the nested `audit` and `recommendation` evidence.
+The execution fields distinguish an audit that ran with partial data from a
+recommendation failure. Do not run a second audit or recommendation after this
+combined command. `groundline audit weekly --days 7 --json` remains the raw audit
+interface for callers that explicitly need separate stages.
 Review counts, coverage, failure reason codes, and the proposed single workflow
 change. Keep source validation, installed runtime validation, and user-visible
 behavior as separate evidence lanes.
@@ -13,7 +19,7 @@ or search the entire Codex home. Read only the relevant GroundLine configuration
 tables if needed. Run the installed `provider-smoke --require-installed --json`
 once before claiming package integrity; a manifest alone proves no live hook.
 
-Run the weekly audit once. Retain its redacted JSON in process memory and pass
+When using the separate-stage interface, run the weekly audit once. Retain its redacted JSON in process memory and pass
 those same bytes to `groundline efficiency recommend --audit - --json` through
 standard input (maximum 2 MiB). Check both commands' exit status independently.
 Do not use `/dev/stdin`, write an unapproved temporary report, or repeat the
@@ -77,7 +83,16 @@ Verification outcomes use native exit/status metadata. Test names or stdout word
 such as `timeout` and `rejected` are not failures. Running, missing, and unrecognized
 results stay unresolved; orchestrator completion does not prove nested command
 success. Report outcome coverage before interpreting success ratios. Separate
-calls to poll a process may remain uncorrelated and unresolved. Central aggregates
+calls to poll a process are connected only with a matching explicit handle in the
+same rollout and observation window. Literal awaited native polls can be recognized
+in straight-line exec wrappers, including multiple top-level text emissions.
+Each result must match its emission slot; unobserved calls and unmatched shapes
+cannot establish success. Dynamic, interactive, conditional, or ambiguous polls
+stay uncorrelated. Inspect `verification_unresolved_reasons`; its sum equals
+the unresolved count. `verification_recovered_by_poll_count` identifies recovered
+terminal results without counting polls as new verifications. Missing source
+usage and unsupported ownership boundaries remain separate usage reason counts.
+Central aggregates
 from collectors before 0.25.6 used textual heuristics: do not compare their failure
 or verification ratios directly with current metadata-based results. Local audits
 recompute their requested window with the installed parser; they do not repair or
