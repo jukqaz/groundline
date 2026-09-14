@@ -42,7 +42,22 @@ impl Fixture {
         };
         let source = root.join("plugins/groundline");
         let installed = home.join(format!("plugins/cache/groundline/groundline/{version}"));
-        let bytes = fs::read(binary).unwrap();
+        let packaged = temp.path().join(executable);
+        fs::copy(binary, &packaged).unwrap();
+        // Linux embeds full DWARF in test binaries. Workspace feature unification
+        // can exceed the runtime's package limit with debug data alone. Match the
+        // shipped stripped artifact without changing the original test binary,
+        // the 128 MiB runtime bound, or any checksum/ownership assertions.
+        #[cfg(target_os = "linux")]
+        assert!(
+            Command::new("strip")
+                .arg("--strip-debug")
+                .arg(&packaged)
+                .status()
+                .expect("binutils strip is required for the Linux package fixture")
+                .success()
+        );
+        let bytes = fs::read(&packaged).unwrap();
         let hash = format!("{:x}", Sha256::digest(&bytes));
         for package in [&source, &installed] {
             fs::create_dir_all(package.join(".codex-plugin")).unwrap();
@@ -53,7 +68,7 @@ impl Fixture {
             .unwrap();
             let bin = package.join("bin").join(target);
             fs::create_dir_all(&bin).unwrap();
-            fs::copy(binary, bin.join(executable)).unwrap();
+            fs::copy(&packaged, bin.join(executable)).unwrap();
             fs::write(
                 bin.join(format!("{executable}.sha256")),
                 format!("{hash}  {executable}\n"),
