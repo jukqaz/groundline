@@ -9,10 +9,12 @@ use uuid::Uuid;
 use crate::ContractError;
 use crate::model::{EFFORTS, MAX_MODEL_CONTEXTS, MODEL_FAMILIES};
 
+pub mod analysis;
+
 pub const MAX_WEEKLY_REPORT_BYTES: usize = 128 * 1024;
 pub const MAX_BASIC_EVENT_BYTES: usize = 64 * 1024;
 /// Semantic allowlist revision, independent of the envelope schema version.
-pub const BASIC_CONTRACT_REVISION: u64 = 6;
+pub const BASIC_CONTRACT_REVISION: u64 = 7;
 
 pub fn ingest_capabilities() -> Value {
     serde_json::json!({"basic_schema_versions":[5], "basic_contract_revision":BASIC_CONTRACT_REVISION})
@@ -229,6 +231,21 @@ pub struct Cohorts {
     pub installation_distributions: InstallationDistributions,
     pub model_effort_context_distribution: Vec<ModelEffortContext>,
     pub model_effort_token_efficiency: ModelEffortTokenEfficiency,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_token_distribution: Option<Vec<ModelTokenUsage>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelTokenUsage {
+    pub component: String,
+    pub model_family: String,
+    pub effort: String,
+    pub input_tokens: u64,
+    pub cached_input_tokens: u64,
+    pub output_tokens: u64,
+    pub reasoning_output_tokens: u64,
+    pub total_tokens: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -662,7 +679,60 @@ impl WeeklyReport {
             return invalid();
         }
         let efficiency = &self.cohorts.model_effort_token_efficiency;
-        if efficiency.status != "UNAVAILABLE"
+        if let Some(rows) = &self.cohorts.model_token_distribution {
+            if rows.len() > 2 * MAX_MODEL_CONTEXTS
+                || efficiency.status != "DESCRIPTIVE"
+                || efficiency.reason_code != "completed_turns_not_attributed_to_model_effort"
+                || efficiency.context_distribution_only
+            {
+                return invalid();
+            }
+            let mut keys = BTreeSet::new();
+            for row in rows {
+                if !matches!(row.component.as_str(), "root" | "delegated")
+                    || !MODEL_FAMILIES.contains(&row.model_family.as_str())
+                    || !EFFORTS.contains(&row.effort.as_str())
+                    || !keys.insert((&row.component, &row.model_family, &row.effort))
+                {
+                    return invalid();
+                }
+            }
+            for (component, expected) in [
+                ("root", self.weekly_metrics.tokens.total),
+                ("delegated", self.weekly_metrics.tokens.delegated_total),
+            ] {
+                let sum = rows
+                    .iter()
+                    .filter(|r| r.component == component)
+                    .try_fold(0_u64, |sum, r| sum.checked_add(r.total_tokens));
+                if sum != Some(expected) {
+                    return invalid();
+                }
+            }
+            for (key, expected) in [
+                (0, self.weekly_metrics.tokens.input),
+                (1, self.weekly_metrics.tokens.cached_input),
+                (2, self.weekly_metrics.tokens.output),
+                (3, self.weekly_metrics.tokens.reasoning_output),
+            ] {
+                let sum =
+                    rows.iter()
+                        .filter(|r| r.component == "root")
+                        .try_fold(0_u64, |sum, r| {
+                            sum.checked_add(
+                                [
+                                    r.input_tokens,
+                                    r.cached_input_tokens,
+                                    r.output_tokens,
+                                    r.reasoning_output_tokens,
+                                ][key],
+                            )
+                        });
+                if sum != Some(expected) {
+                    return invalid();
+                }
+            }
+        } else if efficiency.status != "UNAVAILABLE"
             || efficiency.reason_code != "token_usage_not_attributed_to_model_effort"
             || !efficiency.context_distribution_only
         {
@@ -1340,7 +1410,14 @@ fn validate_guardian_metrics(value: &Value) -> bool {
 }
 
 fn validate_basic_semantics(event: &Value) -> bool {
-    if !exact_object_keys(event, BASIC_TOP_LEVEL_KEYS) || !no_forbidden_basic_keys(event) {
+    let mut keys = BASIC_TOP_LEVEL_KEYS.to_vec();
+    if let Some(analysis) = event.get("analysis") {
+        keys.push("analysis");
+        if !self::analysis::valid(analysis, &event["metrics"]) {
+            return false;
+        }
+    }
+    if !exact_object_keys(event, &keys) || !no_forbidden_basic_keys(event) {
         return false;
     }
     let object = event.as_object().expect("validated object");

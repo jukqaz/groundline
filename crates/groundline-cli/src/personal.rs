@@ -879,7 +879,8 @@ fn review(
         "workflow": report.weekly_metrics.workflow,
         "tokens": report.weekly_metrics.tokens,
         "verification": report.weekly_metrics.verification,
-        "model_effort_tokens_available": false,
+        "model_effort_tokens_available": report.cohorts.model_token_distribution.as_ref().is_some_and(|rows|rows.iter().any(|r|r.model_family!="unknown" && r.total_tokens>0)),
+        "model_token_distribution": report.cohorts.model_token_distribution,
         "model_performance_attribution_available": false,
     });
     out["outcomes"] = sample.as_ref().map(metrics).unwrap_or(Value::Null);

@@ -125,13 +125,17 @@ pub(super) fn stage(
         // Persist the attempt before reading: repeated process crashes also stop.
         window.attempts = window.attempts.saturating_add(1).min(MAX_ATTEMPTS);
         write_json(&directory.join(FILE), &window)?;
-        let result = audit(
+        let mut result = audit(
             parse_timestamp(&window.start_utc)?,
             parse_timestamp(&window.end_utc)?,
         )?;
         if result.get("collection_complete").and_then(Value::as_bool) != Some(true) {
             return Err(StateError::AuditIncomplete);
         }
+        result["scope"]["explicit_purpose"] = json!(super::analysis_profile::purpose(
+            directory,
+            parse_timestamp(&window.start_utc)?,
+        )?);
         let has_samples = [
             "observed_root_sample_count",
             "delegated_rollout_count",
