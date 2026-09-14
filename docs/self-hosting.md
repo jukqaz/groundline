@@ -210,7 +210,8 @@ For discovery only, all three image references may use explicit moving tags and
 the plugin may be exactly `grafana-clickhouse-datasource`; add
 `--allow-unpinned-dependencies` to both verification and rendering. Grafana then
 selects the current plugin version. Never retain that rendered file for
-production. After the complete stack and all 20 provisioned queries pass, copy
+production. After the complete stack and every provisioned dashboard, variable,
+and semantic reference query pass, copy
 the resolved image digests and installed plugin version into a pinned candidate
 profile, rerender without the override, and repeat the verification.
 
@@ -328,6 +329,12 @@ This does not change the separate GroundLine event retention policy. Existing
 deployments need explicit configuration application and TTL verification; a
 source-template change alone does not clean an already running database.
 See [ClickHouse TTL](https://clickhouse.com/docs/concepts/features/operations/delete/ttl).
+
+Normal logging uses Information-level rotated server logs and Warning-level
+`text_log`; periodic query/allocation/processor profiling is opt-in for bounded
+diagnosis. See [Insights operations](insights-operations.md) for metric
+definitions, dashboard filters, retirement retention, trust-column migration,
+and screen-only monitoring boundaries.
 
 ## 5. Configure each collector
 

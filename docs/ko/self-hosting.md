@@ -202,7 +202,7 @@ Compose template에는 ClickHouse·Nginx·Grafana·datasource plugin의 최대 �
 최신 버전 탐색 단계에 한해서 image 세 개에 명시적 moving tag를 쓰고 plugin을
 `grafana-clickhouse-datasource`로만 지정할 수 있습니다. 검증과 렌더링 모두에
 `--allow-unpinned-dependencies`를 추가합니다. 이 Compose는 운영에 보존하지 않습니다.
-전체 stack과 provision된 query 20개가 통과하면 실제 image digest와 설치된 plugin
+전체 stack과 모든 dashboard·변수·의미 검증 query가 통과하면 실제 image digest와 설치된 plugin
 버전을 pinned 후보 profile에 기록하고, override 없이 다시 렌더링·검증합니다.
 
 GitHub 수동 workflow에도 후보 입력 네 개가 있습니다. 네 개를 모두 주거나 하나도

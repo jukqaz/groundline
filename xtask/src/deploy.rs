@@ -47,6 +47,7 @@ const MANAGED_BLOCKS: &[&str] = &[
     "clickhouse_grafana_user",
     "grafana_datasource",
     "grafana_dashboard",
+    "grafana_analysis_dashboard",
 ];
 const FLEET_COUNT_FIELDS: &[&str] = &[
     "enrolled_installation_count",
@@ -433,15 +434,33 @@ fn update_compose(
             .and_then(Value::as_object_mut)
             .ok_or(XtaskError::DeploymentFailed)?;
         for (name, content) in managed_contents {
-            let existing = configs
-                .get(name)
-                .and_then(Value::as_object)
-                .ok_or(XtaskError::DeploymentFailed)?;
-            if existing.len() != 1 || !existing.get("content").is_some_and(Value::is_string) {
-                return Err(XtaskError::DeploymentFailed);
+            match configs.get(name) {
+                Some(value) => {
+                    let existing = value.as_object().ok_or(XtaskError::DeploymentFailed)?;
+                    if existing.len() != 1 || !existing.get("content").is_some_and(Value::is_string)
+                    {
+                        return Err(XtaskError::DeploymentFailed);
+                    }
+                }
+                None if name == "grafana_analysis_dashboard" => {}
+                None => return Err(XtaskError::DeploymentFailed),
             }
             configs.insert(name.to_owned(), json!({"content":content}));
         }
+    }
+    let mount = json!({"source":"grafana_analysis_dashboard","target":"/var/lib/grafana/dashboards/groundline-analysis.json"});
+    let mounts = updated
+        .pointer_mut("/services/grafana/configs")
+        .and_then(Value::as_array_mut)
+        .ok_or(XtaskError::DeploymentFailed)?;
+    let existing = mounts
+        .iter()
+        .filter(|entry| entry["source"] == mount["source"] || entry["target"] == mount["target"])
+        .collect::<Vec<_>>();
+    if existing.is_empty() {
+        mounts.push(mount);
+    } else if existing.len() != 1 || *existing[0] != mount {
+        return Err(XtaskError::DeploymentFailed);
     }
     if serde_json::to_vec(&updated)?.len() > MAX_CONFIG_BYTES {
         return Err(XtaskError::DeploymentFailed);
@@ -607,42 +626,108 @@ struct GrafanaQueryPlan {
 }
 
 fn grafana_query_plan(template: &str) -> Result<GrafanaQueryPlan, XtaskError> {
-    let dashboard: Value = serde_json::from_str(&block_content(template, "grafana_dashboard")?)?;
-    let panels = dashboard
-        .get("panels")
+    let dashboards = ["grafana_dashboard", "grafana_analysis_dashboard"]
+        .iter()
+        .map(|name| serde_json::from_str(&block_content(template, name)?).map_err(Into::into))
+        .collect::<Result<Vec<Value>, XtaskError>>()?;
+    grafana_query_plan_for_dashboards(&dashboards)
+}
+
+fn current_grafana_query_plan(current: &Value) -> Result<GrafanaQueryPlan, XtaskError> {
+    let mounts = current
+        .pointer("/services/grafana/configs")
         .and_then(Value::as_array)
-        .ok_or(XtaskError::DeploymentFailed)?;
+        .ok_or(XtaskError::InvalidCurrentConfiguration)?;
+    let mut dashboards = Vec::new();
+    for name in ["grafana_dashboard", "grafana_analysis_dashboard"] {
+        let mounted = mounts.iter().any(|m| m["source"] == name);
+        if !mounted && name == "grafana_analysis_dashboard" {
+            continue;
+        }
+        if !mounted {
+            return Err(XtaskError::InvalidCurrentConfiguration);
+        }
+        let content = current
+            .pointer(&format!("/configs/{name}/content"))
+            .and_then(Value::as_str)
+            .ok_or(XtaskError::InvalidCurrentConfiguration)?;
+        dashboards.push(serde_json::from_str(content)?);
+    }
+    grafana_query_plan_for_dashboards(&dashboards)
+}
+
+fn grafana_query_plan_for_dashboards(dashboards: &[Value]) -> Result<GrafanaQueryPlan, XtaskError> {
+    let mut targets = Vec::new();
     let expected_datasource = json!({
         "type":"grafana-clickhouse-datasource",
         "uid":"groundline-clickhouse",
     });
-    let mut queries = Vec::new();
-    for panel in panels {
-        if panel.get("datasource") != Some(&expected_datasource) {
-            return Err(XtaskError::DeploymentFailed);
+    for dashboard in dashboards {
+        let panels = dashboard
+            .get("panels")
+            .and_then(Value::as_array)
+            .ok_or(XtaskError::DeploymentFailed)?;
+        if let Some(annotations) = dashboard
+            .pointer("/annotations/list")
+            .and_then(Value::as_array)
+        {
+            for annotation in annotations {
+                if annotation["enable"] == true {
+                    if annotation["datasource"] != expected_datasource {
+                        return Err(XtaskError::DeploymentFailed);
+                    }
+                    targets.push(annotation["target"].clone());
+                }
+            }
         }
-        let Some(targets) = panel.get("targets").and_then(Value::as_array) else {
-            continue;
-        };
-        for target in targets {
-            if target.get("datasource") != Some(&expected_datasource) {
+        for panel in panels {
+            if panel.get("datasource") != Some(&expected_datasource) {
                 return Err(XtaskError::DeploymentFailed);
             }
-            let raw_sql = target
+            let Some(panel_targets) = panel.get("targets").and_then(Value::as_array) else {
+                continue;
+            };
+            targets.extend(panel_targets.iter().cloned());
+        }
+        if let Some(variables) = dashboard
+            .pointer("/templating/list")
+            .and_then(Value::as_array)
+        {
+            for variable in variables {
+                if variable["type"] == "query" {
+                    if variable["datasource"] != expected_datasource {
+                        return Err(XtaskError::DeploymentFailed);
+                    }
+                    let mut query = variable["query"].clone();
+                    query["datasource"] = expected_datasource.clone();
+                    targets.push(query);
+                }
+            }
+        }
+    }
+    let mut queries = Vec::new();
+    for target in &targets {
+        if target.get("datasource") != Some(&expected_datasource) {
+            return Err(XtaskError::DeploymentFailed);
+        }
+        let raw_sql = groundline_contracts::grafana::verification_sql(
+            target
                 .get("rawSql")
                 .and_then(Value::as_str)
                 .filter(|value| !value.is_empty())
-                .ok_or(XtaskError::DeploymentFailed)?
-                .replace("$$__", "$__");
-            let ref_id = format!("Q{}", queries.len() + 1);
-            queries.push(json!({
-                "refId":ref_id,
-                "datasource":expected_datasource.clone(),
-                "rawSql":raw_sql,
-                "format":target.get("format").cloned().unwrap_or_else(|| json!(1)),
-                "queryType":target.get("queryType").cloned().unwrap_or_else(|| json!("table")),
-            }));
-        }
+                .ok_or(XtaskError::DeploymentFailed)?,
+        )
+        .ok_or(XtaskError::DeploymentFailed)?;
+        let ref_id = format!("Q{}", queries.len() + 1);
+        queries.push(json!({
+            "refId":ref_id,
+            "datasource":expected_datasource.clone(),
+            "rawSql":raw_sql,
+            "intervalMs":3600000,
+            "maxDataPoints":1000,
+            "format":target.get("format").cloned().unwrap_or_else(|| json!(1)),
+            "queryType":target.get("queryType").cloned().unwrap_or_else(|| json!("table")),
+        }));
     }
     if queries.is_empty() || queries.len() > 64 {
         return Err(XtaskError::DeploymentFailed);
@@ -1006,12 +1091,9 @@ async fn grafana_datasource_healthy(
     client: &reqwest::Client,
     base: &Url,
     public_host: &str,
-    template: &str,
+    plan: &GrafanaQueryPlan,
     auth: Option<&GrafanaAuth>,
 ) -> bool {
-    let Ok(plan) = grafana_query_plan(template) else {
-        return false;
-    };
     let mut url = base.clone();
     url.set_path("/api/ds/query");
     url.set_query(None);
@@ -1041,7 +1123,7 @@ async fn grafana_datasource_healthy(
     bounded_json(response, MAX_GRAFANA_RESPONSE_BYTES)
         .await
         .as_ref()
-        .is_some_and(|value| grafana_query_ready(value, &plan))
+        .is_some_and(|value| grafana_query_ready(value, plan))
 }
 
 fn http_client() -> Option<reqwest::Client> {
@@ -1059,7 +1141,7 @@ async fn service_healthy(
     url: &str,
     kind: &str,
     public_host: &str,
-    template: &str,
+    plan: &GrafanaQueryPlan,
     require_datasource: bool,
     grafana_auth: Option<&GrafanaAuth>,
 ) -> bool {
@@ -1088,14 +1170,8 @@ async fn service_healthy(
             (value.get("database").and_then(Value::as_str) == Some("ok")
                 || value.get("status").and_then(Value::as_str) == Some("ok"))
                 && (!require_datasource
-                    || grafana_datasource_healthy(
-                        client,
-                        &url,
-                        public_host,
-                        template,
-                        grafana_auth,
-                    )
-                    .await)
+                    || grafana_datasource_healthy(client, &url, public_host, plan, grafana_auth)
+                        .await)
         }
         _ => false,
     }
@@ -1155,7 +1231,7 @@ struct HealthInputs<'a> {
     grafana_url: &'a str,
     access_url: &'a str,
     public_host: &'a str,
-    template: &'a str,
+    query_plan: &'a GrafanaQueryPlan,
     grafana_auth: &'a GrafanaAuth,
 }
 
@@ -1179,7 +1255,7 @@ where
                 inputs.api_url,
                 "api",
                 inputs.public_host,
-                inputs.template,
+                inputs.query_plan,
                 false,
                 None,
             )
@@ -1189,7 +1265,7 @@ where
                 inputs.grafana_url,
                 "grafana",
                 inputs.public_host,
-                inputs.template,
+                inputs.query_plan,
                 require_datasource,
                 Some(inputs.grafana_auth),
             )
@@ -1295,7 +1371,7 @@ struct RuntimeInputs {
     access_url: String,
     public_host: String,
     template: String,
-    query_count: usize,
+    query_plan: GrafanaQueryPlan,
 }
 
 impl RuntimeInputs {
@@ -1366,10 +1442,8 @@ impl RuntimeInputs {
             _ => return Err(XtaskError::InvalidRuntimeConfiguration),
         };
         grafana_auth.validate_config(&config)?;
-        let query_count = grafana_query_plan(&template)
-            .map_err(|_| XtaskError::InvalidRuntimeConfiguration)?
-            .queries
-            .len();
+        let query_plan =
+            grafana_query_plan(&template).map_err(|_| XtaskError::InvalidRuntimeConfiguration)?;
         Ok(Self {
             uri,
             username,
@@ -1382,7 +1456,7 @@ impl RuntimeInputs {
             access_url,
             public_host,
             template,
-            query_count,
+            query_plan,
         })
     }
 
@@ -1393,7 +1467,7 @@ impl RuntimeInputs {
             grafana_url: &self.grafana_health,
             access_url: &self.access_url,
             public_host: &self.public_host,
-            template: &self.template,
+            query_plan: &self.query_plan,
             grafana_auth: &self.grafana_auth,
         }
     }
@@ -1513,7 +1587,7 @@ async fn deploy_async(
         "rollback_performed":false,
         "api_health_verified":true,
         "grafana_health_verified":true,
-        "grafana_query_count":inputs.query_count,
+        "grafana_query_count":inputs.query_plan.queries.len(),
         "grafana_semantics_verified":true,
         "access_gate_verified":true,
         "preflight_config_matched":true,
@@ -1540,9 +1614,14 @@ async fn preflight_async(compose_template: &Path) -> Result<Value, XtaskError> {
         &inputs.enrollment_token,
     )
     .map_err(|_| XtaskError::InvalidCurrentConfiguration)?;
+    // Before migration, verify the currently mounted dashboards. Candidate
+    // queries can legitimately need tables introduced by the new API image.
+    let current_plan = current_grafana_query_plan(&current)?;
+    let mut current_health = inputs.health();
+    current_health.query_plan = &current_plan;
     if !wait_for_health(
         &mut client,
-        &inputs.health(),
+        &current_health,
         PREFLIGHT_HEALTH_ATTEMPTS,
         PREFLIGHT_HEALTH_DELAY,
         true,
@@ -1559,7 +1638,9 @@ async fn preflight_async(compose_template: &Path) -> Result<Value, XtaskError> {
         "mutation_started":false,
         "api_health_verified":true,
         "grafana_health_verified":true,
-        "grafana_query_count":inputs.query_count,
+        "grafana_query_count":current_plan.queries.len(),
+        "candidate_grafana_query_count":inputs.query_plan.queries.len(),
+        "candidate_queries_executed":false,
         "grafana_semantics_verified":true,
         "access_gate_verified":true,
         "configuration_printed":false,
@@ -1615,23 +1696,15 @@ async fn verify_stack_async(
     );
     let client = http_client().ok_or(XtaskError::RuntimeFailed)?;
     for attempt in 0..STACK_VERIFY_ATTEMPTS {
-        let api_ready = service_healthy(
-            &client,
-            api_health,
-            "api",
-            public_host,
-            &template,
-            false,
-            None,
-        )
-        .await;
+        let api_ready =
+            service_healthy(&client, api_health, "api", public_host, &plan, false, None).await;
         let grafana_ready = api_ready
             && service_healthy(
                 &client,
                 grafana_health,
                 "grafana",
                 public_host,
-                &template,
+                &plan,
                 true,
                 Some(&grafana_auth),
             )
@@ -1818,7 +1891,7 @@ mod tests {
 
     fn compose(image: &str, dashboard: &str) -> String {
         format!(
-            "services:\n  api:\n    image: {image}\n    environment:\n      GROUNDLINE_INGEST_TOKEN: \"legacy\"\n      GROUNDLINE_MINIMUM_SUPPORTED_VERSION: \"0.13.0\"\n  other:\n    image: other:1\nconfigs:\n  clickhouse_limits:\n    content: |\n      limits\n  clickhouse_grafana_user:\n    content: |\n      user\n  grafana_datasource:\n    content: |\n      datasource\n  grafana_dashboard:\n    content: |\n      {dashboard}\nnetworks:\n  data:\n"
+            "services:\n  api:\n    image: {image}\n    environment:\n      GROUNDLINE_INGEST_TOKEN: \"legacy\"\n      GROUNDLINE_MINIMUM_SUPPORTED_VERSION: \"0.13.0\"\n  other:\n    image: other:1\nconfigs:\n  clickhouse_limits:\n    content: |\n      limits\n  clickhouse_grafana_user:\n    content: |\n      user\n  grafana_datasource:\n    content: |\n      datasource\n  grafana_analysis_dashboard:\n    content: |\n      {dashboard}\n  grafana_dashboard:\n    content: |\n      {dashboard}\nnetworks:\n  data:\n"
         )
     }
 
@@ -1833,6 +1906,7 @@ mod tests {
                         "PRESERVED_SECRET":"unchanged"
                     }
                 },
+                "grafana":{"configs":[{"source":"grafana_dashboard","target":"/var/lib/grafana/dashboards/groundline-insights.json"}]},
                 "other":{"image":"other:1"}
             },
             "configs":{
@@ -1874,6 +1948,27 @@ mod tests {
             updated.pointer("/configs/clickhouse_schema"),
             current.pointer("/configs/clickhouse_schema")
         );
+        assert_eq!(
+            updated["configs"]["grafana_analysis_dashboard"]["content"],
+            "new\n"
+        );
+        assert_eq!(
+            updated["services"]["grafana"]["configs"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        let twice = update_compose(&updated, &template, &image, &enrollment_credential()).unwrap();
+        assert_eq!(
+            twice, updated,
+            "reapplying must not duplicate a dashboard mount"
+        );
+        let mut conflict = current.clone();
+        conflict["services"]["grafana"]["configs"].as_array_mut().unwrap().push(
+            json!({"source":"owner_dashboard","target":"/var/lib/grafana/dashboards/groundline-analysis.json"})
+        );
+        assert!(update_compose(&conflict, &template, &image, &enrollment_credential()).is_err());
         assert!(
             updated
                 .pointer("/services/api/environment/GROUNDLINE_INGEST_TOKEN")
@@ -2131,9 +2226,34 @@ mod tests {
     }
 
     #[test]
+    fn preflight_uses_mounted_current_queries_before_candidate_migration() {
+        let template = include_str!("../../infrastructure/compose.template.yaml");
+        let candidate = grafana_query_plan(template).unwrap();
+        let mut current: serde_json::Value = serde_saphyr::from_str(template).unwrap();
+        let mounts = current["services"]["grafana"]["configs"]
+            .as_array_mut()
+            .unwrap();
+        mounts.retain(|m| m["source"] != "grafana_analysis_dashboard");
+        // Unmounted candidate configuration must not enter the live preflight.
+        current["configs"]["grafana_analysis_dashboard"]["content"] = json!("invalid candidate");
+        let baseline = super::current_grafana_query_plan(&current).unwrap();
+        assert!(baseline.queries.len() < candidate.queries.len());
+        assert_eq!(baseline.semantic_refs.len(), 4);
+        current["services"]["grafana"]["configs"] = json!([]);
+        assert!(super::current_grafana_query_plan(&current).is_err());
+    }
+
+    #[test]
     fn grafana_gate_executes_every_panel_and_checks_semantics() {
         let (response, plan) = valid_grafana_response();
-        assert_eq!(plan.queries.len(), 20);
+        // 19 overview panels, 10 analysis panels, four variable queries,
+        // and the independent fleet reference must all execute.
+        assert_eq!(plan.queries.len(), 45);
+        assert!(
+            plan.queries
+                .iter()
+                .all(|query| !query["rawSql"].as_str().unwrap().contains("${"))
+        );
         assert!(grafana_query_ready(&response, &plan));
 
         let mut drifted = response;
