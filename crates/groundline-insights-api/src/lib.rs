@@ -2714,6 +2714,21 @@ mod tests {
             "../../../infrastructure/compose.template.yaml"
         ))
         .unwrap();
+        let overview = template["configs"]["grafana_dashboard"]["content"]
+            .as_str()
+            .unwrap();
+        let detail_link = overview
+            .split("\"url\": \"/d/groundline-analysis?from=")
+            .nth(1)
+            .and_then(|v| v.split('"').next())
+            .expect("installation drilldown link");
+        for variable in ["os", "runtime", "version", "device", "purpose"] {
+            assert!(
+                detail_link.contains(&format!("&var-{variable}=%24__all")),
+                "drilldown must reset stale {variable} selection"
+            );
+        }
+        assert!(detail_link.contains("var-install=$${__data.fields.install_key}"));
         for name in ["grafana_dashboard", "grafana_analysis_dashboard"] {
             let dashboard: Value =
                 serde_json::from_str(template["configs"][name]["content"].as_str().unwrap())
