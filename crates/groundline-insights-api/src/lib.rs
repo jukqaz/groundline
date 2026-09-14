@@ -1750,6 +1750,9 @@ async fn weekly_report(
         return Err(ApiError::new(StatusCode::BAD_REQUEST, "invalid_request"));
     }
     let _storage_permit = state.storage_permit(StorageClass::Operator)?;
+    // Keep every report component on the same single-writer state. Enrollment,
+    // ingestion, activation, and deletion must not change between these reads.
+    let _ingestion_guard = state.ingestion_gate.lock().await;
     let end = Utc::now();
     let start = end - ChronoDuration::days(i64::from(query.days));
     let params = [
@@ -2154,6 +2157,10 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
+
+    // These integration scenarios own the same fixed disposable database.
+    // Their independent AppStates do not model supported concurrent writers.
+    static CLICKHOUSE_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     #[tokio::test]
     async fn health_advertises_current_ingest_contract_without_secret_or_storage_roundtrip() {
@@ -3057,8 +3064,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn report_waits_for_an_in_progress_storage_writer() {
+        let mut state = unit_state(1, 1);
+        state.config.require_tailnet = false;
+        state.config.proxy_token = None;
+        state.clickhouse.endpoint = Url::parse("http://127.0.0.1:0/").unwrap();
+        let guard = state.ingestion_gate.lock().await;
+        let headers = HeaderMap::from_iter([(
+            axum::http::header::AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {}", "x".repeat(32))).unwrap(),
+        )]);
+        let report = weekly_report(
+            State(state.clone()),
+            ConnectInfo("127.0.0.1:1234".parse().unwrap()),
+            headers,
+            Query(ReportQuery { days: 7 }),
+        );
+        tokio::pin!(report);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut report)
+                .await
+                .is_err(),
+            "a report must not read a partially updated writer state"
+        );
+        drop(guard);
+        let response = tokio::time::timeout(Duration::from_secs(2), report)
+            .await
+            .expect("writer release must unblock the report")
+            .unwrap_err()
+            .into_response();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
     #[ignore = "requires an isolated loopback ClickHouse and explicit mutation opt-in"]
     async fn clickhouse_schema_report_and_grafana_queries_are_executable() {
+        let _database_guard = CLICKHOUSE_TEST_LOCK.lock().await;
         let config = clickhouse_test_config();
         let clickhouse = ClickHouse::new(&config).unwrap();
         clickhouse.ensure_storage(&config).await.unwrap();
@@ -3148,6 +3189,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires an isolated loopback ClickHouse and explicit mutation opt-in"]
     async fn clickhouse_model_device_and_diagnostic_observations_preserve_evidence() {
+        let _database_guard = CLICKHOUSE_TEST_LOCK.lock().await;
         let config = clickhouse_test_config();
         let db = ClickHouse::new(&config).unwrap();
         db.ensure_storage(&config).await.unwrap();
@@ -3278,17 +3320,27 @@ mod tests {
         .unwrap();
         assert_eq!(db.request("SELECT count() FROM groundline.basic_quarantined WHERE collector_id={id:UUID} FORMAT TabSeparated",&[("id",ids[0].to_string())],None).await.unwrap(),b"1\n");
         for id in ids {
-            let response = router
-                .clone()
-                .oneshot(local_request(
-                    Method::DELETE,
-                    &format!("/v1/collectors/{id}"),
-                    &"a".repeat(32),
-                    None,
-                    &[("x-groundline-delete-confirm", id.to_string())],
-                ))
-                .await
-                .unwrap();
+            let deletion = router.clone().oneshot(local_request(
+                Method::DELETE,
+                &format!("/v1/collectors/{id}"),
+                &"a".repeat(32),
+                None,
+                &[("x-groundline-delete-confirm", id.to_string())],
+            ));
+            let reporting = router.clone().oneshot(local_request(
+                Method::GET,
+                "/v3/reports/weekly?days=7",
+                &"a".repeat(32),
+                None,
+                &[],
+            ));
+            let (response, report) = tokio::join!(deletion, reporting);
+            let response = response.unwrap();
+            assert_eq!(
+                report.unwrap().status(),
+                StatusCode::OK,
+                "concurrent deletion must preserve report consistency"
+            );
             assert_eq!(response.status(), StatusCode::OK);
             for table in ["lifecycle", "collector_diagnostics"] {
                 assert_eq!(db.request(&format!("SELECT count() FROM groundline.{table} WHERE collector_id={{id:UUID}} FORMAT TabSeparated"),&[("id",id.to_string())],None).await.unwrap(),b"0\n");
@@ -3299,6 +3351,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires an isolated loopback ClickHouse and explicit mutation opt-in"]
     async fn clickhouse_collection_duplicate_report_and_deletion_are_end_to_end() {
+        let _database_guard = CLICKHOUSE_TEST_LOCK.lock().await;
         let mut config = clickhouse_test_config();
         config.collector_max_events = 1;
         let clickhouse = ClickHouse::new(&config).expect("ClickHouse client");
@@ -3564,6 +3617,9 @@ mod tests {
 
         // SessionStart precedes the first provider usage record. Its lifecycle
         // counters are valid even though token measurements are unavailable.
+        let missing_usage_before = report["coverage"]["root_usage_missing_event_count"]
+            .as_u64()
+            .expect("missing usage count");
         let mut unmeasured = integration_event(collector_id, 7);
         unmeasured["source"]["collection_trigger"] = json!("session_start_hook");
         unmeasured["metrics"]["root"]["activity"]["task_started"] = json!(1);
@@ -3670,7 +3726,11 @@ mod tests {
                 .unwrap()
                 .contains(&json!("events_quarantined"))
         );
-        assert_eq!(report["coverage"]["root_usage_missing_event_count"], 1);
+        assert_eq!(
+            report["coverage"]["root_usage_missing_event_count"],
+            missing_usage_before + 1,
+            "the new unmeasured event must add exactly one missing usage observation"
+        );
         assert!(
             report["data_quality"]["reason_codes"]
                 .as_array()
