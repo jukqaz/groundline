@@ -7,6 +7,7 @@ use sha2::{Digest, Sha256};
 use crate::ContractError;
 use crate::rollout::Record;
 
+mod attribution;
 mod continuation;
 mod tool_outcome;
 mod verification;
@@ -268,6 +269,7 @@ pub fn audit_rollouts(
     let mut failure_counts = BTreeMap::<String, u64>::new();
     let mut completed_durations = Vec::<u64>::new();
     let mut provider_usage = Usage::default();
+    let mut attributed_usage = attribution::Aggregate::default();
     let mut usage_rollouts = 0_u64;
     let mut usage_events = 0_u64;
     let mut cumulative_rollouts = 0_u64;
@@ -350,6 +352,7 @@ pub fn audit_rollouts(
         let mut response_usage = Usage::default();
         let mut response_ids = BTreeSet::<String>::new();
         let mut response_events = 0_u64;
+        let mut attribution = attribution::Responses::default();
         let mut last_ordinal = None;
         let mut previous_model = None;
         let mut active_tasks = BTreeMap::<String, DateTime<Utc>>::new();
@@ -464,6 +467,11 @@ pub fn audit_rollouts(
                     continue;
                 }
             };
+            // Contexts outside the selected window still identify an owned
+            // response inside it. Never infer a response's model by proximity.
+            if record_type == "turn_context" {
+                attribution.context(&payload);
+            }
             if record_type == "token_usage_record"
                 && owner.is_some()
                 && payload.get("thread_id").and_then(Value::as_str) == owner
@@ -476,6 +484,7 @@ pub fn audit_rollouts(
             {
                 if record_in_window {
                     response_usage.add_checked(&usage)?;
+                    attribution.response(&payload, &usage)?;
                     response_events = response_events.saturating_add(1);
                     uncovered_response = true;
                     native_uncovered_response = true;
@@ -753,16 +762,19 @@ pub fn audit_rollouts(
                 None => latest,
             };
             provider_usage.add_checked(&window_usage)?;
+            attributed_usage.add(attribution, &window_usage)?;
             usage_rollouts = usage_rollouts.saturating_add(1);
             cumulative_rollouts = cumulative_rollouts.saturating_add(1);
         } else if response_events > 0 {
             provider_usage.add_checked(&response_usage)?;
+            attributed_usage.add(attribution, &response_usage)?;
             usage_rollouts = usage_rollouts.saturating_add(1);
             fallback_rollouts = fallback_rollouts.saturating_add(1);
             response_rollouts = response_rollouts.saturating_add(1);
             usage_events = usage_events.saturating_add(response_events);
         } else if has_fallback {
             provider_usage.add_checked(&fallback_usage)?;
+            attributed_usage.add(attribution, &fallback_usage)?;
             usage_rollouts = usage_rollouts.saturating_add(1);
             fallback_rollouts = fallback_rollouts.saturating_add(1);
         } else {
@@ -862,6 +874,7 @@ pub fn audit_rollouts(
             "compacted_record_count": compacted_records,
         },
         "model_effort": { "counts": model_effort, "transition_count": transitions },
+        "model_attributed_usage": attributed_usage.json(),
         "provider_reported_usage": {
             "source": usage_source,
             "rollout_count_with_usage": usage_rollouts,
@@ -1794,4 +1807,64 @@ mod tests {
         assert_eq!(result["provider_reported_usage"]["total_tokens"], 0);
         assert_eq!(result["errors"].as_array().unwrap().len(), 3);
     }
+}
+#[test]
+fn owned_response_attribution_conserves_mixed_models_across_windows() {
+    let at = |s| format!("2026-09-01T00:00:{s:02}Z");
+    let response = |second, turn, response, n, total| {
+        json!({"timestamp":at(second),"type":"token_usage_record","payload":{
+            "thread_id":"owner","turn_id":turn,"response_id":response,"usage":{"total_tokens":n},"thread_token_usage":{"total_tokens":total}}})
+    };
+    let rows = [
+        json!({"timestamp":at(0),"type":"session_meta","payload":{"id":"owner"}}),
+        json!({"timestamp":at(1),"type":"turn_context","payload":{"turn_id":"a","model":"gpt-6-astra","effort":"high"}}),
+        response(2, "a", "r1", 6, 6),
+        response(3, "a", "r1", 6, 6),
+        json!({"timestamp":at(4),"type":"turn_context","payload":{"turn_id":"b","model":"gpt-5.6-sol","effort":"high"}}),
+        response(5, "b", "r2", 3, 9),
+        response(6, "unknown-turn", "r3", 1, 10),
+    ];
+    let raw = rows
+        .iter()
+        .map(Value::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let audit = |start, end| {
+        audit_rollouts(
+            &[&raw],
+            0,
+            15,
+            AuditWindow {
+                start: timestamp(Some(&at(start))),
+                end: timestamp(Some(&at(end))),
+            },
+        )
+        .unwrap()
+    };
+    let whole = audit(0, 7);
+    let first = audit(0, 3);
+    let second = audit(3, 7);
+    assert_eq!(whole["provider_reported_usage"]["total_tokens"], 10);
+    assert_eq!(first["provider_reported_usage"]["total_tokens"], 6);
+    assert_eq!(second["provider_reported_usage"]["total_tokens"], 4);
+    assert_eq!(
+        whole["model_attributed_usage"]["buckets"][0]["tokens"]["total_tokens"],
+        6
+    );
+    assert_eq!(
+        whole["model_attributed_usage"]["buckets"][1]["tokens"]["total_tokens"],
+        3
+    );
+    assert_eq!(
+        whole["model_attributed_usage"]["unattributed"]["total_tokens"],
+        1
+    );
+    assert_eq!(
+        second["model_attributed_usage"]["buckets"][0]["model_family"],
+        "sol"
+    );
+    assert_eq!(
+        second["model_attributed_usage"]["unattributed"]["total_tokens"],
+        1
+    );
 }

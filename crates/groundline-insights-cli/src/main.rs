@@ -78,6 +78,13 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum WorkerCommand {
+    /// Declare the purpose of future complete collection windows on this host.
+    Purpose {
+        #[arg(long, value_parser = ["production", "verification", "unclassified"])]
+        value: String,
+        #[arg(long, hide = true)]
+        codex_home: Option<PathBuf>,
+    },
     /// Install a validated owner-local collection profile with private permissions.
     Configure {
         #[arg(long)]
@@ -371,6 +378,26 @@ async fn run(cli: Cli) -> Result<(), ExitCode> {
                 Err(ExitCode::FAILURE)
             }
         },
+        Command::Worker {
+            command: WorkerCommand::Purpose { value, codex_home },
+        } => {
+            let result = match codex_home
+                .or_else(|| groundline_runtime::insights::default_codex_home().ok())
+            {
+                Some(home) => groundline_runtime::insights_state::set_purpose(&home, &value),
+                None => Err(groundline_runtime::insights_state::StateError::LocalState),
+            };
+            match result {
+                Ok(value) => {
+                    emit(&value, true);
+                    Ok(())
+                }
+                Err(error) => {
+                    emit(&state_failure(&error), true);
+                    Err(ExitCode::FAILURE)
+                }
+            }
+        }
         Command::Worker {
             command: WorkerCommand::Configure { input, codex_home },
         } => {

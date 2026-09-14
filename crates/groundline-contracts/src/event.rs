@@ -313,6 +313,7 @@ pub fn build_basic_event(
             "selection_coverage":optional_number(scope.get("selection_coverage")),"selected_recency_start_utc":timestamp(scope.get("selected_recency_start_utc")),"selected_recency_end_utc":timestamp(scope.get("selected_recency_end_utc")),
         },
         "metrics":{"root":session_metrics(root),"delegated":session_metrics(delegated),"guardian":guardian_metrics(guardian)},
+        "analysis":crate::insights::analysis::from_audit(audit),
         "quality_contract":{"provider_usage_only":true,"billing_inference_performed":false,"verification_is_a_tool_call_proxy":true,"verification_outcome_is_a_tool_result_proxy":true,"rework_not_observed":true,"correlation_is_not_causation":true},
         "privacy":{"basic_aggregate_only":true},
         "consent":{"scope":"basic_weekly","receipt_id":consent.receipt_id,"accepted_at_utc":accepted_at},

@@ -104,6 +104,10 @@ pub enum StateError {
     EnrollmentDisabled,
     #[error("collector_already_enrolled")]
     CollectorAlreadyEnrolled,
+    #[error("collector_retired")]
+    CollectorRetired,
+    #[error("device_identity_conflict")]
+    DeviceIdentityConflict,
     #[error("outbox_capacity_exceeded")]
     OutboxCapacity,
     #[error("reconsent_required")]
@@ -121,6 +125,8 @@ impl StateError {
                 | Self::TailnetPeerRejected
                 | Self::EnrollmentDisabled
                 | Self::CollectorAlreadyEnrolled
+                | Self::CollectorRetired
+                | Self::DeviceIdentityConflict
                 | Self::ApiUpgradeRequired
         )
     }
@@ -153,6 +159,8 @@ impl StateError {
             | Self::TailnetPeerRejected
             | Self::EnrollmentDisabled
             | Self::CollectorAlreadyEnrolled
+            | Self::CollectorRetired
+            | Self::DeviceIdentityConflict
             | Self::OutboxCapacity => None,
         }
     }
@@ -252,6 +260,9 @@ struct UploadReceipt {
     acknowledged_paths: Vec<PathBuf>,
     collected_through_utc: Option<String>,
 }
+
+mod analysis_profile;
+pub use analysis_profile::set_purpose;
 
 struct CycleLock {
     _file: File,
@@ -650,7 +661,9 @@ fn classify_remote_response(status: reqwest::StatusCode, value: &Value) -> Resul
         (401, Some("proxy_authentication_rejected")) => StateError::ProxyAuthenticationRejected,
         (401, Some("tailnet_peer_rejected")) => StateError::TailnetPeerRejected,
         (403, Some("enrollment_disabled")) => StateError::EnrollmentDisabled,
+        (403, Some("collector_retired")) => StateError::CollectorRetired,
         (409, Some("collector_already_enrolled")) => StateError::CollectorAlreadyEnrolled,
+        (409, Some("device_identity_conflict")) => StateError::DeviceIdentityConflict,
         (401 | 403, _) => StateError::RemoteAuthenticationRejected,
         _ => return classify_response_status(status),
     };
@@ -787,11 +800,19 @@ async fn enroll(
         )
         .map_err(|_| StateError::LocalState)?;
     }
+    let retry = read_delivery_retry(directory)?;
+    let previous = current_status(directory)?;
     let body = serde_json::to_vec(&json!({
         "schema_version":2,"kind":"groundline-insights-owner-enrollment",
         "collector_instance_id":identity.collector_instance_id,"collector_token":token.expose_secret(),
         "os_family":identity.os_family,"runtime_family":identity.runtime_family,"execution_mode":identity.execution_mode,
         "groundline_version":env!("CARGO_PKG_VERSION"),
+        "device_id":analysis_profile::device(codex_home)?,
+        "diagnostics":{
+            "retry_attempts":retry.as_ref().map_or(0,|r|r.attempt_count),
+            "operator_required":retry.as_ref().is_some_and(|r|r.operator_required),
+            "previous_cycle_pending":previous.as_ref().map_or(0,|s|s.pending_event_count),
+        },
     }))
     .map_err(|_| StateError::LocalState)?;
     let response = client()?
@@ -2726,6 +2747,7 @@ fn auth_rejections_preserve_bounded_server_reason_codes() {
         ),
         (401, "tailnet_peer_rejected", "tailnet_peer_rejected"),
         (403, "enrollment_disabled", "enrollment_disabled"),
+        (403, "collector_retired", "collector_retired"),
         (
             409,
             "collector_already_enrolled",
