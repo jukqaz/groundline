@@ -7,6 +7,8 @@ use sha2::{Digest, Sha256};
 use crate::ContractError;
 use crate::rollout::Record;
 
+mod tool_outcome;
+
 const TOKEN_FIELDS: [&str; 6] = [
     "input_tokens",
     "cached_input_tokens",
@@ -210,159 +212,12 @@ fn tool_category(name: &str, arguments: &str) -> &'static str {
     }
 }
 
-fn failure_signals(output: &Value, payload: &Map<String, Value>) -> BTreeSet<&'static str> {
-    let mut signals = BTreeSet::new();
-    if payload.get("is_error").and_then(Value::as_bool) == Some(true)
-        || matches!(
-            payload.get("status").and_then(Value::as_str),
-            Some("error" | "failed")
-        )
-    {
-        signals.insert("nonzero_exit");
-    }
-    let serialized = match output {
-        Value::String(value) => value.to_ascii_lowercase(),
-        _ => serde_json::to_string(output)
-            .unwrap_or_default()
-            .to_ascii_lowercase(),
-    };
-    if serialized.contains("timed out") || serialized.contains("timeout") {
-        signals.insert("timeout");
-    }
-    if serialized.contains("script running with cell id")
-        || serialized.contains("process running with session id")
-    {
-        signals.insert("yielded_for_wait");
-    }
-    if serialized.contains("invalid argument") || serialized.contains("invalid_arguments") {
-        signals.insert("invalid_arguments");
-    }
-    if serialized.contains("rejected") || serialized.contains("permission denied") {
-        signals.insert("rejected");
-    }
-    if output
-        .get("exit_code")
-        .and_then(Value::as_i64)
-        .is_some_and(|code| code != 0)
-    {
-        signals.insert("nonzero_exit");
-    }
-    signals
-}
-
-fn projected_signals(signals: &BTreeSet<&'static str>) -> Value {
-    json!({
-        "exit_code": if signals.contains("nonzero_exit") {1} else {0},
-        "markers": signals.iter().filter_map(|signal| match *signal {
-            "timeout" => Some("timed out"),
-            "yielded_for_wait" => Some("script running with cell id"),
-            "invalid_arguments" => Some("invalid argument"),
-            "rejected" => Some("permission denied"),
-            _ => None,
-        }).collect::<Vec<_>>()
-    })
-}
-
-/// Scan large native tool results without allocating their image/content trees.
-/// Only fixed outcome markers survive; raw and retained byte limits are separate.
+/// Retain native outcome metadata while discarding stdout and content trees.
 pub(crate) fn project_raw_tool_output(
     raw: &serde_json::value::RawValue,
     payload: &Map<String, Value>,
 ) -> serde_json::Result<Value> {
-    use serde::Deserializer;
-    use serde::de::{DeserializeSeed, MapAccess, SeqAccess, Visitor};
-
-    if raw.get().len() > 64 * 1024 * 1024 {
-        return Err(serde::de::Error::custom("tool output byte limit exceeded"));
-    }
-    if raw.get().trim() == "null" {
-        return Ok(Value::Null);
-    }
-    struct Scan<'a> {
-        signals: &'a mut BTreeSet<&'static str>,
-        root: bool,
-    }
-    impl Scan<'_> {
-        fn text(&mut self, value: &str) {
-            self.signals.extend(failure_signals(
-                &Value::String(value.to_owned()),
-                &Map::new(),
-            ));
-        }
-    }
-    impl<'de> DeserializeSeed<'de> for Scan<'_> {
-        type Value = ();
-        fn deserialize<D: Deserializer<'de>>(self, de: D) -> Result<(), D::Error> {
-            de.deserialize_any(self)
-        }
-    }
-    impl<'de> Visitor<'de> for Scan<'_> {
-        type Value = ();
-        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str("a native tool result")
-        }
-        fn visit_str<E: serde::de::Error>(mut self, value: &str) -> Result<(), E> {
-            self.text(value);
-            Ok(())
-        }
-        fn visit_unit<E: serde::de::Error>(self) -> Result<(), E> {
-            Ok(())
-        }
-        fn visit_bool<E: serde::de::Error>(self, _: bool) -> Result<(), E> {
-            Ok(())
-        }
-        fn visit_i64<E: serde::de::Error>(self, _: i64) -> Result<(), E> {
-            Ok(())
-        }
-        fn visit_u64<E: serde::de::Error>(self, _: u64) -> Result<(), E> {
-            Ok(())
-        }
-        fn visit_f64<E: serde::de::Error>(self, _: f64) -> Result<(), E> {
-            Ok(())
-        }
-        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<(), A::Error> {
-            while seq
-                .next_element_seed(Scan {
-                    signals: self.signals,
-                    root: false,
-                })?
-                .is_some()
-            {}
-            Ok(())
-        }
-        fn visit_map<A: MapAccess<'de>>(mut self, mut map: A) -> Result<(), A::Error> {
-            let mut nonzero_exit = false;
-            while let Some(key) = map.next_key::<String>()? {
-                self.text(&key);
-                if self.root && key == "exit_code" {
-                    let value = map.next_value::<&serde_json::value::RawValue>()?;
-                    nonzero_exit = serde_json::from_str::<i64>(value.get()).is_ok_and(|v| v != 0);
-                    Scan {
-                        signals: self.signals,
-                        root: false,
-                    }
-                    .deserialize(value)
-                    .map_err(serde::de::Error::custom)?;
-                } else {
-                    map.next_value_seed(Scan {
-                        signals: self.signals,
-                        root: false,
-                    })?;
-                }
-            }
-            if nonzero_exit {
-                self.signals.insert("nonzero_exit");
-            }
-            Ok(())
-        }
-    }
-    let mut signals = failure_signals(&Value::Null, payload);
-    Scan {
-        signals: &mut signals,
-        root: true,
-    }
-    .deserialize(raw)?;
-    Ok(projected_signals(&signals))
+    tool_outcome::from_raw(raw, payload).map(|outcome| outcome.projection())
 }
 
 fn is_tool_call(item_type: &str) -> bool {
@@ -821,7 +676,8 @@ pub fn audit_rollouts(
                 }
             } else if is_tool_output(item_type) {
                 let output = payload.get("output").unwrap_or(&Value::Null);
-                let signals = failure_signals(output, &payload);
+                let outcome = tool_outcome::from_value(output, &payload);
+                let signals = outcome.signals();
                 for signal in &signals {
                     increment(&mut failure_counts, *signal)?;
                 }
@@ -829,13 +685,10 @@ pub fn audit_rollouts(
                     && verification_calls.contains(call_id)
                     && !verification_resolved.contains(call_id)
                 {
-                    if signals
-                        .iter()
-                        .any(|value| matches!(*value, "nonzero_exit" | "timeout" | "rejected"))
-                    {
+                    if outcome.state() == tool_outcome::State::Failure {
                         verification_failure = verification_failure.saturating_add(1);
                         verification_resolved.insert(call_id.to_owned());
-                    } else if !signals.contains("yielded_for_wait") && !output.is_null() {
+                    } else if outcome.state() == tool_outcome::State::Success {
                         verification_success = verification_success.saturating_add(1);
                         verification_resolved.insert(call_id.to_owned());
                     }
@@ -972,6 +825,8 @@ pub fn audit_rollouts(
         "status": if errors.is_empty() { "PASS" } else { "PARTIAL" },
         "collection_complete": errors.count == known_scope_exclusions,
         "error_count": errors.count,
+        "scope_exclusion_count": known_scope_exclusions,
+        "collection_issue_count": errors.count.saturating_sub(known_scope_exclusions),
         "error_examples_omitted": errors.count.saturating_sub(errors.examples.len() as u64),
         "errors": errors.examples,
         "coverage": {
@@ -994,6 +849,8 @@ pub fn audit_rollouts(
         "provider_reported_usage": {
             "source": usage_source,
             "rollout_count_with_usage": usage_rollouts,
+            "rollout_count_without_usage": (rollouts.len() as u64).saturating_sub(usage_rollouts),
+            "rollout_usage_coverage": crate::usage::ratio(usage_rollouts, rollouts.len() as u64),
             "usage_event_count": usage_events,
             "cumulative_rollout_count": cumulative_rollouts,
             "fallback_rollout_count": fallback_rollouts,
@@ -1008,6 +865,7 @@ pub fn audit_rollouts(
             "cached_input_ratio": usage_json.get("cached_input_ratio"),
         },
         "task_latency": {
+            "unit": "completed_turn",
             "completed_count": completed_durations.len(),
             "median_ms": percentile(&completed_durations, 0.5),
             "p90_ms": percentile(&completed_durations, 0.9),
@@ -1016,6 +874,7 @@ pub fn audit_rollouts(
             "long_turn_count": completed_durations.iter().filter(|duration| **duration >= duration_threshold).count(),
         },
         "prompt_shape": {
+            "availability": if user_messages > 0 { "observed_text_events" } else { "unavailable" },
             "short_message_threshold_chars": 30,
             "short_message_count": short_messages,
             "broad_scope_message_count": broad_scope_count,
@@ -1024,6 +883,7 @@ pub fn audit_rollouts(
             "max_user_message_chars": user_lengths.last(),
         },
         "tools": {
+            "outcome_source": "native_status_metadata",
             "call_count": tool_names.values().copied().sum::<u64>(),
             "by_name": tool_names,
             "by_category": tool_categories,
@@ -1665,7 +1525,7 @@ mod tests {
             let projected = project_raw_tool_output(&raw, &Map::new()).unwrap();
             assert_eq!(
                 projected,
-                projected_signals(&failure_signals(&output, &Map::new()))
+                tool_outcome::from_value(&output, &Map::new()).projection()
             );
             assert!(projected.to_string().len() < 300);
         }
@@ -1675,7 +1535,173 @@ mod tests {
         .unwrap();
         let projected = project_raw_tool_output(&raw, &Map::new()).unwrap();
         assert_eq!(projected["exit_code"], 0);
-        assert_eq!(projected["markers"], json!(["timed out"]));
+        assert_eq!(projected["status"], Value::Null);
+    }
+
+    #[test]
+    fn verification_uses_terminal_metadata_and_keeps_unknown_results_unresolved() {
+        let cases = [
+            (
+                json!({"exit_code":0,"output":"test timeout_defaults ... ok; test rejected_inputs ... ok"}),
+                (1, 0, 0),
+            ),
+            (
+                json!(
+                    "Chunk ID: opaque\nWall time: 0.1 seconds\nProcess exited with code 1\nFinal output:\nerror: test failed"
+                ),
+                (0, 1, 0),
+            ),
+            (
+                json!({"exit_code":null,"session_id":42,"output":"compiling"}),
+                (0, 0, 1),
+            ),
+            (json!("Process running with session ID 42"), (0, 0, 1)),
+            (
+                json!({"exit_code":0,"session_id":42,"output":"done"}),
+                (1, 0, 0),
+            ),
+            (
+                json!("Script completed\nOutput:\n{\"exit_code\":1}"),
+                (0, 0, 1),
+            ),
+            (json!("Output:\nProcess exited with code 0"), (0, 0, 1)),
+            (json!("all tests passed"), (0, 0, 1)),
+            (json!("{\"exit_code\":1,\"output\":\"private\"}"), (0, 1, 0)),
+            (json!({"status":"timeout","output":"private"}), (0, 1, 0)),
+            (json!({"status":"completed"}), (0, 0, 1)),
+            (Value::Null, (0, 0, 1)),
+        ];
+        for (output, (success, failure, unresolved)) in cases {
+            let records = lines(&[
+                json!({"type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"check","arguments":"cargo test"}}),
+                json!({"type":"response_item","payload":{"type":"function_call_output","call_id":"check","output":output}}),
+            ]);
+            let projected = records
+                .lines()
+                .map(|line| {
+                    Record::parse(line)
+                        .unwrap()
+                        .unwrap()
+                        .audit_projection()
+                        .unwrap()
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            for input in [&records, &projected] {
+                let audit = audit_rollouts(&[input], 0, 20, AuditWindow::default()).unwrap();
+                let tools = &audit["tools"];
+                assert_eq!(tools["verification_success_count"], success, "{output}");
+                assert_eq!(tools["verification_failure_count"], failure, "{output}");
+                assert_eq!(
+                    tools["verification_unresolved_count"], unresolved,
+                    "{output}"
+                );
+                if success == 1 {
+                    assert_eq!(tools["failure_signals"], json!({}));
+                }
+            }
+            assert!(!projected.contains("private"));
+        }
+    }
+
+    #[test]
+    fn running_verification_only_resolves_on_a_terminal_result() {
+        let mut records = vec![
+            json!({"type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"check","arguments":"cargo test"}}),
+        ];
+        for output in [
+            json!({"session_id":42}),
+            json!({"exit_code":1}),
+            json!({"exit_code":0}),
+        ] {
+            records.push(json!({"type":"response_item","payload":{"type":"function_call_output","call_id":"check","output":output}}));
+        }
+        let audit = audit_rollouts(&[&lines(&records)], 0, 20, AuditWindow::default()).unwrap();
+        assert_eq!(audit["tools"]["verification_success_count"], 0);
+        assert_eq!(audit["tools"]["verification_failure_count"], 1);
+        assert_eq!(audit["tools"]["verification_unresolved_count"], 0);
+        assert_eq!(audit["tools"]["failure_signals"]["yielded_for_wait"], 1);
+    }
+
+    #[test]
+    fn native_error_flags_and_bounded_projection_are_preserved() {
+        let output =
+            serde_json::value::to_raw_value(&json!({"exit_code":0,"output":"private"})).unwrap();
+        let payload = json!({"is_error":true});
+        let payload = payload.as_object().unwrap();
+        let projected = project_raw_tool_output(&output, payload).unwrap();
+        assert_eq!(
+            tool_outcome::from_value(&projected, &Map::new()).state(),
+            tool_outcome::State::Failure
+        );
+        assert!(!projected.to_string().contains("private"));
+        let too_many = (0..129)
+            .map(|n| (n.to_string(), Value::Null))
+            .collect::<Map<_, _>>();
+        let output = serde_json::value::to_raw_value(&too_many).unwrap();
+        assert!(project_raw_tool_output(&output, &Map::new()).is_err());
+    }
+
+    #[test]
+    fn native_content_blocks_and_settled_batches_require_all_results_to_succeed() {
+        let header =
+            json!({"type":"text","text":"Script completed\nWall time: 0.1 seconds\nOutput:"});
+        let text = |value: Value| json!({"type":"text","text":value.to_string()});
+        let success = json!({"exit_code":0,"output":"test rejected_inputs ... ok"});
+        let failure = json!({"exit_code":1,"output":"private error"});
+        let cases = [
+            (
+                json!([header, text(success.clone())]),
+                tool_outcome::State::Success,
+            ),
+            (
+                json!({"content":[header,text(failure.clone())]}),
+                tool_outcome::State::Failure,
+            ),
+            (
+                json!([header, text(success.clone()), text(failure)]),
+                tool_outcome::State::Failure,
+            ),
+            (
+                json!([header,text(success.clone()),{"type":"text","text":"uninstrumented output"}]),
+                tool_outcome::State::Unknown,
+            ),
+            (
+                json!([
+                    header,
+                    text(json!({"status":"fulfilled","value":success.clone()}))
+                ]),
+                tool_outcome::State::Success,
+            ),
+            (
+                json!([
+                    header,
+                    text(json!([{ "status":"fulfilled","value":success.clone()}]))
+                ]),
+                tool_outcome::State::Success,
+            ),
+            (
+                json!([header, text(success), text(json!({"session_id":42}))]),
+                tool_outcome::State::Running,
+            ),
+            (json!([header]), tool_outcome::State::Unknown),
+        ];
+        for (input, state) in cases {
+            let raw = serde_json::value::to_raw_value(&input).unwrap();
+            let output = project_raw_tool_output(&raw, &Map::new()).unwrap();
+            assert_eq!(
+                tool_outcome::from_value(&input, &Map::new()).state(),
+                state,
+                "{input}"
+            );
+            assert_eq!(
+                tool_outcome::from_value(&output, &Map::new()).state(),
+                state,
+                "{input}"
+            );
+            assert!(output.to_string().len() < 200);
+            assert!(!output.to_string().contains("private"));
+        }
     }
 
     #[test]

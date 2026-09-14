@@ -1,6 +1,7 @@
 use std::fs;
+use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -28,6 +29,64 @@ fn parse_stdout(output: &Output) -> Value {
 
 fn path_argument(path: &Path) -> &str {
     path.to_str().expect("UTF-8 temporary path")
+}
+
+fn recommend_stdin(bytes: &[u8]) -> Output {
+    let mut child = Command::new(groundline())
+        .args(["efficiency", "recommend", "--audit", "-", "--json"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(bytes).unwrap();
+    child.wait_with_output().unwrap()
+}
+
+#[test]
+fn recommendation_stdin_matches_a_file_without_creating_a_report_file() {
+    let fixture = json!({
+        "kind":"groundline-codex-weekly-audit","schema":1,"status":"PARTIAL",
+        "scope":{"generated_at":"2026-09-14T00:00:00Z","completed_root_sample_count":6},
+        "root":{"activity":{},"model_effort":{},"task_latency":{},"prompt_shape":{},"tools":{},"boundary_signals":{}},
+        "raw_content_emitted":false,"private_paths_emitted":false,"thread_ids_emitted":false,
+        "rollout_paths_emitted":false,"secret_value_printed":false
+    });
+    let bytes = serde_json::to_vec(&fixture).unwrap();
+    let home = tempdir().unwrap();
+    let file = home.path().join("weekly.json");
+    fs::write(&file, &bytes).unwrap();
+    let from_file = run(&[
+        "efficiency",
+        "recommend",
+        "--audit",
+        path_argument(&file),
+        "--json",
+    ]);
+    let from_stdin = recommend_stdin(&bytes);
+    assert!(from_file.status.success());
+    assert!(from_stdin.status.success());
+    assert_eq!(parse_stdout(&from_stdin), parse_stdout(&from_file));
+    assert_eq!(
+        parse_stdout(&from_stdin)["signals"]["short_message_ratio"],
+        Value::Null
+    );
+}
+
+#[test]
+fn recommendation_stdin_rejects_empty_malformed_non_object_and_oversized_input_privately() {
+    for bytes in [
+        vec![],
+        b"private-not-json".to_vec(),
+        b"[]".to_vec(),
+        vec![b' '; 2 * 1024 * 1024 + 1],
+    ] {
+        let output = recommend_stdin(&bytes);
+        assert!(!output.status.success());
+        assert_eq!(parse_stdout(&output)["status"], "FAIL");
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("private-not-json"));
+        assert!(output.stderr.is_empty());
+    }
 }
 
 #[test]

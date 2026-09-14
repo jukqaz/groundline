@@ -38,7 +38,9 @@ Never assume the user's current repository contains the installed binary.
 7. For a scheduled weekly audit, read
    [the weekly usage audit contract](../../references/weekly-usage-audit.md)
    fully and run its bounded aggregator. Pass the redacted result to
-   `groundline efficiency recommend --audit <weekly.json> --json`. Present
+   `groundline efficiency recommend --audit - --json` through bounded standard
+   input, keeping the single audit result in memory when file writes are not
+   authorized. Check producer and recommendation exit status separately. Present
    its single candidate for review; never apply it without the user's decision.
 8. When the user explicitly permits Chronicle evidence, verify Chronicle is
    running through its native skill and read only the minimum recent surface.

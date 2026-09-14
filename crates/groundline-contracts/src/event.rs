@@ -340,6 +340,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn unavailable_guardian_fields_preserve_the_ingest_contract() {
+        // Local audit nulls do not change the strict wire schema. The event
+        // capability remains false; zero/false wire defaults are not observations.
+        let component = json!({"signals":{
+            "reviewer_already_low_effort":null,
+            "workspace_attributed_review_count":null
+        },"availability":{"workspace_attribution":false}});
+        let metrics = guardian_metrics(Some(&component));
+        assert_eq!(metrics["signals"]["reviewer_already_low_effort"], false);
+        assert_eq!(metrics["signals"]["workspace_attributed_review_count"], 0);
+        assert_eq!(
+            metrics["signals"]["workspace_attribution_coverage"],
+            Value::Null
+        );
+    }
+
+    #[test]
     fn cache_ratios_are_derived_from_provider_counters() {
         for (input, cached, expected) in [
             (0, 0, json!(null)),

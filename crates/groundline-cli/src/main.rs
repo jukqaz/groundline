@@ -196,6 +196,7 @@ enum EfficiencyCommand {
     },
     /// Propose one bounded workflow change from a weekly aggregate.
     Recommend {
+        /// Audit JSON file, or - to read at most 2 MiB from standard input.
         #[arg(long)]
         audit: PathBuf,
         #[arg(long)]
@@ -261,8 +262,29 @@ fn load_bounded_range(
 }
 
 fn load_object(path: &Path) -> Result<Value, ContractError> {
-    let value: Value = serde_json::from_slice(&load_bounded(path, 2 * 1024 * 1024)?)
-        .map_err(|_| ContractError("invalid_json".to_owned()))?;
+    parse_object(&load_bounded(path, 2 * 1024 * 1024)?)
+}
+
+fn load_audit(path: &Path) -> Result<Value, ContractError> {
+    if path != Path::new("-") {
+        return load_object(path);
+    }
+    const MAX_BYTES: u64 = 2 * 1024 * 1024;
+    let mut bytes = Vec::new();
+    std::io::stdin()
+        .lock()
+        .take(MAX_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| ContractError("input_unavailable".to_owned()))?;
+    if bytes.is_empty() || bytes.len() as u64 > MAX_BYTES {
+        return Err(ContractError("invalid_input_file".to_owned()));
+    }
+    parse_object(&bytes)
+}
+
+fn parse_object(bytes: &[u8]) -> Result<Value, ContractError> {
+    let value: Value =
+        serde_json::from_slice(bytes).map_err(|_| ContractError("invalid_json".to_owned()))?;
     if value.is_object() {
         Ok(value)
     } else {
@@ -443,7 +465,7 @@ fn run(cli: Cli) -> Result<(), ExitCode> {
             .map(|value| (value, json)),
         Command::Efficiency {
             command: EfficiencyCommand::Recommend { audit, json },
-        } => load_object(&audit)
+        } => load_audit(&audit)
             .and_then(|audit| efficiency::recommend_weekly_optimization(&audit))
             .map(|value| (value, json)),
         Command::Efficiency {
