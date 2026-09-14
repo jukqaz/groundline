@@ -1645,7 +1645,7 @@ mod tests {
     #[test]
     fn native_content_blocks_and_settled_batches_require_all_results_to_succeed() {
         let header =
-            json!({"type":"text","text":"Script completed\nWall time: 0.1 seconds\nOutput:"});
+            json!({"type":"text","text":"Script completed\nWall time 0.1 seconds\nOutput:"});
         let text = |value: Value| json!({"type":"text","text":value.to_string()});
         let success = json!({"exit_code":0,"output":"test rejected_inputs ... ok"});
         let failure = json!({"exit_code":1,"output":"private error"});

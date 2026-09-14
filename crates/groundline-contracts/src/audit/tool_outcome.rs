@@ -100,7 +100,7 @@ fn text_outcome(text: &str) -> Outcome {
     if header.next() == Some("Script completed")
         && header
             .next()
-            .is_some_and(|line| line.starts_with("Wall time:"))
+            .is_some_and(|line| line.starts_with("Wall time:") || line.starts_with("Wall time "))
         && header.next() == Some("Output:")
         && header.next().is_none()
     {
