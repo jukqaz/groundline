@@ -9,10 +9,12 @@ default-run = "xtask"
 
 [dependencies]
 aho-corasick.workspace = true
+base64.workspace = true
 chrono.workspace = true
 clap.workspace = true
 command-group.workspace = true
 futures-util.workspace = true
+flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
 groundline-contracts = { version = "0.26.0", path = "../crates/groundline-contracts", default-features = false, features = ["guidance", "insights"] }
 groundline-runtime = { version = "0.26.0", path = "../crates/groundline-runtime", default-features = false }
 percent-encoding.workspace = true

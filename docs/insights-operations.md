@@ -156,6 +156,17 @@ remain unattributed. No event's total is spread over context frequencies.
 
 ## Verification and remaining contracts
 
+TrueNAS deployment transports the two dashboards as gzip/base64 inline configs
+to fit its 64 KiB authenticated WebSocket request limit. The public Compose
+template remains readable. The deploy operator uses `flate2` with its Rust
+backend because the standard library does not provide gzip, and validates
+decoded size, checksum, trailing bytes, JSON, and the mounted target before
+query verification. Dashboard JSON and Compose dollar escaping are preserved.
+Grafana decodes these files into its container-local temporary directory before
+its original `/run.sh`; startup stops if decoding fails. An owner-defined
+command or entrypoint is rejected rather than overwritten. Preflight checks
+both the candidate and rollback request sizes without increasing server limits.
+
 Source checks execute both dashboards, annotations, and all six variable queries against
 ClickHouse. Deployment verification executes them through the authenticated
 Grafana datasource and independently reconciles fleet/roster/storage semantics.

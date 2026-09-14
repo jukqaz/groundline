@@ -18,6 +18,7 @@ use uuid::Uuid;
 use groundline_runtime::local_file::{open_bounded_regular_file, private_for_current_user};
 
 use crate::DeployError as XtaskError;
+use crate::deploy_dashboard;
 
 const MAX_CONFIG_BYTES: usize = 2 * 1024 * 1024;
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
@@ -455,14 +456,26 @@ fn update_compose(
         .ok_or(XtaskError::DeploymentFailed)?;
     let existing = mounts
         .iter()
-        .filter(|entry| entry["source"] == mount["source"] || entry["target"] == mount["target"])
+        .filter(|entry| {
+            entry["source"] == mount["source"]
+                || entry["target"] == mount["target"]
+                || entry["target"] == "/run/groundline/groundline-analysis.json.gz.b64"
+        })
         .collect::<Vec<_>>();
     if existing.is_empty() {
         mounts.push(mount);
-    } else if existing.len() != 1 || *existing[0] != mount {
+    } else if existing.len() != 1
+        || (*existing[0] != mount
+            && *existing[0]
+                != json!({"source":"grafana_analysis_dashboard","target":"/run/groundline/groundline-analysis.json.gz.b64"}))
+    {
         return Err(XtaskError::DeploymentFailed);
     }
-    if serde_json::to_vec(&updated)?.len() > MAX_CONFIG_BYTES {
+    deploy_dashboard::pack(&mut updated)?;
+    // Leave room for the validated app name, method, UUID, and JSON envelope.
+    if serde_json::to_vec(&updated)?.len() + 1024 > deploy_dashboard::MAX_RPC_BYTES
+        || serde_json::to_vec(current)?.len() + 1024 > deploy_dashboard::MAX_RPC_BYTES
+    {
         return Err(XtaskError::DeploymentFailed);
     }
     Ok(updated)
@@ -489,6 +502,9 @@ where
             "method":method,
             "params":params,
         }))?;
+        if request.len() > deploy_dashboard::MAX_RPC_BYTES {
+            return Err(XtaskError::InvalidRuntimeConfiguration);
+        }
         timeout(deadline, async {
             self.stream
                 .send(Message::Text(request.into()))
@@ -647,11 +663,7 @@ fn current_grafana_query_plan(current: &Value) -> Result<GrafanaQueryPlan, Xtask
         if !mounted {
             return Err(XtaskError::InvalidCurrentConfiguration);
         }
-        let content = current
-            .pointer(&format!("/configs/{name}/content"))
-            .and_then(Value::as_str)
-            .ok_or(XtaskError::InvalidCurrentConfiguration)?;
-        dashboards.push(serde_json::from_str(content)?);
+        dashboards.push(deploy_dashboard::dashboard(current, name)?);
     }
     grafana_query_plan_for_dashboards(&dashboards)
 }
@@ -1607,7 +1619,7 @@ async fn preflight_async(compose_template: &Path) -> Result<Value, XtaskError> {
         "ghcr.io/jukqaz/groundline-insights-api@sha256:{}",
         "0".repeat(64)
     );
-    update_compose(
+    let candidate = update_compose(
         &current,
         &inputs.template,
         &probe_image,
@@ -1635,6 +1647,8 @@ async fn preflight_async(compose_template: &Path) -> Result<Value, XtaskError> {
         "schema":1,
         "status":"PASS",
         "current_config_sha256":config_sha256(&current)?,
+        "candidate_configuration_bytes":serde_json::to_vec(&candidate)?.len(),
+        "rpc_request_limit_bytes":deploy_dashboard::MAX_RPC_BYTES,
         "mutation_started":false,
         "api_health_verified":true,
         "grafana_health_verified":true,
@@ -1890,6 +1904,7 @@ mod tests {
     }
 
     fn compose(image: &str, dashboard: &str) -> String {
+        let dashboard = json!({"title":dashboard}).to_string();
         format!(
             "services:\n  api:\n    image: {image}\n    environment:\n      GROUNDLINE_INGEST_TOKEN: \"legacy\"\n      GROUNDLINE_MINIMUM_SUPPORTED_VERSION: \"0.13.0\"\n  other:\n    image: other:1\nconfigs:\n  clickhouse_limits:\n    content: |\n      limits\n  clickhouse_grafana_user:\n    content: |\n      user\n  grafana_datasource:\n    content: |\n      datasource\n  grafana_analysis_dashboard:\n    content: |\n      {dashboard}\n  grafana_dashboard:\n    content: |\n      {dashboard}\nnetworks:\n  data:\n"
         )
@@ -1914,6 +1929,7 @@ mod tests {
                 "clickhouse_grafana_user":{"content":"user-old\n"},
                 "clickhouse_schema":{"content":"schema-unchanged\n"},
                 "grafana_datasource":{"content":"datasource-old\n"},
+                "grafana_dashboard_provider":{"content":"{\"providers\":[{\"type\":\"file\",\"options\":{\"path\":\"/var/lib/grafana/dashboards\"}}]}"},
                 "grafana_dashboard":{"content":dashboard}
             },
             "networks":{"data":{}}
@@ -1941,16 +1957,16 @@ mod tests {
             current.pointer("/services/other/image")
         );
         assert_eq!(
-            updated.pointer("/configs/grafana_dashboard/content"),
-            Some(&json!("new\n"))
+            crate::deploy_dashboard::dashboard(&updated, "grafana_dashboard").unwrap(),
+            json!({"title":"new"})
         );
         assert_eq!(
             updated.pointer("/configs/clickhouse_schema"),
             current.pointer("/configs/clickhouse_schema")
         );
         assert_eq!(
-            updated["configs"]["grafana_analysis_dashboard"]["content"],
-            "new\n"
+            crate::deploy_dashboard::dashboard(&updated, "grafana_analysis_dashboard").unwrap(),
+            json!({"title":"new"})
         );
         assert_eq!(
             updated["services"]["grafana"]["configs"]
@@ -2241,6 +2257,47 @@ mod tests {
         assert_eq!(baseline.semantic_refs.len(), 4);
         current["services"]["grafana"]["configs"] = json!([]);
         assert!(super::current_grafana_query_plan(&current).is_err());
+    }
+
+    #[test]
+    fn packed_dashboards_keep_every_query_and_semantic_reference() {
+        let template = include_str!("../../infrastructure/compose.template.yaml");
+        let expected = grafana_query_plan(template).unwrap();
+        let mut config: serde_json::Value = serde_saphyr::from_str(template).unwrap();
+        crate::deploy_dashboard::pack(&mut config).unwrap();
+        let actual = super::current_grafana_query_plan(&config).unwrap();
+        assert_eq!(actual.queries, expected.queries);
+        assert_eq!(actual.semantic_refs, expected.semantic_refs);
+    }
+
+    #[tokio::test]
+    async fn oversized_rpc_is_rejected_before_writing_to_the_socket() {
+        use tokio::io::AsyncReadExt;
+        let (client, mut peer) = tokio::io::duplex(64);
+        let stream = tokio_tungstenite::WebSocketStream::from_raw_socket(
+            client,
+            tokio_tungstenite::tungstenite::protocol::Role::Client,
+            None,
+        )
+        .await;
+        let mut rpc = super::RpcClient { stream };
+        let result = rpc
+            .call_bounded(
+                "app.update",
+                json!(["x".repeat(crate::deploy_dashboard::MAX_RPC_BYTES)]),
+                std::time::Duration::from_secs(1),
+            )
+            .await;
+        assert!(matches!(
+            result,
+            Err(crate::DeployError::InvalidRuntimeConfiguration)
+        ));
+        let mut byte = [0];
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(25), peer.read(&mut byte))
+                .await
+                .is_err()
+        );
     }
 
     #[test]
