@@ -151,6 +151,9 @@ enum AuditCommand {
         runtime_family: Option<String>,
         #[arg(long)]
         codex_home: Option<PathBuf>,
+        /// Run one audit and one recommendation with an explicit, unit-safe readout.
+        #[arg(long)]
+        review: bool,
         #[arg(long)]
         json: bool,
     },
@@ -380,6 +383,7 @@ fn run(cli: Cli) -> Result<(), ExitCode> {
                     days,
                     runtime_family,
                     codex_home,
+                    review,
                     json,
                 },
         } => {
@@ -398,6 +402,13 @@ fn run(cli: Cli) -> Result<(), ExitCode> {
                     )
                 })
                 .map_err(audit_store::contract_error)
+                .and_then(|value| {
+                    if review {
+                        groundline_contracts::weekly_review::review(value)
+                    } else {
+                        Ok(value)
+                    }
+                })
                 .map(|value| (value, json))
         }
         Command::Audit {

@@ -67,3 +67,22 @@ Serde의 스트리밍 방문자로 이미지·본문 트리의 메모리 할당�
 텍스트의 성공 오인, 실행 중 결과, 미확인 결과, 종료 결과 중복, 대형 본문,
 이스케이프와 JSON 문자열 봉투를 회귀 입력으로 고정한다. 실제 종료 증거가
 없는 결과는 미확인으로 보존하며 종료 코드 0을 만들어 내지 않는다.
+
+후속 대기 연결에는 `oxc_parser`, `oxc_ast`, `oxc_allocator`, `oxc_span`
+0.149.0을 사용한다. 잠금 파일과 실제 빌드로 Rust 요구사항 1.96.0이 현재
+1.98.1과 호환됨을 확인했다. JSON 형태의 직접 poll은 기존 Serde로 읽는다.
+JavaScript `exec`는 문자열·주석·조건 분기 안의 poll을 실행으로 오인할 수
+있으므로 정규식 대신 Oxc AST를 사용한다. 8 KiB와 문장부호 수 제한을 먼저
+적용하고, 최상위에서 순서대로 실행되는 `await`와 정적 인자만 인정한다.
+복수 poll은 각 `text` 출력과 네이티브 결과 봉투의 개수·순서가 일치할 때만
+연결한다. 출력되지 않은 호출은 미확정으로 보존한다. 코드를 실행하거나
+일반 제어 흐름을 추론하지 않는다. 동적 ID, spread, 중복 속성, 대화형 입력,
+조건 분기, 파싱 오류는 연결하지 않는다. 외부로 실행 handle을 출력하지 않는다.
+
+공식 근거: [Oxc parser](https://oxc.rs/docs/guide/usage/parser),
+[고정 버전 API](https://docs.rs/oxc_parser/0.149.0/oxc_parser/).
+
+Oxc의 숫자 변환 의존성 `dragonbox_ecma 0.1.12`는 포함된 `LICENSE-Boost`와
+공식 [Boost Software License 1.0](https://www.boost.org/LICENSE_1_0.txt)을 확인해
+BSL-1.0 선택을 해당 버전에만 허용한다. 전역 허용 목록이나 보안 권고 검사는
+완화하지 않는다. 범위는 [cargo-deny의 패키지별 예외](https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html#the-exceptions-field-optional)로 고정한다.

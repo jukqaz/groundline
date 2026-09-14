@@ -7,7 +7,9 @@ use sha2::{Digest, Sha256};
 use crate::ContractError;
 use crate::rollout::Record;
 
+mod continuation;
 mod tool_outcome;
+mod verification;
 
 const TOKEN_FIELDS: [&str; 6] = [
     "input_tokens",
@@ -277,6 +279,12 @@ pub fn audit_rollouts(
     let mut boundary_review_rollouts = 0_u64;
     let mut verification_success = 0_u64;
     let mut verification_failure = 0_u64;
+    let mut verification_recovered = 0_u64;
+    let mut literal_poll_calls = 0_u64;
+    let mut linked_poll_calls = 0_u64;
+    let mut verification_unresolved_reasons = BTreeMap::<String, u64>::new();
+    let mut usage_missing_reasons = BTreeMap::<String, u64>::new();
+    let mut ownership_unavailable = 0_u64;
 
     for (rollout_index, contents) in rollouts.iter().enumerate() {
         let metadata = contents
@@ -322,6 +330,8 @@ pub fn audit_rollouts(
                 || fork_boundary.is_some()
                 || child_boundary.is_some());
         if inherited && !known_boundary {
+            ownership_unavailable += 1;
+            increment(&mut usage_missing_reasons, "unsupported_ownership_boundary")?;
             errors.push(format!(
                 "rollout[{rollout_index}] inherited history attribution unavailable"
             ));
@@ -343,8 +353,7 @@ pub fn audit_rollouts(
         let mut last_ordinal = None;
         let mut previous_model = None;
         let mut active_tasks = BTreeMap::<String, DateTime<Utc>>::new();
-        let mut verification_calls = BTreeSet::<String>::new();
-        let mut verification_resolved = BTreeSet::<String>::new();
+        let mut verifications = verification::Verifications::default();
         let mut latest_usage: Option<Usage> = None;
         let mut baseline_usage: Option<Usage> = None;
         let mut checkpoint_usage: Option<Usage> = None;
@@ -669,11 +678,12 @@ pub fn audit_rollouts(
                 digest.update([0]);
                 digest.update(arguments.as_bytes());
                 increment(&mut call_signatures, <[u8; 32]>::from(digest.finalize()))?;
-                if category == "verification"
-                    && let Some(call_id) = payload.get("call_id").and_then(Value::as_str)
-                {
-                    verification_calls.insert(call_id.to_owned());
-                }
+                verifications.call(
+                    payload.get("call_id").and_then(Value::as_str),
+                    name,
+                    &arguments,
+                    category == "verification",
+                );
             } else if is_tool_output(item_type) {
                 let output = payload.get("output").unwrap_or(&Value::Null);
                 let outcome = tool_outcome::from_value(output, &payload);
@@ -681,19 +691,22 @@ pub fn audit_rollouts(
                 for signal in &signals {
                     increment(&mut failure_counts, *signal)?;
                 }
-                if let Some(call_id) = payload.get("call_id").and_then(Value::as_str)
-                    && verification_calls.contains(call_id)
-                    && !verification_resolved.contains(call_id)
-                {
-                    if outcome.state() == tool_outcome::State::Failure {
-                        verification_failure = verification_failure.saturating_add(1);
-                        verification_resolved.insert(call_id.to_owned());
-                    } else if outcome.state() == tool_outcome::State::Success {
-                        verification_success = verification_success.saturating_add(1);
-                        verification_resolved.insert(call_id.to_owned());
-                    }
+                if let Some(call_id) = payload.get("call_id").and_then(Value::as_str) {
+                    verifications.output(call_id, outcome);
                 }
             }
+        }
+
+        let verification = verifications.finish();
+        verification_success += verification.success;
+        verification_failure += verification.failure;
+        verification_recovered += verification.recovered;
+        literal_poll_calls += verification.literal_polls;
+        linked_poll_calls += verification.linked_polls;
+        for (reason, count) in verification.reasons {
+            *verification_unresolved_reasons
+                .entry(reason.to_owned())
+                .or_default() += count;
         }
 
         let rollout_compactions = rollout_compactions.max(rollout_compaction_events);
@@ -752,6 +765,8 @@ pub fn audit_rollouts(
             provider_usage.add_checked(&fallback_usage)?;
             usage_rollouts = usage_rollouts.saturating_add(1);
             fallback_rollouts = fallback_rollouts.saturating_add(1);
+        } else {
+            increment(&mut usage_missing_reasons, "no_owned_usage_observed")?;
         }
     }
 
@@ -827,6 +842,7 @@ pub fn audit_rollouts(
         "error_count": errors.count,
         "scope_exclusion_count": known_scope_exclusions,
         "collection_issue_count": errors.count.saturating_sub(known_scope_exclusions),
+        "ownership_unavailable_rollout_count": ownership_unavailable,
         "error_examples_omitted": errors.count.saturating_sub(errors.examples.len() as u64),
         "errors": errors.examples,
         "coverage": {
@@ -854,6 +870,9 @@ pub fn audit_rollouts(
             "usage_event_count": usage_events,
             "cumulative_rollout_count": cumulative_rollouts,
             "fallback_rollout_count": fallback_rollouts,
+            "response_rollout_count": response_rollouts,
+            "last_usage_fallback_rollout_count": fallback_rollouts.saturating_sub(response_rollouts),
+            "missing_usage_reasons": usage_missing_reasons,
             "billing_inference_performed": false,
             "input_tokens": usage_json.get("input_tokens"),
             "cached_input_tokens": usage_json.get("cached_input_tokens"),
@@ -884,6 +903,11 @@ pub fn audit_rollouts(
         },
         "tools": {
             "outcome_source": "native_status_metadata",
+            "outcome_contract_revision": 2,
+            "verification_recovered_by_poll_count": verification_recovered,
+            "literal_poll_call_count": literal_poll_calls,
+            "verification_linked_poll_count": linked_poll_calls,
+            "verification_unresolved_reasons": verification_unresolved_reasons,
             "call_count": tool_names.values().copied().sum::<u64>(),
             "by_name": tool_names,
             "by_category": tool_categories,
@@ -923,6 +947,45 @@ mod tests {
 
     fn at(seconds: i64) -> DateTime<Utc> {
         DateTime::from_timestamp(seconds, 0).unwrap()
+    }
+    #[test]
+    fn poll_completion_respects_window_and_rollout_scope_after_projection() {
+        let records = vec![
+            json!({"timestamp":at(2).to_rfc3339(),"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"check","input":"text(await tools.exec_command({cmd:'cargo test'}))"}}),
+            json!({"timestamp":at(3).to_rfc3339(),"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"check","output":[{"type":"text","text":"Script completed\nWall time 0.2 seconds\nOutput:\n"},{"type":"text","text":"{\"session_id\":55,\"output\":\"private body\"}"}]}}),
+            json!({"timestamp":at(8).to_rfc3339(),"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"poll","input":"text(await tools.write_stdin({session_id:55,chars:''}));"}}),
+            json!({"timestamp":at(9).to_rfc3339(),"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"poll","output":{"exit_code":0,"output":"private body"}}}),
+        ];
+        let raw = lines(&records);
+        let projected = raw
+            .lines()
+            .map(|line| {
+                Record::parse(line)
+                    .unwrap()
+                    .unwrap()
+                    .audit_projection()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        for data in [&raw, &projected] {
+            let before = total_in(data, 0, 7);
+            let after = total_in(data, 0, 10);
+            assert_eq!(before["tools"]["verification_success_count"], 0);
+            assert_eq!(
+                before["tools"]["verification_unresolved_reasons"]["pending_completion"],
+                1
+            );
+            assert_eq!(after["tools"]["verification_success_count"], 1);
+            assert_eq!(after["tools"]["verification_recovered_by_poll_count"], 1);
+            assert_eq!(after["tools"]["verification_unresolved_reasons"], json!({}));
+            assert!(!after.to_string().contains("private body"));
+        }
+        let root = lines(&records[..2]);
+        let other = lines(&records[2..]);
+        let split = audit_rollouts(&[&root, &other], 0, 20, AuditWindow::default()).unwrap();
+        assert_eq!(split["tools"]["verification_success_count"], 0);
+        assert_eq!(split["tools"]["verification_unresolved_count"], 1);
     }
     fn cumulative(seconds: i64, tokens: u64) -> Value {
         json!({"timestamp":at(seconds).to_rfc3339(),"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":tokens}}}})
@@ -1605,7 +1668,7 @@ mod tests {
     }
 
     #[test]
-    fn running_verification_only_resolves_on_a_terminal_result() {
+    fn contradictory_terminal_results_remain_unresolved() {
         let mut records = vec![
             json!({"type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"check","arguments":"cargo test"}}),
         ];
@@ -1618,8 +1681,12 @@ mod tests {
         }
         let audit = audit_rollouts(&[&lines(&records)], 0, 20, AuditWindow::default()).unwrap();
         assert_eq!(audit["tools"]["verification_success_count"], 0);
-        assert_eq!(audit["tools"]["verification_failure_count"], 1);
-        assert_eq!(audit["tools"]["verification_unresolved_count"], 0);
+        assert_eq!(audit["tools"]["verification_failure_count"], 0);
+        assert_eq!(audit["tools"]["verification_unresolved_count"], 1);
+        assert_eq!(
+            audit["tools"]["verification_unresolved_reasons"]["conflicting_terminal_results"],
+            1
+        );
         assert_eq!(audit["tools"]["failure_signals"]["yielded_for_wait"], 1);
     }
 
@@ -1707,7 +1774,10 @@ mod tests {
                 state,
                 "{input}"
             );
-            assert!(output.to_string().len() < 200);
+            let handle_count = output["pending_keys"].as_array().unwrap().len();
+            let emission_count = output["emissions"].as_array().map_or(0, Vec::len);
+            // Fixed metadata plus one bounded observation per native text emission.
+            assert!(output.to_string().len() < (200 + handle_count * 80) * (emission_count + 1));
             assert!(!output.to_string().contains("private"));
         }
     }

@@ -29,19 +29,22 @@ Never assume the user's current repository contains the installed binary.
 2. Inventory counts, sizes, time range, layout, and trustworthy model/effort/compaction/verification metadata.
 3. Search paths and keywords with indexes, `rg`, `find`, or `jq`; open only the minimum matches.
 4. Report reusable patterns, duplication/retention candidates, capability candidates, and facts needing live proof.
-5. For cost or efficiency, separate exact Codex-reported usage from
-   activity/storage proxies; never convert storage bytes into tokens.
+5. For cost or efficiency, retain the usage source and coverage, separate
+   Codex-reported usage from activity/storage proxies, and never infer billing
+   or convert storage bytes into tokens.
 6. For general usage evidence, run `groundline audit weekly --days 7 --json`
    or a bounded `groundline audit activity --start <RFC3339> --json`. Both
    include root, delegated-agent, and canonical Guardian aggregates without raw
    content.
 7. For a scheduled weekly audit, read
    [the weekly usage audit contract](../../references/weekly-usage-audit.md)
-   fully and run its bounded aggregator. Pass the redacted result to
-   `groundline efficiency recommend --audit - --json` through bounded standard
-   input, keeping the single audit result in memory when file writes are not
-   authorized. Check producer and recommendation exit status separately. Present
-   its single candidate for review; never apply it without the user's decision.
+   fully and run `groundline audit weekly --days 7 --review --json` once.
+   It runs one audit and one recommendation from the same in-memory result.
+   Preserve `report_ko` units and source labels; inspect the nested audit and
+   recommendation statuses separately. Do not run a second recommendation or
+   audit after this combined command. Present its single candidate for review;
+   never apply it without the user's decision. The separate raw audit and
+   `efficiency recommend --audit - --json` workflow remains available when needed.
 8. When the user explicitly permits Chronicle evidence, verify Chronicle is
    running through its native skill and read only the minimum recent surface.
    Create the numeric aggregate defined in

@@ -44,6 +44,80 @@ fn recommend_stdin(bytes: &[u8]) -> Output {
 }
 
 #[test]
+fn weekly_review_runs_the_installed_command_contract_without_mutating_history() {
+    use chrono::{Duration, Utc};
+    let home = tempdir().unwrap();
+    let sessions = home.path().join("sessions");
+    fs::create_dir(&sessions).unwrap();
+    let database = home.path().join("state_5.sqlite");
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    connection.execute_batch("CREATE TABLE threads (rollout_path TEXT, source TEXT, has_user_event INTEGER, updated_at INTEGER)").unwrap();
+    let now = Utc::now();
+    let mut expected = Vec::new();
+    for n in 0..5 {
+        let owner = format!("test-owner-{n}");
+        let path = sessions.join(format!("test-{n}.jsonl"));
+        let mut records = vec![
+            json!({"timestamp":(now-Duration::seconds(40)).to_rfc3339(),"type":"session_meta","payload":{"id":owner,"originator":"codex_cli"}}),
+        ];
+        for turn in 1..=2 {
+            let at = now - Duration::seconds(30 - turn * 5);
+            records.push(json!({"timestamp":at.to_rfc3339(),"type":"event_msg","payload":{"type":"task_started","turn_id":format!("turn-{turn}")}}));
+            records.push(json!({"timestamp":(at+Duration::seconds(1)).to_rfc3339(),"type":"token_usage_record","payload":{"thread_id":owner,"response_id":format!("response-{turn}"),"usage":{"input_tokens":9,"output_tokens":1,"total_tokens":10},"thread_token_usage":{"input_tokens":turn*9,"output_tokens":turn,"total_tokens":turn*10}}}));
+            records.push(json!({"timestamp":(at+Duration::seconds(2)).to_rfc3339(),"type":"event_msg","payload":{"type":"task_complete","turn_id":format!("turn-{turn}")}}));
+        }
+        let contents = records
+            .iter()
+            .map(Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        fs::write(&path, contents.as_bytes()).unwrap();
+        expected.push((path.clone(), contents));
+        connection
+            .execute(
+                "INSERT INTO threads VALUES (?1,'cli',1,?2)",
+                rusqlite::params![path.to_str().unwrap(), now.timestamp()],
+            )
+            .unwrap();
+    }
+    drop(connection);
+    let database_before = fs::read(&database).unwrap();
+    let output = run(&[
+        "audit",
+        "weekly",
+        "--review",
+        "--codex-home",
+        path_argument(home.path()),
+        "--json",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value = parse_stdout(&output);
+    assert_eq!(value["kind"], "groundline-codex-weekly-review");
+    assert_eq!(
+        value["execution"],
+        json!({"audit_runs":1,"recommendation_runs":1,"audit_completed":true,"recommendation_completed":true})
+    );
+    assert_eq!(value["readout"]["completed_root_task_count"], 5);
+    assert_eq!(value["readout"]["completed_turn_count"], 10);
+    assert_eq!(
+        value["audit"]["root"]["provider_reported_usage"]["total_tokens"],
+        100
+    );
+    assert_eq!(value["recommendation"]["status"], "PASS");
+    assert!(!String::from_utf8_lossy(&output.stdout).contains(path_argument(home.path())));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("test-owner"));
+    assert_eq!(fs::read(&database).unwrap(), database_before);
+    for (path, contents) in expected {
+        assert_eq!(fs::read_to_string(path).unwrap(), contents);
+    }
+}
+
+#[test]
 fn recommendation_stdin_matches_a_file_without_creating_a_report_file() {
     let fixture = json!({
         "kind":"groundline-codex-weekly-audit","schema":1,"status":"PARTIAL",
