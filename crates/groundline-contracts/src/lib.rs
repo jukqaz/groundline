@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod artifact;
+
 #[cfg(feature = "guidance")]
 pub mod skill;
 

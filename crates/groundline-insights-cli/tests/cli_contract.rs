@@ -353,4 +353,29 @@ fn provider_smoke_verifies_one_native_binary_package() {
     assert_eq!(result["status"], "PASS");
     assert_eq!(result["artifact_verified"], true);
     assert_eq!(result["python_runtime_required"], false);
+
+    let checksum_path = binary
+        .parent()
+        .unwrap()
+        .join(format!("{executable}.sha256"));
+    fs::write(&checksum_path, format!("{checksum}  {executable}\r\n")).unwrap();
+    let crlf = run(&[
+        "provider-smoke",
+        "--plugin-root",
+        path_argument(root.path()),
+        "--require-installed",
+        "--json",
+    ]);
+    assert!(crlf.status.success(), "{:?}", crlf.stdout);
+    assert_eq!(parse_stdout(&crlf)["artifact_verified"], true);
+    fs::write(&binary, b"changed-native-groundline-fixture").unwrap();
+    let changed = run(&[
+        "provider-smoke",
+        "--plugin-root",
+        path_argument(root.path()),
+        "--require-installed",
+        "--json",
+    ]);
+    assert!(!changed.status.success());
+    assert_eq!(parse_stdout(&changed)["error"], "invalid_artifact_checksum");
 }

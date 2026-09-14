@@ -80,6 +80,13 @@ codex plugin list --json
 갱신 후 설치 버전이 그대로라면 같은 플러그인 ID의 `plugin add`를 다시 실행하고
 설치 버전과 체크섬을 확인합니다.
 
+Windows의 `LF will be replaced by CRLF`는 Git 줄바꿈 변환 메시지입니다.
+`warning`만으로 설치 실패를 판정하지 말고 명령의 종료 코드와 마지막 오류를
+확인합니다. `fatal`과 함께 변환을 거부했다면 Git의 `core.safecrlf` 설정도
+확인합니다. 배포본은 `.gitattributes`로 텍스트를 LF로 유지하며, 체크섬 검증은
+LF·CRLF 한 줄을 모두 허용하고 실제 바이너리 해시·크기·파일명은 정확히 비교합니다.
+전역 Git 설정을 바꾸거나 체크섬 검증을 끄지 않습니다.
+
 marketplace 갱신, 설치 package checksum, hook 신뢰, collector upload,
 ClickHouse 반영, Grafana frame, image 게시, 운영 배포, stable 승격은 서로 다른
 증거 lane입니다.

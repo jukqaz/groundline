@@ -85,6 +85,15 @@ codex plugin list --json
 the binary distribution. A frozen installation needs a verified packaged
 revision. If refresh leaves an installed version unchanged, run `plugin add`
 again for that same plugin ID, then verify its version and checksum.
+
+On Windows, `LF will be replaced by CRLF` describes Git line-ending conversion.
+Check the command exit code and final error; a warning alone does not prove an
+installation failure. A fatal conversion rejection can also involve
+`core.safecrlf`. The distribution pins text to LF through `.gitattributes`;
+checksum validation accepts one LF or CRLF record while comparing the actual
+binary digest, size, and filename exactly. Do not disable checksum validation
+or change global Git settings to silence the message.
+
 Marketplace refresh, installed package checksums, hook
 trust, collector upload, ClickHouse visibility, Grafana frames, image
 publication, deployment, and stable promotion are separate evidence lanes.

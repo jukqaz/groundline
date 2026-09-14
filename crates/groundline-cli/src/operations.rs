@@ -129,7 +129,11 @@ pub fn provider_smoke(root: &Path, require_installed: bool) -> Result<Value, Con
             && artifact.executable == executable
             && artifact.size_bytes == binary_size
             && artifact.sha256 == binary_sha256
-            && checksum == format!("{binary_sha256}  {executable}\n");
+            && groundline_contracts::artifact::checksum_matches(
+                checksum.as_bytes(),
+                &binary_sha256,
+                executable,
+            );
         if !artifact_verified {
             return Err(ContractError("invalid_artifact_checksum".to_owned()));
         }

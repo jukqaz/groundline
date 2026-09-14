@@ -207,6 +207,41 @@ fn installer_applies_and_checks_without_another_manual_setup_request() {
 }
 
 #[test]
+fn installer_accepts_crlf_checksum_records() {
+    let f = Fixture::new();
+    let relative = f
+        .installed
+        .strip_prefix(f.home.join(format!(
+            "plugins/cache/groundline/groundline/{}",
+            env!("CARGO_PKG_VERSION")
+        )))
+        .unwrap();
+    for binary in [
+        f.root.join("plugins/groundline").join(relative),
+        f.installed.clone(),
+    ] {
+        let checksum = binary.with_file_name(format!(
+            "{}.sha256",
+            binary.file_name().unwrap().to_str().unwrap()
+        ));
+        let text = fs::read_to_string(&checksum).unwrap();
+        fs::write(checksum, text.replace('\n', "\r\n")).unwrap();
+    }
+    let result = f.run(false);
+    assert!(
+        result.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(
+        fs::read_to_string(&f.calls)
+            .unwrap()
+            .contains("--strict-config doctor")
+    );
+}
+
+#[test]
 fn failed_catalog_with_valid_partial_output_cannot_change_configuration() {
     let f = Fixture::new();
     assert!(!f.run(true).status.success());

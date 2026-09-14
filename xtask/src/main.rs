@@ -391,7 +391,7 @@ fn verify_package_set(root: &Path, version: &str, product: Product) -> Result<()
             1,
             MAX_CHECKSUM_BYTES,
         )?;
-        if checksum != format!("{sha256}  {executable}\n").as_bytes() {
+        if !groundline_contracts::artifact::checksum_matches(&checksum, &sha256, &executable) {
             return Err(XtaskError::InvalidPackageSet);
         }
     }
@@ -785,6 +785,14 @@ mod tests {
 
         verify_package_set(&dist, env!("CARGO_PKG_VERSION"), Product::Core)
             .expect("valid package set");
+        for target in SUPPORTED_TARGETS {
+            let executable = super::executable_name(Product::Core, target).unwrap();
+            let path = dist.join(target).join(format!("{executable}.sha256"));
+            let checksum = fs::read_to_string(&path).unwrap();
+            fs::write(&path, checksum.replace('\n', "\r\n")).unwrap();
+        }
+        verify_package_set(&dist, env!("CARGO_PKG_VERSION"), Product::Core)
+            .expect("Git for Windows checksum line endings");
         assert!(matches!(
             verify_package_set(&dist, "9.9.9", Product::Core),
             Err(XtaskError::InvalidPackageSet)

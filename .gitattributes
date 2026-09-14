@@ -1,0 +1,7 @@
+# Keep text in distributed plugins stable across Git for Windows checkouts.
+* text=auto eol=lf
+
+# Native artifacts must never undergo line-ending conversion.
+plugins/**/bin/**/groundline -text
+plugins/**/bin/**/groundline-insights -text
+*.exe -text
