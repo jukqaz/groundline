@@ -212,8 +212,8 @@ impl<'de> Visitor<'de> for NativeOutcome {
             return Ok(result);
         }
         let nested = match kind.as_deref() {
-            Some("text") => text,
-            Some("image" | "image_url") => {
+            Some("text" | "input_text") => text,
+            Some("image" | "image_url" | "input_image") => {
                 result.ignored = true;
                 return Ok(result);
             }

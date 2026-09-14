@@ -1645,8 +1645,8 @@ mod tests {
     #[test]
     fn native_content_blocks_and_settled_batches_require_all_results_to_succeed() {
         let header =
-            json!({"type":"text","text":"Script completed\nWall time 0.1 seconds\nOutput:"});
-        let text = |value: Value| json!({"type":"text","text":value.to_string()});
+            json!({"type":"input_text","text":"Script completed\nWall time 0.1 seconds\nOutput:"});
+        let text = |value: Value| json!({"type":"input_text","text":value.to_string()});
         let success = json!({"exit_code":0,"output":"test rejected_inputs ... ok"});
         let failure = json!({"exit_code":1,"output":"private error"});
         let cases = [
@@ -1689,6 +1689,14 @@ mod tests {
         for (input, state) in cases {
             let raw = serde_json::value::to_raw_value(&input).unwrap();
             let output = project_raw_tool_output(&raw, &Map::new()).unwrap();
+            let record = json!({"type":"response_item","payload":{"type":"function_call_output","output":input}}).to_string();
+            let projected = Record::parse(&record)
+                .unwrap()
+                .unwrap()
+                .audit_projection()
+                .unwrap();
+            let projected: Value = serde_json::from_str(&projected).unwrap();
+            assert_eq!(projected["payload"]["output"], output);
             assert_eq!(
                 tool_outcome::from_value(&input, &Map::new()).state(),
                 state,
