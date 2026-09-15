@@ -3177,6 +3177,55 @@ mod tests {
         }
         let queries = dashboard_queries();
         assert!(queries.len() >= 10, "dashboard query inventory shrank");
+        // Execute both UI queries against the same synthetic registrations.
+        // A newly registered package with only an older aggregate must not
+        // remain in the summary's update count while the roster says latest.
+        let status_cases: Vec<Value> =
+            serde_json::from_str(include_str!("../tests/fixtures/installation-status.json"))
+                .unwrap();
+        let roster_sql = queries
+            .iter()
+            .find(|sql| sql.contains("AS reporting_status") && sql.contains("AS status"))
+            .expect("installation status roster");
+        let attention_sql = queries
+            .iter()
+            .find(|sql| sql.starts_with("SELECT countIf(status NOT IN"))
+            .expect("installation attention summary");
+        for case in status_cases {
+            let os = case["os"].as_str().unwrap_or("macos");
+            let installed = case["installed"].as_str().unwrap();
+            let reported = case["reported"].as_str().unwrap();
+            let created_hours = case["created_hours"].as_u64().unwrap();
+            let last_seen_hours = case["last_seen_hours"].as_u64().unwrap();
+            let has_report = case["has_report"].as_u64().unwrap();
+            let registration = format!(
+                "(SELECT toUUID('00000000-0000-4000-8000-000000000001') AS collector_id, \
+                 now() - INTERVAL {created_hours} HOUR AS created_at, '{os}' AS os_family, \
+                 'codex_app' AS runtime_family, 'desktop' AS execution_mode, \
+                 '{installed}' AS groundline_version, toUInt8(0) AS revoked)"
+            );
+            let events = format!(
+                "(SELECT toUUID('00000000-0000-4000-8000-000000000001') AS collector_id, \
+                 now() - INTERVAL {last_seen_hours} HOUR AS received_at, '{os}' AS os_family, \
+                 'codex_app' AS runtime_family, 'desktop' AS execution_mode, \
+                 '{reported}' AS groundline_version WHERE {has_report}=1)"
+            );
+            for (sql, field, expected) in [
+                (roster_sql, "status", &case["status"]),
+                (attention_sql, "value", &case["attention"]),
+            ] {
+                let fixture = sql
+                    .replace("groundline.collectors FINAL", &registration)
+                    .replace("groundline.basic_active", &events)
+                    .replace("groundline.release_policy FINAL", "(SELECT 'stable' AS policy_key, '9.9.9' AS latest_version, '9.0.0' AS minimum_supported_version, now() AS updated_at)");
+                let row = clickhouse
+                    .json_row(&format!("{fixture} FORMAT JSONEachRow"), &[])
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(&row[field], expected, "status fixture: {case}");
+            }
+        }
         for (index, query) in queries.iter().enumerate() {
             let query = expand_grafana_time_filter(query).expect("bounded Grafana macro");
             clickhouse
