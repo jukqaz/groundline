@@ -421,6 +421,8 @@ jobs:
           suffix=""
           if [ "${{ runner.os }}" = "Windows" ]; then suffix=".exe"; fi
           runtime_dir="$RUNNER_TEMP/groundline-native-codex"
+          # Git Bash tar interprets a Windows drive colon as a remote host.
+          if [ "${{ runner.os }}" = "Windows" ]; then runtime_dir=$(cygpath -u "$runtime_dir"); fi
           mkdir -p "$runtime_dir"
           archive="$runtime_dir/codex.tar.gz"
           curl --fail --silent --show-error --location --retry 2 \
