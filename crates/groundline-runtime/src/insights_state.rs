@@ -34,6 +34,8 @@ mod collection;
 #[cfg(test)]
 mod collection_stop_tests;
 mod delivery_confirmation;
+mod onboarding;
+pub use onboarding::setup;
 
 const PROFILE_PATH: &str = "groundline/insights/owner-profile.json";
 const ENROLLMENT_TOKEN_PATH: &str = "groundline/insights/enrollment-token";
@@ -112,6 +114,8 @@ pub enum StateError {
     OutboxCapacity,
     #[error("reconsent_required")]
     ReconsentRequired,
+    #[error("setup_connection_change_requires_review")]
+    SetupConnectionConflict,
 }
 
 impl StateError {
@@ -139,6 +143,7 @@ impl StateError {
     pub fn mutation_performed(&self) -> Option<bool> {
         match self {
             Self::InvalidProfile
+            | Self::SetupConnectionConflict
             | Self::InvalidEnvironment(_)
             | Self::AlreadyRunning
             | Self::ReconsentRequired => Some(false),
@@ -270,8 +275,11 @@ struct CycleLock {
 
 impl CycleLock {
     fn acquire(directory: &Path) -> Result<Self, StateError> {
-        let path = directory.join(LOCK_FILE);
-        let file = open_or_create_private_lock(&path).map_err(|_| StateError::LocalState)?;
+        Self::at(&directory.join(LOCK_FILE))
+    }
+
+    fn at(path: &Path) -> Result<Self, StateError> {
+        let file = open_or_create_private_lock(path).map_err(|_| StateError::LocalState)?;
         // A previous worker's PID marker may still be active. Do not overwrite
         // it or start alongside an older process that does not use OS locks.
         if file.metadata().map_err(|_| StateError::LocalState)?.len() != 0 {
@@ -341,8 +349,7 @@ fn load_profile(codex_home: &Path) -> Result<Profile, StateError> {
     Ok(profile)
 }
 
-pub fn configure_profile(codex_home: &Path, bytes: &[u8]) -> Result<Value, StateError> {
-    crate::environment::Environment::current()?;
+fn parse_owner_profile(bytes: &[u8]) -> Result<(Profile, Zeroizing<String>), StateError> {
     if bytes.is_empty() || bytes.len() > 16 * 1024 {
         return Err(StateError::InvalidProfile);
     }
@@ -350,7 +357,10 @@ pub fn configure_profile(codex_home: &Path, bytes: &[u8]) -> Result<Value, State
         serde_json::from_slice(bytes).map_err(|_| StateError::InvalidProfile)?;
     let enrollment_token = input
         .remove("enrollment_token")
-        .and_then(|value| value.as_str().map(ToOwned::to_owned))
+        .and_then(|value| match value {
+            Value::String(secret) => Some(secret),
+            _ => None,
+        })
         .map(Zeroizing::new)
         .ok_or(StateError::InvalidProfile)?;
     if !(32..=4096).contains(&enrollment_token.len()) {
@@ -361,6 +371,27 @@ pub fn configure_profile(codex_home: &Path, bytes: &[u8]) -> Result<Value, State
     if !valid_profile(&profile) {
         return Err(StateError::InvalidProfile);
     }
+    Ok((profile, enrollment_token))
+}
+
+fn profile_lock(home: &Path) -> Result<CycleLock, StateError> {
+    for parent in [home.join("groundline"), home.join("groundline/insights")] {
+        match std::fs::symlink_metadata(&parent) {
+            Ok(meta) if !meta.is_dir() || meta.file_type().is_symlink() => {
+                return Err(StateError::InvalidProfile);
+            }
+            Ok(_) => (),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+            Err(_) => return Err(StateError::LocalState),
+        }
+    }
+    CycleLock::at(&home.join("groundline/insights/owner-profile.lock"))
+}
+
+pub fn configure_profile(codex_home: &Path, bytes: &[u8]) -> Result<Value, StateError> {
+    crate::environment::Environment::current()?;
+    let (profile, enrollment_token) = parse_owner_profile(bytes)?;
+    let _lock = profile_lock(codex_home)?;
     let mut canonical =
         serde_json::to_vec_pretty(&profile).map_err(|_| StateError::InvalidProfile)?;
     canonical.push(b'\n');
@@ -1913,7 +1944,7 @@ mod tests {
         write_status,
     };
 
-    fn profile(extra: &str) -> Vec<u8> {
+    pub(super) fn profile(extra: &str) -> Vec<u8> {
         format!(
             r#"{{
   "schema_version": 7,

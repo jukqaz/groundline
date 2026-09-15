@@ -27,6 +27,23 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Configure and verify Insights without resetting existing identity, consent, or history.
+    Setup {
+        #[arg(long, conflicts_with_all = ["endpoint", "enrollment_token_file"])]
+        input: Option<PathBuf>,
+        #[arg(long, requires = "enrollment_token_file")]
+        endpoint: Option<String>,
+        #[arg(long, requires = "endpoint")]
+        enrollment_token_file: Option<PathBuf>,
+        /// Explicitly consent to owner-service aggregate collection.
+        #[arg(long)]
+        enable: bool,
+        /// Check the owner service and attempt eligible first collection.
+        #[arg(long)]
+        verify: bool,
+        #[arg(long, hide = true)]
+        codex_home: Option<PathBuf>,
+    },
     /// Run a bounded, read-only installation and local-state diagnostic.
     Doctor {
         #[arg(long)]
@@ -244,6 +261,46 @@ fn state_failure(error: &insights_state::StateError) -> Value {
 
 async fn run(cli: Cli) -> Result<(), ExitCode> {
     match cli.command {
+        Command::Setup {
+            input,
+            endpoint,
+            enrollment_token_file,
+            enable,
+            verify,
+            codex_home,
+        } => {
+            let home = codex_home
+                .map(Ok)
+                .unwrap_or_else(insights_runtime::default_codex_home);
+            let result = match home {
+                Ok(home) => {
+                    insights_state::setup(
+                        &home,
+                        input.as_deref(),
+                        endpoint.as_deref(),
+                        enrollment_token_file.as_deref(),
+                        enable,
+                        verify,
+                    )
+                    .await
+                }
+                Err(_) => Err(insights_state::StateError::LocalState),
+            };
+            match result {
+                Ok(value) => {
+                    emit(&value, true);
+                    match value["status"].as_str() {
+                        Some("PASS") => Ok(()),
+                        Some("ACTION_REQUIRED") => Err(ExitCode::from(2)),
+                        _ => Err(ExitCode::FAILURE),
+                    }
+                }
+                Err(error) => {
+                    emit(&state_failure(&error), true);
+                    Err(ExitCode::FAILURE)
+                }
+            }
+        }
         Command::Doctor {
             plugin_root,
             codex_home,
