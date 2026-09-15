@@ -21,6 +21,16 @@ of that API. It does not read model configuration or inference credentials.
 
 ## Install and upgrade
 
+For installation, connection, consent, and verification in one flow, use the
+reviewed distribution installer with the `insights` or `both` profile. See
+[complete installation](https://github.com/jukqaz/groundline/blob/main/docs/installation.md).
+After package-only installation, `groundline-insights setup` reports what remains;
+use `--endpoint <https-origin> --enrollment-token-file <private-file> --enable
+--verify` to complete an explicitly selected connection. `--input <private-profile>`
+is also supported. Matching existing inputs are reused; conflicting connections
+are rejected without resetting identity or history. Exit 2 means action or first
+activity is pending. Setup never grants hook trust or fabricates a delivery receipt.
+
 Register the monorepo once and install the Insights plugin. This does not install
 Core; install `groundline@groundline` separately only when Core skills and local
 audits are also wanted.

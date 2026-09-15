@@ -32,7 +32,7 @@ continue with [installation alignment](installation-alignment.md) after package
 verification. Complete evidenced configuration/guidance repairs in the same
 authorized task; package refresh alone does not prove the old setup was fixed.
 The reviewed stable distribution's `install.sh`/`install.ps1` joins those native
-commands to artifact verification, the declared `setup` baseline, and strict
+commands to artifact verification, preserving setup, and strict
 doctor. It does not independently resolve versions or modify cached packages.
 
 For an Insights release that expands a validated event dimension, update the

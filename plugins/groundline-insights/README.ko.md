@@ -19,6 +19,13 @@ Grafana는 이 API에 연결됩니다. 모델 설정이나 추론 인증 정보�
 
 ## 설치와 업그레이드
 
+패키지 설치와 초기 연결을 함께 처리하려면
+[통합 설치 안내](../../docs/installation.md)의 `--profile insights` 또는 `both`를
+사용합니다. 설치 후에는 `groundline-insights setup --endpoint <URL>
+--enrollment-token-file <비공개 파일> --enable --verify`로 같은 절차를 수행할 수
+있습니다. 기존 연결과 수집 동의는 보존하며, 새 수집은 명시적으로 동의해야
+시작됩니다. 연결 확인과 실제 hook·전송 증거는 별도로 보고합니다.
+
 모노레포를 한 번 등록하고 Insights를 설치합니다. 이 명령은 Core를 자동으로
 설치하지 않습니다. Core skill과 로컬 감사도 필요할 때만
 `groundline@groundline`을 별도로 설치합니다.

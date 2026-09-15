@@ -81,7 +81,8 @@ or make external writes merely to satisfy this document.
 | Installation dry run | Use isolated fixtures; do not modify the real Codex home |
 | Install and apply GroundLine with existing-setting repair | Continue from package verification to backed-up evidenced repairs; report unresolved findings |
 | Bare native package installation only | No automatic personal-setting rewrite or repair hook |
-| Published installer or explicit setup | Apply the declared Astra/xhigh/Fast-off baseline, back up existing config, retain unrelated state, verify once |
+| Published installer or default setup | Preserve existing/native choices, back up actual changes, retain unrelated state, verify once |
+| Explicit Astra preset | Check model/effort availability before applying; no silent fallback or unrequested context reset |
 | Intentional positive context override | Preserve unless native-default restoration is requested and justified |
 | Config/catalog changes after repair preview | Reject the stale plan before replacing settings |
 | Astra guide includes a delegation example but user forbids delegation | Preserve user policy; no subagent or agent-setting rewrite |

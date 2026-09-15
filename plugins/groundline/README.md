@@ -33,12 +33,13 @@ with private backups and verification. Follow
 installation alone does not execute this workflow or rewrite personal settings.
 
 The repository's reviewed stable distribution includes `install.sh` and
-`install.ps1` for installation and setup in one invocation. Its common baseline
-is **gpt-6-astra / xhigh / Fast off**. The installed `groundline setup --catalog
-<native-models.json> --apply` command applies it with private backups, native
-context restoration, and bounded retired Core hook trust cleanup. Without
-`--apply`, it previews without writes. Unsupported host catalog choices fail
-explicitly. Other user settings and Insights state are preserved.
+`install.ps1` for installation and setup in one invocation. Its default preserves
+existing choices and native defaults. `groundline setup --catalog
+<native-models.json> --apply` uses the same policy; add `--preset astra` to select
+**gpt-6-astra / xhigh / Fast off**, or `--model` and `--effort` for another supported
+choice. Context restoration requires `--restore-native-context`. Changed files
+receive private backups. Without `--apply`, setup previews without writes.
+See [existing settings and migration](references/installation-alignment.md#existing-settings-and-migration).
 
 ```console
 codex plugin marketplace add https://github.com/jukqaz/groundline.git --ref stable --json

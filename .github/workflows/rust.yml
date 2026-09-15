@@ -66,16 +66,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     outputs:
-      windows_setup: ${{ steps.setup-changes.outputs.needed }}
+      native_setup: ${{ steps.setup-changes.outputs.needed }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
-      - name: Select bounded Windows setup checks for relevant PR changes
+      - name: Select native setup checks for relevant PR changes
         if: github.event_name == 'pull_request'
         id: setup-changes
         run: |
-          if git diff --quiet HEAD^ HEAD -- .gitattributes Cargo.toml Cargo.lock crates/groundline-cli crates/groundline-contracts/src/artifact.rs crates/groundline-insights-cli crates/groundline-runtime/src/local_file.rs plugins/groundline/config install.ps1 .github/workflows/rust.yml .github/actions/setup-rust-stable; then
+          if git diff --quiet HEAD^ HEAD -- .gitattributes Cargo.toml Cargo.lock crates/groundline-cli crates/groundline-contracts/src/artifact.rs crates/groundline-insights-cli crates/groundline-runtime/src/local_file.rs crates/groundline-runtime/src/insights_state.rs crates/groundline-runtime/src/insights_state plugins/groundline/config install.sh install.ps1 .github/workflows/rust.yml .github/actions/setup-rust-stable; then
             echo "needed=false" >> "$GITHUB_OUTPUT"
           else
             echo "needed=true" >> "$GITHUB_OUTPUT"
@@ -353,9 +353,9 @@ jobs:
           cargo run --locked --bin groundline -- project-audit --repo . --json
           cargo run --locked --bin groundline-insights -- doctor --plugin-root plugins/groundline-insights --codex-home /tmp/groundline-empty-codex-home --json
 
-  windows-setup:
+  native-setup:
     name: setup on ${{ matrix.target }}
-    if: github.event_name == 'pull_request' && needs.fast.outputs.windows_setup == 'true'
+    if: github.event_name == 'pull_request' && needs.fast.outputs.native_setup == 'true'
     needs: fast
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 12
@@ -363,10 +363,24 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+            codex_sha256: 344310a0a591c1b192e04feff304321a69907c9498baaac331ca7e16ebcef9d7
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            codex_sha256: 1219c837d8f813b493a424c125c0038b5d9ca16279bc6d3fe6ce037a3e18a6e7
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            codex_sha256: 583b48df32804213bdcd338c2e5adb06b34340821fa757a726cc0a524fa33c27
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            codex_sha256: d7e18b2597ae8f242f5f31ee9e90deef48dbc9edd634d9868fb6435d08c07f02
           - runner: windows-11-arm
             target: aarch64-pc-windows-msvc
+            codex_sha256: c8eea016f66a5511bd50b181dcdc4c62f679d3e4b73e62051126386e1337478f
           - runner: windows-latest
             target: x86_64-pc-windows-msvc
+            codex_sha256: 4e96740782869faff9d424806d4419afd2ee51ea5ece6cec462912b7098497a1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-rust-stable
@@ -374,17 +388,57 @@ jobs:
           target: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          shared-key: windows-setup-${{ matrix.target }}
+          shared-key: native-setup-${{ matrix.target }}
+      - name: Install native musl test linker
+        if: contains(matrix.target, 'unknown-linux-musl')
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends musl-tools=1.2.4-2
+          cc_key="CC_${TARGET//-/_}"
+          linker_key="CARGO_TARGET_${TARGET^^}_LINKER"
+          linker_key="${linker_key//-/_}"
+          echo "${cc_key}=musl-gcc" >> "$GITHUB_ENV"
+          echo "${linker_key}=musl-gcc" >> "$GITHUB_ENV"
       - name: Verify user ownership, repair, setup, and installer behavior
         run: cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --lib --test config_repair_cli --test setup_cli --test install_cli -- --show-output
       - name: Verify native checksum endings for both plugins
         run: |
           cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --test cli_contract provider_smoke
-          cargo test --locked -p groundline-insights-cli --target "${{ matrix.target }}" --test cli_contract provider_smoke
+          cargo test --locked -p groundline-insights-cli --target "${{ matrix.target }}" --test cli_contract
       - name: Verify private replacement and cross-process collection stop before release
         run: |
           cargo test --locked -p groundline-runtime --lib --all-features --target "${{ matrix.target }}" local_file::tests -- --show-output
           cargo test --locked -p groundline-runtime --lib --all-features --target "${{ matrix.target }}" collection_stop_tests -- --show-output
+      - name: Verify clean installation with actual Codex
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          CODEX_SHA256: ${{ matrix.codex_sha256 }}
+        run: |
+          suffix=""
+          if [ "${{ runner.os }}" = "Windows" ]; then suffix=".exe"; fi
+          runtime_dir="$RUNNER_TEMP/groundline-native-codex"
+          # Git Bash tar interprets a Windows drive colon as a remote host.
+          if [ "${{ runner.os }}" = "Windows" ]; then runtime_dir=$(cygpath -u "$runtime_dir"); fi
+          mkdir -p "$runtime_dir"
+          archive="$runtime_dir/codex.tar.gz"
+          curl --fail --silent --show-error --location --retry 2 \
+            "https://github.com/openai/codex/releases/download/rust-v0.154.0/codex-${TARGET}${suffix}.tar.gz" -o "$archive"
+          actual_sha=$(openssl dgst -sha256 "$archive")
+          test "${actual_sha##* }" = "$CODEX_SHA256"
+          tar -xzf "$archive" -C "$runtime_dir"
+          cargo build --locked --bin groundline-insights --target "$TARGET"
+          native_codex="$runtime_dir/codex-${TARGET}${suffix}"
+          native_insights="$GITHUB_WORKSPACE/target/$TARGET/debug/groundline-insights${suffix}"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            native_codex=$(cygpath -w "$native_codex")
+            native_insights=$(cygpath -w "$native_insights")
+          fi
+          GROUNDLINE_NATIVE_CODEX="$native_codex" GROUNDLINE_NATIVE_INSIGHTS_BINARY="$native_insights" \
+            cargo test --locked -p groundline-cli --target "$TARGET" --test native_install -- --ignored --nocapture
 
   artifacts:
     name: package both products for ${{ matrix.target }}
@@ -447,7 +501,9 @@ jobs:
           cargo test --locked -p groundline-runtime local_file
           cargo test --locked -p xtask dataset_roots_are_portable_absolute_and_injection_safe
       - name: Verify setup and installer behavior on each native target
-        run: cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --lib --test setup_cli --test config_repair_cli --test install_cli
+        run: |
+          cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --lib --test setup_cli --test config_repair_cli --test install_cli
+          cargo test --locked -p groundline-insights-cli --target "${{ matrix.target }}" --test cli_contract
       - name: Verify collection stop across native processes
         run: cargo test --locked -p groundline-runtime --all-features --target "${{ matrix.target }}" collection_stop_tests
       - name: Build both release binaries and the host packager

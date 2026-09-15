@@ -100,12 +100,12 @@ Grafana 대시보드에서 확인합니다. [Insights 명령 안내](plugins/gro
 별도 GroundLine Desktop 앱은 제공을 종료했습니다. 기존 앱을 제거해도 플러그인,
 서버 설정, 수집 동의, 인증 정보, 커서와 미전송 이벤트는 유지됩니다.
 
-### 선택 작업: 기존 Codex 설정 보정
+### 설치와 초기 설정
 
-설치와 설정 보정을 함께 원할 때만 검토한 `stable` 배포본의 설치 스크립트를 실행합니다.
-이 스크립트는 Core를 설치하고 `gpt-6-astra / xhigh / Fast 끔`을 적용하며,
-수동 컨텍스트 제한과 퇴역한 Core hook 승인 기록 4종을 정리합니다.
-기존 파일은 비공개 백업을 남기며 다른 설정은 보존합니다. Insights는 설치하지 않습니다.
+검토한 `stable` 배포본의 설치 스크립트가 공식 초기 설정 경로입니다.
+기본은 Core 설치와 기존 설정 보존이며, `--profile both` 또는 `-Profile both`로
+Insights를 함께 선택할 수 있습니다. 모델·연결·동의·단계별 결과와 재실행 방법은
+[통합 설치 안내](docs/installation.md) 한 곳에서 관리합니다.
 
 ```console
 git clone --branch stable --single-branch https://github.com/jukqaz/groundline.git groundline-install
@@ -113,7 +113,7 @@ bash groundline-install/install.sh
 ```
 
 Windows에서는 두 번째 줄 대신 `powershell -File groundline-install/install.ps1`을
-실행합니다. 실제 App 런타임의 CLI가 자동 탐지와 다르면 shell 스크립트의 첫 인자,
+실행합니다. 실제 App 런타임의 CLI가 자동 탐지와 다르면 shell의 `--codex` 인자,
 PowerShell의 `-Codex` 인자로 경로를 전달합니다. 같은 설정에 재적용하면 쓰기와
 추가 백업이 없습니다. 배포본과 설치된 실행 파일이 다르면 중단합니다.
 
@@ -127,11 +127,11 @@ PowerShell의 `-Codex` 인자로 경로를 전달합니다. 같은 설정에 재
 이 적용 과정은 잘못된 설정을 보고만 하고 끝내지 않습니다. 근거가 확인된
 오류는 요청 범위에서 수정하고, 의도적인 모델·추론·권한 선택은 보존합니다.
 단순 `plugin add`는 설치만 수행하며 개인 설정 수정 hook을 실행하지 않습니다.
-[설치·적용 절차](plugins/groundline/references/installation-alignment.md)와
-[Astra 기반 조사 보고서](docs/research/install-alignment-astra.ko.md)를 참고하세요.
+[설정 정리·마이그레이션 절차](plugins/groundline/references/installation-alignment.md#existing-settings-and-migration)를 참고하세요.
 
-설치된 `groundline setup --catalog <native-models.json> --apply`로도 공통 기본값을
-적용할 수 있습니다. `CODEX_HOME`을 자동으로 찾고, `--apply`를 빼면 미리보기만
+설치된 `groundline setup --catalog <native-models.json> --apply`도 기존 선택과
+Codex 기본값을 보존합니다. Astra는 `--preset astra`, 컨텍스트 복원은
+`--restore-native-context`로 명시합니다. `--apply`를 빼면 미리보기만
 수행합니다. 해당 PC에서 지원되지 않는 모델·추론 수준이나 해석되지 않은
 profile/provider/catalog override는 파일을 바꾸지 않고 명시적으로 거부합니다.
 
