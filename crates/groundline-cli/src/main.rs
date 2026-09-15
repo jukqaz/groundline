@@ -48,7 +48,7 @@ enum Command {
     },
     /// Preview or apply a backed-up repair of invalid context limits; emits JSON.
     ConfigRepair(config_repair::Options),
-    /// Preview or apply the packaged installation defaults with private backups.
+    /// Preserve Codex choices or apply an explicit preset with private backups.
     Setup(setup::Options),
     /// Inspect and track user-owned skill sources without executing or uploading them.
     Guidance {
@@ -334,7 +334,24 @@ fn run(cli: Cli) -> Result<(), ExitCode> {
     let result: Result<(Value, bool), ContractError> = match cli.command {
         Command::Personal { command } => personal::run(command).map(|value| (value, true)),
         Command::ConfigRepair(options) => config_repair::run(options).map(|value| (value, true)),
-        Command::Setup(options) => setup::run(options).map(|value| (value, true)),
+        Command::Setup(options) => match setup::run(options) {
+            Ok(value) => {
+                emit(&value, true);
+                return match value["status"].as_str() {
+                    Some("FAIL") => Err(ExitCode::FAILURE),
+                    Some("REVIEW_REQUIRED") => Err(ExitCode::from(2)),
+                    _ => Ok(()),
+                };
+            }
+            Err(error) => {
+                let mut value = failure(error);
+                value["migration_guide"] =
+                    json!("references/installation-alignment.md#existing-settings-and-migration");
+                value["next_action"] = json!("review_active_config_layers_before_retrying_setup");
+                emit(&value, true);
+                return Err(ExitCode::FAILURE);
+            }
+        },
         Command::ConfigAudit {
             config,
             catalog,

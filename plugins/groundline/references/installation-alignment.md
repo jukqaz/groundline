@@ -32,21 +32,19 @@ Codex's marketplace installer, run `setup --apply`, and finish with strict docto
 They require no additional chat request. Native GUI or bare `plugin add` still
 performs package delivery only; no post-install execution callback is assumed.
 
-Only when the user also requests the declared configuration setup, use `setup`
-for an already installed package. A guidance review or general alignment request
-does not select the preset. If the user specifies a different model, effort, or
-service tier, preserve it and use bounded repairs instead; `setup` has no
-alternative-preset flag. Resolve the package executable and the active Codex
+For an already installed package, default `setup` preserves existing choices and
+native defaults. A guidance review does not select the Astra preset. Use explicit
+`--model`, `--effort`, and `--service-tier` choices only as requested. Resolve the package executable and the active Codex
 executable with [platform commands](platform-commands.md). Obtain successful
 `codex debug models` output before invoking `groundline setup --catalog - --apply`
 with that JSON on stdin. Do not apply after a failed catalog command, even if it
 produced valid partial JSON. Omit `--apply` for a write-free preview.
 
-`setup` reads the baseline embedded from `config/setup-defaults.toml`:
+Only `setup --preset astra` selects the baseline embedded from `config/setup-defaults.toml`:
 `gpt-6-astra`, `xhigh`, and `service_tier="default"` (Fast off). This is the
-explicit installation policy, not a claim that OpenAI recommends a universal
-preset. Restore Codex-owned context sizing by removing the two root context
-overrides, and remove only the four recognized retired Core hook trust records.
+explicit preset, not a claim that OpenAI recommends a universal configuration.
+Remove root context overrides only with `--restore-native-context`. Setup can
+remove only the four recognized retired Core hook trust records.
 Unknown state is never migrated. All other semantic settings remain unchanged;
 comments and formatting are retained where the TOML editor supports them.
 
@@ -61,8 +59,17 @@ own writers and rechecks bytes before replacement; unrelated editors do not shar
 its lock. Keep backups on uncertain write outcomes. Inspect higher-priority
 project/profile/system settings with native Codex before claiming runtime proof.
 
+## Existing settings and migration
+
+The setup report links here when a selected model, profile, unsupported type, or
+unfamiliar format prevents applying a policy. Preview with `setup --catalog -`
+before using `--apply`. Never print or commit the native model catalog. Native
+strict doctor checks the effective configuration separately from this bounded
+file review.
+
 | Evidence | Action within an installation-and-repair request |
 | --- | --- |
+| No model or effort selected | Retain native Codex defaults |
 | Nonpositive context limit, or compaction limit above an explicit window | Preview `config-repair`, then apply the same plan with a new private backup |
 | Positive context overrides copied from an earlier setup without a remaining requirement | Establish their origin and intended native defaults; use `--restore-native-context` only for that approved choice |
 | Unsupported model/effort in refreshed active-host evidence | Preserve any explicit choice; fix a typo only when the intended supported value is established; otherwise obtain that missing choice |
@@ -70,6 +77,7 @@ project/profile/system settings with native Codex before claiming runtime proof.
 | Duplicate or conflicting personal guidance | Trace the active instruction chain; revise the obsolete rule in its owning file, preserving the user's current policy |
 | Stale imported skill or provider cache | Review source and local changes; use the owning updater, not direct cache patches |
 | Duplicate hooks or obsolete command paths | Establish ownership and equivalent behavior; repair only the conflicting definition; leave trust and collection consent to their native workflow |
+| Recognized retired Core hook approval | Remove only its validated record; preserve Insights and other hook trust |
 | Intentional model, effort, service tier, delegation, permissions, experiment | Preserve unless a concrete requested change covers it |
 | Unparseable input, unknown ownership, managed policy, or unresolved layer | Preserve bytes and report the specific missing evidence/authority; continue independent repairs |
 
@@ -102,6 +110,13 @@ post-edit bytes before restoring its private backup. Never overwrite subsequent
 user edits; merge or ask for the new decision. Preserve failed-write backups and
 report an uncertain write outcome explicitly. Do not reset unsupported state,
 delete sessions, weaken approvals, or enable Insights to make a check pass.
+
+For the detailed parser and repair contract, use
+[configuration review](codex-configuration.md). Configuration migration never
+resets native tasks, Insights identity, consent, cursors, or queued events. A
+successful file edit is separate from native runtime behavior. Exit 2 means
+review remains; resolve it and rerun the same installer. Package, settings,
+native diagnostics, and Insights outcomes remain separate in the final receipt.
 
 Report installation, files repaired, intentional choices retained, and native
 runtime/behavior evidence separately. Record an unresolved finding rather than

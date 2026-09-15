@@ -3,7 +3,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use clap::Args;
+use clap::{Args, ValueEnum};
 use groundline_contracts::ContractError;
 use groundline_runtime::local_file::{create_private_new, open_or_create_private_lock};
 use serde_json::{Value, json};
@@ -20,6 +20,13 @@ const RETIRED_HOOKS: [&str; 4] = [
     "groundline@groundline:hooks/hooks.json:stop:0:0",
 ];
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+enum Preset {
+    #[default]
+    Preserve,
+    Astra,
+}
+
 #[derive(Debug, Args)]
 pub struct Options {
     /// Defaults to CODEX_HOME, then the current user's .codex directory.
@@ -28,7 +35,21 @@ pub struct Options {
     /// Native debug models JSON, or - for bounded stdin. No model fallback.
     #[arg(long)]
     catalog: PathBuf,
-    /// Apply GPT-6 Astra / xhigh / Fast off, native context, and retired Core trust cleanup.
+    /// Preserve existing choices and native defaults, or explicitly select Astra / xhigh / Fast off.
+    #[arg(long, value_enum, default_value = "preserve")]
+    preset: Preset,
+    /// Explicitly select a model from the supplied native catalog.
+    #[arg(long)]
+    model: Option<String>,
+    /// Explicitly select a supported reasoning effort.
+    #[arg(long)]
+    effort: Option<String>,
+    #[arg(long, value_parser = ["default", "fast"])]
+    service_tier: Option<String>,
+    /// Explicitly remove root context overrides so Codex owns context sizing.
+    #[arg(long)]
+    restore_native_context: bool,
+    /// Apply the selected policy with a private backup; unchanged files are not rewritten.
     #[arg(long)]
     apply: bool,
 }
@@ -37,7 +58,11 @@ fn error(code: &str) -> ContractError {
     ContractError(format!("setup_{code}"))
 }
 
-fn candidate(config: &str, defaults: &toml::Table) -> Result<(String, Vec<String>), ContractError> {
+fn candidate(
+    config: &str,
+    defaults: &toml::Table,
+    restore_context: bool,
+) -> Result<(String, Vec<String>), ContractError> {
     let mut doc: DocumentMut = config.parse().map_err(|_| error("invalid_config"))?;
     let mut expected: toml::Table = toml::from_str(config).map_err(|_| error("invalid_config"))?;
     // A profile/custom provider/catalog can change the meaning of this baseline.
@@ -73,7 +98,10 @@ fn candidate(config: &str, defaults: &toml::Table) -> Result<(String, Vec<String
         expected.insert(key.clone(), value.clone());
         changes.push(format!("set_{key}"));
     }
-    for key in ["model_context_window", "model_auto_compact_token_limit"] {
+    for key in ["model_context_window", "model_auto_compact_token_limit"]
+        .into_iter()
+        .filter(|_| restore_context)
+    {
         if let Some(value) = expected.get(key) {
             if !value.is_integer() {
                 return Err(error("unsupported_setting_type"));
@@ -179,18 +207,44 @@ pub fn run(options: Options) -> Result<Value, ContractError> {
         Vec::new()
     };
     let config = std::str::from_utf8(&original).map_err(|_| error("invalid_config"))?;
-    let defaults: toml::Table = toml::from_str(DEFAULTS).map_err(|_| error("invalid_policy"))?;
-    let (updated, changes) = candidate(config, &defaults)?;
+    if options.preset == Preset::Astra
+        && (options.model.is_some() || options.effort.is_some() || options.service_tier.is_some())
+    {
+        return Err(error("conflicting_policy"));
+    }
+    let mut defaults: toml::Table = if options.preset == Preset::Astra {
+        toml::from_str(DEFAULTS).map_err(|_| error("invalid_policy"))?
+    } else {
+        toml::Table::new()
+    };
+    for (key, value) in [
+        ("model", options.model),
+        ("model_reasoning_effort", options.effort),
+        ("service_tier", options.service_tier),
+    ] {
+        if let Some(value) = value {
+            defaults.insert(key.to_owned(), toml::Value::String(value));
+        }
+    }
+    let (updated, changes) = candidate(config, &defaults, options.restore_native_context)?;
     let after = inspect(&updated, &load_catalog(&options.catalog)?)?;
     let blocked = after["status"] == "FAIL";
     let mut report = json!({
-        "kind":"groundline-setup", "schema":1,
+        "kind":"groundline-setup", "schema":2,
         "status":if blocked { "FAIL" } else if changes.is_empty() { after["status"].as_str().unwrap_or("FAIL") } else { "READY" },
         "mode":if options.apply { "apply" } else { "preview" },
-        "defaults":defaults,
+        "preset":if options.preset == Preset::Astra { "astra" } else { "preserve" },
+        "model_policy":if defaults.contains_key("model") { "explicit_selection" } else { "existing_or_native_default" },
+        "migration_review":{
+            "guide":"references/installation-alignment.md#existing-settings-and-migration",
+            "native_schema_check_required":true,
+            "guidance_review":"groundline:align-agent-home",
+            "unknown_settings_preserved":true,
+            "context_overrides_removed_only_when_requested":true
+        },
         "changes":changes, "audit_after":after,
         "configuration_existed":exists, "configuration_changed":false,
-        "backup_written":false, "backup_file":null, "file_verified":false,
+        "backup_written":false, "backup_file":null, "file_verified":exists && !blocked && changes.is_empty(),
         "external_writers_locked":false, "effective_runtime_verified":false,
         "network_performed":false, "mutation_performed":false,
         "raw_content_emitted":false, "private_paths_emitted":false
@@ -216,6 +270,8 @@ pub fn run(options: Options) -> Result<Value, ContractError> {
     if let Err(e) = result {
         report["status"] = json!("FAIL");
         report["error"] = json!(e.0);
+    } else if report["audit_after"]["status"] == "REVIEW_REQUIRED" {
+        report["status"] = json!("REVIEW_REQUIRED");
     }
     Ok(report)
 }

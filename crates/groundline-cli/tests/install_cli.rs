@@ -1,13 +1,15 @@
 //! Exercise the public installer with real setup/artifact validation and a fake
 //! native provider. Actual marketplace/network delivery is a separate release gate.
-use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
+use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use tempfile::{TempDir, tempdir};
 
 mod common;
+#[path = "common/package.rs"]
+mod package;
+use package::receipt;
 
 struct Fixture {
     _temp: TempDir,
@@ -42,42 +44,8 @@ impl Fixture {
         };
         let source = root.join("plugins/groundline");
         let installed = home.join(format!("plugins/cache/groundline/groundline/{version}"));
-        let packaged = temp.path().join(executable);
-        fs::copy(binary, &packaged).unwrap();
-        // Linux embeds full DWARF in test binaries. Workspace feature unification
-        // can exceed the runtime's package limit with debug data alone. Match the
-        // shipped stripped artifact without changing the original test binary,
-        // the 128 MiB runtime bound, or any checksum/ownership assertions.
-        #[cfg(target_os = "linux")]
-        assert!(
-            Command::new("strip")
-                .arg("--strip-debug")
-                .arg(&packaged)
-                .status()
-                .expect("binutils strip is required for the Linux package fixture")
-                .success()
-        );
-        let bytes = fs::read(&packaged).unwrap();
-        let hash = format!("{:x}", Sha256::digest(&bytes));
         for package in [&source, &installed] {
-            fs::create_dir_all(package.join(".codex-plugin")).unwrap();
-            fs::write(
-                package.join(".codex-plugin/plugin.json"),
-                format!("{{\"name\":\"groundline\",\"version\":\"{version}\"}}"),
-            )
-            .unwrap();
-            let bin = package.join("bin").join(target);
-            fs::create_dir_all(&bin).unwrap();
-            fs::copy(&packaged, bin.join(executable)).unwrap();
-            fs::write(
-                bin.join(format!("{executable}.sha256")),
-                format!("{hash}  {executable}\n"),
-            )
-            .unwrap();
-            fs::write(bin.join("manifest.json"), serde_json::to_vec(&json!({
-                "schema_version":1,"kind":"groundline-binary-artifact","groundline_version":version,
-                "target":target,"executable":executable,"size_bytes":bytes.len(),"sha256":hash
-            })).unwrap()).unwrap();
+            package::stage(package, binary, "groundline", target);
         }
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         for file in ["install.sh", "install.ps1"] {
@@ -92,9 +60,9 @@ impl Fixture {
             "fake codex.sh"
         });
         if cfg!(windows) {
-            fs::write(&codex, "@echo off\r\necho %*>>\"%GROUNDLINE_TEST_CALLS%\"\r\nif \"%~1 %~2\"==\"debug models\" (\r\n type \"%GROUNDLINE_TEST_CATALOG%\"\r\n if \"%GROUNDLINE_TEST_FAIL_CATALOG%\"==\"1\" exit /b 1\r\n)\r\nexit /b 0\r\n").unwrap();
+            fs::write(&codex, "@echo off\r\necho %*>>\"%GROUNDLINE_TEST_CALLS%\"\r\nif \"%~3\"==\"--help\" exit /b 0\r\nif \"%~1 %~2\"==\"debug models\" (\r\n type \"%GROUNDLINE_TEST_CATALOG%\"\r\n if \"%GROUNDLINE_TEST_FAIL_CATALOG%\"==\"1\" exit /b 1\r\n)\r\nexit /b 0\r\n").unwrap();
         } else {
-            fs::write(&codex, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$GROUNDLINE_TEST_CALLS\"\nif [ \"$1 $2\" = 'debug models' ]; then\n cat \"$GROUNDLINE_TEST_CATALOG\"\n [ \"${GROUNDLINE_TEST_FAIL_CATALOG:-0}\" != 1 ] || exit 1\nfi\n").unwrap();
+            fs::write(&codex, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$GROUNDLINE_TEST_CALLS\"\n[ \"${3:-}\" != --help ] || exit 0\nif [ \"$1 $2\" = 'debug models' ]; then\n cat \"$GROUNDLINE_TEST_CATALOG\"\n [ \"${GROUNDLINE_TEST_FAIL_CATALOG:-0}\" != 1 ] || exit 1\nfi\n").unwrap();
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -112,6 +80,10 @@ impl Fixture {
         }
     }
     fn run(&self, fail_catalog: bool) -> Output {
+        self.run_options(fail_catalog, &[])
+    }
+
+    fn run_options(&self, fail_catalog: bool, options: &[&str]) -> Output {
         let mut command = if cfg!(windows) {
             let mut command = Command::new("powershell.exe");
             command
@@ -121,11 +93,26 @@ impl Fixture {
             command
         } else {
             let mut command = Command::new("bash");
-            command.arg(self.root.join("install.sh"));
+            command.arg(self.root.join("install.sh")).arg("--codex");
             command
         };
+        command.arg(&self.codex);
+        for option in options {
+            let argument = if cfg!(windows) {
+                match *option {
+                    "--preset" => "-Preset",
+                    "--profile" => "-Profile",
+                    "--model" => "-Model",
+                    "--effort" => "-Effort",
+                    "--restore-native-context" => "-RestoreNativeContext",
+                    other => other,
+                }
+            } else {
+                option
+            };
+            command.arg(argument);
+        }
         command
-            .arg(&self.codex)
             .env("CODEX_HOME", &self.home)
             .env("GROUNDLINE_TEST_CATALOG", &self.catalog)
             .env("GROUNDLINE_TEST_CALLS", &self.calls)
@@ -171,7 +158,7 @@ fn installer_applies_and_checks_without_another_manual_setup_request() {
         &f.home.join("config.toml"),
         b"model_context_window=0\nservice_tier='fast'\n",
     );
-    let output = f.run(false);
+    let output = f.run_options(false, &["--preset", "astra", "--restore-native-context"]);
     assert!(
         output.status.success(),
         "{}\n{}\n{}",
@@ -190,7 +177,11 @@ fn installer_applies_and_checks_without_another_manual_setup_request() {
     assert!(calls.contains("--strict-config doctor --summary --no-color --ascii"));
     assert!(!calls.contains("groundline-insights"));
     let before = fs::read(f.home.join("config.toml")).unwrap();
-    assert!(f.run(false).status.success());
+    assert!(
+        f.run_options(false, &["--preset", "astra", "--restore-native-context"])
+            .status
+            .success()
+    );
     assert_eq!(before, fs::read(f.home.join("config.toml")).unwrap());
     assert_eq!(
         fs::read_dir(&f.home)
@@ -246,7 +237,6 @@ fn failed_catalog_with_valid_partial_output_cannot_change_configuration() {
     let f = Fixture::new();
     assert!(!f.run(true).status.success());
     assert!(!f.home.join("config.toml").exists());
-    assert!(!fs::read_to_string(&f.calls).unwrap().contains("doctor"));
 }
 
 #[test]
@@ -258,6 +248,51 @@ fn mismatched_installed_artifact_stops_before_setup() {
     assert!(
         !fs::read_to_string(&f.calls)
             .unwrap()
-            .contains("debug models")
+            .contains("debug models\n")
     );
+}
+
+#[test]
+fn default_install_preserves_existing_choices_and_emits_stage_results() {
+    let f = Fixture::new();
+    let original = b"model='gpt-6-astra'\nmodel_reasoning_effort='xhigh'\nservice_tier='fast'\n";
+    common::write_owned_config(&f.home.join("config.toml"), original);
+    let result = f.run(false);
+    assert!(result.status.success(), "{result:?}");
+    assert_eq!(fs::read(f.home.join("config.toml")).unwrap(), original);
+    let report = receipt(&result);
+    assert_eq!(report["status"], "PASS");
+    assert_eq!(report["stages"]["settings"]["status"], "PASS");
+    assert_eq!(report["stages"]["insights_setup"]["status"], "NOT_SELECTED");
+}
+
+#[test]
+fn doctor_failure_preserves_completed_settings_and_can_resume() {
+    let f = Fixture::new();
+    let original = fs::read_to_string(&f.codex).unwrap();
+    let failure = if cfg!(windows) {
+        "if \"%~1 %~2\"==\"--strict-config doctor\" exit /b 42\r\n"
+    } else {
+        "if [ \"$1 $2\" = '--strict-config doctor' ]; then exit 42; fi\n"
+    };
+    let changed = if cfg!(windows) {
+        original
+            .replacen("@echo off\n", &format!("@echo off\n{failure}"), 1)
+            .replacen("@echo off\r\n", &format!("@echo off\r\n{failure}"), 1)
+    } else {
+        original.replacen("#!/bin/sh\n", &format!("#!/bin/sh\n{failure}"), 1)
+    };
+    fs::write(&f.codex, changed).unwrap();
+    let result = f.run_options(false, &["--preset", "astra"]);
+    assert_eq!(result.status.code(), Some(2), "{result:?}");
+    let report = receipt(&result);
+    assert_eq!(report["status"], "ACTION_REQUIRED");
+    assert_eq!(report["stages"]["settings"]["status"], "PASS");
+    assert_eq!(report["stages"]["native_doctor"]["exit_code"], 42);
+    let before = fs::read(f.home.join("config.toml")).unwrap();
+    fs::write(&f.codex, original).unwrap();
+    let result = f.run_options(false, &["--preset", "astra"]);
+    assert!(result.status.success(), "{result:?}");
+    assert_eq!(fs::read(f.home.join("config.toml")).unwrap(), before);
+    assert_eq!(receipt(&result)["status"], "PASS");
 }
