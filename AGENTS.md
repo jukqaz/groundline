@@ -2,6 +2,10 @@
 
 - Prove the current checkout, runtime, and configuration before changing them.
 - Preserve user-owned WIP and use bounded edits.
+- Use the maintainer's established GitHub noreply identity for public commits,
+  including merges. Verify author/committer metadata before advancing main;
+  prepare the PR merge locally if GitHub would expose a private address.
+  Preserve other contributors' attribution.
 - Maintain one current GroundLine contract. Do not add backward-compatibility
   adapters, deprecated aliases, or silent downgrades for retired formats.
   Reject unsupported state explicitly without rewriting or deleting it. Keep
