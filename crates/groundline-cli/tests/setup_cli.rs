@@ -38,12 +38,17 @@ impl Fixture {
         }
     }
     fn run(&self, apply: bool) -> (i32, Value) {
+        self.run_options(apply, &["--preset", "astra", "--restore-native-context"])
+    }
+
+    fn run_options(&self, apply: bool, options: &[&str]) -> (i32, Value) {
         let mut command = Command::new(env!("CARGO_BIN_EXE_groundline"));
         // Test the same automatic home resolution used by the installer.
         command
             .env("CODEX_HOME", &self.home)
             .args(["setup", "--catalog"])
-            .arg(&self.catalog);
+            .arg(&self.catalog)
+            .args(options);
         if apply {
             command.arg("--apply");
         }
@@ -61,6 +66,59 @@ impl Fixture {
     fn bytes(&self) -> Vec<u8> {
         fs::read(self.home.join("config.toml")).unwrap()
     }
+}
+
+#[test]
+fn default_setup_preserves_sol_choices_and_native_defaults_without_writes() {
+    let f = Fixture::new(None);
+    let (code, report) = f.run_options(true, &[]);
+    assert_eq!(code, 0, "{report}");
+    assert_eq!(report["model_policy"], "existing_or_native_default");
+    assert_eq!(report["mutation_performed"], false);
+    assert!(!f.home.join("config.toml").exists());
+    let catalog = fs::read_to_string(&f.catalog)
+        .unwrap()
+        .replace("gpt-6-astra", "gpt-5.6-sol");
+    fs::write(&f.catalog, catalog).unwrap();
+    let original = "# choice\r\nmodel='gpt-5.6-sol'\r\nmodel_reasoning_effort='low'\r\nservice_tier='fast'\r\n";
+    common::write_owned_config(&f.home.join("config.toml"), original.as_bytes());
+    let (code, report) = f.run_options(true, &[]);
+    assert_eq!(code, 0, "{report}");
+    assert_eq!(f.bytes(), original.as_bytes());
+    assert_eq!(report["mutation_performed"], false);
+    assert_eq!(fs::read_dir(&f.home).unwrap().count(), 1);
+    assert_eq!(f.run_options(true, &["--preset", "astra"]).0, 1);
+    assert_eq!(f.bytes(), original.as_bytes());
+}
+
+#[test]
+fn explicit_model_selection_is_catalog_checked_and_context_is_opt_in() {
+    let original = "model='gpt-6-astra'\nmodel_reasoning_effort='low'\nmodel_context_window=999\n";
+    let f = Fixture::new(Some(original));
+    let (_, report) = f.run_options(true, &[]);
+    assert_eq!(report["mutation_performed"], false);
+    assert_eq!(f.bytes(), original.as_bytes());
+    let (code, report) = f.run_options(
+        true,
+        &[
+            "--model",
+            "gpt-6-astra",
+            "--effort",
+            "xhigh",
+            "--restore-native-context",
+        ],
+    );
+    assert_eq!(code, 0, "{report}");
+    assert_eq!(report["file_verified"], true);
+    let before = f.bytes();
+    assert_eq!(f.run_options(true, &["--model", "unavailable"]).0, 1);
+    assert_eq!(f.bytes(), before);
+    assert_eq!(
+        f.run_options(true, &["--preset", "astra", "--effort", "low"])
+            .0,
+        1
+    );
+    assert_eq!(f.bytes(), before);
 }
 
 proptest! {

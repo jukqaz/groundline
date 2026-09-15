@@ -15,14 +15,18 @@ When asked to install and apply GroundLine, complete
 task: inspect existing settings and active instructions, fix evidenced mistakes
 within the requested scope, and verify the affected behavior. Do not stop after
 package installation or give only recommendations when repair was requested.
-Use the packaged `setup` baseline only when the request includes the documented
-configuration setup. A guidance review or ordinary alignment does not opt into
-that preset. Preserve an explicit different posture and use bounded repairs;
-`setup` cannot apply an alternative model policy. Use the active host's native
+Default `setup` preserves existing choices and native defaults. Use `--preset
+astra` only when the user selects that model policy; a guidance review does not
+select it. Explicit `--model` and `--effort` choices use the active host's native
 catalog and report unsupported choices without substitution. The distribution
 installer already runs setup; reuse its result instead of repeating the write.
 Installation alone is package delivery; it does not run a repair hook or grant
 authority to reset settings. A review-only request remains read-only.
+
+For old Codex settings and migration, follow
+[existing settings](../../references/installation-alignment.md#existing-settings-and-migration). Include native schema
+diagnostics and active-layer guidance review; never replace unfamiliar state or
+delete native task data to make a migration check pass.
 
 ## Select the relevant checks
 
