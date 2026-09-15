@@ -76,6 +76,44 @@ async fn wait_for_revocation(home: &Path) {
 }
 
 #[tokio::test]
+async fn onboarding_requires_consent_and_keeps_fresh_history_uncommitted() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let home = setup(&format!("http://{}", listener.local_addr().unwrap()));
+    disable(home.path()).unwrap();
+    let report = super::onboarding::setup(home.path(), None, None, None, false, true)
+        .await
+        .unwrap();
+    assert_eq!(report["stages"]["connection_verified_now"], false);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), listener.accept())
+            .await
+            .is_err()
+    );
+    let server = tokio::spawn(async move {
+        let (health, _) = request(&listener, "get /healthz ").await;
+        respond(health, json!({"storage_ready":true,"ingest_capabilities":groundline_contracts::insights::ingest_capabilities()})).await;
+        let (enrollment, body) = request(&listener, "post /v1/enroll ").await;
+        respond(enrollment, json!({"status":"PASS","collector_instance_id":body["collector_instance_id"],"current_generation":0})).await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(150), listener.accept())
+                .await
+                .is_err()
+        );
+    });
+    let report = super::onboarding::setup(home.path(), None, None, None, true, true)
+        .await
+        .unwrap();
+    server.await.unwrap();
+    assert_eq!(report["status"], "ACTION_REQUIRED");
+    assert_eq!(report["stages"]["connection_verified_now"], true);
+    assert_eq!(report["stages"]["recent_hook_dispatch_observed"], false);
+    assert_eq!(report["stages"]["recent_delivery_confirmed"], false);
+    let directory = state_directory(home.path()).unwrap();
+    assert!(collection::read(&directory).unwrap().is_none());
+    assert_eq!(pending_events(&directory, 0).unwrap().observed_count, 0);
+}
+
+#[tokio::test]
 async fn stop_during_health_or_enrollment_prevents_following_requests_and_collection() {
     for delayed_step in [0, 1] {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

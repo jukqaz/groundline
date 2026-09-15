@@ -31,6 +31,126 @@ fn path_argument(path: &Path) -> &str {
 }
 
 #[test]
+fn setup_reports_missing_actions_and_never_enables_collection_implicitly() {
+    let home = tempdir().unwrap();
+    let result = run(&["setup", "--codex-home", path_argument(home.path())]);
+    assert_eq!(result.status.code(), Some(2));
+    let report = parse_stdout(&result);
+    assert_eq!(report["status"], "ACTION_REQUIRED");
+    assert_eq!(report["stages"]["collection_consented"], false);
+    assert_eq!(report["stages"]["connection_verified_now"], false);
+    assert_eq!(fs::read_dir(home.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn setup_keeps_one_connection_and_preserves_identity_on_repeated_enable() {
+    let home = tempdir().unwrap();
+    let private = tempdir().unwrap();
+    let token = private.path().join("token");
+    let secret = "PRIVATE_SETUP_SECRET_MUST_NOT_APPEAR_123456789";
+    groundline_runtime::local_file::atomic_write_private(&token, secret.as_bytes()).unwrap();
+    let arguments = [
+        "setup",
+        "--codex-home",
+        path_argument(home.path()),
+        "--endpoint",
+        "https://insights.example.com",
+        "--enrollment-token-file",
+        path_argument(&token),
+    ];
+    let result = run(&arguments);
+    assert_eq!(result.status.code(), Some(2), "{result:?}");
+    let report = parse_stdout(&result);
+    assert_eq!(report["stages"]["connection_configured"], true);
+    assert_eq!(report["stages"]["collection_consented"], false);
+    let mut enabled = arguments.to_vec();
+    enabled.push("--enable");
+    let result = run(&enabled);
+    assert_eq!(result.status.code(), Some(2), "{result:?}");
+    assert_eq!(
+        parse_stdout(&result)["stages"]["collection_consented"],
+        true
+    );
+    let directory = groundline_runtime::insights::state_directory(home.path()).unwrap();
+    let paths = [
+        directory.join("identity.json"),
+        directory.join("consent.json"),
+        directory.join("owner-auto-policy.json"),
+        home.path().join("groundline/insights/owner-profile.json"),
+    ];
+    let before = paths.each_ref().map(|p| {
+        (
+            fs::read(p).unwrap(),
+            fs::metadata(p).unwrap().modified().unwrap(),
+        )
+    });
+    let result = run(&enabled);
+    let report = parse_stdout(&result);
+    assert_eq!(report["configuration_changed"], false);
+    assert_eq!(report["collection_enabled_now"], false);
+    assert_eq!(report["stages"]["recent_delivery_confirmed"], false);
+    assert_eq!(
+        paths.each_ref().map(|p| (
+            fs::read(p).unwrap(),
+            fs::metadata(p).unwrap().modified().unwrap()
+        )),
+        before
+    );
+    let emitted = format!(
+        "{}{}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(!emitted.contains(secret));
+    assert!(!emitted.contains("insights.example.com"));
+    let conflict: Vec<_> = arguments
+        .iter()
+        .map(|s| {
+            if *s == "https://insights.example.com" {
+                "https://changed.example.com"
+            } else {
+                *s
+            }
+        })
+        .collect();
+    let result = run(&conflict);
+    assert_eq!(result.status.code(), Some(1), "{result:?}");
+    assert_eq!(
+        parse_stdout(&result)["result_code"],
+        "setup_connection_change_requires_review"
+    );
+    assert_eq!(
+        paths.each_ref().map(|p| (
+            fs::read(p).unwrap(),
+            fs::metadata(p).unwrap().modified().unwrap()
+        )),
+        before
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn setup_rejects_world_readable_secrets_before_writing_state() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = tempdir().unwrap();
+    let token = home.path().join("token");
+    fs::write(&token, "PRIVATE_SECRET_123456789012345678901234567890").unwrap();
+    fs::set_permissions(&token, fs::Permissions::from_mode(0o644)).unwrap();
+    let result = run(&[
+        "setup",
+        "--codex-home",
+        path_argument(home.path()),
+        "--endpoint",
+        "https://insights.example.com",
+        "--enrollment-token-file",
+        path_argument(&token),
+        "--enable",
+    ]);
+    assert_eq!(result.status.code(), Some(1));
+    assert_eq!(fs::read_dir(home.path()).unwrap().count(), 1);
+}
+
+#[test]
 fn rejected_event_validation_never_echoes_input() {
     let root = tempdir().unwrap();
     let input = root.path().join("event.json");
