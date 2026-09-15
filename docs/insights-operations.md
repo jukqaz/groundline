@@ -14,6 +14,15 @@ reported version, and installation filters to every panel. An opaque SHA-256
 installation key is used for links; the four-character display suffix is not a
 unique identifier. A random installation UUID is not a person or device count.
 
+The installation roster exposes one **status** combining reporting freshness
+and the authenticated package registration. The attention count uses the same
+decisions. A latest package awaiting its first new-version aggregate is a
+waiting state, not an update failure. Initial reporting grace and this waiting
+state do not require attention; missing metadata, reporting delays, and outdated
+or unsupported package versions do. Reporting age alone cannot establish that
+a device is offline or that collection is disabled. Retiring an installation
+removes it from the roster and usage data; it does not end platform support.
+
 | Metric | Unit and denominator | Interpretation |
 | --- | --- | --- |
 | Observed roots | Sum of observed root windows | Period aggregate, not unique people or devices |
@@ -52,6 +61,22 @@ Retirement, activation, enrollment, and ingestion share the single API writer's
 serialization gate. Multiple API writers need a separate concurrency design.
 Already deleted IDs cannot be reconstructed from absent rows; use only a
 verified owner-held retirement inventory when migrating earlier cleanups.
+
+### Returning to a retired device
+
+Retirement is scoped to the previous random installation ID, never an operating
+system, machine, or user. A fresh Windows, macOS, or Linux installation gets a
+new ID and can enroll normally. Its dashboard status starts at initial-report
+waiting and becomes normal after a current supported package reports.
+
+Reinstalling plugin files alone deliberately preserves existing local state;
+it does not replace a retired ID. If `collector_retired` remains after a
+reinstall, request a fresh registration for that runtime. Stop its worker,
+inventory and preserve its pending data, and explicitly authorize a fresh setup
+of only that retired runtime's Insights state. Preserve Codex history, global
+configuration, the shared owner profile, and every other runtime. Then enable
+and verify the fresh registration using the current installer/setup flow.
+Do not remove the server deny record or silently replay the retired outbox.
 
 ## Trust-column migration
 
