@@ -53,8 +53,8 @@ remove task state, or disable safety checks to make every row green.
 
 For installation/application requests, follow
 [installation alignment](installation-alignment.md), including active guidance
-review and the declared `setup` defaults. `setup --catalog <native-models.json>
---apply` resolves the current home and applies the installation policy; omitting
+review and migration. `setup --catalog <native-models.json>
+--apply` resolves the current home and preserves existing/native choices; omitting
 `--apply` previews it. The separate `config-repair` command always emits JSON and previews
 without writes by default:
 

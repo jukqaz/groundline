@@ -1,5 +1,9 @@
 # Astra 지침에 따른 GroundLine 설치와 기존 설정 정비
 
+이 문서는 조사 당시의 설계·검증 기록입니다. 과거의 Astra 고정 기본값은 현재
+일반 설치 정책이 아닙니다. 현재 명령과 정책은 [설치 안내](../installation.md)와
+[설정 정렬 계약](../../plugins/groundline/references/installation-alignment.md)을 따릅니다.
+
 GroundLine은 설치 뒤 기존 환경을 그대로 둔 채 사용을 시작하는 흐름에서,
 설치와 적용을 요청하면 기존 설정·활성 지침을 점검하고 확인된 오류를 고치는
 흐름으로 확장하는 것이 적절하다. 설정 파일을 새 기본값으로 통째로 교체하는

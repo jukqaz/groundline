@@ -30,10 +30,11 @@ Codex가 담당하며, GroundLine은 자체 업데이트나 trust 변경을 수�
 [설치·적용 절차](references/installation-alignment.md)를 참고하세요.
 
 저장소의 검토한 stable 배포본에 있는 `install.sh` 또는 `install.ps1`은 설치와
-설정 보정을 한 번에 실행합니다. 공통 기본값은 **gpt-6-astra / xhigh / Fast 끔**이며,
-설치된 `groundline setup --catalog <native-models.json> --apply`로도 적용할 수 있습니다.
-기존 설정 백업, 네이티브 컨텍스트 복원, 퇴역한 Core hook 승인 기록 정리를 수행하고
-다른 사용자 설정과 Insights 상태는 보존합니다. `--apply`를 빼면 미리보기이며,
+설정 점검을 한 번에 실행합니다. 기본 동작은 기존 선택과 Codex 기본값 보존입니다.
+`groundline setup --catalog <native-models.json> --apply`도 같은 정책을 사용합니다.
+**Astra / xhigh / Fast 끔**은 `--preset astra`로 명시하며, 다른 모델·effort도 선택할
+수 있습니다. 컨텍스트 복원은 `--restore-native-context`로 별도 요청합니다.
+실제 변경만 백업하고 Insights 상태는 보존합니다. `--apply`를 빼면 미리보기이며,
 해당 PC의 카탈로그에서 지원하지 않는 선택은 명시적으로 거부합니다.
 단순 package 설치는 이 절차를 자동 실행하거나 개인 설정을 덮어쓰지 않습니다.
 

@@ -1,6 +1,7 @@
 # GroundLine 문서
 
 - [README](../../README.ko.md)
+- [통합 설치와 기존 설정 이전](../installation.md)
 - [연동과 설치 프로필](integrations.md)
 - [Insights CLI 연결과 보고서](../../plugins/groundline-insights/README.ko.md)
 - [Codex 업데이트 대응과 지원 범위](codex-compatibility.md)

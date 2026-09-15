@@ -41,6 +41,21 @@ explicit comparison and rollback rules in the
 
 ## Install and upgrade
 
+Use the **install and configure** entry point from a reviewed binary-bearing
+`stable` distribution. It preserves existing Codex choices by default and reports
+each completed or pending stage. Git and Codex must already be installed.
+
+```console
+git clone --branch stable --single-branch https://github.com/jukqaz/groundline.git groundline-install
+bash groundline-install/install.sh
+```
+
+On Windows use `powershell -File groundline-install/install.ps1`. Select
+`--profile both` (`-Profile both`) to include Insights, or `insights` for Insights
+alone. See [complete installation and recovery](docs/installation.md) for model
+selection, private connection inputs, consent, first collection, and retrying a
+partial installation. Package-only installation is also available below.
+
 **GroundLine runs as Codex plugins and native CLIs.** Codex App and CLI use the
 same plugins. Only Git and Codex are required. These native
 commands preserve personal model, reasoning, and permission settings. Insights
@@ -107,24 +122,15 @@ CLI or the owner's Grafana dashboard. See the [Insights commands](plugins/ground
 The separate GroundLine Desktop app is retired. Removing an old copy preserves
 the plugins, server profile, consent, credentials, cursor, and pending events.
 
-### Optional Codex configuration repair
+### Existing settings and migration
 
-Use a reviewed `stable` distribution's installer only when you also want settings
-repair. It installs Core, applies `gpt-6-astra`, `xhigh`, and Fast off, restores
-native context limits, removes four retired Core hook approval entries, and runs
-strict doctor. Existing configuration is privately backed up; unrelated settings
-remain intact. It does not install Insights.
-
-```console
-git clone --branch stable --single-branch https://github.com/jukqaz/groundline.git groundline-install
-bash groundline-install/install.sh
-```
-
-On Windows, run `powershell -File groundline-install/install.ps1` instead. Pass the
-actual App-bundled Codex executable as the shell script's first argument or
-PowerShell's `-Codex` argument when it differs from the detected CLI. Repeating
-unchanged setup creates no extra backup or write. Stale or mismatched artifacts
-are rejected.
+Installation validates existing choices and removes only four recognized retired
+Core hook approval entries. Use `--preset astra` (`-Preset astra`) only when
+requesting Astra/xhigh/Fast off, and `--restore-native-context`
+(`-RestoreNativeContext`) only when intentionally restoring native context sizing.
+Changed configuration receives a private backup. An unchanged retry writes no
+extra backup. The [migration guide](plugins/groundline/references/installation-alignment.md#existing-settings-and-migration)
+covers old native options, profiles, conflicting instructions, and recovery.
 
 ## Maintain personal skills
 
@@ -132,13 +138,13 @@ For broader guidance alignment, ask `$groundline:align-agent-home` to apply Grou
 repair evidenced mistakes in existing Codex settings and active guidance, with
 private backups and focused verification. A bare `plugin add` only installs the
 package; it does not run a personal-setting repair hook. See
-[installation alignment](plugins/groundline/references/installation-alignment.md)
-and the [Astra research report](docs/research/install-alignment-astra.ko.md).
+[installation alignment](plugins/groundline/references/installation-alignment.md).
 
 The installed `groundline setup --catalog <native-models.json> --apply` command
-also applies the packaged baseline directly, resolving `CODEX_HOME` automatically.
+uses the same preserve policy, resolving `CODEX_HOME` automatically.
 Omit `--apply` for a write-free preview. Unsupported models, efforts, or unresolved
 profile/provider/catalog overrides fail without changing the configuration.
+Use `--model <id> --effort <level>` for an explicit catalog-supported choice.
 
 `groundline config-repair --config <config.toml> --catalog <native-models.json>`
 previews invalid-context repairs. Apply the same reviewed inputs with
