@@ -2,13 +2,14 @@
 
 [한국어](README.ko.md)
 
-GroundLine is one public Rust monorepo with two independently installable Codex
-plugins. Codex remains responsible for execution, settings, permissions, agents,
-worktrees, review, compaction, and upgrades.
+GroundLine customizes Codex workflows through usage analysis, token optimization,
+and task-performance improvement. Its public Rust monorepo ships two independently
+installable plugins. Codex remains responsible for execution, settings,
+permissions, agents, worktrees, review, compaction, and upgrades.
 
 | Plugin | Purpose | Default network behavior |
 | --- | --- | --- |
-| `groundline` | Local guidance, project audits, evidence boundaries, and aggregate usage analysis | Offline; no hooks or collector identity |
+| `groundline` | Usage analysis, Codex guidance, and evidence-gated token/time optimization trials | Offline; no hooks or collector identity |
 | `groundline-insights` | Optional aggregate collection plus a public self-hosting preview for ClickHouse and Grafana | Disabled until an owner profile and enrollment credential are configured |
 
 The plugin packages are canonical under `plugins/`. Shared Rust contracts and
@@ -30,7 +31,7 @@ verification, and report analysis can also consume additional tokens. Automatic
 Insights collection runs native code to aggregate existing activity and send it
 to the owner's service; it does not call a language model.
 
-Evaluate comparable completed tasks using verified outcomes, rework, user
+Evaluate comparable requested deliveries, including failed work, using verified outcomes, rework, user
 intervention, elapsed time, and measured tokens. Additional tokens can be a
 reasonable cost when the resulting quality or reliability justifies them. Net
 token savings are not guaranteed, and successful installation or delivery checks
@@ -223,7 +224,18 @@ See [integrations and installation profiles](docs/integrations.md),
 
 ## Personal workflow improvement
 
-Use `$groundline:improve-personal-workflow` to combine Insights reports, native
-audits, current model guidance, and private completion evidence. Core personal
-commands review, trial, evaluate, and restore dedicated guidance while preserving
-user edits. Missing evidence never authorizes a change. See [the contract](plugins/groundline/references/personal-improvement.md).
+Use `$groundline:improve-personal-workflow` to turn usage patterns and relevant
+current Codex guidance into improvements to GroundLine or the owner's environment.
+A weekly review first evaluates the previous change, reuses one bounded native
+audit, researches applicable updates, and proposes one testable improvement.
+Context selection, evidence reuse, and appropriate native concurrency matter
+alongside model choice. See [the optimization loop](plugins/groundline/references/codex-optimization-loop.md).
+
+Core personal commands trial reviewed guidance for approval continuity, diagnosis
+before retry, evidence reuse, just-in-time context, and bounded parallel reads.
+Token and elapsed-time objectives use resources per verified delivery, including
+failed work in the numerator, with protected quality and rollback gates. Native
+Codex performs research, authorized edits, and activation verification; the CLI
+does not silently apply settings or activate instructions. Missing evidence never
+authorizes a change, and source changes do not update installed plugins. See
+[the personal trial contract](plugins/groundline/references/personal-improvement.md).

@@ -1,6 +1,6 @@
 ---
 name: evaluate-ai-usage-maturity
-description: Use when explicitly assessing Codex workflow efficiency or choosing a Codex model and effort from current task shape.
+description: Assess Codex workflow quality, token and time efficiency, or choose a task-scoped model and effort.
 ---
 
 # Evaluate AI Usage Maturity
@@ -10,7 +10,9 @@ description: Use when explicitly assessing Codex workflow efficiency or choosing
 Choose a simple Codex mode for the current task, or evaluate operating behavior
 from artifacts and redacted evidence. When evidence starts in histories, use
 `audit-agent-history -> evaluate-ai-usage-maturity`; consume its Codex Evidence
-Packet.
+Packet. For usage-driven changes to GroundLine or the user's Codex environment,
+read [the optimization loop](../../references/codex-optimization-loop.md). Feature
+utilization is valuable only when an eligible workflow's outcome improves.
 
 ## Quick Mode Choice
 
@@ -42,11 +44,21 @@ time boundary, verification contract, and protected outcomes for each run.
 Return a `GroundLine Codex Benchmark` plan or result. Hold model, tools, and
 delegation policy constant when comparing effort; vary one factor at a time.
 
-When the user asks how much a GroundLine workflow could improve, use
-`groundline efficiency simulate --audit <audit.json> --json` with one or
-more redacted session-audit JSON files. Report conservative, expected, and
-optimistic projections separately. Do not convert reported total or cached
-tokens into billing.
+When the user explicitly wants a counterfactual projection, use
+`groundline efficiency simulate --audit <audit.json> --json` with a supported
+redacted session, weekly, or combined weekly-review result. Reuse existing audit
+bytes; this is not a reason to recollect. Weekly simulation covers only observed
+root counters, not delegated or Guardian usage. The conservative, expected, and
+optimistic cases use fixed assumptions, not learned effects or measured savings.
+Missing usage cannot be filled with zero. Do not convert tokens into billing.
+The output exposes the actual scenario fractions and input scope; a zero-token
+baseline is INCONCLUSIVE with null reduction ratios. Supply exactly one audit;
+multiple inputs are rejected because their ownership and overlap cannot be proven.
+Required token splits need explicit native field-availability evidence and a
+known usage source, not numeric zeros from missing fields. Older evidence without
+that metadata cannot support a projection; do not rerun the weekly audit merely
+to produce one. Comparison sample readiness is descriptive, not statistical confidence or
+proof of a causal effect.
 
 ## Workflow
 
@@ -75,6 +87,10 @@ tokens into billing.
 - Do not claim full conversation coverage without approved redacted collection.
 - Prefer artifacts over self-report. Score workflow quality, not intelligence.
 - Tool count is neutral; reward orchestration only when outcomes and boundaries improve.
+- Compare resources across all eligible deliveries, including failed work;
+  do not lower apparent cost by excluding failures or changing task difficulty.
+  Separate verified-delivery denominators, token availability, total elapsed
+  time, and any directly observed waiting time. Tool latency is not model speed.
 - Never infer billable tokens from bytes, file sizes, tool calls, or elapsed time.
 - Recommend an escalation ladder; do not change Codex model, reasoning effort, Max, Ultra, or service tier.
 - For a tracked efficiency experiment, establish a healthy verification
