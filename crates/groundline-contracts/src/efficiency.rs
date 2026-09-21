@@ -191,6 +191,22 @@ fn normalized_utc_timestamp(value: Option<&Value>) -> Option<String> {
     )
 }
 
+fn known_usage_source(value: Option<&Value>) -> Option<&str> {
+    value.and_then(Value::as_str).filter(|source| {
+        matches!(
+            *source,
+            "codex-cumulative-total-snapshots"
+                | "codex-cumulative-and-last-usage-fallback"
+                | "codex-last-usage-events-summed-fallback"
+                | "codex-cumulative-window-delta"
+                | "codex-window-delta-and-last-usage-fallback"
+                | "codex-last-usage-events-summed-window"
+                | "codex-response-usage-records"
+                | "codex-mixed-usage-sources"
+        )
+    })
+}
+
 pub fn audit_metrics(audit: &Value) -> Result<BTreeMap<&'static str, u64>, ContractError> {
     let audit = object(audit, "unsupported_codex_audit")?;
     if audit.get("kind").and_then(Value::as_str) != Some("groundline-codex-session-audit")
@@ -219,45 +235,135 @@ pub fn audit_metrics(audit: &Value) -> Result<BTreeMap<&'static str, u64>, Contr
         Some(Value::Object(value)) => value.clone(),
         Some(_) => return Err(ContractError("invalid_failure_signals".to_owned())),
     };
-    let input_tokens = non_negative_int(usage, "input_tokens");
-    let cached_input_tokens = non_negative_int(usage, "cached_input_tokens").min(input_tokens);
+    // The current audit contract permits unknown splits. A hypothetical reduction
+    // needs a complete decomposition; unknown usage must not become a zero baseline.
+    if known_usage_source(usage.get("source")).is_none()
+        || !usage
+            .get("rollout_count_with_usage")
+            .and_then(Value::as_u64)
+            .is_some_and(|count| count > 0)
+    {
+        return Err(ContractError("unavailable_usage_provenance".to_owned()));
+    }
+    let usage_count = |field: &str| {
+        // Numeric aggregates alone cannot prove a split was reported: the audit
+        // reducer can retain a zero for a field missing from an owned source.
+        if usage
+            .get("token_field_availability")
+            .and_then(Value::as_object)
+            .and_then(|availability| availability.get(field))
+            .and_then(Value::as_bool)
+            != Some(true)
+        {
+            return Err(ContractError(format!(
+                "unverified_codex_usage_field:{field}"
+            )));
+        }
+        required_count(usage, field, &format!("provider_reported_usage.{field}"))
+    };
+    let input_tokens = usage_count("input_tokens")?;
+    let cached_input_tokens = usage_count("cached_input_tokens")?;
+    let output_tokens = usage_count("output_tokens")?;
+    let reasoning_output_tokens = usage_count("reasoning_output_tokens")?;
+    let total_tokens = usage_count("total_tokens")?;
+    if cached_input_tokens > input_tokens || reasoning_output_tokens > output_tokens {
+        return Err(ContractError("inconsistent_codex_usage_subsets".to_owned()));
+    }
+    if total_tokens != checked_sum([input_tokens, output_tokens])? {
+        return Err(ContractError("inconsistent_codex_usage_total".to_owned()));
+    }
+    let non_cached_input_tokens = input_tokens - cached_input_tokens;
+    if let Some(value) = usage.get("non_cached_input_tokens")
+        && value.as_u64() != Some(non_cached_input_tokens)
+    {
+        return Err(ContractError(
+            "inconsistent_non_cached_input_tokens".to_owned(),
+        ));
+    }
 
-    let failure_signal_count = checked_sum(failure_signals.values().filter_map(Value::as_u64))?;
+    let failure_signal_count = checked_sum(
+        failure_signals
+            .keys()
+            .map(|field| required_count(&failure_signals, field, "failure_signals"))
+            .collect::<Result<Vec<_>, _>>()?,
+    )?;
     Ok(BTreeMap::from([
         ("input_tokens", input_tokens),
         ("cached_input_tokens", cached_input_tokens),
+        ("non_cached_input_tokens", non_cached_input_tokens),
+        ("output_tokens", output_tokens),
+        ("reasoning_output_tokens", reasoning_output_tokens),
+        ("total_tokens", total_tokens),
         (
-            "non_cached_input_tokens",
-            input_tokens - cached_input_tokens,
+            "tool_calls",
+            required_count(tools, "call_count", "tools.call_count")?,
         ),
-        ("output_tokens", non_negative_int(usage, "output_tokens")),
         (
-            "reasoning_output_tokens",
-            non_negative_int(usage, "reasoning_output_tokens"),
+            "compactions",
+            required_count(activity, "compactions", "activity.compactions")?,
         ),
-        ("total_tokens", non_negative_int(usage, "total_tokens")),
-        ("tool_calls", non_negative_int(tools, "call_count")),
-        ("compactions", non_negative_int(activity, "compactions")),
         ("failure_signals", failure_signal_count),
-        ("long_turns", non_negative_int(latency, "long_turn_count")),
+        (
+            "long_turns",
+            required_count(latency, "long_turn_count", "task_latency.long_turn_count")?,
+        ),
     ]))
 }
 
+fn simulation_audit(audit: &Value) -> Result<(&Value, &'static str), ContractError> {
+    if audit.get("schema").and_then(Value::as_u64) != Some(1) {
+        return Err(ContractError("unsupported_codex_audit".to_owned()));
+    }
+    match audit.get("kind").and_then(Value::as_str) {
+        Some("groundline-codex-session-audit") => Ok((audit, "supplied_session_rollouts")),
+        Some("groundline-codex-weekly-audit") => audit
+            .get("root")
+            .map(|root| (root, "selected_root_rollouts"))
+            .ok_or_else(|| ContractError("incomplete_weekly_root_audit".to_owned())),
+        Some("groundline-codex-weekly-review") => {
+            let weekly = audit
+                .get("audit")
+                .filter(|value| {
+                    value.get("kind").and_then(Value::as_str)
+                        == Some("groundline-codex-weekly-audit")
+                })
+                .ok_or_else(|| ContractError("incomplete_weekly_review_audit".to_owned()))?;
+            simulation_audit(weekly)
+        }
+        _ => Err(ContractError("unsupported_codex_audit".to_owned())),
+    }
+}
+
 pub fn simulate(audits: &[Value]) -> Result<Value, ContractError> {
+    if audits.is_empty() {
+        return Err(ContractError("simulation_audit_required".to_owned()));
+    }
+    if audits.len() != 1 {
+        return Err(ContractError("simulation_single_audit_required".to_owned()));
+    }
     let mut baseline = METRIC_NAMES
         .iter()
         .map(|name| (*name, 0_u64))
         .collect::<BTreeMap<_, _>>();
-    for audit in audits {
+    let mut input_scopes = Vec::new();
+    for input in audits {
+        let (audit, usage_scope) = simulation_audit(input)?;
         for (name, value) in audit_metrics(audit)? {
             let total = baseline.entry(name).or_default();
             *total = total
                 .checked_add(value)
                 .ok_or_else(|| ContractError("numeric_overflow".to_owned()))?;
         }
+        let usage_source = known_usage_source(audit.pointer("/provider_reported_usage/source"));
+        input_scopes.push(json!({
+            "input_kind": input.get("kind"),
+            "usage_scope": usage_scope,
+            "usage_source": usage_source,
+            "usage_observed_rollouts": audit.pointer("/provider_reported_usage/rollout_count_with_usage").and_then(Value::as_u64),
+            "usage_missing_rollouts": audit.pointer("/provider_reported_usage/rollout_count_without_usage").and_then(Value::as_u64),
+        }));
     }
-    let computed_total = checked_sum([baseline["input_tokens"], baseline["output_tokens"]])?;
-    let baseline_total = baseline["total_tokens"].max(computed_total);
+    let baseline_total = baseline["total_tokens"];
     let mut scenarios = Map::new();
     for (name, reduction) in SCENARIOS {
         let cached = reduced(baseline["cached_input_tokens"], reduction.cached_input);
@@ -267,16 +373,14 @@ pub fn simulate(audits: &[Value]) -> Result<Value, ContractError> {
         );
         let output = reduced(baseline["output_tokens"], reduction.output);
         let projected_total = checked_sum([cached, non_cached, output])?;
-        let reduction_ratio = if baseline_total == 0 {
-            0.0
-        } else {
-            round_to(1.0 - (projected_total as f64 / baseline_total as f64), 4)
-        };
+        let reduction_ratio = (baseline_total != 0)
+            .then(|| round_to(1.0 - (projected_total as f64 / baseline_total as f64), 4));
         scenarios.insert(
             (*name).to_owned(),
             json!({
                 "total_tokens": projected_total,
                 "total_reduction_ratio": reduction_ratio,
+                "input_tokens": checked_sum([cached, non_cached])?,
                 "cached_input_tokens": cached,
                 "non_cached_input_tokens": non_cached,
                 "output_tokens": output,
@@ -285,17 +389,42 @@ pub fn simulate(audits: &[Value]) -> Result<Value, ContractError> {
                 "compactions": reduced(baseline["compactions"], reduction.compactions),
                 "failure_signals": reduced(baseline["failure_signals"], reduction.failures),
                 "long_turns": reduced(baseline["long_turns"], reduction.long_turns),
+                "assumed_reduction_fractions": {
+                    "cached_input_tokens": reduction.cached_input,
+                    "non_cached_input_tokens": reduction.non_cached_input,
+                    "output_tokens": reduction.output,
+                    "reasoning_output_tokens": reduction.reasoning,
+                    "tool_calls": reduction.tool_calls,
+                    "compactions": reduction.compactions,
+                    "failure_signals": reduction.failures,
+                    "long_turns": reduction.long_turns,
+                },
             }),
         );
     }
     Ok(json!({
         "kind": "groundline-efficiency-simulation",
         "schema": 1,
-        "status": "PASS",
+        "status": if baseline_total == 0 { "INCONCLUSIVE" } else { "PASS" },
+        "reason_codes": if baseline_total == 0 { vec!["zero_observed_token_baseline"] } else { vec![] },
         "audit_count": audits.len(),
+        "input_scopes": input_scopes,
         "baseline": baseline,
         "scenarios": scenarios,
         "evidence_class": "counterfactual_not_measured",
+        "assumptions": {
+            "source": "fixed_hypothetical_reduction_fractions",
+            "learned_from_usage": false,
+            "expected_label_is_measured_expectation": false,
+            "scope": "observed_reported_counters_only",
+            "unobserved_usage_imputed": false,
+            "sample_representativeness_assessed": false,
+            "single_audit_input_required": true,
+            "cached_input_is_subset_of_input": true,
+            "reasoning_output_is_subset_of_output": true,
+            "total_formula": "cached_input_tokens + non_cached_input_tokens + output_tokens",
+            "quality_improvement_measured": false,
+        },
         "billing_inference_performed": false,
         "quality_regression_allowed": false,
         "mutation_performed": false,
@@ -649,28 +778,20 @@ pub fn compare_aggregate_periods(packet: &Value) -> Result<Value, ContractError>
             )
         })
         .collect::<Map<_, _>>();
-    let minimum_roots = baseline.sample["root_count"]
-        .as_u64()
-        .unwrap_or(0)
-        .min(candidate.sample["root_count"].as_u64().unwrap_or(0));
-    let confidence = if status == "READY" && minimum_roots >= 30 {
-        "high"
-    } else if status == "READY" {
-        "medium"
-    } else {
-        "low"
-    };
     Ok(json!({
         "kind": "groundline-comparison-readiness",
         "schema": 1,
         "status": status,
         "mode": mode,
         "changed_dimension": changed_dimension,
-        "confidence": confidence,
+        "sample_readiness": if status == "READY" { "descriptive_comparison_ready" } else { "not_ready" },
+        "statistical_confidence": "not_estimated",
+        "causal_effect_estimated": false,
         "reason_codes": reasons,
         "metric_deltas": metric_deltas,
         "quality_contract": {
             "correlation_is_not_causation": true,
+            "sample_threshold_is_not_statistical_confidence": true,
             "quality_regression_blocks_adoption": true,
             "wall_turn_latency_is_not_model_latency": true,
             "automatic_application_allowed": false,
@@ -921,12 +1042,22 @@ mod tests {
             "kind": "groundline-codex-session-audit",
             "schema": 1,
             "provider_reported_usage": {
+                "source": "codex-cumulative-window-delta",
+                "rollout_count_with_usage": 1,
                 "input_tokens": 1000,
                 "cached_input_tokens": 700,
                 "non_cached_input_tokens": 300,
                 "output_tokens": 200,
                 "reasoning_output_tokens": 40,
-                "total_tokens": 1200
+                "total_tokens": 1200,
+                "token_field_availability": {
+                    "input_tokens": true,
+                    "cached_input_tokens": true,
+                    "cache_write_input_tokens": false,
+                    "output_tokens": true,
+                    "reasoning_output_tokens": true,
+                    "total_tokens": true
+                }
             },
             "activity": {"compactions": 2},
             "tools": {"call_count": 20, "failure_signals": {"nonzero_exit": 2}},
@@ -944,6 +1075,288 @@ mod tests {
             0.4417
         );
         assert_eq!(result["evidence_class"], "counterfactual_not_measured");
+        assert_eq!(
+            result["assumptions"]["source"],
+            "fixed_hypothetical_reduction_fractions"
+        );
+        assert_eq!(result["assumptions"]["learned_from_usage"], false);
+        assert_eq!(
+            result["assumptions"]["expected_label_is_measured_expectation"],
+            false
+        );
+        assert_eq!(result["assumptions"]["unobserved_usage_imputed"], false);
+        assert_eq!(
+            result["scenarios"]["expected"]["assumed_reduction_fractions"]["cached_input_tokens"],
+            0.56
+        );
+        for scenario in result["scenarios"].as_object().unwrap().values() {
+            assert_eq!(
+                scenario["total_tokens"].as_u64().unwrap(),
+                scenario["input_tokens"].as_u64().unwrap()
+                    + scenario["output_tokens"].as_u64().unwrap()
+            );
+            assert_eq!(
+                scenario["input_tokens"].as_u64().unwrap(),
+                scenario["cached_input_tokens"].as_u64().unwrap()
+                    + scenario["non_cached_input_tokens"].as_u64().unwrap()
+            );
+            assert!(
+                scenario["reasoning_output_tokens"].as_u64().unwrap()
+                    <= scenario["output_tokens"].as_u64().unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn simulation_accepts_current_weekly_audit_and_combined_review_without_mixing_ownership() {
+        let mut weekly = weekly_audit();
+        let mut root = audit();
+        root["provider_reported_usage"]["source"] = json!("codex-mixed-usage-sources");
+        root["provider_reported_usage"]["rollout_count_with_usage"] = json!(3);
+        root["provider_reported_usage"]["rollout_count_without_usage"] = json!(2);
+        let mut merged_root = weekly["root"].as_object().unwrap().clone();
+        merged_root.extend(root.as_object().unwrap().clone());
+        weekly["root"] = json!(merged_root);
+        weekly["delegated"] = audit();
+        weekly["guardian"] = audit();
+        let combined = crate::weekly_review::review(weekly.clone()).unwrap();
+        let direct = simulate(&[weekly]).unwrap();
+        let from_review = simulate(&[combined]).unwrap();
+        assert_eq!(direct["baseline"], from_review["baseline"]);
+        assert_eq!(direct["baseline"]["total_tokens"], 1200);
+        assert_eq!(from_review["audit_count"], 1);
+        assert_eq!(
+            from_review["input_scopes"][0]["usage_scope"],
+            "selected_root_rollouts"
+        );
+        assert_eq!(
+            from_review["input_scopes"][0]["usage_source"],
+            "codex-mixed-usage-sources"
+        );
+        assert_eq!(from_review["input_scopes"][0]["usage_observed_rollouts"], 3);
+        assert_eq!(from_review["input_scopes"][0]["usage_missing_rollouts"], 2);
+        assert_eq!(
+            from_review["assumptions"]["scope"],
+            "observed_reported_counters_only"
+        );
+    }
+
+    #[test]
+    fn simulation_rejects_missing_null_or_invalid_token_splits() {
+        for field in [
+            "input_tokens",
+            "cached_input_tokens",
+            "output_tokens",
+            "reasoning_output_tokens",
+            "total_tokens",
+        ] {
+            for replacement in [None, Some(json!(null)), Some(json!(-1)), Some(json!("100"))] {
+                let mut incomplete = audit();
+                let usage = incomplete["provider_reported_usage"]
+                    .as_object_mut()
+                    .unwrap();
+                if let Some(value) = replacement {
+                    usage.insert(field.to_owned(), value);
+                } else {
+                    usage.remove(field);
+                }
+                assert_eq!(
+                    simulate(&[incomplete]).unwrap_err().0,
+                    format!("invalid_non_negative_count:provider_reported_usage.{field}")
+                );
+            }
+        }
+        let mut total_only = audit();
+        total_only["provider_reported_usage"] = json!({"total_tokens": 1200});
+        assert!(simulate(&[total_only]).is_err());
+    }
+
+    #[test]
+    fn simulation_requires_verified_usage_provenance_without_echoing_untrusted_strings() {
+        let mut input = audit();
+        input["provider_reported_usage"]["source"] = json!("private fixture marker");
+        assert_eq!(
+            simulate(&[input]).unwrap_err().0,
+            "unavailable_usage_provenance"
+        );
+        for field in ["source", "rollout_count_with_usage"] {
+            for replacement in [
+                None,
+                Some(json!(null)),
+                Some(json!(0)),
+                Some(json!("private fixture marker")),
+            ] {
+                let mut input = audit();
+                let usage = input["provider_reported_usage"].as_object_mut().unwrap();
+                if let Some(value) = replacement {
+                    usage.insert(field.to_owned(), value);
+                } else {
+                    usage.remove(field);
+                }
+                assert_eq!(
+                    simulate(&[input]).unwrap_err().0,
+                    "unavailable_usage_provenance"
+                );
+            }
+        }
+        let mut input = audit();
+        input["provider_reported_usage"]["rollout_count_without_usage"] =
+            json!("private fixture marker");
+        let result = simulate(&[input]).unwrap();
+        assert!(result["input_scopes"][0]["usage_missing_rollouts"].is_null());
+        assert!(!result.to_string().contains("private fixture marker"));
+    }
+
+    #[test]
+    fn simulation_requires_reported_field_availability_not_zero_filled_splits() {
+        for field in [
+            "input_tokens",
+            "cached_input_tokens",
+            "output_tokens",
+            "reasoning_output_tokens",
+            "total_tokens",
+        ] {
+            for availability in [
+                None,
+                Some(json!(false)),
+                Some(json!(null)),
+                Some(json!("true")),
+            ] {
+                let mut input = audit();
+                // These numbers conserve the total even when the optional source
+                // fields were absent and the upstream reducer retained zero.
+                input["provider_reported_usage"]["cached_input_tokens"] = json!(0);
+                input["provider_reported_usage"]["non_cached_input_tokens"] = json!(1000);
+                input["provider_reported_usage"]["reasoning_output_tokens"] = json!(0);
+                let map = input["provider_reported_usage"]["token_field_availability"]
+                    .as_object_mut()
+                    .unwrap();
+                if let Some(value) = availability {
+                    map.insert(field.to_owned(), value);
+                } else {
+                    map.remove(field);
+                }
+                assert_eq!(
+                    simulate(&[input]).unwrap_err().0,
+                    format!("unverified_codex_usage_field:{field}")
+                );
+            }
+        }
+        for availability in [None, Some(json!(null)), Some(json!([]))] {
+            let mut input = audit();
+            let usage = input["provider_reported_usage"].as_object_mut().unwrap();
+            if let Some(value) = availability {
+                usage.insert("token_field_availability".to_owned(), value);
+            } else {
+                usage.remove("token_field_availability");
+            }
+            assert_eq!(
+                simulate(&[input]).unwrap_err().0,
+                "unverified_codex_usage_field:input_tokens"
+            );
+        }
+    }
+
+    #[test]
+    fn simulation_rejects_unavailable_or_inconsistent_usage_without_clamping() {
+        for (field, value, error) in [
+            (
+                "cached_input_tokens",
+                json!(1001),
+                "inconsistent_codex_usage_subsets",
+            ),
+            (
+                "reasoning_output_tokens",
+                json!(201),
+                "inconsistent_codex_usage_subsets",
+            ),
+            (
+                "non_cached_input_tokens",
+                json!(301),
+                "inconsistent_non_cached_input_tokens",
+            ),
+            (
+                "total_tokens",
+                json!(1240),
+                "inconsistent_codex_usage_total",
+            ),
+            ("total_tokens", json!(0), "inconsistent_codex_usage_total"),
+            (
+                "source",
+                json!("unavailable"),
+                "unavailable_usage_provenance",
+            ),
+            (
+                "rollout_count_with_usage",
+                json!(0),
+                "unavailable_usage_provenance",
+            ),
+        ] {
+            let mut inconsistent = audit();
+            inconsistent["provider_reported_usage"][field] = value;
+            assert_eq!(simulate(&[inconsistent]).unwrap_err().0, error);
+        }
+    }
+
+    #[test]
+    fn zero_observed_baseline_is_inconclusive_not_zero_percent_savings() {
+        let mut zero = audit();
+        for field in [
+            "input_tokens",
+            "cached_input_tokens",
+            "non_cached_input_tokens",
+            "output_tokens",
+            "reasoning_output_tokens",
+            "total_tokens",
+        ] {
+            zero["provider_reported_usage"][field] = json!(0);
+        }
+        let result = simulate(&[zero]).unwrap();
+        assert_eq!(result["status"], "INCONCLUSIVE");
+        assert_eq!(
+            result["reason_codes"],
+            json!(["zero_observed_token_baseline"])
+        );
+        for scenario in result["scenarios"].as_object().unwrap().values() {
+            assert!(scenario["total_reduction_ratio"].is_null());
+        }
+        assert_eq!(simulate(&[]).unwrap_err().0, "simulation_audit_required");
+    }
+
+    #[test]
+    fn unsupported_simulation_envelopes_are_rejected() {
+        let mut weekly = weekly_audit();
+        weekly["root"] = audit();
+        for field in ["schema", "kind"] {
+            let mut invalid = weekly.clone();
+            invalid["root"][field] = json!("unsupported");
+            assert_eq!(
+                simulate(&[invalid]).unwrap_err().0,
+                "unsupported_codex_audit"
+            );
+        }
+        let mut invalid_review =
+            json!({"kind":"groundline-codex-weekly-review", "schema":1, "audit":weekly});
+        invalid_review["audit"]["schema"] = json!(2);
+        assert_eq!(
+            simulate(&[invalid_review]).unwrap_err().0,
+            "unsupported_codex_audit"
+        );
+    }
+
+    #[test]
+    fn simulation_rejects_multiple_inputs_without_disjoint_ownership_proof() {
+        let input = audit();
+        assert_eq!(
+            simulate(&[input.clone(), input]).unwrap_err().0,
+            "simulation_single_audit_required"
+        );
+        let mut weekly = weekly_audit();
+        weekly["root"] = audit();
+        assert_eq!(
+            simulate(&[weekly, audit()]).unwrap_err().0,
+            "simulation_single_audit_required"
+        );
     }
 
     #[test]
@@ -1061,7 +1474,10 @@ mod tests {
         });
         let ready = compare_aggregate_periods(&packet).expect("ready comparison");
         assert_eq!(ready["status"], "READY");
-        assert_eq!(ready["confidence"], "high");
+        assert_eq!(ready["sample_readiness"], "descriptive_comparison_ready");
+        assert_eq!(ready["statistical_confidence"], "not_estimated");
+        assert_eq!(ready["causal_effect_estimated"], false);
+        assert!(ready.get("confidence").is_none());
         assert_eq!(
             ready["metric_deltas"]["compactions_per_root"]["relative_delta"],
             -0.5

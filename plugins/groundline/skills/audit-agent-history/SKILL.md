@@ -42,8 +42,11 @@ Never assume the user's current repository contains the installed binary.
    It runs one audit and one recommendation from the same in-memory result.
    Preserve `report_ko` units and source labels; inspect the nested audit and
    recommendation statuses separately. Do not run a second recommendation or
-   audit after this combined command. Present its single candidate for review;
-   never apply it without the user's decision. The separate raw audit and
+   audit after this combined command. Its deterministic candidate is evidence
+   for the weekly improvement loop, not the whole product-improvement decision.
+   Reuse it with `$groundline:improve-personal-workflow` when usage-pattern and
+   current Codex research are requested. Never apply a change without scoped
+   authority. The separate raw audit and
    `efficiency recommend --audit - --json` workflow remains available when needed.
 8. When the user explicitly permits Chronicle evidence, verify Chronicle is
    running through its native skill and read only the minimum recent surface.
@@ -55,7 +58,8 @@ Never assume the user's current repository contains the installed binary.
    experiment ledger.
 9. For an efficiency counterfactual, use
    `groundline efficiency simulate --audit <weekly.json> --json`. Label the
-   result as a simulation, not measured savings or billing.
+   result as fixed-assumption root-counter scenarios, not measured savings or
+   billing. Reuse supported existing JSON rather than running another audit.
 10. For a user-requested personal improvement trial, use
     `$groundline:improve-personal-workflow`. Its explicit private state contains
     only that trial and outcome evidence. Do not modify Chronicle records or

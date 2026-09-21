@@ -10,7 +10,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.27.0"
+version = "0.28.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/jukqaz/groundline"
@@ -47,6 +47,7 @@ serde_json = "1.0.149"
 serde_path_to_error = "0.1.20"
 serde-saphyr = { version = "1.2.0", default-features = false, features = ["deserialize"] }
 sha2 = "0.10.9"
+shlex = "=2.0.1"
 subtle = "2.6.1"
 syn = { version = "3.0.5", default-features = false, features = ["full", "parsing"] }
 thiserror = "2.0.18"

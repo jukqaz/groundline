@@ -8,6 +8,7 @@ use crate::ContractError;
 use crate::rollout::Record;
 
 mod attribution;
+mod command_category;
 mod continuation;
 mod tool_outcome;
 mod verification;
@@ -53,6 +54,9 @@ pub struct AuditWindow {
 #[derive(Debug, Default, Clone)]
 struct Usage {
     values: BTreeMap<&'static str, u64>,
+    // Numeric accumulators alone cannot distinguish a source omission from zero.
+    // Propagate omissions through both sums and window baselines.
+    missing_fields: BTreeSet<&'static str>,
 }
 
 impl Usage {
@@ -66,6 +70,9 @@ impl Usage {
         }
         let mut result = Self::default();
         for field in TOKEN_FIELDS {
+            if !object.get(field).is_some_and(Value::is_u64) {
+                result.missing_fields.insert(field);
+            }
             let number = object.get(field).and_then(Value::as_u64).unwrap_or(0);
             result.values.insert(field, number);
         }
@@ -80,6 +87,7 @@ impl Usage {
     }
 
     fn add_checked(&mut self, other: &Self) -> Result<(), ContractError> {
+        self.missing_fields.extend(&other.missing_fields);
         for field in TOKEN_FIELDS {
             let current = self.values.get(field).copied().unwrap_or(0);
             let next = current
@@ -104,7 +112,14 @@ impl Usage {
                 )
             })
             .collect();
-        Self { values }
+        Self {
+            values,
+            missing_fields: self
+                .missing_fields
+                .union(&baseline.missing_fields)
+                .copied()
+                .collect(),
+        }
     }
 
     fn as_json(&self) -> Map<String, Value> {
@@ -168,7 +183,6 @@ fn serialized_arguments(payload: &Map<String, Value>) -> String {
 
 fn tool_category(name: &str, arguments: &str) -> &'static str {
     let name = name.to_ascii_lowercase();
-    let arguments = arguments.to_ascii_lowercase();
     if name.contains("wait") || name.contains("write_stdin") || name.contains("poll") {
         "wait_or_poll"
     } else if name.contains("spawn_agent")
@@ -183,33 +197,12 @@ fn tool_category(name: &str, arguments: &str) -> &'static str {
         "codex_runtime"
     } else if name.contains("apply_patch") || name.contains("write") || name.contains("edit") {
         "mutation"
+    } else if name == "exec" {
+        continuation::plan(&name, arguments)
+            .filter(|plan| plan.has_verification)
+            .map_or("other_command", |_| "verification")
     } else if name.contains("exec") || name == "bash" || name == "shell" {
-        if [
-            "cargo test",
-            "cargo clippy",
-            "cargo check",
-            "cargo fmt",
-            "actionlint",
-            "npm test",
-            "pnpm test",
-            "flutter test",
-            "pytest",
-            "unittest",
-        ]
-        .iter()
-        .any(|marker| arguments.contains(marker))
-        {
-            "verification"
-        } else if arguments.contains("git ") || arguments.contains("gh ") {
-            "git_or_github"
-        } else if ["rg ", "sed ", "head ", "tail ", "find ", "ls "]
-            .iter()
-            .any(|marker| arguments.contains(marker))
-        {
-            "inspection"
-        } else {
-            "other_command"
-        }
+        command_category::category(arguments)
     } else {
         "other_tool"
     }
@@ -887,6 +880,7 @@ pub fn audit_rollouts(
             "last_usage_fallback_rollout_count": fallback_rollouts.saturating_sub(response_rollouts),
             "missing_usage_reasons": usage_missing_reasons,
             "billing_inference_performed": false,
+            "token_field_availability": TOKEN_FIELDS.into_iter().map(|field| (field, usage_rollouts > 0 && !provider_usage.missing_fields.contains(field))).collect::<BTreeMap<_, _>>(),
             "input_tokens": usage_json.get("input_tokens"),
             "cached_input_tokens": usage_json.get("cached_input_tokens"),
             "cache_write_input_tokens": usage_json.get("cache_write_input_tokens"),
@@ -916,6 +910,8 @@ pub fn audit_rollouts(
         },
         "tools": {
             "outcome_source": "native_status_metadata",
+            "verification_classification_scope": "literal_commands_and_static_awaited_native_calls",
+            "unclassified_command_call_count": tool_categories.get("other_command").copied().unwrap_or(0),
             "outcome_contract_revision": 2,
             "verification_recovered_by_poll_count": verification_recovered,
             "literal_poll_call_count": literal_poll_calls,
@@ -1301,6 +1297,148 @@ mod tests {
         let result = audit_rollouts(&[&many], 0, 20, AuditWindow::default()).unwrap();
         assert_eq!(result["status"], "PARTIAL");
         assert_eq!(result["coverage"]["record_count"], MAX_AUDIT_RECORDS);
+    }
+
+    #[test]
+    fn usage_field_availability_survives_missing_subsets_projection_sums_and_deltas() {
+        let complete = json!({"input_tokens":100,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":20,"reasoning_output_tokens":0,"total_tokens":120});
+        let mut partial = complete.clone();
+        partial
+            .as_object_mut()
+            .unwrap()
+            .remove("cached_input_tokens");
+        partial
+            .as_object_mut()
+            .unwrap()
+            .remove("reasoning_output_tokens");
+        let full = Usage::from_value(&complete).unwrap();
+        for value in [Value::Null, json!("0"), json!(-1)] {
+            let mut invalid = complete.clone();
+            invalid["cached_input_tokens"] = value;
+            assert!(
+                Usage::from_value(&invalid)
+                    .unwrap()
+                    .missing_fields
+                    .contains("cached_input_tokens")
+            );
+        }
+        let missing = Usage::from_value(&partial).unwrap();
+        assert!(
+            full.subtract(&missing)
+                .missing_fields
+                .contains("cached_input_tokens")
+        );
+        assert!(
+            missing
+                .subtract(&full)
+                .missing_fields
+                .contains("cached_input_tokens")
+        );
+        assert!(full.subtract(&Usage::default()).missing_fields.is_empty());
+        let mut aggregate = full.clone();
+        aggregate.add_checked(&missing).unwrap();
+        assert!(aggregate.missing_fields.contains("cached_input_tokens"));
+        let records = lines(&[
+            json!({"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":partial}}}),
+        ]);
+        let projected = records
+            .lines()
+            .map(|line| {
+                Record::parse(line)
+                    .unwrap()
+                    .unwrap()
+                    .audit_projection()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        for input in [&records, &projected] {
+            let result = audit_rollouts(&[input], 0, 20, AuditWindow::default()).unwrap();
+            assert_eq!(result["provider_reported_usage"]["total_tokens"], 120);
+            assert_eq!(
+                result["provider_reported_usage"]["token_field_availability"]["total_tokens"],
+                true
+            );
+            assert_eq!(
+                result["provider_reported_usage"]["token_field_availability"]["cached_input_tokens"],
+                false
+            );
+            assert_eq!(
+                result["provider_reported_usage"]["token_field_availability"]["reasoning_output_tokens"],
+                false
+            );
+            #[cfg(feature = "efficiency")]
+            assert!(crate::efficiency::simulate(&[result]).is_err());
+        }
+        let empty = audit_rollouts(&[], 0, 20, AuditWindow::default()).unwrap();
+        assert_eq!(
+            empty["provider_reported_usage"]["token_field_availability"]["total_tokens"],
+            false
+        );
+    }
+
+    #[test]
+    fn quoted_test_search_is_not_a_verification_in_raw_or_projected_history() {
+        let records = lines(&[
+            json!({"type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"search","arguments":json!({"cmd":"rg -n 'cargo test' src"}).to_string()}}),
+            json!({"type":"response_item","payload":{"type":"function_call_output","call_id":"search","output":{"exit_code":2}}}),
+            json!({"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"wrapper","input":"text(await tools.exec_command({cmd:\"rg -n 'pytest' src\"}));"}}),
+            json!({"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"wrapper","output":{"exit_code":2}}}),
+        ]);
+        let projected = records
+            .lines()
+            .map(|line| {
+                Record::parse(line)
+                    .unwrap()
+                    .unwrap()
+                    .audit_projection()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        for input in [&records, &projected] {
+            let audit = audit_rollouts(&[input], 0, 20, AuditWindow::default()).unwrap();
+            for metric in [
+                "verification_success_count",
+                "verification_failure_count",
+                "verification_unresolved_count",
+            ] {
+                assert_eq!(audit["tools"][metric], 0);
+            }
+            assert_eq!(audit["tools"]["by_category"]["inspection"], 1);
+        }
+    }
+
+    #[test]
+    fn static_wrapper_selects_test_result_without_borrowing_search_failure() {
+        let records = lines(&[
+            json!({"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"batch","input":"text(await tools.exec_command({cmd:'cargo test'})); text(await tools.exec_command({cmd:\"rg -n 'cargo test' src\"}));"}}),
+            json!({"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"batch","output":[{"type":"text","text":"Script completed\nWall time 1 seconds\nOutput:"},{"type":"text","text":"{\"exit_code\":0}"},{"type":"text","text":"{\"exit_code\":2}"}]}}),
+        ]);
+        let audit = audit_rollouts(&[&records], 0, 20, AuditWindow::default()).unwrap();
+        assert_eq!(audit["tools"]["verification_success_count"], 1);
+        assert_eq!(audit["tools"]["verification_failure_count"], 0);
+        assert_eq!(audit["tools"]["verification_unresolved_count"], 0);
+    }
+
+    #[test]
+    fn non_verification_or_unexecuted_wrappers_do_not_borrow_terminal_success() {
+        for source in [
+            "text(await tools.exec_command({cmd:'cargo fmt'}));",
+            "text(await tools.exec_command({cmd:'cargo test --help'}));",
+            "text('cargo test');",
+            "if (false) text(await tools.exec_command({cmd:'cargo test'}));",
+            "const f = async () => await tools.exec_command({cmd:'cargo test'});",
+            "const results = await Promise.allSettled([tools.exec_command({cmd:\"rg 'cargo test' src\"})]); text(results);",
+        ] {
+            let records = lines(&[
+                json!({"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"opaque","input":source}}),
+                json!({"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"opaque","output":{"exit_code":0}}}),
+            ]);
+            let audit = audit_rollouts(&[&records], 0, 20, AuditWindow::default()).unwrap();
+            assert_eq!(audit["tools"]["verification_success_count"], 0);
+            assert_eq!(audit["tools"]["unclassified_command_call_count"], 1);
+        }
     }
 
     #[test]

@@ -44,6 +44,56 @@ fn recommend_stdin(bytes: &[u8]) -> Output {
 }
 
 #[test]
+fn simulation_cli_requires_one_observed_audit_and_does_not_modify_its_input() {
+    let root = tempdir().unwrap();
+    let path = root.path().join("audit.json");
+    let mut fixture = json!({
+        "kind":"groundline-codex-session-audit","schema":1,
+        "provider_reported_usage":{
+            "source":"codex-cumulative-total-snapshots","rollout_count_with_usage":1,
+            "input_tokens":100,"cached_input_tokens":20,"output_tokens":10,
+            "reasoning_output_tokens":2,"total_tokens":110,
+            "token_field_availability":{"input_tokens":true,"cached_input_tokens":true,
+                "output_tokens":true,"reasoning_output_tokens":true,"total_tokens":true}
+        },
+        "tools":{"call_count":5,"failure_signals":{}},
+        "activity":{"compactions":0},"task_latency":{"long_turn_count":0}
+    });
+    let bytes = serde_json::to_vec(&fixture).unwrap();
+    fs::write(&path, &bytes).unwrap();
+    let args = [
+        "efficiency",
+        "simulate",
+        "--audit",
+        path_argument(&path),
+        "--json",
+    ];
+    let output = run(&args);
+    assert!(output.status.success());
+    let result = parse_stdout(&output);
+    assert_eq!(result["evidence_class"], "counterfactual_not_measured");
+    assert_eq!(result["mutation_performed"], false);
+    assert_eq!(fs::read(&path).unwrap(), bytes);
+    let duplicate = run(&[
+        "efficiency",
+        "simulate",
+        "--audit",
+        path_argument(&path),
+        "--audit",
+        path_argument(&path),
+        "--json",
+    ]);
+    assert!(!duplicate.status.success());
+    fixture["provider_reported_usage"]["token_field_availability"]["cached_input_tokens"] =
+        json!(false);
+    let partial = serde_json::to_vec(&fixture).unwrap();
+    fs::write(&path, &partial).unwrap();
+    assert!(!run(&args).status.success());
+    assert_eq!(fs::read(&path).unwrap(), partial);
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
+}
+
+#[test]
 fn weekly_review_runs_the_installed_command_contract_without_mutating_history() {
     use chrono::{Duration, Utc};
     let home = tempdir().unwrap();

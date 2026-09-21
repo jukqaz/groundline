@@ -1,6 +1,6 @@
 interface:
   display_name: "Improve Personal Workflow"
-  short_description: "Review model guidance or evaluate a personal workflow trial"
-  default_prompt: "Use $improve-personal-workflow to improve the requested guidance; use Insights and a personal trial only when that evidence is part of my request."
+  short_description: "Improve Codex quality, token use, and task performance"
+  default_prompt: "Use $improve-personal-workflow to review prior improvements, usage patterns, and relevant Codex updates, then propose one testable change within my requested scope."
 policy:
   allow_implicit_invocation: false

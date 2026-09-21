@@ -27,7 +27,7 @@ fn sample(context: &str, offset: i64, key: &str) -> Sample {
     let start = Utc::now() - Duration::days(offset);
     Sample {
         kind: "groundline-outcome-sample".into(),
-        schema: 1,
+        schema: 2,
         period_start_utc: start.to_rfc3339(),
         period_end_utc: (start + Duration::hours(1)).to_rfc3339(),
         model_context_sha256: context.into(),
@@ -37,7 +37,7 @@ fn sample(context: &str, offset: i64, key: &str) -> Sample {
         ),
         task_kind: "implementation".into(),
         scope_size: "medium".into(),
-        activation_verified: false,
+        activation_evidence: None,
         units: (0..10)
             .map(|i| Unit {
                 unit_hash: hash(format!("{key}{i}").as_bytes()),
@@ -51,9 +51,19 @@ fn sample(context: &str, offset: i64, key: &str) -> Sample {
                 repeated_call_count: 3,
                 tool_call_count: 10,
                 total_tokens: Some(1000),
+                optimization_opportunities: None,
             })
             .collect(),
     }
+}
+fn activate(sample: &mut Sample) {
+    sample.activation_evidence = Some(ActivationEvidence {
+        instruction_load_sha256: hash(b"native instruction load evidence"),
+        behavior_check_sha256: hash(b"native observed behavior evidence"),
+        guidance_sha256: sample.guidance_sha256.clone(),
+        observed_at_utc: (time(&sample.period_start_utc).unwrap() - Duration::seconds(1))
+            .to_rfc3339(),
+    });
 }
 fn trial() -> (TempDir, ModelEvidence, Vec<u8>, Sample) {
     let root = tempdir().unwrap();
@@ -70,7 +80,7 @@ fn trial() -> (TempDir, ModelEvidence, Vec<u8>, Sample) {
     .unwrap();
     let mut candidate = sample(&context, 2, "after");
     candidate.guidance_sha256 = hash(render(&[Rule::ApprovalContinuity]).as_bytes());
-    candidate.activation_verified = true;
+    activate(&mut candidate);
     for unit in &mut candidate.units {
         unit.redundant_approval_count = 0;
         unit.continuation_prompt_count = 0;
@@ -314,8 +324,11 @@ fn absent_activation_overlapping_periods_reused_ids_and_cohort_changes_are_incon
         let (root, e, c, mut s) = trial();
         let baseline = load_trial(root.path()).unwrap().baseline;
         match case {
-            0 => s.activation_verified = false,
-            1 => s.period_start_utc = baseline.period_start_utc.clone(),
+            0 => s.activation_evidence = None,
+            1 => {
+                s.period_start_utc = baseline.period_start_utc.clone();
+                activate(&mut s);
+            }
             2 => s.units[0].unit_hash = baseline.units[0].unit_hash.clone(),
             3 => s.task_kind = "review".into(),
             _ => {
@@ -442,7 +455,7 @@ fn invalid_archived_trials_are_preserved_and_rejected_before_any_state_write() {
         let before_trial = fs::read(root.path().join("trial.json")).unwrap();
         let mut archived: Value = serde_json::from_slice(&before_trial).unwrap();
         match case {
-            "schema" => archived["schema"] = json!(2),
+            "schema" => archived["schema"] = json!(3),
             "active" => archived["status"] = json!("pending"),
             _ => {}
         }
@@ -473,6 +486,8 @@ fn invalid_archived_trials_are_preserved_and_rejected_before_any_state_write() {
             err.0,
             if case == "hash" {
                 "personal_archive_mismatch"
+            } else if case == "schema" {
+                "personal_unsupported_trial_schema_preserved_restore_with_matching_cli"
             } else {
                 "personal_invalid_trial"
             }
@@ -1163,7 +1178,7 @@ fn review_selects_the_next_eligible_rule_and_matches_locked_application() {
     let context = model_context(&e, &c, Utc::now()).unwrap();
     let mut fresh = sample(&context, 1, "fresh");
     fresh.guidance_sha256 = hash(render(&[Rule::ApprovalContinuity]).as_bytes());
-    fresh.activation_verified = true;
+    activate(&mut fresh);
     let before = fs::read(root.path().join("trial.json")).unwrap();
     let out = review_sample(inputs.path(), &fresh, &e, &c, Some(root.path()), false);
     assert_eq!(out["status"], "READY");
@@ -1193,6 +1208,7 @@ fn review_selects_the_next_eligible_rule_and_matches_locked_application() {
     both.status = "retained".into();
     save_trial(root.path(), &both).unwrap();
     fresh.guidance_sha256 = hash(render(&both.after_rules).as_bytes());
+    activate(&mut fresh);
     for unit in &mut fresh.units {
         unit.unit_hash = hash(unit.unit_hash.as_bytes());
     }
@@ -1216,7 +1232,7 @@ fn review_reports_blocked_state_and_never_authorizes_an_unchecked_directory() {
             atomic_write_private(&root.path().join("personal-guidance.md"), b"").unwrap();
         } else {
             sample.guidance_sha256 = hash(render(&t.after_rules).as_bytes());
-            sample.activation_verified = true;
+            activate(&mut sample);
             if phase == "retained" {
                 for unit in &mut sample.units {
                     unit.unit_hash = hash(unit.unit_hash.as_bytes());
@@ -1246,4 +1262,383 @@ fn review_reports_blocked_state_and_never_authorizes_an_unchecked_directory() {
     assert_eq!(out["status"], "OBSERVE");
     assert_eq!(out["state_preflight_checked"], false);
     assert_eq!(out["automatic_application_eligible"], false);
+}
+
+fn observe_opportunity(sample: &mut Sample, rule: Rule) {
+    for unit in &mut sample.units {
+        unit.optimization_opportunities = Some(vec![OpportunityEvidence {
+            kind: rule.opportunity().unwrap(),
+            evidence_sha256: hash(format!("observed eligibility {}", unit.unit_hash).as_bytes()),
+            eligible_count: 1,
+        }]);
+    }
+}
+
+fn optimization_trial(rule: Rule) -> (TempDir, ModelEvidence, Vec<u8>, Sample) {
+    let root = tempdir().unwrap();
+    let (mut evidence, catalog) = model();
+    evidence.behavior_focus = vec![rule];
+    let context = model_context(&evidence, &catalog, Utc::now()).unwrap();
+    let mut baseline = sample(&context, 4, "optimizer-before");
+    observe_opportunity(&mut baseline, rule);
+    apply(
+        root.path(),
+        rule,
+        &baseline,
+        &context,
+        Utc::now() - Duration::days(3),
+    )
+    .unwrap();
+    let mut candidate = sample(&context, 2, "optimizer-after");
+    candidate.guidance_sha256 = hash(render(&[rule]).as_bytes());
+    activate(&mut candidate);
+    for unit in &mut candidate.units {
+        // The task and intervention counts stay identical: only the resource
+        // named by the rule's primary objective improves.
+        unit.optimization_opportunities = Some(Vec::new());
+        match rule {
+            Rule::EvidenceReuse | Rule::JustInTimeContext => unit.total_tokens = Some(800),
+            Rule::BoundedParallelReads => {
+                unit.completed_at_utc =
+                    (time(&unit.started_at_utc).unwrap() + Duration::seconds(40)).to_rfc3339();
+            }
+            _ => unreachable!(),
+        }
+    }
+    (root, evidence, catalog, candidate)
+}
+
+#[test]
+fn optimization_rules_use_direct_opportunities_not_effort_or_aggregate_tool_counts() {
+    let (mut evidence, catalog) = model();
+    evidence.behavior_focus = Rule::ALL.to_vec();
+    let context = model_context(&evidence, &catalog, Utc::now()).unwrap();
+    for rule in [
+        Rule::EvidenceReuse,
+        Rule::JustInTimeContext,
+        Rule::BoundedParallelReads,
+    ] {
+        evidence.behavior_focus = vec![rule];
+        let mut baseline = sample(&context, 1, "direct-opportunity");
+        assert_eq!(select_rule(&evidence, Some(&baseline), &audit()), None);
+        assert_eq!(
+            strategy_eligibility(rule, Some(&baseline))["observed_eligible_opportunity_count"],
+            Value::Null
+        );
+        for unit in &mut baseline.units {
+            unit.optimization_opportunities = Some(Vec::new());
+        }
+        assert_eq!(select_rule(&evidence, Some(&baseline), &audit()), None);
+        assert_eq!(
+            strategy_eligibility(rule, Some(&baseline))["observed_eligible_opportunity_count"],
+            0
+        );
+        observe_opportunity(&mut baseline, rule);
+        assert_eq!(
+            select_rule(&evidence, Some(&baseline), &audit()),
+            Some(rule)
+        );
+        let inputs = tempdir().unwrap();
+        let state = tempdir().unwrap();
+        let reviewed = review_sample(
+            inputs.path(),
+            &baseline,
+            &evidence,
+            &catalog,
+            Some(state.path()),
+            true,
+        );
+        assert_eq!(reviewed["status"], "READY");
+        assert_eq!(
+            reviewed["candidate"]["primary_metric"],
+            rule.primary_metric()
+        );
+        assert_eq!(reviewed["trial"]["native_activation"], "UNVERIFIED");
+        assert_eq!(
+            reviewed["strategy_eligibility"][0]["observed_eligible_opportunity_count"],
+            10
+        );
+    }
+}
+
+#[test]
+fn token_or_time_only_improvement_can_retain_each_optimization_strategy() {
+    for rule in [
+        Rule::EvidenceReuse,
+        Rule::JustInTimeContext,
+        Rule::BoundedParallelReads,
+    ] {
+        let (root, evidence, catalog, candidate) = optimization_trial(rule);
+        let out = evaluate(root.path(), candidate, &evidence, &catalog).unwrap();
+        assert_eq!(out["status"], "RETAINED");
+        assert_eq!(out["primary_metric"], rule.primary_metric());
+        assert_eq!(out["native_activation"], "OPERATOR_EVIDENCED");
+        assert_eq!(out["activation_independently_verified"], false);
+        assert_eq!(out["causal_improvement_claimed"], false);
+        assert_eq!(
+            out["baseline"]["redundant_approvals_per_unit"],
+            out["candidate"]["redundant_approvals_per_unit"]
+        );
+        assert_eq!(
+            out["baseline"]["repeated_calls_per_unit"],
+            out["candidate"]["repeated_calls_per_unit"]
+        );
+    }
+}
+
+#[test]
+fn verified_delivery_metrics_include_failed_resources_and_keep_unknown_or_zero_denominators_null() {
+    let mut observed = sample(&hash(b"context"), 1, "denominator");
+    observed.units[0].outcome = Outcome::Failed;
+    let measured = metrics(&observed);
+    assert_eq!(measured["verified_delivery_count"], 9);
+    assert_eq!(
+        measured["owned_tokens_per_verified_delivery"],
+        json!(10_000.0 / 9.0)
+    );
+    assert_eq!(
+        measured["wall_duration_ms_per_verified_delivery"],
+        json!(600_000.0 / 9.0)
+    );
+    observed.units[0].total_tokens = None;
+    assert_eq!(
+        metrics(&observed)["owned_tokens_per_verified_delivery"],
+        Value::Null
+    );
+    assert_eq!(
+        metrics(&observed)["owned_token_coverage"]["unobserved_unit_count"],
+        1
+    );
+    for unit in &mut observed.units {
+        unit.outcome = Outcome::Failed;
+        unit.total_tokens = Some(1000);
+    }
+    assert_eq!(
+        metrics(&observed)["owned_tokens_per_verified_delivery"],
+        Value::Null
+    );
+    assert_eq!(
+        metrics(&observed)["wall_duration_ms_per_verified_delivery"],
+        Value::Null
+    );
+}
+
+#[test]
+fn missing_owned_usage_blocks_optimization_application_and_evaluation_without_mutation() {
+    for rule in [
+        Rule::EvidenceReuse,
+        Rule::JustInTimeContext,
+        Rule::BoundedParallelReads,
+    ] {
+        let (root, evidence, catalog, mut candidate) = optimization_trial(rule);
+        let mut baseline = load_trial(root.path()).unwrap().baseline;
+        baseline.units[0].total_tokens = None;
+        let inputs = tempdir().unwrap();
+        let unused = tempdir().unwrap();
+        let out = review_sample(
+            inputs.path(),
+            &baseline,
+            &evidence,
+            &catalog,
+            Some(unused.path()),
+            true,
+        );
+        assert_eq!(out["status"], "OBSERVE");
+        assert_eq!(out["mutation_performed"], false);
+        assert!(
+            out["reason_codes"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("owned_token_baseline_incomplete"))
+        );
+        candidate.units[0].total_tokens = None;
+        let before = fs::read(root.path().join("trial.json")).unwrap();
+        let out = evaluate(root.path(), candidate, &evidence, &catalog).unwrap();
+        assert_eq!(out["status"], "INCONCLUSIVE");
+        assert_eq!(out["mutation_performed"], false);
+        assert_eq!(out["candidate"]["tokens_per_unit"], Value::Null);
+        assert_eq!(fs::read(root.path().join("trial.json")).unwrap(), before);
+    }
+    let (root, evidence, catalog, candidate) = optimization_trial(Rule::EvidenceReuse);
+    let mut trial = load_trial(root.path()).unwrap();
+    trial.baseline.units[0].total_tokens = None;
+    save_trial(root.path(), &trial).unwrap();
+    let out = evaluate(root.path(), candidate, &evidence, &catalog).unwrap();
+    assert_eq!(out["status"], "INCONCLUSIVE");
+    assert_eq!(
+        out["baseline"]["owned_tokens_per_verified_delivery"],
+        Value::Null
+    );
+}
+
+#[test]
+fn invalid_opportunity_evidence_and_retired_samples_are_rejected() {
+    let context = hash(b"context");
+    for invalid in ["digest", "zero", "unbounded", "duplicate", "retired"] {
+        let mut observed = sample(&context, 1, "invalid-opportunity");
+        observe_opportunity(&mut observed, Rule::EvidenceReuse);
+        let opportunities = observed.units[0]
+            .optimization_opportunities
+            .as_mut()
+            .unwrap();
+        match invalid {
+            "digest" => opportunities[0].evidence_sha256 = "not-a-digest".into(),
+            "zero" => opportunities[0].eligible_count = 0,
+            "unbounded" => opportunities[0].eligible_count = 10_001,
+            "duplicate" => opportunities.push(opportunities[0].clone()),
+            _ => observed.schema = 1,
+        }
+        assert!(validate_sample(&observed, &context, Utc::now()).is_err());
+    }
+    let (root, _, _, _) = optimization_trial(Rule::EvidenceReuse);
+    let mut trial = serde_json::to_value(load_trial(root.path()).unwrap()).unwrap();
+    trial["schema"] = json!(1);
+    trial["baseline"]["schema"] = json!(1);
+    trial["baseline"]
+        .as_object_mut()
+        .unwrap()
+        .remove("activation_evidence");
+    trial["baseline"]["activation_verified"] = json!(true);
+    atomic_write_private(
+        &root.path().join("trial.json"),
+        &serde_json::to_vec(&trial).unwrap(),
+    )
+    .unwrap();
+    let before = fs::read(root.path().join("trial.json")).unwrap();
+    let before_guidance = fs::read(root.path().join("personal-guidance.md")).unwrap();
+    assert_eq!(
+        run(Command::Rollback {
+            state_dir: root.path().into(),
+            json: true
+        })
+        .unwrap_err()
+        .0,
+        "personal_unsupported_trial_schema_preserved_restore_with_matching_cli"
+    );
+    assert_eq!(fs::read(root.path().join("trial.json")).unwrap(), before);
+    assert_eq!(
+        fs::read(root.path().join("personal-guidance.md")).unwrap(),
+        before_guidance
+    );
+}
+
+#[test]
+fn activation_requires_load_and_behavior_evidence_before_the_trial_sample() {
+    let (root, evidence, catalog, candidate) = optimization_trial(Rule::EvidenceReuse);
+    let context = model_context(&evidence, &catalog, Utc::now()).unwrap();
+    for invalid in ["load", "behavior", "guidance", "equal_sample_start", "late"] {
+        let mut sample = candidate.clone();
+        let activation = sample.activation_evidence.as_mut().unwrap();
+        match invalid {
+            "load" => activation.instruction_load_sha256.clear(),
+            "behavior" => activation.behavior_check_sha256.clear(),
+            "guidance" => activation.guidance_sha256 = hash(b"another guidance"),
+            "equal_sample_start" => activation.observed_at_utc = sample.period_start_utc.clone(),
+            _ => {
+                activation.observed_at_utc =
+                    (time(&sample.period_start_utc).unwrap() + Duration::seconds(1)).to_rfc3339()
+            }
+        }
+        assert!(validate_sample(&sample, &context, Utc::now()).is_err());
+    }
+    let mut absent = candidate.clone();
+    absent.activation_evidence = None;
+    let out = evaluate(root.path(), absent, &evidence, &catalog).unwrap();
+    assert_eq!(out["status"], "INCONCLUSIVE");
+    assert_eq!(out["native_activation"], "UNVERIFIED");
+    let applied = time(&load_trial(root.path()).unwrap().applied_at_utc).unwrap();
+    for offset in [-1, 0] {
+        let mut pretrial = candidate.clone();
+        pretrial
+            .activation_evidence
+            .as_mut()
+            .unwrap()
+            .observed_at_utc = (applied + Duration::seconds(offset)).to_rfc3339();
+        let out = evaluate(root.path(), pretrial, &evidence, &catalog).unwrap();
+        assert_eq!(out["status"], "INCONCLUSIVE");
+        assert_eq!(out["native_activation"], "UNVERIFIED");
+    }
+}
+
+#[test]
+fn optimization_resource_or_quality_regressions_roll_back_and_preserve_owner_edits() {
+    for regression in ["quality", "tokens", "time", "intervention", "no_benefit"] {
+        let (root, evidence, catalog, mut candidate) = optimization_trial(Rule::JustInTimeContext);
+        match regression {
+            "quality" => candidate.units[0].outcome = Outcome::Failed,
+            "tokens" => candidate.units[0].total_tokens = Some(100_000),
+            "time" => {
+                candidate.units[0].completed_at_utc =
+                    (time(&candidate.units[0].started_at_utc).unwrap() + Duration::seconds(90))
+                        .to_rfc3339()
+            }
+            "intervention" => candidate.units[0].redundant_approval_count += 1,
+            _ => {
+                for unit in &mut candidate.units {
+                    unit.total_tokens = Some(1000);
+                }
+            }
+        }
+        let out = evaluate(root.path(), candidate, &evidence, &catalog).unwrap();
+        assert_eq!(out["status"], "ROLLED_BACK");
+        assert_eq!(
+            fs::read(root.path().join("personal-guidance.md")).unwrap(),
+            b""
+        );
+    }
+    let (root, evidence, catalog, candidate) = optimization_trial(Rule::EvidenceReuse);
+    atomic_write_private(&root.path().join("personal-guidance.md"), b"owner changes").unwrap();
+    assert!(evaluate(root.path(), candidate, &evidence, &catalog).is_err());
+    assert_eq!(
+        fs::read(root.path().join("personal-guidance.md")).unwrap(),
+        b"owner changes"
+    );
+}
+
+#[test]
+fn all_five_generated_rules_and_large_trial_subsets_round_trip_safely() {
+    let root = tempdir().unwrap();
+    for bits in 0..(1 << Rule::ALL.len()) {
+        let rules: Vec<_> = Rule::ALL
+            .into_iter()
+            .enumerate()
+            .filter(|(index, _)| bits & (1 << index) != 0)
+            .map(|(_, rule)| rule)
+            .collect();
+        atomic_write_private(
+            &root.path().join("personal-guidance.md"),
+            render(&rules).as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(current_rules(root.path()).unwrap(), rules);
+    }
+    let (root, _, _, _) = optimization_trial(Rule::BoundedParallelReads);
+    let mut trial = load_trial(root.path()).unwrap();
+    trial.before_rules = Rule::ALL[..4].to_vec();
+    trial.after_rules = Rule::ALL.to_vec();
+    trial.baseline.guidance_sha256 = hash(render(&trial.before_rules).as_bytes());
+    activate(&mut trial.baseline);
+    assert!(parse_trial(&serde_json::to_vec(&trial).unwrap()).is_ok());
+    trial.before_rules.swap(0, 1);
+    assert!(parse_trial(&serde_json::to_vec(&trial).unwrap()).is_err());
+}
+
+#[test]
+fn evaluation_rechecks_the_stored_baseline_opportunity_evidence() {
+    let (root, evidence, catalog, candidate) = optimization_trial(Rule::EvidenceReuse);
+    let mut trial = load_trial(root.path()).unwrap();
+    for unit in &mut trial.baseline.units {
+        unit.optimization_opportunities = None;
+    }
+    save_trial(root.path(), &trial).unwrap();
+    let before = fs::read(root.path().join("trial.json")).unwrap();
+    let out = evaluate(root.path(), candidate, &evidence, &catalog).unwrap();
+    assert_eq!(out["status"], "INCONCLUSIVE");
+    assert!(
+        out["reason_codes"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("baseline_candidate_signal_missing"))
+    );
+    assert_eq!(fs::read(root.path().join("trial.json")).unwrap(), before);
 }

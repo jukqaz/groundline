@@ -181,10 +181,10 @@ enum EfficiencyCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Simulate bounded efficiency scenarios from Codex-reported audits.
+    /// Simulate fixed-assumption scenarios from one observed Codex audit.
     Simulate {
         #[arg(long, required = true)]
-        audit: Vec<PathBuf>,
+        audit: PathBuf,
         #[arg(long)]
         json: bool,
     },
@@ -473,11 +473,8 @@ fn run(cli: Cli) -> Result<(), ExitCode> {
             .map(|value| (value, json)),
         Command::Efficiency {
             command: EfficiencyCommand::Simulate { audit, json },
-        } => audit
-            .iter()
-            .map(|path| load_object(path))
-            .collect::<Result<Vec<_>, _>>()
-            .and_then(|audits| efficiency::simulate(&audits))
+        } => load_object(&audit)
+            .and_then(|audit| efficiency::simulate(&[audit]))
             .map(|value| (value, json)),
         Command::Efficiency {
             command:

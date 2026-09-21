@@ -93,3 +93,15 @@ Oxc의 숫자 변환 의존성 `dragonbox_ecma 0.1.12`는 포함된 `LICENSE-Boo
 공식 [Boost Software License 1.0](https://www.boost.org/LICENSE_1_0.txt)을 확인해
 BSL-1.0 선택을 해당 버전에만 허용한다. 전역 허용 목록이나 보안 권고 검사는
 완화하지 않는다. 범위는 [cargo-deny의 패키지별 예외](https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html#the-exceptions-field-optional)로 고정한다.
+
+검증 호출 분류는 인자 전체의 `cargo test` 같은 문자열 검색 대신 실행 위치를
+확인한다. 기존 잠금 파일의 `shlex 2.0.1`을 audit의 직접 의존성으로 사용해
+8 KiB 이하 리터럴 명령의 인용을 해석한다. 표준 `split_whitespace`만으로는
+인용된 검색어와 실행 파일 경계를 보존할 수 없다. shlex는 셸 실행기가 아니므로
+복합 명령, 치환, 파이프와 동적 실행은 추측하지 않고 미분류 수로 공개한다.
+JavaScript는 기존 Oxc의 정적 await 계획만 사용하며 문자열·주석 속 호출을
+실행으로 취급하지 않는다. 검색문에 테스트 이름이 있는 경우와 실제 테스트를
+같이 출력한 경우, 원본/투영 기록의 판정 동등성을 회귀 검증한다. 이는 검증
+종료 결과 커버리지와 별도의 호출 분류 한계이며, 과거 서버 집계를 수정하지 않는다.
+
+공식 근거: [고정 버전 shlex API](https://docs.rs/shlex/2.0.1/shlex/).

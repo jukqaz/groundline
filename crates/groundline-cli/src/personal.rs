@@ -71,8 +71,54 @@ pub enum Command {
 enum Rule {
     ApprovalContinuity,
     DiagnoseBeforeRetry,
+    EvidenceReuse,
+    JustInTimeContext,
+    BoundedParallelReads,
 }
 impl Rule {
+    const ALL: [Self; 5] = [
+        Self::ApprovalContinuity,
+        Self::DiagnoseBeforeRetry,
+        Self::EvidenceReuse,
+        Self::JustInTimeContext,
+        Self::BoundedParallelReads,
+    ];
+
+    fn primary_metric(self) -> &'static str {
+        match self {
+            Self::ApprovalContinuity => "redundant_approvals_per_unit",
+            Self::DiagnoseBeforeRetry => "repeated_calls_per_unit",
+            Self::EvidenceReuse | Self::JustInTimeContext => "owned_tokens_per_verified_delivery",
+            Self::BoundedParallelReads => "wall_duration_ms_per_verified_delivery",
+        }
+    }
+
+    fn opportunity(self) -> Option<OpportunityKind> {
+        match self {
+            Self::EvidenceReuse => Some(OpportunityKind::EvidenceReuse),
+            Self::JustInTimeContext => Some(OpportunityKind::JustInTimeContext),
+            Self::BoundedParallelReads => Some(OpportunityKind::BoundedParallelReads),
+            _ => None,
+        }
+    }
+
+    fn observed_in(self, unit: &Unit) -> bool {
+        match self {
+            Self::ApprovalContinuity => {
+                unit.redundant_approval_count > 0 || unit.continuation_prompt_count > 0
+            }
+            Self::DiagnoseBeforeRetry => unit.repeated_call_count > 0,
+            _ => unit
+                .optimization_opportunities
+                .as_ref()
+                .is_some_and(|items| {
+                    items
+                        .iter()
+                        .any(|item| Some(item.kind) == self.opportunity())
+                }),
+        }
+    }
+
     fn instruction(self) -> &'static str {
         match self {
             Self::ApprovalContinuity => {
@@ -81,8 +127,44 @@ impl Rule {
             Self::DiagnoseBeforeRetry => {
                 "After a failed operation, identify the cause or a changed condition before retrying. Treat environment failures separately from code failures. Keep transient retries and verification bounded; reuse passing evidence until a relevant change or unresolved risk requires another check."
             }
+            Self::EvidenceReuse => {
+                "Reuse a directly verified result only while its relevant inputs, code, environment, scope, and risk remain unchanged. Check that evidence still covers the requested outcome; rerun the smallest affected check after a relevant change or unresolved risk. Do not substitute old evidence for a required fresh live check."
+            }
+            Self::JustInTimeContext => {
+                "Load the smallest relevant context needed for the active task, using targeted discovery and conditional references. Read every selected mandatory instruction fully, preserve decision-critical evidence, and expand context when uncertainty remains. Do not preload unrelated references or truncate required evidence to reduce tokens."
+            }
+            Self::BoundedParallelReads => {
+                "Use an available native parallel mechanism for bounded, independent read-only operations when their results do not depend on each other. Preserve per-operation status and evidence, respect rate limits and permissions, and serialize dependent or state-changing work. This guidance does not authorize subagents or change native settings."
+            }
         }
     }
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+enum OpportunityKind {
+    EvidenceReuse,
+    JustInTimeContext,
+    BoundedParallelReads,
+}
+
+/// Operator-observed eligible opportunities, never inferred from effort, time,
+/// or tool counts. The digest refers to private, strategy-specific evidence.
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct OpportunityEvidence {
+    kind: OpportunityKind,
+    evidence_sha256: String,
+    eligible_count: u16,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ActivationEvidence {
+    instruction_load_sha256: String,
+    behavior_check_sha256: String,
+    guidance_sha256: String,
+    observed_at_utc: String,
 }
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -148,6 +230,7 @@ struct Unit {
     repeated_call_count: u32,
     tool_call_count: u32,
     total_tokens: Option<u64>,
+    optimization_opportunities: Option<Vec<OpportunityEvidence>>,
 }
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -161,7 +244,7 @@ struct Sample {
     comparison_context_sha256: String,
     task_kind: String,
     scope_size: String,
-    activation_verified: bool,
+    activation_evidence: Option<ActivationEvidence>,
     units: Vec<Unit>,
 }
 #[derive(Clone, Deserialize, Serialize)]
@@ -247,7 +330,7 @@ fn model_context(
         || e.catalog_sha256 != hash(catalog_bytes)
         || e.official_sources.is_empty()
         || e.official_sources.len() > 4
-        || e.behavior_focus.len() > 2
+        || e.behavior_focus.len() > Rule::ALL.len()
         || e.behavior_focus.iter().collect::<BTreeSet<_>>().len() != e.behavior_focus.len()
     {
         return Err(error("invalid_model_evidence"));
@@ -319,7 +402,7 @@ fn validate_sample(s: &Sample, context: &str, now: DateTime<Utc>) -> Result<(), 
     let start = time(&s.period_start_utc)?;
     let end = time(&s.period_end_utc)?;
     if s.kind != "groundline-outcome-sample"
-        || s.schema != 1
+        || s.schema != 2
         || s.model_context_sha256 != context
         || !valid_hash(&s.guidance_sha256)
         || !valid_hash(&s.comparison_context_sha256)
@@ -332,6 +415,14 @@ fn validate_sample(s: &Sample, context: &str, now: DateTime<Utc>) -> Result<(), 
         || s.units.len() > 1000
     {
         return Err(error("invalid_outcome_sample"));
+    }
+    if let Some(activation) = &s.activation_evidence
+        && (!valid_hash(&activation.instruction_load_sha256)
+            || !valid_hash(&activation.behavior_check_sha256)
+            || activation.guidance_sha256 != s.guidance_sha256
+            || time(&activation.observed_at_utc)? >= start)
+    {
+        return Err(error("invalid_activation_evidence"));
     }
     let mut ids = BTreeSet::new();
     for u in &s.units {
@@ -347,6 +438,22 @@ fn validate_sample(s: &Sample, context: &str, now: DateTime<Utc>) -> Result<(), 
             || (u.outcome == Outcome::Unknown) != (u.evidence == Evidence::Unobserved)
         {
             return Err(error("invalid_or_duplicate_outcome"));
+        }
+        if let Some(opportunities) = &u.optimization_opportunities
+            && (opportunities.len() > 3
+                || opportunities
+                    .iter()
+                    .map(|item| item.kind)
+                    .collect::<BTreeSet<_>>()
+                    .len()
+                    != opportunities.len()
+                || opportunities.iter().any(|item| {
+                    !valid_hash(&item.evidence_sha256)
+                        || item.eligible_count == 0
+                        || item.eligible_count > 10_000
+                }))
+        {
+            return Err(error("invalid_opportunity_evidence"));
         }
     }
     Ok(())
@@ -364,15 +471,67 @@ fn metrics(s: &Sample) -> Value {
         }
     };
     let sum = |f: fn(&Unit) -> u64| s.units.iter().map(f).sum::<u64>();
+    let verified = sum(|u| u64::from(u.outcome == Outcome::Verified));
+    let per_verified = |value: u64| {
+        if verified == 0 {
+            Value::Null
+        } else {
+            json!(value as f64 / verified as f64)
+        }
+    };
+    // Failed deliveries consume resources too. Missing ownership is not zero.
+    let tokens = s
+        .units
+        .iter()
+        .map(|u| u.total_tokens)
+        .collect::<Option<Vec<_>>>()
+        .map(|values| values.iter().sum::<u64>());
+    let wall_ms = sum(|u| {
+        (time(&u.completed_at_utc).unwrap() - time(&u.started_at_utc).unwrap()).num_milliseconds()
+            as u64
+    });
     json!({"unit_count":s.units.len(),"verified_rate":rate(sum(|u| u64::from(u.outcome==Outcome::Verified))),
+        "verified_delivery_count":verified,
         "unknown_count":sum(|u| u64::from(u.outcome==Outcome::Unknown)),"rework_rate":rate(sum(|u| u64::from(u.rework))),
         "redundant_approvals_per_unit":rate(sum(|u| u64::from(u.redundant_approval_count))),
         "continuation_prompts_per_unit":rate(sum(|u| u64::from(u.continuation_prompt_count))),
         "repeated_calls_per_unit":rate(sum(|u| u64::from(u.repeated_call_count))),
         "tool_calls_per_unit":rate(sum(|u| u64::from(u.tool_call_count))),
-        "tokens_per_unit":if s.units.iter().all(|u| u.total_tokens.is_some()) {rate(sum(|u| u.total_tokens.unwrap_or(0)))} else {Value::Null},
-        "wall_duration_ms_per_unit":rate(sum(|u| (time(&u.completed_at_utc).unwrap()-time(&u.started_at_utc).unwrap()).num_milliseconds() as u64)),
+        "owned_token_coverage":{"observed_unit_count":s.units.iter().filter(|u|u.total_tokens.is_some()).count(),"unobserved_unit_count":s.units.iter().filter(|u|u.total_tokens.is_none()).count()},
+        "tokens_per_unit":tokens.map(rate).unwrap_or(Value::Null),
+        "owned_tokens_per_verified_delivery":tokens.map(per_verified).unwrap_or(Value::Null),
+        "wall_duration_ms_per_unit":rate(wall_ms),
+        "wall_duration_ms_per_verified_delivery":per_verified(wall_ms),
+        "resource_numerator_includes_failed_deliveries":true,
         "wall_duration_is_model_latency":false})
+}
+
+fn strategy_eligibility(rule: Rule, sample: Option<&Sample>) -> Value {
+    let Some(kind) = rule.opportunity() else {
+        return json!({"rule":rule,"primary_metric":rule.primary_metric(),
+            "direct_signal_observed":sample.is_some_and(|s|s.units.iter().any(|u|rule.observed_in(u)))});
+    };
+    let observed = sample.map(|s| {
+        s.units
+            .iter()
+            .filter(|u| u.optimization_opportunities.is_some())
+            .count()
+    });
+    let opportunities = sample.filter(|_| observed.is_some_and(|n| n > 0)).map(|s| {
+        s.units
+            .iter()
+            .filter_map(|u| u.optimization_opportunities.as_ref())
+            .flatten()
+            .filter(|item| item.kind == kind)
+            .map(|item| u64::from(item.eligible_count))
+            .sum::<u64>()
+    });
+    json!({"rule":rule,"primary_metric":rule.primary_metric(),
+        "evidence_origin":"operator_supplied_direct_observation",
+        "observed_unit_count":observed,
+        "unobserved_unit_count":sample.map(|s|s.units.len()-observed.unwrap_or(0)),
+        "observed_eligible_opportunity_count":opportunities,
+        "direct_signal_observed":opportunities.is_some_and(|n|n > 0)})
 }
 fn render(rules: &[Rule]) -> String {
     if rules.is_empty() {
@@ -389,15 +548,11 @@ fn render(rules: &[Rule]) -> String {
 fn select_rule(e: &ModelEvidence, s: Option<&Sample>, audit: &Value) -> Option<Rule> {
     let mut candidates = Vec::new();
     if let Some(s) = s {
-        if s.units
-            .iter()
-            .any(|u| u.redundant_approval_count > 0 || u.continuation_prompt_count > 0)
-        {
-            candidates.push(Rule::ApprovalContinuity);
-        }
-        if s.units.iter().any(|u| u.repeated_call_count > 0) {
-            candidates.push(Rule::DiagnoseBeforeRetry);
-        }
+        candidates.extend(
+            Rule::ALL
+                .into_iter()
+                .filter(|rule| s.units.iter().any(|u| rule.observed_in(u))),
+        );
     }
     let calls = audit
         .get("root")
@@ -549,9 +704,8 @@ fn current_rules(root: &Path) -> Result<Vec<Rule>, ContractError> {
         Err(_) => return Err(error("state_unavailable")),
         Ok(_) => private_bytes(&path)?,
     };
-    let all = [Rule::ApprovalContinuity, Rule::DiagnoseBeforeRetry];
-    for bits in 0..4 {
-        let rules: Vec<_> = all
+    for bits in 0..(1 << Rule::ALL.len()) {
+        let rules: Vec<_> = Rule::ALL
             .iter()
             .enumerate()
             .filter(|(i, _)| bits & (1 << i) != 0)
@@ -574,9 +728,21 @@ fn load_trial(root: &Path) -> Result<Trial, ContractError> {
     parse_trial(&private_bytes(&root.join("trial.json"))?)
 }
 fn parse_trial(data: &[u8]) -> Result<Trial, ContractError> {
+    // Inspect only the version before parsing the current contract. Do not
+    // reinterpret or migrate retired state; its matching CLI must restore it.
+    #[derive(Deserialize)]
+    struct TrialVersion {
+        schema: u64,
+    }
+    let version: TrialVersion = serde_json::from_slice(data).map_err(|_| error("invalid_trial"))?;
+    if version.schema != 2 {
+        return Err(error(
+            "unsupported_trial_schema_preserved_restore_with_matching_cli",
+        ));
+    }
     let t: Trial = serde_json::from_slice(data).map_err(|_| error("invalid_trial"))?;
     if t.kind != "groundline-personal-trial"
-        || t.schema != 1
+        || t.schema != 2
         || ![
             "prepared",
             "pending",
@@ -585,7 +751,7 @@ fn parse_trial(data: &[u8]) -> Result<Trial, ContractError> {
             "rolled_back",
         ]
         .contains(&t.status.as_str())
-        || t.before_rules.len() > 1
+        || t.before_rules.len() >= Rule::ALL.len()
         || t.after_rules.len() != t.before_rules.len() + 1
         || t.before_rules.contains(&t.rule)
         || !t.after_rules.contains(&t.rule)
@@ -598,6 +764,7 @@ fn parse_trial(data: &[u8]) -> Result<Trial, ContractError> {
     validate_sample(&t.baseline, &t.model_context_sha256, Utc::now())?;
     if time(&t.applied_at_utc)? < time(&t.baseline.period_end_utc)?
         || time(&t.applied_at_utc)? > Utc::now()
+        || t.before_rules.windows(2).any(|pair| pair[0] >= pair[1])
         || t.after_rules.windows(2).any(|pair| pair[0] >= pair[1])
     {
         return Err(error("invalid_trial"));
@@ -724,7 +891,7 @@ fn apply(
     after.sort();
     let mut trial = Trial {
         kind: "groundline-personal-trial".into(),
-        schema: 1,
+        schema: 2,
         status: "prepared".into(),
         applied_at_utc: now.to_rfc3339(),
         rule,
@@ -833,18 +1000,19 @@ fn review(
     }
     if let Some(s) = &sample {
         fresh(&s.period_end_utc, now, Duration::days(7))?;
-        if s.guidance_sha256 != hash(b"") && !s.activation_verified {
+        if s.guidance_sha256 != hash(b"") && s.activation_evidence.is_none() {
             reasons.push("baseline_activation_unverified");
         }
-        if rule.is_some_and(|r| {
-            !s.units.iter().any(|u| match r {
-                Rule::ApprovalContinuity => {
-                    u.redundant_approval_count > 0 || u.continuation_prompt_count > 0
-                }
-                Rule::DiagnoseBeforeRetry => u.repeated_call_count > 0,
-            })
-        }) {
+        if rule.is_some_and(|r| !s.units.iter().any(|u| r.observed_in(u))) {
             reasons.push("candidate_signal_missing_in_outcomes");
+        }
+        if rule.is_some_and(|r| r.opportunity().is_some()) {
+            if s.units.iter().any(|u| u.total_tokens.is_none()) {
+                reasons.push("owned_token_baseline_incomplete");
+            }
+            if !s.units.iter().any(|u| u.outcome == Outcome::Verified) {
+                reasons.push("verified_delivery_denominator_required");
+            }
         }
     }
     if rule.is_none() {
@@ -884,14 +1052,33 @@ fn review(
         "model_performance_attribution_available": false,
     });
     out["outcomes"] = sample.as_ref().map(metrics).unwrap_or(Value::Null);
+    out["strategy_eligibility"] = json!(
+        e.behavior_focus
+            .iter()
+            .map(|rule| strategy_eligibility(*rule, sample.as_ref()))
+            .collect::<Vec<_>>()
+    );
+    out["native_activation"] = json!(if sample
+        .as_ref()
+        .is_some_and(|s| s.activation_evidence.is_some())
+    {
+        "OPERATOR_EVIDENCED"
+    } else {
+        "UNVERIFIED"
+    });
+    out["activation_independently_verified"] = json!(false);
     out["candidate"] = rule
         .map(|r| json!({
             "rule": r,
             "instruction": r.instruction(),
+            "primary_metric": r.primary_metric(),
             "evidence_class": "review_candidate_not_measured_improvement",
             "review_note": match r {
                 Rule::DiagnoseBeforeRetry => "Classify expected nonzero results, legitimate polling, and environment failures before treating aggregate signals as wasted work. Confirm avoidable retries in direct outcomes before applying a trial.",
                 Rule::ApprovalContinuity => "Distinguish redundant approval pauses from material missing choices or new authority.",
+                Rule::EvidenceReuse => "Require direct evidence of repeated verification or retrieval with unchanged relevant inputs and risk. Preserve fresh live checks and include failed-delivery resources in the comparison.",
+                Rule::JustInTimeContext => "Require direct evidence of unnecessary eager context loading. Do not classify required instructions or decision-critical evidence as waste.",
+                Rule::BoundedParallelReads => "Require directly observed independent read-only operations and an available native parallel mechanism. Do not infer eligibility from tool count or long duration.",
             },
         }))
         .unwrap_or(Value::Null);
@@ -986,14 +1173,44 @@ fn evaluate(
     if s.units.iter().any(|u| ids.contains(&u.unit_hash)) {
         reasons.push("reused_outcome_units");
     }
-    if s.guidance_sha256 != hash(render(&t.after_rules).as_bytes()) || !s.activation_verified {
+    if s.guidance_sha256 != hash(render(&t.after_rules).as_bytes())
+        || s.activation_evidence.as_ref().is_none_or(|activation| {
+            time(&activation.observed_at_utc)
+                .is_ok_and(|observed| observed <= time(&t.applied_at_utc).unwrap())
+        })
+    {
         reasons.push("native_activation_unverified");
     }
     if !sufficient(&s) || !sufficient(&t.baseline) {
         reasons.push("verified_outcomes_required");
     }
+    if t.baseline.guidance_sha256 != hash(b"") && t.baseline.activation_evidence.is_none() {
+        reasons.push("baseline_activation_unverified");
+    }
+    if t.rule.opportunity().is_some()
+        && !t.baseline.units.iter().any(|unit| t.rule.observed_in(unit))
+    {
+        reasons.push("baseline_candidate_signal_missing");
+    }
     let before = metrics(&t.baseline);
     let after = metrics(&s);
+    let primary = t.rule.primary_metric();
+    if before[primary].is_null() || after[primary].is_null() {
+        reasons.push("primary_metric_unavailable");
+    }
+    if before["tokens_per_unit"].is_null() || after["tokens_per_unit"].is_null() {
+        reasons.push("owned_token_comparison_incomplete");
+    }
+    out["rule"] = json!(t.rule);
+    out["primary_metric"] = json!(primary);
+    out["primary_metric_comparison"] = json!({"baseline":before[primary],"candidate":after[primary],
+        "direction":"lower_is_better"});
+    out["native_activation"] = json!(if reasons.contains(&"native_activation_unverified") {
+        "UNVERIFIED"
+    } else {
+        "OPERATOR_EVIDENCED"
+    });
+    out["activation_independently_verified"] = json!(false);
     out["baseline"] = before.clone();
     out["candidate"] = after.clone();
     if !reasons.is_empty() {
@@ -1013,10 +1230,6 @@ fn evaluate(
             .as_f64()
             .zip(before["tokens_per_unit"].as_f64())
             .is_some_and(|(a, b)| a > b);
-    let primary = match t.rule {
-        Rule::ApprovalContinuity => "redundant_approvals_per_unit",
-        Rule::DiagnoseBeforeRetry => "repeated_calls_per_unit",
-    };
     let improves = v(&after, primary) < v(&before, primary)
         || (t.rule == Rule::ApprovalContinuity
             && v(&after, "continuation_prompts_per_unit")
@@ -1024,7 +1237,9 @@ fn evaluate(
     archive(
         &root,
         "evaluation",
-        &serde_json::to_vec(&json!({"sample":s,"baseline":before,"candidate":after})).unwrap(),
+        &serde_json::to_vec(&json!({"sample":s,"baseline":before,"candidate":after,
+            "primary_metric":primary}))
+        .unwrap(),
     )?;
     if quality_regression || intervention_regression || resource_regression || !improves {
         restore(&root, &mut t)?;

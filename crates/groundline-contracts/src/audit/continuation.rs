@@ -19,6 +19,7 @@ pub(super) struct Slot {
 pub(super) struct Plan {
     pub slots: Vec<Slot>,
     pub unobserved_call: bool,
+    pub has_verification: bool,
 }
 
 fn native_key(name: &str, values: &Map<String, Value>) -> Option<String> {
@@ -179,9 +180,12 @@ pub(super) fn plan(name: &str, arguments: &str) -> Option<Plan> {
             _ => return None,
         }
     }
+    let has_verification = slots.iter().any(|slot| slot.verification)
+        || variables.values().any(|(slot, _)| slot.verification);
     (!slots.is_empty() && slots.len() <= 128).then(|| Plan {
         slots,
         unobserved_call: variables.values().any(|(_, observed)| !observed),
+        has_verification,
     })
 }
 

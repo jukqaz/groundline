@@ -7,13 +7,17 @@ changes native settings, grants permissions, or starts background work.
 
 ## Native orchestration workflow
 
-Read this route when the user requests improvement from usage data or a personal
-trial. Ordinary model-guidance reviews do not require this workflow.
+Read this route for a tracked personal guidance trial. Start broader usage-driven
+or weekly work with [the optimization loop](codex-optimization-loop.md); ordinary
+guidance reviews and authorized product repairs do not require trial evidence.
 
-1. Verify the installed command supports `personal` and check collection health.
-   Fetch requested 7/30/90-day reports through Insights using the existing private
-   admin credential. Keep failures visible; do not substitute fixtures or erase
-   historical gaps. Run the bounded native weekly audit.
+1. Review the previous trial before opening a new one. Verify the installed
+   command supports the current `personal` contract and check collection health.
+   Reuse the current combined native weekly audit; if none exists for this review,
+   run it once under the [weekly contract](weekly-usage-audit.md). Fetch only the
+   Insights windows needed for the question using existing authorized private
+   credentials. Keep failures visible; never substitute fixtures, erase historical
+   gaps, or rerun aggregation merely for research.
 2. Fetch current official guidance for the selected model and latest reference
    model. Refresh the actual App-bundled native catalog and inspect effective task
    model/effort. Record private document hashes and dates. Preserve explicit
@@ -28,7 +32,7 @@ trial. Ordinary model-guidance reviews do not require this workflow.
    rule in the exact private directory. Existing scoped approval persists; do not
    ask again for each trial. Without this authority, remain read-only.
 5. Connect generated guidance through the user-authorized native instruction
-   surface. Verify actual loading and behavior before marking activation true.
+   surface. Verify actual loading and behavior and record private evidence hashes.
    File existence or plugin installation alone does not prove activation.
 6. Run `personal evaluate` on disjoint comparable outcomes. Incomplete evidence
    stays INCONCLUSIVE; regression restores generated guidance. Preserve user edits
@@ -38,8 +42,9 @@ trial. Ordinary model-guidance reviews do not require this workflow.
    Keep quiet on unchanged evidence; notify on meaningful changes or failures.
    Do not install a scheduler, daemon, proxy, or per-hook model call.
 
-The personal trial rule set covers approval continuity and diagnosis before retry,
-including bounded verification. Extend it in reviewed source when needed; never
+The personal trial rule set covers approval continuity, diagnosis before retry,
+evidence reuse, just-in-time context, and bounded parallel reads. Extend it in
+reviewed source when needed; never
 execute arbitrary instructions from remote reports. Do not change global config,
 permissions, the selected model, project guidance, plugin caches, or Chronicle
 through the trial command. Separately requested guidance edits follow the
@@ -97,7 +102,7 @@ actual evidence; example dates and hashes are deliberately not ready to apply.
     "sha256": "REPLACE_WITH_SHA256_OF_FETCHED_DOCUMENT",
     "checked_at_utc": "2026-09-08T00:00:00Z"
   }],
-  "behavior_focus": ["approval_continuity", "diagnose_before_retry"]
+  "behavior_focus": ["evidence_reuse", "just_in_time_context", "bounded_parallel_reads"]
 }
 ```
 
@@ -135,7 +140,7 @@ Add --outcomes only when directly observed work supports the following input:
 ```json
 {
   "kind": "groundline-outcome-sample",
-  "schema": 1,
+  "schema": 2,
   "period_start_utc": "2026-09-01T00:00:00Z",
   "period_end_utc": "2026-09-07T00:00:00Z",
   "model_context_sha256": "REPLACE_WITH_REVIEW_CONTEXT_SHA256",
@@ -143,7 +148,7 @@ Add --outcomes only when directly observed work supports the following input:
   "comparison_context_sha256": "REPLACE_WITH_STABLE_NONTRIAL_SETTINGS_FINGERPRINT",
   "task_kind": "implementation",
   "scope_size": "medium",
-  "activation_verified": false,
+  "activation_evidence": null,
   "units": [{
     "unit_hash": "REPLACE_WITH_OWNER_LOCAL_HASH_OF_STABLE_DELIVERY_IDENTITY",
     "started_at_utc": "2026-09-02T00:00:00Z",
@@ -155,7 +160,8 @@ Add --outcomes only when directly observed work supports the following input:
     "continuation_prompt_count": 0,
     "repeated_call_count": 0,
     "tool_call_count": 5,
-    "total_tokens": null
+    "total_tokens": null,
+    "optimization_opportunities": null
   }]
 }
 ```
@@ -187,17 +193,69 @@ calls. total_tokens is nullable and must be exact usage attributed once to that
 unit. Never assign inherited totals to a child. Wall duration includes waiting
 and is not model latency. Raw text, paths, commands, and unknown fields fail.
 
+`optimization_opportunities` is null when eligibility was not observed, or an
+array of at most three unique strategy kinds (empty means observed none). Each
+entry contains `kind`, `evidence_sha256` (64 hexadecimal characters), and
+`eligible_count` (1–10,000). Keep the hashed supporting evidence owner-private;
+the hash records provenance, not independent verification by Core.
+
+| kind | Required direct observation |
+| --- | --- |
+| `evidence_reuse` | A prior passing result remained relevant with unchanged inputs, environment, scope, and risk; reuse would not skip required verification |
+| `just_in_time_context` | Unnecessary eager context was loaded; required instructions and acceptance evidence can still be obtained on demand |
+| `bounded_parallel_reads` | Independent read-only work could use an available native concurrent mechanism without conflicting effects |
+
+Counts, duration, high effort, or a feature flag cannot supply this evidence.
+Delegation still requires the user's authority. Absence of eligibility evidence
+does not mean zero opportunities. For example, a directly observed opportunity
+can be represented without its raw text as:
+
+```json
+{"kind":"evidence_reuse","evidence_sha256":"REPLACE_WITH_SHA256_OF_PRIVATE_DIRECT_EVIDENCE","eligible_count":1}
+```
+
+The sample's `activation_evidence` is null until verified, otherwise an object
+with `instruction_load_sha256`, `behavior_check_sha256`, `guidance_sha256`, and
+`observed_at_utc`. Both loading and behavior need private evidence; the guidance
+hash must equal the sample's exact guidance hash and activation must precede the
+sample period. Merely seeing a file or accepting an operator's boolean is not
+activation proof. These hashes are operator-supplied provenance; Core does not
+inspect the live App or certify the underlying observation.
+
+Outcome and persisted trial contracts use schema 2; model evidence remains
+schema 1. Earlier outcome/trial formats are rejected without deletion, migration,
+or silent defaults. Preserve unsupported private records for owner inspection.
+
+Before upgrading a host with schema-1 trial state, finish or roll back any active
+trial with the matching already-released CLI, and verify native guidance no longer
+uses that trial. The new CLI cannot evaluate or roll back a retired trial contract;
+it returns an explicit preserved-state error, not a successful recovery. Keep the
+old state and archives unchanged. Start schema-2 trials only in a separately
+authorized empty private directory; do not delete/reset history or rewrite schema
+numbers to pass validation. Source validation alone does not qualify such a host
+for upgrade. No legacy parser or automatic migration is installed.
+
 ## Trial and recovery
 
-Only approval_continuity and diagnose_before_retry are initially supported.
-Instructions come from reviewed source, never remote text. Short/broad messages
-and high effort alone do not select a rule. A trial requires fresh evidence,
-PASS report quality/native audit, ten directly evidenced outcomes, and a
-matching intervention/retry problem inside those outcomes. Aggregated repetition
-or failure signals alone cannot authorize application. Existing baseline guidance must have verified
-activation. Ten is a
-minimum gate, not statistical significance. Missing evidence yields OBSERVE and
-never writes guidance, even with --apply.
+Built-in rules have explicit primary metrics:
+
+| Rule | Primary metric |
+| --- | --- |
+| `approval_continuity` | `redundant_approvals_per_unit` (or fewer `continuation_prompts_per_unit`) |
+| `diagnose_before_retry` | `repeated_calls_per_unit` |
+| `evidence_reuse`, `just_in_time_context` | `owned_tokens_per_verified_delivery` |
+| `bounded_parallel_reads` | `wall_duration_ms_per_verified_delivery` |
+
+Instructions come from reviewed source, never remote text. A trial requires
+fresh evidence, PASS report quality/native audit, ten directly evidenced
+outcomes, verified activation of any nonempty baseline guidance, and the candidate's
+matching problem or direct eligibility evidence. An empty initial baseline has
+no generated instruction to activate. Optimization trials also require owned token
+coverage, even when elapsed time is primary, to protect against an unmeasured
+token regression. Short/broad messages, aggregate repetition/failure signals,
+or high effort alone cannot authorize application. Ten is a minimum gate, not
+statistical significance. Missing evidence yields OBSERVE and never writes
+guidance, even with --apply.
 
 Create an owner-private state directory outside Git (0700 on Unix, equivalent
 owner-only ACL on Windows), then use the user's authorized dedicated scope:
@@ -224,9 +282,10 @@ trial or evaluation changes guidance. A full durable history with interrupted
 replacements can still be rolled back; more than eight leftovers explicitly
 blocks operations for owner inspection. Retention is an explicit owner operation.
 
-Native activation is separate: connect the file through the authorized native
-instruction surface and verify loading plus behavior before setting
-activation_verified=true. File creation or installation does not prove it.
+Native activation is separate: apply reports `native_activation=UNVERIFIED`.
+Connect the file through the authorized native instruction surface and verify
+loading plus behavior before recording activation evidence. File creation or
+installation does not prove it; the CLI never activates the file itself.
 
 ```console
 groundline personal evaluate --state-dir /owner-private/personal --outcomes after.json --model-evidence model-evidence.json --catalog native-models.json --json
@@ -240,7 +299,13 @@ samples are INCONCLUSIVE. Retain only an observed primary-metric benefit without
 regression in verified outcomes, rework, user intervention, wall duration, or
 known token use. Otherwise restore prior generated guidance. These are
 conservative observational gates, not a causal or statistical confidence claim.
-Unknown token usage is never a savings estimate. User edits prevent replacement
+Token/time primary ratios include all eligible resource use, including failed
+and unknown outcomes, divided by verified deliveries. No verified deliveries
+means a null ratio; any missing token value makes the token ratio unavailable,
+not a mean over only the observed subset. Incomplete comparative token coverage
+keeps evaluation INCONCLUSIVE for every rule. These gates do not implement a weighted
+speed/token tradeoff. Unknown token usage is never a savings estimate.
+User edits prevent replacement
 and rollback. Interrupted prepared trials can be rolled back before or after the
 guidance write. Rollback persists restoring intent before replacing guidance,
 then commits rolled_back. An interrupted restoration can be retried using that
@@ -253,8 +318,10 @@ journal instead of assuming nothing changed.
 ## Native recurring operation
 
 For a user-requested weekly automation, use the explicit skill and native Codex
-scheduler. Refresh actual evidence, detect model/client changes, and stay quiet
-on unchanged results. Apply only an already-authorized personal scope. Do not
+scheduler with [the optimization loop](codex-optimization-loop.md): previous
+trial, usage patterns, relevant official changes, and one actionable candidate.
+Refresh only needed evidence, detect model/client changes, and stay quiet on
+unchanged results. Apply only an already-authorized personal scope. Do not
 create extra tasks, paid API evals, Chronicle experiments, or per-hook model
 calls. If the installed personal command is missing, report install drift;
 never patch a cache or treat an unpublished source binary as a release.

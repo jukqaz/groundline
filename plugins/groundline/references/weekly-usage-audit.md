@@ -1,4 +1,12 @@
-# Weekly local audit
+# Weekly audit for Codex optimization
+
+A scheduled review uses usage patterns and current Codex information to improve
+GroundLine and the owner's Codex environment, not merely to publish usage totals.
+Follow [the optimization loop](codex-optimization-loop.md) when that purpose is
+requested: evaluate the previous change, collect once, research relevant
+official changes, and select one bounded improvement with acceptance and rollback
+criteria. The native audit below is its evidence layer, not an automatic source,
+configuration, or plugin updater. An audit-only request remains audit-only.
 
 Use `groundline audit weekly --days 7 --review --json` for one audit, one
 recommendation, and a deterministic Korean readout. Use `report_ko` and `readout`
@@ -7,9 +15,19 @@ The execution fields distinguish an audit that ran with partial data from a
 recommendation failure. Do not run a second audit or recommendation after this
 combined command. `groundline audit weekly --days 7 --json` remains the raw audit
 interface for callers that explicitly need separate stages.
-Review counts, coverage, failure reason codes, and the proposed single workflow
-change. Keep source validation, installed runtime validation, and user-visible
-behavior as separate evidence lanes.
+Check the command exit status, `execution.audit_runs`,
+`execution.recommendation_runs`, and the nested audit/recommendation statuses
+independently. Retain the audit if recommendation fails. Review counts, coverage,
+failure reason codes, and the proposed single workflow change. Keep source
+validation, installed runtime validation, and user-visible behavior as separate
+evidence lanes.
+
+Use the actual App runtime first. On macOS inspect bundle metadata and the
+`Contents/Resources/codex` executable in standard Applications locations;
+product display names do not determine bundle paths, and Codex may ship inside
+ChatGPT.app. Only fall back to PATH CLI when the App runtime cannot be verified,
+and label that evidence scope. Do not treat a CLI feature flag as active App
+behavior or a manual invocation as proof of a scheduled trigger.
 
 Resolve the enabled installed version from the active native Codex CLI's
 `plugin list --marketplace groundline --json`, then match that exact cache
@@ -17,7 +35,10 @@ manifest and executable. Capture provider output privately and emit only the
 required safe fields. Do not sort cache directories to guess the active version
 or search the entire Codex home. Read only the relevant GroundLine configuration
 tables if needed. Run the installed `provider-smoke --require-installed --json`
-once before claiming package integrity; a manifest alone proves no live hook.
+once before claiming package integrity; a manifest alone proves no live hook or
+server receipt. Resolve one active root and read this reference and its audit
+skill from that same installation. Missing required files or commands are
+UNVERIFIED, not grounds to substitute a different cache or unpublished binary.
 
 When using the separate-stage interface, run the weekly audit once. Retain its redacted JSON in process memory and pass
 those same bytes to `groundline efficiency recommend --audit - --json` through
@@ -41,7 +62,18 @@ and service tier. Compare matched outcomes before recommending a setting change;
 an aggregate-only recommendation cannot establish high confidence in benefit.
 
 The command is read-only, performs no network request, and does not emit raw
-task content or private paths.
+task content or private paths. The surrounding research is native Codex work,
+not functionality hidden inside this command. Reuse the same in-memory audit
+for that research; extract its nested `audit` value for raw-audit consumers
+without running collection again. Do not create temporary report files or use
+`/dev/stdin` to bridge stages. Save a redacted report only when authorized.
+
+For the final weekly report, preserve `report_ko` task samples, completed turns,
+usage source, observed/selected rollouts, and unresolved reasons; cross-check
+`readout`. Add only the previous-change disposition, relevant verified update,
+and selected improvement with evidence, acceptance, rollback, and remaining
+UNVERIFIED lanes. Distinguish GroundLine product defects from personal choices.
+Do not claim savings from a proposed change, a simulation, or a successful install.
 
 Codex's latest numeric `state_<n>.sqlite` is selected read-only and its thread
 columns are checked before use. Plain `.jsonl` and compressed `.jsonl.zst`
@@ -57,6 +89,11 @@ Activity audits include ongoing work, with `completed_root_coverage=false` on
 export. Unreadable or unclassified inputs make the result `PARTIAL` and remain
 visible as aggregate counts. `selection_coverage` describes selection among
 known eligible roots; it does not mean every stored task was readable.
+
+The readout separates parsed-root `collection_issue_count` from store-level
+unreadable root/delegated/Guardian counts and unclassified origins. A zero parser
+issue count does not mean files excluded before parsing were readable. Do not
+sum counts with different denominators or turn missing scope counters into zero.
 
 Standalone histories prefer cumulative window deltas, then matching-thread
 response records, then last-usage events. These sources never add on top of
@@ -79,10 +116,22 @@ Zero observed prompt text leaves prompt-shape ratios unavailable, not proof of
 zero user instructions. Guardian outcome, risk, effort, and workspace attribution
 remain unavailable unless their explicit availability fields establish otherwise.
 
+`provider_reported_usage.token_field_availability` distinguishes source-observed
+components from partial numeric accumulators. A missing/null/invalid source field
+stays unavailable through selected-rollout sums and both endpoints of a window
+delta. Numeric zero alone does not establish an observed split. Simulation needs
+one audit with a known usage source, positive observed-rollout count, and explicit
+availability of every required token component; absent metadata is not backfilled.
+
 Verification outcomes use native exit/status metadata. Test names or stdout words
 such as `timeout` and `rejected` are not failures. Running, missing, and unrecognized
 results stay unresolved; orchestrator completion does not prove nested command
-success. Report outcome coverage before interpreting success ratios. Separate
+success. Verification classification inspects supported literal command positions,
+not test-command words quoted inside a search or inspection. Unsupported dynamic
+or compound shell/JavaScript shapes remain `other_command`; preserve
+`tools.unclassified_command_call_count` and `tools.verification_classification_scope`
+as classification coverage limits, not proof that no verification occurred.
+Report outcome coverage before interpreting success ratios. Separate
 calls to poll a process are connected only with a matching explicit handle in the
 same rollout and observation window. Literal awaited native polls can be recognized
 in straight-line exec wrappers, including multiple top-level text emissions.
