@@ -14,6 +14,7 @@
 - literal Cargo 환경 접두사의 검증 명령을 인식하고, 인용 검색문·동적 실행을 성공 검사로 오인하지 않는 회귀를 보강했습니다.
 - Insights ingest revision 8과 GPT-6 집계를 추가했습니다. owner API 호환성을 먼저 확인하고, 현재 저장 데이터의 명시적 신뢰 마이그레이션·원본 보존·재개 경로를 유지합니다.
 - 설치기는 기존 Insights 연결이 있으면 `worker check-server`로 서버 호환성을 먼저 검사합니다. Core만 선택해도 native marketplace 갱신이 함께 설치된 Insights를 업데이트할 수 있으므로, 미호환·잘못된 설정·연결 실패 시 갱신 전에 중단합니다.
+- 설치 대상을 검토한 배포본의 커밋으로 고정합니다. 이동하는 `stable`과 사전검사 대상이 달라지는 것을 방지하며, 기존 설치·활성 상태와 HTTPS/SSH 연결 방식을 보존합니다. 소스 전환 실패 시 이전 실제 커밋으로 복구하고 바이너리·체크섬·manifest를 대조합니다. 다음 릴리스로의 업데이트는 최신 배포본 설치기를 실행합니다.
 
 BREAKING CHANGE: 폐기 명령·스킬·preset에는 별칭을 두지 않습니다. 새 routing evidence/proposal과 delivery manifest는 schema 2이며 이전 입력을 명시 거절합니다. 기존 개인 상태·native 기록·schema-1 delivery receipt는 삭제하지 않습니다. Insights는 호환 API를 먼저 배포한 뒤 수집기를 갱신해야 합니다.
 

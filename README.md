@@ -58,7 +58,7 @@ same-day releases and date changes.
 
 Use the **install and configure** entry point from a reviewed binary-bearing
 `stable` distribution. It preserves existing Codex choices by default and reports
-each completed or pending stage. Git and Codex must already be installed.
+each completed or pending stage. Install Git and Codex first; Bash also requires `jq`.
 
 ```console
 git clone --branch stable --single-branch https://github.com/jukqaz/groundline.git groundline-install
@@ -69,10 +69,13 @@ On Windows use `powershell -File groundline-install/install.ps1`. Select
 `--profile both` (`-Profile both`) to include Insights, or `insights` for Insights
 alone. See [complete installation and recovery](docs/installation.md) for model
 selection, private connection inputs, consent, first collection, and retrying a
-partial installation. Package-only installation is also available below.
+partial installation. Existing disabled plugins remain disabled. The installer
+pins the reviewed commit; App Refresh stays there. For a newer release, obtain
+its current complete `stable` distribution and rerun that installer.
+Package-only installation is also available below.
 
 **GroundLine runs as Codex plugins and native CLIs.** Codex App and CLI use the
-same plugins. Only Git and Codex are required. These native
+same plugins. Package-only native commands require Git and Codex. These native
 commands preserve personal model, reasoning, and permission settings. Insights
 collection starts only after connection setup and explicit consent, on Codex hooks.
 
@@ -105,7 +108,7 @@ codex plugin add groundline-insights@groundline --json
 
 Run both `plugin add` commands only when the combined profile is desired.
 
-Refresh the single marketplace snapshot to adopt a newer release:
+Refresh the registered snapshot (a pinned registration stays on the same commit):
 
 ```console
 codex plugin marketplace upgrade groundline --json
@@ -115,8 +118,8 @@ codex plugin list --json
 `main` and version tags contain source; `stable` includes the verified native
 `bin` trees required for plugin installation. Do not substitute a source tag for
 the binary distribution. A frozen installation needs a verified packaged
-revision. If refresh leaves an installed version unchanged, run `plugin add`
-again for that same plugin ID, then verify its version and checksum.
+revision. Direct native commands skip installer compatibility checks. Use the
+reviewed installer for updates; re-adding a disabled plugin explicitly enables it.
 
 On Windows, `LF will be replaced by CRLF` describes Git line-ending conversion.
 Check the command exit code and final error; a warning alone does not prove an

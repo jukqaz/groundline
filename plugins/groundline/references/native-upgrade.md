@@ -22,12 +22,25 @@ After refresh or upgrade, verify four distinct lanes:
 
 A result from one lane does not prove the others.
 
-Use Codex App Refresh or `codex plugin marketplace upgrade groundline --json`.
-Inspect `codex plugin list --json`; if Core remains on the old version, install
-the same ID again with `codex plugin add groundline@groundline --json` and verify
-its checksum. A remote marketplace and GroundLine's Git `stable` channel are
-different sources. Inspect the actual installed source before troubleshooting.
-GroundLine does not maintain a parallel updater or rewrite Codex plugin state.
+Use the latest reviewed, complete `stable` distribution's installer for each
+release. It checks artifacts and API compatibility, then uses native marketplace
+remove/add with that exact commit and native upgrade. The existing official
+HTTPS/SSH transport, installed product set, and enabled/disabled flags are
+preserved. Only newly selected products use `plugin add`; re-adding an existing
+disabled plugin would enable it.
+
+App Refresh and `codex plugin marketplace upgrade groundline --json` remain on
+this immutable commit. A newer release needs its reviewed distribution and
+installer. Direct native commands bypass the installer preflight. GroundLine
+neither maintains a parallel updater nor edits native caches directly.
+
+Caught source-transition or verification failures attempt native recovery to the
+previous actual commit and verify the old artifact bytes and installed flags.
+The receipt reports `previous_commit_pinned`: native JSON does not expose the
+original symbolic ref, so recovery does not claim to restore it. Unsupported
+sources and inconsistent snapshots fail before writes. Process termination or
+power loss can interrupt the multi-command transition; a failed recovery needs
+review rather than a state reset.
 
 When the request includes applying GroundLine or repairing the existing setup,
 continue with [installation alignment](installation-alignment.md) after package
@@ -53,7 +66,9 @@ compatibility before advancing or refreshing their shared `stable` channel when
 Insights is already enabled. Core-only installation is not an isolation measure.
 
 The native isolated regression stages an older package manifest, advances local
-Git `stable`, and checks cache versions, same-version repeat, model settings and
-disabled collection consent preservation. Both fixture versions contain the
+Git `stable` beyond a separately reviewed commit, and checks exact-commit cache
+versions, source-add/upgrade failure recovery with artifact comparison,
+same-version repeat, model settings, disabled plugin flags, and collection consent
+preservation. Both fixture versions contain the
 current binary: this proves native metadata transition, not an old runtime's
 behavior, authenticated task execution, or delivery to an owner API.

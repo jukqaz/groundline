@@ -13,11 +13,17 @@ param(
 )
 $ErrorActionPreference = "Stop"
 $OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+$script:PreviousConsoleEncoding = [Console]::OutputEncoding
+[Console]::OutputEncoding = $OutputEncoding
 $script:Stages = [ordered]@{}
 $script:ActiveStage = "preflight"
 $script:Failed = $false
 $script:Pending = $false
 $script:CodexAppSelected = $false
+$script:SourceCommit = $null
+$script:PreviousCommit = $null
+$script:Rollback = "not_needed"
+$script:MarketplaceUrl = "https://github.com/jukqaz/groundline.git"
 function Set-Stage([string]$Name, [string]$Status, [int]$Code) {
     $script:Stages[$Name] = [ordered]@{ status = $Status; exit_code = $Code }
     if ($Status -eq "FAIL") { $script:Failed = $true }
@@ -40,6 +46,183 @@ function Get-ArtifactSha256([string]$Path) {
         finally { $stream.Dispose() }
     } finally { $hash.Dispose() }
 }
+
+function Get-GitValue([string]$Root, [string[]]$Arguments) {
+    $output = & git -c core.fsmonitor=false --literal-pathspecs -C $Root @Arguments 2>$null
+    if ($LASTEXITCODE -ne 0) { throw "Git distribution validation failed." }
+    return ($output -join "`n").Trim()
+}
+function Get-NormalPath([string]$Path) {
+    return [System.IO.Path]::GetFullPath($Path).TrimEnd([char[]]"\/")
+}
+function Get-CleanCommit([string]$Root, [bool]$NativeSnapshot = $false) {
+    $directory = Get-Item -LiteralPath $Root -Force
+    $gitDirectory = Get-Item -LiteralPath (Join-Path $Root ".git") -Force
+    if (!$directory.PSIsContainer -or !$gitDirectory.PSIsContainer -or
+        ($directory.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or
+        ($gitDirectory.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+        throw "Use a normal clean Git distribution."
+    }
+    $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+    try {
+        # Elevated Windows tokens may create files owned by their default owner
+        # SID rather than the user SID; accept only these current-token owners.
+        $currentOwners = @($identity.User.Value, $identity.Owner.Value)
+        foreach ($path in @($directory.FullName, $gitDirectory.FullName)) {
+            $owner = (Get-Acl -LiteralPath $path).GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+            if ($owner -notin $currentOwners) { throw "Git distribution ownership is unsupported." }
+        }
+    } finally { $identity.Dispose() }
+    $top = Get-GitValue $Root @("rev-parse", "--show-toplevel")
+    if ((Get-NormalPath $top) -ne (Get-NormalPath $Root)) {
+        throw "Use the complete clean distribution at its repository root."
+    }
+    $changes = Get-GitValue $Root @("status", "--porcelain", "--untracked-files=all")
+    foreach ($change in @($changes -split "`n")) {
+        if (!$change) { continue }
+        if (!$NativeSnapshot -or $change -cne "?? .codex-marketplace-install.json") {
+            throw "Use the complete clean distribution at its repository root."
+        }
+    }
+    $revision = Get-GitValue $Root @("rev-parse", "--verify", "HEAD^{commit}")
+    if ($revision -cnotmatch '^[0-9a-f]{40}$') { throw "Invalid distribution commit." }
+    return $revision
+}
+function Get-NativeJson([string[]]$Arguments) {
+    $output = & $Codex @Arguments
+    if ($LASTEXITCODE -ne 0) { throw "Native state inspection failed." }
+    return (($output -join "`n") | ConvertFrom-Json)
+}
+function Test-ReleaseVersion([string]$Version) {
+    return $Version -cmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+}
+function Assert-ForwardVersion([string]$Current, [string]$Candidate) {
+    if (!(Test-ReleaseVersion $Current) -or !(Test-ReleaseVersion $Candidate)) {
+        throw "Invalid native release version."
+    }
+    $oldParts = $Current.Split('.')
+    $newParts = $Candidate.Split('.')
+    for ($index = 0; $index -lt 3; $index++) {
+        $oldNumber = [UInt64]::Parse($oldParts[$index])
+        $newNumber = [UInt64]::Parse($newParts[$index])
+        if ($newNumber -gt $oldNumber) { return }
+        if ($newNumber -lt $oldNumber) { throw "A release downgrade requires separate review." }
+    }
+}
+function Test-MarketplaceUrl([string]$Url) {
+    return @("https://github.com/jukqaz/groundline.git", "git@github.com:jukqaz/groundline.git", "ssh://git@github.com/jukqaz/groundline.git") -ccontains $Url
+}
+function Get-NativeState([bool]$RequireVersionAlignment = $true) {
+    $listing = Get-NativeJson @("plugin", "marketplace", "list", "--json")
+    $plugins = Get-NativeJson @("plugin", "list", "--json")
+    if ($listing.marketplaces -isnot [System.Array] -or
+        $plugins.installed -isnot [System.Array]) { throw "Invalid native state response." }
+    $markets = @($listing.marketplaces | Where-Object { $_.name -eq "groundline" })
+    if ($markets.Count -gt 1) { throw "Ambiguous GroundLine marketplace source." }
+    $market = $null
+    $revision = $null
+    if ($markets.Count -eq 1) {
+        $market = $markets[0]
+        if ($market.marketplaceSource.sourceType -cne "git" -or
+            !(Test-MarketplaceUrl $market.marketplaceSource.source) -or
+            $market.root -isnot [string] -or ![System.IO.Path]::IsPathRooted($market.root)) {
+            throw "Unsupported GroundLine marketplace source."
+        }
+        $revision = Get-CleanCommit $market.root $true
+        $metadataPath = Join-Path $market.root ".codex-marketplace-install.json"
+        $metadataFile = $null
+        try { $metadataFile = Get-Item -LiteralPath $metadataPath -Force -ErrorAction Stop }
+        catch [System.Management.Automation.ItemNotFoundException] {}
+        if ($metadataFile) {
+            if ($metadataFile.PSIsContainer -or $metadataFile.Length -gt 16384 -or
+                ($metadataFile.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { throw "Invalid native source metadata." }
+            $metadata = Get-Content -LiteralPath $metadataPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($metadata.source_type -cne "git" -or $metadata.source -cne $market.marketplaceSource.source -or
+                $metadata.revision -cne $revision -or $metadata.ref_name -isnot [string] -or !$metadata.ref_name -or
+                $metadata.sparse_paths -isnot [System.Array] -or $metadata.sparse_paths.Count -ne 0) {
+                throw "Native source metadata does not match its snapshot."
+            }
+        }
+    }
+    $map = @{}
+    foreach ($plugin in @($plugins.installed)) {
+        if ($plugin.marketplaceName -ne "groundline") { continue }
+        $name = $plugin.name
+        if (!$market -or $name -cnotin @("groundline", "groundline-insights") -or
+            $map.ContainsKey($name) -or $plugin.pluginId -cne "$name@groundline" -or
+            $plugin.installed -isnot [bool] -or !$plugin.installed -or $plugin.enabled -isnot [bool] -or
+            $plugin.marketplaceSource.sourceType -cne "git" -or
+            $plugin.marketplaceSource.source -cne $market.marketplaceSource.source -or
+            $plugin.source.source -cne "local" -or $plugin.source.path -isnot [string] -or
+            (Get-NormalPath $plugin.source.path) -ne (Get-NormalPath (Join-Path $market.root "plugins/$name")) -or
+            !(Test-ReleaseVersion $plugin.version)) { throw "Unsupported installed GroundLine state." }
+        if ($RequireVersionAlignment) {
+            $manifest = Get-Content -LiteralPath (Join-Path $market.root "plugins/$name/.codex-plugin/plugin.json") -Raw | ConvertFrom-Json
+            if ($manifest.name -cne $name -or $manifest.version -cne $plugin.version) {
+                throw "Native snapshot and installed version differ; review the partial update first."
+            }
+        }
+        $map[$name] = [pscustomobject]@{ version = $plugin.version; enabled = $plugin.enabled }
+    }
+    return [pscustomobject]@{ market = $market; commit = $revision; installed = $map }
+}
+function Assert-InstalledMap($Actual, $Expected) {
+    if ($Actual.Count -ne $Expected.Count) { throw "Installed product set changed unexpectedly." }
+    foreach ($name in $Expected.Keys) {
+        if (!$Actual.ContainsKey($name) -or $Actual[$name].version -cne $Expected[$name].version -or
+            $Actual[$name].enabled -ne $Expected[$name].enabled) {
+            throw "Installed version or enabled state changed unexpectedly."
+        }
+    }
+}
+function Assert-RestoredArtifacts($Restored) {
+    foreach ($name in $Restored.installed.Keys) {
+        $version = $Restored.installed[$name].version
+        $source = Join-Path $Restored.market.root "plugins/$name/bin/$target"
+        $cache = Join-Path $installHome "plugins/cache/groundline/$name/$version/bin/$target"
+        foreach ($file in @("$name.exe", "$name.exe.sha256", "manifest.json")) {
+            $sourcePath = Join-Path $source $file
+            $cachePath = Join-Path $cache $file
+            foreach ($path in @($sourcePath, $cachePath)) {
+                $item = Get-Item -LiteralPath $path -Force
+                if ($item.PSIsContainer -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+                    throw "Invalid restored artifact."
+                }
+            }
+            if ((Get-ArtifactSha256 $sourcePath) -cne (Get-ArtifactSha256 $cachePath)) {
+                throw "Restored artifact differs from the previous commit."
+            }
+        }
+    }
+}
+function Restore-NativeSource($Previous, [string[]]$NewProducts) {
+    $script:ActiveStage = "source_rollback"
+    $current = Get-NativeState $false
+    if ($current.market -and $current.commit -cne $script:SourceCommit -and
+        $current.commit -cne $script:PreviousCommit) { throw "Unexpected source prevents automatic recovery." }
+    foreach ($name in $NewProducts) {
+        if ($current.installed.ContainsKey($name)) {
+            if ($current.installed[$name].version -cne $installVersion) { throw "Unexpected new product prevents recovery." }
+            $null = Get-NativeJson @("plugin", "remove", "$name@groundline", "--json")
+        }
+    }
+    if ($current.market) { $null = Get-NativeJson @("plugin", "marketplace", "remove", "groundline", "--json") }
+    if ($Previous.market) {
+        $null = Get-NativeJson @("plugin", "marketplace", "add", $Previous.market.marketplaceSource.source, "--ref", $Previous.commit, "--json")
+        $null = Get-NativeJson @("plugin", "marketplace", "upgrade", "groundline", "--json")
+        $restored = Get-NativeState
+        if (!$restored.market -or $restored.commit -cne $Previous.commit) { throw "Previous source commit was not restored." }
+        Assert-InstalledMap $restored.installed $Previous.installed
+        Assert-RestoredArtifacts $restored
+        $script:Rollback = "previous_commit_pinned"
+    } else {
+        $restored = Get-NativeState
+        if ($restored.market -or $restored.installed.Count -ne 0) { throw "Fresh registration was not removed." }
+        $script:Rollback = "fresh_registration_removed"
+    }
+    Set-Stage "source_rollback" "PASS" 0
+}
+
 function Find-Codex {
     # Resolve installed App packages from Windows metadata, not a versioned path.
     $candidates = @()
@@ -95,42 +278,98 @@ try {
         default { throw "Unsupported host architecture." }
     }
     Set-Stage "preflight" "PASS" 0
+    $script:ActiveStage = "native_source"
+    $previous = Get-NativeState
+    $script:PreviousCommit = $previous.commit
+    if ($previous.market) { $script:MarketplaceUrl = $previous.market.marketplaceSource.source }
+    Set-Stage "native_source" "PASS" 0
     $products = switch ($Profile) { "core" { @("groundline") } "insights" { @("groundline-insights") } "both" { @("groundline", "groundline-insights") } }
-    $verifyProducts = @($products)
-    $checkInsights = $false
-    # Query filesystem presence only; the candidate's existing profile validator
-    # owns parsing and compatibility. Unexpected filesystem errors fail closed.
+    $updatedProducts = @(@($products) + @($previous.installed.Keys) | Sort-Object -Unique)
+    $verifyProducts = @($updatedProducts)
+    $checkInsights = $previous.installed.ContainsKey("groundline-insights")
     try {
         $null = Get-Item -LiteralPath (Join-Path $installHome "groundline/insights") -Force -ErrorAction Stop
         $checkInsights = $true
     } catch [System.Management.Automation.ItemNotFoundException] {}
-    if ($checkInsights -and $Profile -eq "core") { $verifyProducts += "groundline-insights" }
+    if ($checkInsights -and "groundline-insights" -notin $verifyProducts) { $verifyProducts += "groundline-insights" }
     $installVersion = ""
     foreach ($product in $verifyProducts) {
+        $script:ActiveStage = "distribution_$product"
         $source = Join-Path $PSScriptRoot "plugins/$product"
         $binary = Join-Path $source "bin/$target/$product.exe"
         Invoke-Step "distribution_$product" $binary @("provider-smoke", "--plugin-root", $source, "--require-installed", "--json")
-        $version = & $binary --version
-        if ($LASTEXITCODE -ne 0 -or $version -notmatch ('^' + [regex]::Escape($product) + ' ([0-9]+\.[0-9]+\.[0-9]+)$')) { throw "Invalid distribution version." }
+        $versionOutput = & $binary --version
+        if ($LASTEXITCODE -ne 0 -or $versionOutput -cnotmatch ('^' + [regex]::Escape($product) + ' ([0-9]+\.[0-9]+\.[0-9]+)$')) { throw "Invalid distribution version." }
         $version = $Matches[1]
-        if ($installVersion -and $installVersion -ne $version) { throw "Use one complete release distribution." }
+        if (!(Test-ReleaseVersion $version) -or ($installVersion -and $installVersion -cne $version)) { throw "Use one complete release distribution." }
         $installVersion = $version
     }
+    $script:ActiveStage = "distribution_version"
+    foreach ($name in $previous.installed.Keys) { Assert-ForwardVersion $previous.installed[$name].version $installVersion }
+    $script:ActiveStage = "distribution_revision"
+    $script:SourceCommit = Get-CleanCommit $PSScriptRoot
+    foreach ($product in $verifyProducts) {
+        $tracked = @("plugins/$product/.codex-plugin/plugin.json", "plugins/$product/bin/$target/$product.exe", "plugins/$product/bin/$target/$product.exe.sha256", "plugins/$product/bin/$target/manifest.json")
+        $null = Get-GitValue $PSScriptRoot (@("ls-files", "--error-unmatch", "--") + $tracked)
+    }
+    Set-Stage "distribution_revision" "PASS" 0
     if ($checkInsights) {
         $candidate = Join-Path $PSScriptRoot "plugins/groundline-insights/bin/$target/groundline-insights.exe"
         Invoke-Step "insights_server_compatibility" $candidate @("worker", "check-server", "--json")
     } else { Set-Stage "insights_server_compatibility" "NOT_CONFIGURED" 0 }
-    Invoke-Step "marketplace_add" $Codex @("plugin", "marketplace", "add", "https://github.com/jukqaz/groundline.git", "--ref", "stable", "--json")
-    Invoke-Step "marketplace_refresh" $Codex @("plugin", "marketplace", "upgrade", "groundline", "--json")
-    foreach ($product in $products) {
-        Invoke-Step "install_$product" $Codex @("plugin", "add", "$product@groundline", "--json")
-        $cache = Join-Path $installHome "plugins/cache/groundline/$product/$installVersion"
-        $installed = Join-Path $cache "bin/$target/$product.exe"
-        $script:ActiveStage = "verify_$product"
-        if ((Get-ArtifactSha256 (Join-Path $PSScriptRoot "plugins/$product/bin/$target/$product.exe")) -ne (Get-ArtifactSha256 $installed)) {
-            throw "Installed artifact differs. Obtain the complete current stable distribution and retry."
+    $expected = @{}
+    foreach ($name in $updatedProducts) {
+        $enabled = if ($previous.installed.ContainsKey($name)) { $previous.installed[$name].enabled } else { $true }
+        $expected[$name] = [pscustomobject]@{ version = $installVersion; enabled = $enabled }
+    }
+    $newProducts = @()
+    $sourceVerified = $false
+    try {
+        if ($previous.market) {
+            Invoke-Step "marketplace_remove" $Codex @("plugin", "marketplace", "remove", "groundline", "--json")
         }
-        Invoke-Step "verify_$product" $installed @("provider-smoke", "--plugin-root", $cache, "--require-installed", "--json")
+        Invoke-Step "marketplace_add" $Codex @("plugin", "marketplace", "add", $script:MarketplaceUrl, "--ref", $script:SourceCommit, "--json")
+        Invoke-Step "marketplace_refresh" $Codex @("plugin", "marketplace", "upgrade", "groundline", "--json")
+        $script:ActiveStage = "snapshot_revision"
+        $current = Get-NativeState
+        if (!$current.market -or $current.commit -cne $script:SourceCommit) { throw "Native source does not match the checked commit." }
+        Set-Stage "snapshot_revision" "PASS" 0
+        foreach ($product in $products) {
+            if (!$previous.installed.ContainsKey($product)) {
+                $newProducts += $product
+                Invoke-Step "install_$product" $Codex @("plugin", "add", "$product@groundline", "--json")
+            } else { Set-Stage "install_$product" "PASS" 0 }
+        }
+        $script:ActiveStage = "installed_state"
+        $current = Get-NativeState
+        if (!$current.market -or $current.commit -cne $script:SourceCommit) { throw "Native source changed during installation." }
+        Assert-InstalledMap $current.installed $expected
+        Set-Stage "installed_state" "PASS" 0
+        foreach ($product in $updatedProducts) {
+            $cache = Join-Path $installHome "plugins/cache/groundline/$product/$installVersion"
+            $installed = Join-Path $cache "bin/$target/$product.exe"
+            $script:ActiveStage = "verify_$product"
+            if ((Get-ArtifactSha256 (Join-Path $PSScriptRoot "plugins/$product/bin/$target/$product.exe")) -ne (Get-ArtifactSha256 $installed)) {
+                throw "Installed artifact differs from the checked distribution."
+            }
+            Invoke-Step "verify_$product" $installed @("provider-smoke", "--plugin-root", $cache, "--require-installed", "--json")
+        }
+        $sourceVerified = $true
+    } finally {
+        # Keep recovery armed through native source, state, and artifact checks.
+        # Settings/consent operations below are outside this source transaction.
+        if (!$sourceVerified) {
+            $failedSourceStage = $script:ActiveStage
+            if (!$script:Stages.Contains($failedSourceStage) -or $script:Stages[$failedSourceStage].status -ne "FAIL") {
+                Set-Stage $failedSourceStage "FAIL" 1
+            }
+            try { Restore-NativeSource $previous $newProducts }
+            catch {
+                $script:Rollback = "failed"
+                Set-Stage "source_rollback" "FAIL" 1
+            }
+            $script:ActiveStage = $failedSourceStage
+        }
     }
     if ($Profile -ne "insights") {
         $script:ActiveStage = "catalog"
@@ -168,7 +407,9 @@ try {
     Write-Warning "The reported stage failed. Check the preceding diagnostic and rerun after resolving it."
 } finally {
     $status = if ($script:Failed) { "FAIL" } elseif ($script:Pending) { "ACTION_REQUIRED" } else { "PASS" }
-    [ordered]@{ kind = "groundline-installation"; schema = 1; status = $status; profile = $Profile; stages = $script:Stages; resume = "rerun_same_installer_after_resolving_reported_actions" } | ConvertTo-Json -Depth 5
+    try {
+        [ordered]@{ kind = "groundline-installation"; schema = 1; status = $status; profile = $Profile; source_commit = $script:SourceCommit; previous_commit = $script:PreviousCommit; rollback = $script:Rollback; stages = $script:Stages; resume = "rerun_same_installer_after_resolving_reported_actions" } | ConvertTo-Json -Depth 5
+    } finally { [Console]::OutputEncoding = $script:PreviousConsoleEncoding }
 }
 if ($script:Failed) { exit 1 }
 if ($script:Pending) { exit 2 }

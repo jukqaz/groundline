@@ -52,6 +52,29 @@ impl Fixture {
         for file in ["install.sh", "install.ps1"] {
             fs::copy(repo.join(file), root.join(file)).unwrap();
         }
+        let empty = temp.path().join("empty-market.json");
+        fs::write(&empty, r#"{"marketplaces":[]}"#).unwrap();
+        fs::write(temp.path().join("market.json"), fs::read(&empty).unwrap()).unwrap();
+        fs::write(temp.path().join("market-after.json"), serde_json::to_vec(&serde_json::json!({"marketplaces":[{
+            "name":"groundline","root":root,"marketplaceSource":{"sourceType":"git","source":"https://github.com/jukqaz/groundline.git"}
+        }]})).unwrap()).unwrap();
+        fs::write(
+            temp.path().join("empty-plugins.json"),
+            r#"{"installed":[],"available":[]}"#,
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("plugins.json"),
+            r#"{"installed":[],"available":[]}"#,
+        )
+        .unwrap();
+        for name in ["groundline", "groundline-insights"] {
+            fs::write(temp.path().join(format!("{name}-after.json")), serde_json::to_vec(&serde_json::json!({"installed":[{
+                "name":name,"pluginId":format!("{name}@groundline"),"marketplaceName":"groundline","version":version,"installed":true,"enabled":true,
+                "source":{"source":"local","path":root.join("plugins").join(name)},
+                "marketplaceSource":{"sourceType":"git","source":"https://github.com/jukqaz/groundline.git"}
+            }],"available":[]})).unwrap()).unwrap();
+        }
         let catalog = temp.path().join("models.json");
         fs::write(&catalog, r#"{"models":[{"slug":"gpt-6-astra","default_reasoning_level":"xhigh","supported_reasoning_levels":[{"effort":"xhigh"}]}]}"#).unwrap();
         let calls = temp.path().join("calls.txt");
@@ -61,16 +84,16 @@ impl Fixture {
             "fake codex.sh"
         });
         if cfg!(windows) {
-            fs::write(&codex, "@echo off\r\necho %*>>\"%GROUNDLINE_TEST_CALLS%\"\r\nif \"%~3\"==\"--help\" exit /b 0\r\nif \"%~1 %~2\"==\"debug models\" (\r\n type \"%GROUNDLINE_TEST_CATALOG%\"\r\n if \"%GROUNDLINE_TEST_FAIL_CATALOG%\"==\"1\" exit /b 1\r\n)\r\nexit /b 0\r\n").unwrap();
+            fs::write(&codex, "@echo off\r\necho %*>>\"%GROUNDLINE_TEST_CALLS%\"\r\nif \"%~3\"==\"--help\" exit /b 0\r\nif \"%~4\"==\"--help\" exit /b 0\r\nif \"%~1 %~2 %~3\"==\"plugin marketplace list\" type \"%~dp0market.json\"\r\nif \"%~1 %~2\"==\"plugin list\" type \"%~dp0plugins.json\"\r\nif \"%~1 %~2 %~3\"==\"plugin marketplace add\" copy /y \"%~dp0market-after.json\" \"%~dp0market.json\" >nul\r\nif \"%~1 %~2 %~3\"==\"plugin marketplace remove\" copy /y \"%~dp0empty-market.json\" \"%~dp0market.json\" >nul\r\nif \"%~1 %~2 %~3\"==\"plugin add groundline@groundline\" copy /y \"%~dp0groundline-after.json\" \"%~dp0plugins.json\" >nul\r\nif \"%~1 %~2 %~3\"==\"plugin add groundline-insights@groundline\" copy /y \"%~dp0groundline-insights-after.json\" \"%~dp0plugins.json\" >nul\r\nif \"%~1 %~2\"==\"plugin remove\" copy /y \"%~dp0empty-plugins.json\" \"%~dp0plugins.json\" >nul\r\nif \"%~1 %~2\"==\"debug models\" (\r\n type \"%GROUNDLINE_TEST_CATALOG%\"\r\n if \"%GROUNDLINE_TEST_FAIL_CATALOG%\"==\"1\" exit /b 1\r\n)\r\nexit /b 0\r\n").unwrap();
         } else {
-            fs::write(&codex, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$GROUNDLINE_TEST_CALLS\"\n[ \"${3:-}\" != --help ] || exit 0\nif [ \"$1 $2\" = 'debug models' ]; then\n cat \"$GROUNDLINE_TEST_CATALOG\"\n [ \"${GROUNDLINE_TEST_FAIL_CATALOG:-0}\" != 1 ] || exit 1\nfi\n").unwrap();
+            fs::write(&codex, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$GROUNDLINE_TEST_CALLS\"\n[ \"${3:-}\" != --help ] && [ \"${4:-}\" != --help ] || exit 0\nfixture=$(dirname \"$GROUNDLINE_TEST_CALLS\")\ncase \"$1 $2 ${3:-}\" in\n 'plugin marketplace list') cat \"$fixture/market.json\" ;;\n 'plugin list --json') cat \"$fixture/plugins.json\" ;;\n 'plugin marketplace add') cp \"$fixture/market-after.json\" \"$fixture/market.json\" ;;\n 'plugin marketplace remove') cp \"$fixture/empty-market.json\" \"$fixture/market.json\" ;;\n 'plugin add groundline@groundline') cp \"$fixture/groundline-after.json\" \"$fixture/plugins.json\" ;;\n 'plugin add groundline-insights@groundline') cp \"$fixture/groundline-insights-after.json\" \"$fixture/plugins.json\" ;;\n plugin\\ remove\\ *) cp \"$fixture/empty-plugins.json\" \"$fixture/plugins.json\" ;;\nesac\nif [ \"$1 $2\" = 'debug models' ]; then\n cat \"$GROUNDLINE_TEST_CATALOG\"\n [ \"${GROUNDLINE_TEST_FAIL_CATALOG:-0}\" != 1 ] || exit 1\nfi\n").unwrap();
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
                 fs::set_permissions(&codex, fs::Permissions::from_mode(0o700)).unwrap();
             }
         }
-        Self {
+        let result = Self {
             _temp: temp,
             root,
             home,
@@ -79,6 +102,38 @@ impl Fixture {
             target: target.to_owned(),
             catalog,
             calls,
+        };
+        result.commit_distribution();
+        result
+    }
+    fn commit_distribution(&self) {
+        for args in [
+            vec!["init"],
+            vec!["config", "core.autocrlf", "false"],
+            vec!["add", "--all"],
+            vec![
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "reviewed fixture",
+            ],
+        ] {
+            let output = Command::new("git")
+                .current_dir(&self.root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
     }
     fn run(&self, fail_catalog: bool) -> Output {
@@ -208,6 +263,22 @@ impl Fixture {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(&path, &script).unwrap();
             fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+            fs::write(
+                path.with_file_name("groundline-insights.sha256"),
+                b"synthetic artifact fixture",
+            )
+            .unwrap();
+            fs::write(path.with_file_name("manifest.json"), b"{}").unwrap();
+            let manifest = path
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join(".codex-plugin");
+            fs::create_dir_all(&manifest).unwrap();
+            fs::write(manifest.join("plugin.json"), serde_json::to_vec(&serde_json::json!({"name":"groundline-insights","version":env!("CARGO_PKG_VERSION")})).unwrap()).unwrap();
         }
     }
 
@@ -225,6 +296,7 @@ impl Fixture {
         } else {
             assert!(original.contains(&replacement));
         }
+        self.commit_distribution();
         let path_dir = self.home.join("path-bin");
         self.fake_codex(&path_dir.join("codex"), "PATH_CODEX");
         let mut paths = vec![path_dir];
@@ -337,6 +409,7 @@ fn installer_accepts_crlf_checksum_records() {
         let text = fs::read_to_string(&checksum).unwrap();
         fs::write(checksum, text.replace('\n', "\r\n")).unwrap();
     }
+    f.commit_distribution();
     let result = f.run(false);
     assert!(
         result.status.success(),
@@ -505,4 +578,62 @@ fn explicit_codex_stays_selected_and_legacy_app_layout_remains_recognized() {
     assert!(calls.contains("APP_CodexOldLayout_0"), "{calls}");
     assert!(calls.contains("FAMILY=codex_app"), "{calls}");
     assert!(!calls.contains("PATH_CODEX"), "{calls}");
+}
+
+#[test]
+fn unsupported_native_source_stops_before_writes() {
+    let f = Fixture::new();
+    let path = f.calls.parent().unwrap().join("market-after.json");
+    let mut source: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+    source["marketplaces"][0]["marketplaceSource"]["source"] =
+        serde_json::json!("https://example.invalid/unreviewed.git");
+    fs::write(
+        f.calls.parent().unwrap().join("market.json"),
+        serde_json::to_vec(&source).unwrap(),
+    )
+    .unwrap();
+    let result = f.run(false);
+    let report = receipt(&result);
+    assert_eq!(result.status.code(), Some(1));
+    assert_eq!(report["stages"]["native_source"]["status"], "FAIL");
+    assert!(report["stages"].get("marketplace_add").is_none());
+    assert!(!f.home.join("config.toml").exists());
+}
+
+#[test]
+fn uncommitted_distribution_stops_before_native_writes() {
+    let f = Fixture::new();
+    fs::write(f.root.join("unreviewed.txt"), b"uncommitted distribution").unwrap();
+    let result = f.run(false);
+    let report = receipt(&result);
+    assert_eq!(result.status.code(), Some(1));
+    assert_eq!(report["stages"]["distribution_revision"]["status"], "FAIL");
+    assert!(report["stages"].get("marketplace_add").is_none());
+    assert!(!f.home.join("config.toml").exists());
+}
+
+#[test]
+fn failed_new_plugin_add_does_not_block_source_rollback_with_remove_not_installed() {
+    let f = Fixture::new();
+    let original = fs::read_to_string(&f.codex).unwrap();
+    let script = if cfg!(windows) {
+        original.replacen(
+            "@echo off\r\n",
+            "@echo off\r\nif \"%~1 %~2 %~3\"==\"plugin add groundline@groundline\" exit /b 19\r\n",
+            1,
+        )
+    } else {
+        original.replacen("#!/bin/sh\n", "#!/bin/sh\nif [ \"$1 $2 ${3:-}\" = 'plugin add groundline@groundline' ]; then exit 19; fi\n", 1)
+    };
+    fs::write(&f.codex, script).unwrap();
+    let result = f.run(false);
+    let report = receipt(&result);
+    assert_eq!(result.status.code(), Some(1), "{report}");
+    assert_eq!(report["stages"]["install_groundline"]["status"], "FAIL");
+    assert_eq!(report["stages"]["source_rollback"]["status"], "PASS");
+    assert_eq!(report["rollback"], "fresh_registration_removed");
+    let calls = fs::read_to_string(&f.calls).unwrap();
+    assert!(!calls.contains("plugin remove groundline@groundline"));
+    assert!(calls.contains("plugin marketplace remove groundline --json"));
+    assert!(!f.home.join("config.toml").exists());
 }

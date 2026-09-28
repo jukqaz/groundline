@@ -7,7 +7,7 @@ service connection and collection. There is no additional GUI or background daem
 
 ## Start
 
-Install Git and Codex first, then review and clone the binary-bearing `stable`
+Install Git and Codex first; the Bash installer also requires `jq`. Review and clone the binary-bearing `stable`
 distribution. Source tags and `main` do not contain installable native binaries.
 
 ```console
@@ -34,8 +34,19 @@ documented inputs. Do not assume a plugin post-install callback ran.
 
 Obtain the current complete `stable` distribution and run the same installer with
 the same intended Codex executable and `CODEX_HOME`. It refreshes the native
-marketplace, installs the selected IDs again, checks the installed artifacts,
-then rechecks setup and strict doctor. No separate updater runs in the background.
+marketplace at that distribution's exact clean Git commit, verifies installed artifacts,
+then rechecks setup and strict doctor. Existing installed/enabled states are retained;
+only newly selected products use `plugin add`. Disabled plugins stay disabled.
+No separate updater runs in the background.
+
+The installer changes an existing official HTTPS/SSH registration through native
+remove/add commands, retaining its transport. It accepts only an owned, clean
+native Git snapshot aligned with the installed versions; Codex's validated
+`.codex-marketplace-install.json` bookkeeping file is the sole untracked exception.
+Unsupported sources or partial state stop before changes. The reviewed distribution
+itself must be clean and contain committed binaries, checksums, and manifests.
+App Refresh now stays on the pinned commit. To adopt another release, obtain and
+review its complete current `stable` distribution and rerun its installer.
 
 Profiles select explicit installation and setup steps. Native marketplace refresh
 can also update another already-installed product from this shared channel:
@@ -132,9 +143,16 @@ diagnostics. Stage names and exit semantics are identical on all supported OSes:
 Native doctor failure is reported separately from settings application. It does
 not erase completed steps or trigger automatic rollback. The same installer
 rechecks current state on every retry; it never trusts an old completion flag.
-Repeated unchanged setup creates no additional config backup. If stable changed
-between download and installation, obtain the complete new distribution instead
-of running a mismatched cached binary.
+Repeated unchanged setup creates no additional config backup. Moving `stable`
+after review cannot change the installer's selected commit.
+
+If source replacement or artifact verification fails, the installer attempts
+native recovery before setup. It removes only newly added products, reinstates
+the previous actual commit, and compares prior versions, enabled states, and
+artifact bytes. The receipt reports `source_commit`, `previous_commit`, and
+`rollback`; `previous_commit_pinned` means recovery to that immutable revision,
+not restoration of the old symbolic ref. A failed recovery requires review before
+retrying. These native commands are not atomic across process kill or power loss.
 
 For release qualification, verify all six native targets plus real Codex package
 installation, preservation of existing model choices, explicit supported

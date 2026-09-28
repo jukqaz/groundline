@@ -34,16 +34,31 @@ impl HealthServer {
         let server_revision = revision.clone();
         let server_stop = stop.clone();
         let thread = thread::spawn(move || {
-            while !server_stop.load(Ordering::Relaxed) {
+            'connections: while !server_stop.load(Ordering::Relaxed) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
+                        stream.set_nonblocking(false).unwrap();
                         stream
                             .set_read_timeout(Some(Duration::from_secs(2)))
                             .unwrap();
                         let mut request = Vec::new();
                         let mut buffer = [0; 1024];
                         while !request.windows(4).any(|part| part == b"\r\n\r\n") {
-                            let n = stream.read(&mut buffer).unwrap();
+                            let n = match stream.read(&mut buffer) {
+                                Ok(0) if request.is_empty() => continue 'connections,
+                                Ok(n) => n,
+                                Err(error)
+                                    if request.is_empty()
+                                        && matches!(
+                                            error.kind(),
+                                            std::io::ErrorKind::WouldBlock
+                                                | std::io::ErrorKind::TimedOut
+                                        ) =>
+                                {
+                                    continue 'connections;
+                                }
+                                Err(error) => panic!("fixture health request: {error}"),
+                            };
                             assert!(n > 0 && request.len() < 8192);
                             request.extend_from_slice(&buffer[..n]);
                         }
@@ -74,7 +89,10 @@ impl HealthServer {
 impl Drop for HealthServer {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
-        self.thread.take().unwrap().join().unwrap();
+        let result = self.thread.take().unwrap().join();
+        if !thread::panicking() {
+            result.unwrap();
+        }
     }
 }
 
@@ -174,7 +192,7 @@ fn real_codex_upgrades_metadata_repeats_and_preserves_settings_and_consent() {
     // distribution. The real installer and real Codex commands are unmodified.
     let git_config = root.path().join("fixture.gitconfig");
     fs::write(&git_config, format!(
-        "[url \"{}\"]\n insteadOf = https://github.com/jukqaz/groundline.git\n[user]\n name = GroundLine Test\n email = groundline-test@example.invalid\n[commit]\n gpgsign = false\n",
+        "[url \"{}\"]\n insteadOf = https://github.com/jukqaz/groundline.git\n insteadOf = git@github.com:jukqaz/groundline.git\n[user]\n name = GroundLine Test\n email = groundline-test@example.invalid\n[commit]\n gpgsign = false\n",
         market.to_str().unwrap().replace('\\', "/")
     )).unwrap();
     for args in [
@@ -207,7 +225,7 @@ fn real_codex_upgrades_metadata_repeats_and_preserves_settings_and_consent() {
             "plugin",
             "marketplace",
             "add",
-            "https://github.com/jukqaz/groundline.git",
+            "git@github.com:jukqaz/groundline.git",
             "--ref",
             "stable",
             "--json",
@@ -225,9 +243,20 @@ fn real_codex_upgrades_metadata_repeats_and_preserves_settings_and_consent() {
         let old: Value = serde_json::from_slice(&fs::read(manifest).unwrap()).unwrap();
         assert_eq!(old["version"], "0.29.0");
     }
+    let config = home.join("config.toml");
+    let mut native_settings: toml::Table =
+        toml::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
+    native_settings["plugins"].as_table_mut().unwrap()["groundline-insights@groundline"]
+        .as_table_mut()
+        .unwrap()
+        .insert("enabled".to_owned(), toml::Value::Boolean(false));
+    fs::write(&config, toml::to_string(&native_settings).unwrap()).unwrap();
     let previous_versions = installed_versions(&mut native());
     for name in ["groundline", "groundline-insights"] {
-        assert_eq!(previous_versions[name], ("0.29.0".to_owned(), true));
+        assert_eq!(
+            previous_versions[name],
+            ("0.29.0".to_owned(), name == "groundline")
+        );
     }
     let config = home.join("config.toml");
     let original = fs::read_to_string(&config).unwrap_or_default();
@@ -303,21 +332,92 @@ fn real_codex_upgrades_metadata_repeats_and_preserves_settings_and_consent() {
             "advance local stable fixture",
         );
     }
-    let run_installer = |profile: &str| {
+    let reviewed = root.path().join("immutable reviewed distribution");
+    checked(
+        Command::new("git")
+            .args(["clone", "--no-hardlinks"])
+            .arg(&market)
+            .arg(&reviewed),
+        "copy reviewed distribution",
+    );
+    let candidate_commit = String::from_utf8(
+        checked(
+            Command::new("git")
+                .arg("-C")
+                .arg(&reviewed)
+                .args(["rev-parse", "HEAD"]),
+            "candidate commit",
+        )
+        .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_owned();
+    // stable moves after review. Installation must use candidate_commit, never
+    // these future manifests, even though native refresh normally follows stable.
+    for name in ["groundline", "groundline-insights"] {
+        let path = market
+            .join("plugins")
+            .join(name)
+            .join(".codex-plugin/plugin.json");
+        let mut manifest: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        manifest["version"] = serde_json::json!("2026.929.2");
+        fs::write(path, serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
+    }
+    for args in [
+        vec!["add", "."],
+        vec!["commit", "-m", "move stable beyond reviewed candidate"],
+    ] {
+        checked(
+            Command::new("git")
+                .current_dir(&market)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", &git_config)
+                .args(args),
+            "move stable",
+        );
+    }
+    let wrapper = root.path().join(if cfg!(windows) {
+        "fail-once.cmd"
+    } else {
+        "fail-once.sh"
+    });
+    if cfg!(windows) {
+        fs::write(&wrapper, "@echo off\r\nif \"%~4\"==\"--help\" goto delegate\r\nif exist \"%GROUNDLINE_FAIL_MARKER%\" goto delegate\r\nif not \"%~1 %~2 %~3\"==\"plugin marketplace %GROUNDLINE_FAIL_STAGE%\" goto delegate\r\ntype nul > \"%GROUNDLINE_FAIL_MARKER%\"\r\nif \"%GROUNDLINE_FAIL_STAGE%\"==\"upgrade\" call \"%GROUNDLINE_REAL_CODEX%\" %*\r\nexit /b 19\r\n:delegate\r\ncall \"%GROUNDLINE_REAL_CODEX%\" %*\r\nexit /b %ERRORLEVEL%\r\n").unwrap();
+    } else {
+        fs::write(&wrapper, "#!/bin/sh\nif [ \"${4:-}\" != --help ] && [ ! -e \"$GROUNDLINE_FAIL_MARKER\" ] && [ \"$1 $2 ${3:-}\" = \"plugin marketplace $GROUNDLINE_FAIL_STAGE\" ]; then\n : > \"$GROUNDLINE_FAIL_MARKER\"\n if [ \"$GROUNDLINE_FAIL_STAGE\" = upgrade ]; then \"$GROUNDLINE_REAL_CODEX\" \"$@\" || exit $?; fi\n exit 19\nfi\nexec \"$GROUNDLINE_REAL_CODEX\" \"$@\"\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+    }
+    let run_installer_with_failure = |profile: &str, fail_stage: Option<&str>| {
         let mut installer = if cfg!(windows) {
             let mut c = Command::new("powershell.exe");
             c.args(["-NoProfile", "-File"])
-                .arg(market.join("install.ps1"))
+                .arg(reviewed.join("install.ps1"))
                 .args(["-Profile", profile, "-Codex"]);
             c
         } else {
             let mut c = Command::new("bash");
-            c.arg(market.join("install.sh"))
+            c.arg(reviewed.join("install.sh"))
                 .args(["--profile", profile, "--codex"]);
             c
         };
         installer
-            .arg(&codex)
+            .arg(if fail_stage.is_some() {
+                &wrapper
+            } else {
+                &codex
+            })
+            .env("GROUNDLINE_REAL_CODEX", &codex)
+            .env("GROUNDLINE_FAIL_STAGE", fail_stage.unwrap_or("none"))
+            .env(
+                "GROUNDLINE_FAIL_MARKER",
+                root.path()
+                    .join(format!("failed-{}", fail_stage.unwrap_or("none"))),
+            )
             .env("CODEX_HOME", &home)
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_CONFIG_GLOBAL", &git_config)
@@ -330,6 +430,7 @@ fn real_codex_upgrades_metadata_repeats_and_preserves_settings_and_consent() {
             .output()
             .unwrap()
     };
+    let run_installer = |profile: &str| run_installer_with_failure(profile, None);
     let assert_blocked = |output: Output, failed_stage: &str| {
         let receipt = package::receipt(&output);
         assert_eq!(output.status.code(), Some(1), "{receipt}");
@@ -343,7 +444,7 @@ fn real_codex_upgrades_metadata_repeats_and_preserves_settings_and_consent() {
     } else {
         "groundline-insights"
     };
-    let checksum = market
+    let checksum = reviewed
         .join("plugins/groundline-insights/bin")
         .join(target)
         .join(format!("{executable}.sha256"));
@@ -364,8 +465,65 @@ fn real_codex_upgrades_metadata_repeats_and_preserves_settings_and_consent() {
     assert_blocked(run_installer("core"), "insights_server_compatibility");
     assert_eq!(saved_files(&insights_state), saved_state);
     health.revision.store(8, Ordering::Relaxed);
+    for failure in ["add", "upgrade"] {
+        let output = run_installer_with_failure("core", Some(failure));
+        let receipt = package::receipt(&output);
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "{receipt}; {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            receipt["stages"]["source_rollback"]["status"],
+            "PASS",
+            "{receipt}; {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(receipt["rollback"], "previous_commit_pinned");
+        assert_eq!(installed_versions(&mut native()), previous_versions);
+        let listing: Value = serde_json::from_slice(
+            &checked(
+                native().args(["plugin", "marketplace", "list", "--json"]),
+                "restored source",
+            )
+            .stdout,
+        )
+        .unwrap();
+        let source = Path::new(listing["marketplaces"][0]["root"].as_str().unwrap());
+        for name in ["groundline", "groundline-insights"] {
+            let executable = if cfg!(windows) {
+                format!("{name}.exe")
+            } else {
+                name.to_owned()
+            };
+            for file in [
+                format!("bin/{target}/{executable}"),
+                format!("bin/{target}/{executable}.sha256"),
+                format!("bin/{target}/manifest.json"),
+                ".codex-plugin/plugin.json".to_owned(),
+            ] {
+                assert_eq!(
+                    fs::read(source.join("plugins").join(name).join(&file)).unwrap(),
+                    fs::read(
+                        home.join(format!("plugins/cache/groundline/{name}/0.29.0"))
+                            .join(file)
+                    )
+                    .unwrap()
+                );
+            }
+        }
+        assert_eq!(saved_files(&insights_state), saved_state);
+    }
 
-    let selected_values: toml::Table = toml::from_str(&selected).unwrap();
+    let mut selected_values: toml::Table = toml::from_str(&selected).unwrap();
+    selected_values["marketplaces"].as_table_mut().unwrap()["groundline"]
+        .as_table_mut()
+        .unwrap()
+        .insert(
+            "ref".to_owned(),
+            toml::Value::String(candidate_commit.clone()),
+        );
     let mut previous_config = None;
     for profile in ["core", "both", "both"] {
         let output = run_installer(profile);
@@ -375,7 +533,11 @@ fn real_codex_upgrades_metadata_repeats_and_preserves_settings_and_consent() {
             "{receipt}; {}",
             String::from_utf8_lossy(&output.stderr)
         );
+        assert_eq!(receipt["source_commit"], candidate_commit);
         for stage in [
+            "distribution_revision",
+            "snapshot_revision",
+            "installed_state",
             "marketplace_add",
             "marketplace_refresh",
             "install_groundline",
@@ -393,12 +555,12 @@ fn real_codex_upgrades_metadata_repeats_and_preserves_settings_and_consent() {
             );
             // A profile selects explicit installation/setup, not native update
             // isolation. Refreshing this shared marketplace also advances the
-            // already-installed, enabled Insights package.
+            // already-installed Insights package while preserving its disabled flag.
             let current_versions = installed_versions(&mut native());
             for name in ["groundline", "groundline-insights"] {
                 assert_eq!(
                     current_versions[name],
-                    (env!("CARGO_PKG_VERSION").to_owned(), true)
+                    (env!("CARGO_PKG_VERSION").to_owned(), name == "groundline")
                 );
                 assert!(
                     home.join(format!(
@@ -487,6 +649,6 @@ fn real_codex_upgrades_metadata_repeats_and_preserves_settings_and_consent() {
     assert_eq!(pending["stages"]["collection_consented"], false);
     assert_eq!(saved_files(&insights_state), saved_state);
     println!(
-        "real Codex and local stable transport: old metadata -> current cache, repeat, native catalog, model/effort/Fast and disabled consent preservation PASS; old runtime execution, authenticated task and private delivery UNVERIFIED"
+        "real Codex and local stable transport: old metadata -> exact reviewed cache despite stable movement, add/upgrade failure rollback artifacts, disabled plugin and consent preservation, repeat, native catalog/model/effort/Fast PASS; old runtime execution, authenticated task and private delivery UNVERIFIED"
     );
 }

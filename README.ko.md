@@ -53,7 +53,7 @@ Core의 스킬 설명과 읽은 지침은 모델 입력을 늘립니다. 모델�
 
 실행 파일이 포함된 검토한 `stable` 배포본의 설치 스크립트를 사용합니다. 기본은
 Core 설치와 기존 Codex 선택 보존이며 완료·대기 중인 단계를 각각 보고합니다.
-Git과 Codex가 먼저 설치되어 있어야 합니다.
+Git과 Codex가 먼저 설치되어 있어야 하며 Bash 설치기에는 `jq`도 필요합니다.
 
 ```console
 git clone --branch stable --single-branch https://github.com/jukqaz/groundline.git groundline-install
@@ -63,11 +63,14 @@ bash groundline-install/install.sh
 Windows에서는 `powershell -File groundline-install/install.ps1`을 실행합니다.
 Insights도 설치하려면 `--profile both` 또는 `-Profile both`, Insights만 설치하려면
 `insights`를 선택합니다. 모델 선택, 비공개 연결 입력, 동의, 첫 수집과 재실행은
-[통합 설치 안내](docs/installation.md)를 참고하세요. 패키지만 설치하는 명령도 아래에 있습니다.
+[통합 설치 안내](docs/installation.md)를 참고하세요. 기존 비활성 플러그인은 그대로
+유지합니다. 설치기는 검토한 커밋으로 고정하므로 App Refresh도 그 커밋에 머뭅니다.
+다음 버전은 최신 전체 `stable` 배포본을 검토한 뒤 그 설치기를 다시 실행합니다.
+패키지만 설치하는 명령도 아래에 있습니다.
 
 **GroundLine은 Codex 플러그인과 네이티브 CLI로 동작합니다.**
 Codex App과 CLI에서 같은 플러그인을 사용합니다.
-Git과 Codex만 있으면 됩니다. 아래 명령은 개인 모델·추론·권한 설정을 바꾸지 않습니다.
+패키지만 설치하는 native 명령에는 Git과 Codex가 필요합니다. 아래 명령은 개인 모델·추론·권한 설정을 바꾸지 않습니다.
 수집은 Insights 연결 설정과 명시적 동의 후 Codex 훅이 실행될 때 동작합니다.
 
 아래 `codex`는 실제 사용하는 Codex의 CLI를 뜻합니다. macOS에서 Codex App만
@@ -97,7 +100,7 @@ codex plugin add groundline-insights@groundline --json
 
 Core 기능과 비공개 집계 분석을 함께 쓸 때만 `plugin add` 두 개를 모두 실행합니다.
 
-새 버전은 하나의 marketplace snapshot을 갱신해 적용합니다.
+등록된 marketplace snapshot을 갱신합니다. 커밋으로 고정된 등록은 같은 버전에 머뭅니다.
 
 ```console
 codex plugin marketplace upgrade groundline --json
@@ -107,8 +110,9 @@ codex plugin list --json
 `main`과 버전 태그에는 소스가 있고, 설치에 필요한 실행 파일은 `stable`의
 `bin` 디렉터리에 포함됩니다. 설치 채널을 소스 태그로 바꾸면 실행 파일이
 없을 수 있습니다. 특정 버전으로 고정하려면 검증한 배포용 리비전이 필요합니다.
-갱신 후 설치 버전이 그대로라면 같은 플러그인 ID의 `plugin add`를 다시 실행하고
-설치 버전과 체크섬을 확인합니다.
+직접 실행하는 native 명령은 설치기의 API 호환성 검사를 거치지 않습니다.
+업데이트에는 검토한 설치기를 사용합니다. 비활성 플러그인을 `plugin add`로
+다시 추가하면 활성화됩니다.
 
 Windows의 `LF will be replaced by CRLF`는 Git 줄바꿈 변환 메시지입니다.
 `warning`만으로 설치 실패를 판정하지 말고 명령의 종료 코드와 마지막 오류를
