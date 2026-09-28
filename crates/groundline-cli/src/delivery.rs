@@ -10,6 +10,9 @@ use sha2::{Digest, Sha256};
 
 const MAX_MANIFEST_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_ARTIFACT_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_EVIDENCE_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_RECEIPTS: usize = 1000;
+const MAX_DIRECTORY_BYTES: usize = 16 * 1024 * 1024;
 
 fn error(code: &str) -> ContractError {
     ContractError(format!("delivery_{code}"))
@@ -46,7 +49,12 @@ fn bounded(path: &Path, maximum: u64) -> Result<Vec<u8>, ContractError> {
     Ok(data)
 }
 
-fn artifact(row: &mut Value, manifest_dir: &Path, role: &str) -> Result<(), ContractError> {
+fn artifact(
+    row: &mut Value,
+    manifest_dir: &Path,
+    role: &str,
+    evidence_bytes: &mut u64,
+) -> Result<(), ContractError> {
     let object = row
         .as_object_mut()
         .ok_or_else(|| error("invalid_manifest"))?;
@@ -64,7 +72,12 @@ fn artifact(row: &mut Value, manifest_dir: &Path, role: &str) -> Result<(), Cont
     } else {
         manifest_dir.join(path)
     };
-    let data = bounded(&path, MAX_ARTIFACT_BYTES)?;
+    let remaining = MAX_EVIDENCE_BYTES.saturating_sub(*evidence_bytes);
+    if remaining == 0 {
+        return Err(error("evidence_too_large"));
+    }
+    let data = bounded(&path, MAX_ARTIFACT_BYTES.min(remaining))?;
+    *evidence_bytes += data.len() as u64;
     let actual = format!("{:x}", Sha256::digest(&data));
     if declared != actual {
         return Err(error("artifact_digest_mismatch"));
@@ -75,40 +88,16 @@ fn artifact(row: &mut Value, manifest_dir: &Path, role: &str) -> Result<(), Cont
         let proposal: Value =
             serde_json::from_slice(&data).map_err(|_| error("invalid_recommendation_artifact"))?;
         if proposal["kind"] != "groundline-routing-proposal"
-            || proposal["schema"] != 1
+            || proposal["schema"] != 2
             || proposal["suggestion"]["model"] != row["model"]
             || proposal["suggestion"]["effort"] != row["effort"]
         {
             return Err(error("recommendation_mismatch"));
         }
-    } else if role == "requested" || role == "effective" {
-        let observation: Value =
-            serde_json::from_slice(&data).map_err(|_| error("invalid_selection_artifact"))?;
-        let expected_kind = if role == "effective" {
-            "groundline-native-selection-observation"
-        } else {
-            "groundline-selection-request"
-        };
-        if observation["kind"] != expected_kind
-            || observation["schema"] != 1
-            || observation["model"] != row["model"]
-            || observation["effort"] != row["effort"]
-            || observation["source"] != "operator_supplied"
-        {
-            return Err(error("selection_artifact_mismatch"));
-        }
-    } else if role == "verification" {
-        let observation: Value =
-            serde_json::from_slice(&data).map_err(|_| error("invalid_verification_artifact"))?;
-        if observation["kind"] != "groundline-delivery-verification-observation"
-            || observation["schema"] != 1
-            || observation["status"] != row["status"]
-            || observation["evidence_kind"] != row["evidence_kind"]
-            || observation["source"] != "operator_supplied"
-        {
-            return Err(error("verification_artifact_mismatch"));
-        }
     }
+    // Other evidence points to an existing native result, request, test log or
+    // acceptance artifact. Its interpretation appears once in the manifest;
+    // copying it into another operator-authored JSON adds no authenticity.
     Ok(())
 }
 
@@ -118,7 +107,7 @@ pub(crate) fn record(input: &Path, output: &Path) -> Result<Value, ContractError
     let input_bytes = bounded(input, MAX_MANIFEST_BYTES)?;
     let mut receipt: Value =
         serde_json::from_slice(&input_bytes).map_err(|_| error("invalid_manifest"))?;
-    if receipt["kind"] != "groundline-delivery-manifest" || receipt["schema"] != 1 {
+    if receipt["kind"] != "groundline-delivery-manifest" || receipt["schema"] != 2 {
         return Err(error("invalid_manifest"));
     }
     if receipt.get("activation_verified").is_some()
@@ -132,13 +121,35 @@ pub(crate) fn record(input: &Path, output: &Path) -> Result<Value, ContractError
         return Err(error("derived_fields_not_allowed"));
     }
     let manifest_dir = parent_or_current(input);
+    let mut evidence_bytes = 0;
     for role in ["recommendation", "requested", "effective"] {
         if !receipt[role].is_null() {
-            artifact(&mut receipt[role], manifest_dir, role)?;
+            artifact(&mut receipt[role], manifest_dir, role, &mut evidence_bytes)?;
         }
     }
-    artifact(&mut receipt["verification"], manifest_dir, "verification")?;
+    artifact(
+        &mut receipt["verification"],
+        manifest_dir,
+        "verification",
+        &mut evidence_bytes,
+    )?;
+    if let Some(entries) = receipt["resources"]["entries"].as_array_mut() {
+        if entries.len() > delivery::MAX_RESOURCE_ENTRIES {
+            return Err(error("invalid_resources"));
+        }
+        for entry in entries {
+            if !entry["effective"].is_null() {
+                artifact(
+                    &mut entry["effective"],
+                    manifest_dir,
+                    "effective",
+                    &mut evidence_bytes,
+                )?;
+            }
+        }
+    }
     receipt["kind"] = json!("groundline-delivery-receipt");
+    receipt["schema"] = json!(1);
     receipt["activation_verified"] = json!(false);
     receipt["verification"]["authenticity_verified"] = json!(false);
     receipt["observed_selection_matches_requested"] =
@@ -182,4 +193,60 @@ pub(crate) fn record(input: &Path, output: &Path) -> Result<Value, ContractError
         "raw_content_emitted":false,
         "private_paths_emitted":false
     }))
+}
+
+fn read_error(code: &str) -> ContractError {
+    ContractError(format!("delivery_read_{code}"))
+}
+
+/// The routing importer and observational summary share one bounded, immutable
+/// reader. Collection ownership is checked before either caller filters rows.
+pub(crate) fn read_receipts(directory: &Path) -> Result<Vec<Value>, ContractError> {
+    let metadata =
+        fs::symlink_metadata(directory).map_err(|_| read_error("directory_unavailable"))?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() || reparse(&metadata) {
+        return Err(read_error("invalid_directory"));
+    }
+    let mut paths = Vec::new();
+    for (index, entry) in fs::read_dir(directory)
+        .map_err(|_| read_error("directory_unavailable"))?
+        .enumerate()
+    {
+        if index >= MAX_RECEIPTS {
+            return Err(read_error("too_many_entries"));
+        }
+        let entry = entry.map_err(|_| read_error("entry_unavailable"))?;
+        if entry.path().extension().is_some_and(|e| e == "json") {
+            paths.push(entry.path());
+        }
+    }
+    paths.sort();
+    let mut total_bytes = 0_usize;
+    let mut receipts = Vec::new();
+    for path in paths {
+        let bytes =
+            bounded(&path, MAX_MANIFEST_BYTES).map_err(|_| read_error("invalid_receipt_file"))?;
+        total_bytes = total_bytes
+            .checked_add(bytes.len())
+            .ok_or_else(|| read_error("directory_too_large"))?;
+        if total_bytes > MAX_DIRECTORY_BYTES {
+            return Err(read_error("directory_too_large"));
+        }
+        let receipt = serde_json::from_slice(&bytes).map_err(|_| read_error("invalid_receipt"))?;
+        receipts.push(receipt);
+    }
+    delivery::validate_receipt_collection(&receipts).map_err(|error| match error.0.as_str() {
+        "delivery_duplicate_delivery" => read_error("duplicate_delivery"),
+        "delivery_overlapping_response_ownership" => read_error("overlapping_response_ownership"),
+        _ => read_error("invalid_receipt"),
+    })?;
+    Ok(receipts)
+}
+
+pub(crate) fn summarize(directory: &Path) -> Result<Value, ContractError> {
+    let receipts = read_receipts(directory).map_err(|error| {
+        ContractError(error.0.replacen("delivery_read_", "delivery_summary_", 1))
+    })?;
+    delivery::summarize_receipts(&receipts)
+        .map_err(|error| ContractError(error.0.replacen("delivery_", "delivery_summary_", 1)))
 }

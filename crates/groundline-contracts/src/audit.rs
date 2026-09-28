@@ -1367,8 +1367,6 @@ mod tests {
                 result["provider_reported_usage"]["token_field_availability"]["reasoning_output_tokens"],
                 false
             );
-            #[cfg(feature = "efficiency")]
-            assert!(crate::efficiency::simulate(&[result]).is_err());
         }
         let empty = audit_rollouts(&[], 0, 20, AuditWindow::default()).unwrap();
         assert_eq!(

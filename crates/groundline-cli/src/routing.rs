@@ -44,6 +44,14 @@ fn native_audit_reasons(
     if audit["collection_complete"] != true || root["collection_complete"] != true {
         reasons.push("native_collection_incomplete");
     }
+    match audit
+        .pointer("/coverage/recommendation_evidence_complete")
+        .and_then(Value::as_bool)
+    {
+        Some(true) => {}
+        Some(false) => reasons.push("native_recommendation_evidence_incomplete"),
+        None => reasons.push("native_recommendation_evidence_unknown"),
+    }
     if let Err(reason) = freshness {
         reasons.push(reason);
     }
@@ -173,6 +181,7 @@ pub(crate) fn run(
                 "usage_observed_rollouts": root["provider_reported_usage"]["rollout_count_with_usage"],
                 "usage_selected_rollouts": audit.pointer("/scope/selected_root_count"),
                 "collection_complete": audit["collection_complete"],
+                "recommendation_evidence_complete": audit.pointer("/coverage/recommendation_evidence_complete").and_then(Value::as_bool),
                 "complete_for_aggregate_context": complete,
                 "reason_codes": reasons.clone(),
                 "source_authenticity_verified": false,

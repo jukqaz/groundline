@@ -34,8 +34,7 @@ groundline efficiency record-delivery --input manifest.json --output receipts/de
 
 The selected output directory must already exist. Output is a new owner-private
 file (0600 on Unix); existing files and links are not replaced. The command reads
-at most 2 MiB per input/artifact, checks SHA-256 against the exact bytes, checks
-the declared observation against the artifact, and removes artifact paths from
+at most 2 MiB per input/artifact and 16 MiB of evidence in total, checks SHA-256 against the exact bytes, checks the actual recommendation pair and removes artifact paths from
 the saved receipt. Keep both the manifest and evidence artifacts in a private
 workspace outside public Git. Never include transcripts, credentials or account
 identifiers. Do not reconstruct account membership from a shared Mac's history.
@@ -44,7 +43,7 @@ The strict manifest fields are:
 
 | Field | Value |
 | --- | --- |
-| `kind`, `schema` | `groundline-delivery-manifest`, `1` |
+| `kind`, `schema` | `groundline-delivery-manifest`, `2` |
 | `unit_hash` | SHA-256 identifying one agreed delivery, shared with its root resource entries |
 | `cohort_sha256` | Same phase, acceptance criteria, difficulty, runtime, tools, permissions, service tier, delegation policy and non-routing guidance; exclude the pair being compared |
 | `phase` | One of the phases above |
@@ -54,20 +53,13 @@ The strict manifest fields are:
 | `resources` | `{complete, wall_duration_ms, entries}` |
 
 Artifact paths are absolute or relative to the manifest. The recommendation
-artifact is the actual schema-1 `groundline-routing-proposal` with a matching
+artifact is the actual schema-2 `groundline-routing-proposal` with a matching
 `suggestion.model` and `suggestion.effort`. Do not turn a null suggestion into a
-recommendation. The other artifacts are compact operator observations:
-
-```json
-{"kind":"groundline-selection-request","schema":1,"model":"gpt-6-sol","effort":"high","source":"operator_supplied"}
-```
-
-The effective observation uses the same fields with
-`kind: "groundline-native-selection-observation"`. The verification artifact
-uses `kind: "groundline-delivery-verification-observation"`, `schema: 1`,
-`status`, `evidence_kind`, and `source: "operator_supplied"`. These normalized
-records must describe evidence actually inspected for this delivery. Hash checks
-bind local bytes; they cannot certify semantic classification or provenance.
+recommendation. Other artifact paths point to the existing request, native result,
+test log or acceptance evidence. Describe the observed values once in the manifest;
+do not create extra GroundLine observation JSON files repeating the same fields.
+The command checks their bytes, not the truth of the operator's interpretation.
+Hash checks cannot certify semantic classification or provider provenance.
 
 Verification status is `verified`, `failed`, or `unknown`; evidence kind is
 `runtime_check`, `user_acceptance`, or `unobserved`. Unknown pairs with
@@ -76,9 +68,13 @@ request or a necessary verification step. Missing resource measurements do not
 erase an observed success or failure.
 
 Each resource entry has `owner` (`root`, `child`, `approval`, or `retry`),
-`unit_hash`, `response_hash`, and nullable integer `input_tokens`,
+`unit_hash`, `response_hash`, optional `effective`, and nullable integer `input_tokens`,
 `cached_input_tokens`, `output_tokens`, `reasoning_output_tokens`, and
-`total_tokens`. Use stable response identifiers hashed locally; count every
+`total_tokens`. `effective` is null or the observed response pair with `model`, `effort`,
+`evidence_sha256`, and `artifact_path` in the manifest. It is never inherited from
+the root. The artifact path is removed in the receipt. Old retained receipts with
+no per-response observation remain valid with unknown attribution.
+Use stable response identifiers hashed locally; count every
 owned response exactly once, including failed attempts and delegated work.
 Use response increments, not repeated cumulative counters. Cached input and
 reasoning output are subsets, not additional tokens. Known input plus output
@@ -93,6 +89,60 @@ The saved receipt adds `observed_selection_matches_requested` (true/false/null),
 The CLI response is a compact write result; the receipt contains the detailed
 path-free observations. A failed write can leave an incomplete output if cleanup
 also fails; inspect that file instead of treating failure as proof of no change.
+
+## Inspect the link between selections and delivered work
+
+Read the dedicated receipt directory without a routing packet or native catalog:
+
+```sh
+groundline efficiency delivery-summary --deliveries receipts --json
+```
+
+This command does not change receipts, evidence artifacts, model settings or
+experiment ledgers. It reuses routing's nonrecursive reader, 1,000-entry/16 MiB
+limits, strict receipt checks, duplicate-delivery rejection and overlapping-
+response rejection. It returns aggregate observations without receipt paths,
+delivery/cohort/response hashes, timestamps or raw evidence.
+
+`overall`, `by_phase_and_effective_selection`, and `selection_paths` retain
+verified, failed, unknown and rework counts. Selection paths show the proposed,
+requested and observed pairs together; the phase/selection groups attribute
+outcomes only to `effective`. A null effective pair stays in its own group.
+Relationship counts distinguish matched, mismatched and unobserved pairs.
+`recommendation_only_count` means a proposal is present but both requested and
+effective observations are absent; `effective_selection_missing_count` also
+includes requested lanes whose execution could not be observed. Neither is a
+measured result of using the recommendation.
+
+Resources include every recorded `root`, `child`, `approval`, and `retry` row,
+with separate owner counts. Each measurement reports `known_sum`,
+`measured_count`, and `missing_count`; no observed value yields null, not zero.
+Known sums with missing measurements are partial observations. An omitted row
+cannot be detected from a receipt, so these row counters do not certify full
+ownership coverage. `complete_delivery_total_tokens` includes only receipts
+declared complete and counts the other deliveries as missing; it is not the
+total cost of all retained work. Cached input and reasoning output remain
+subsets and are never added to total tokens. Wall duration sums delivery wall
+measurements once, including partial receipts with known duration; parallel
+child elapsed time is not added. These are token/time observations, not currency
+cost or subscription quota, which remain null.
+`by_owner_and_effective_selection` separates observed child pairs and unknown
+response selections. Child attribution availability and completeness are reported
+separately; no child entries means completeness is unknown, not true. The grouped
+costs include failures and cannot all be attributed to the root model. Stored
+receipt schema 1 is preserved; the new input manifest is schema 2.
+
+`fully_observed_delivery_count` requires effective selection, known verification
+and declared complete resources. `AVAILABLE` describes those fields being
+present for all retained receipts; `PARTIAL` preserves their gaps and `EMPTY`
+means no receipts. These statuses do not establish authenticity, native
+activation, acceptance of the current task, comparable cohorts or optimization.
+`data_readiness` reports receipt availability and measurement coverage separately
+from the implemented summary capability; it does not assess comparison eligibility.
+The summary covers **all retained receipts**, including old and other-cohort
+records, and applies no comparison filter. Do not rank its groups or infer a
+benefit from their aggregates. Use the next route for the current phase's
+matched-cohort comparison and its existing quality/resource gates.
 
 ## Feed the next eligible comparison
 

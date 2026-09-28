@@ -11,10 +11,8 @@
   Reject unsupported state explicitly without rewriting or deleting it. Keep
   data-loss protections, bounded delivery retries, and current native input
   variants; these are not legacy support. A state reset needs separate approval.
-- Use `$groundline:reconcile-current-state` when stale evidence or uncertain
-  scope affects the next action, including broad or high-impact changes.
-  A resumed turn with current evidence and a clear next step needs no repeated
-  skill invocation. Use `$groundline:close-live-work` for requested live proof.
+- Reconcile the relevant checkout, authorization, and evidence before broad changes.
+  Verify the requested execution path without a separate generic workflow layer.
 - Treat Codex App and its bundled CLI as the primary runtime. Use PATH CLI for
   packaging, automation, and secondary-channel evidence.
 - GroundLine ships Core and Insights plugins/CLIs plus the Insights API. Keep
@@ -31,7 +29,7 @@
   Ask for new authority only when scope or external effects materially change.
 - Use other GroundLine skills only when their explicit workflow matches the
   request; ordinary planning and implementation stay Codex-native.
-- Optimize model guidance and personal trials for GPT-6 Astra, Sol, and Luna
+- Optimize model guidance and outcome comparisons for GPT-6 Astra, Sol, and Luna
   only; preserve older records without treating them as optimization targets.
 - A user request or applicable GPT-6 selection skill can authorize useful
   independent subagents throughout that task. Follow the GPT-6 model/effort reference for per-lane
@@ -40,10 +38,8 @@
 - Use Codex built-in agents and any user-owned specialist agents directly;
   GroundLine does not install or override custom agents.
 - Leave model and reasoning effort unpinned unless the user explicitly requests
-  a setting. The documented `setup` preset is a separate opt-in configuration
-  operation, not a prerequisite for ordinary guidance review or repair.
-- Chronicle may provide redacted behavior-boundary counts when the user allows
-  it. Do not change Chronicle state, automation, or experiment ledgers.
+  a setting. Explicit `setup --model/--effort` is a configuration operation,
+  not a prerequisite for ordinary guidance review or repair.
 - Run the smallest credible verification and report source, package, install,
   and live state separately.
 - Repeat passed checks only after relevant changes or unresolved risk. Diagnose

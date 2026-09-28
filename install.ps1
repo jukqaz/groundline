@@ -1,9 +1,9 @@
 # Run from the reviewed binary-bearing stable distribution. No global Git edits.
+# Profiles select explicit setup; native refresh can update other installed marketplace plugins.
 [CmdletBinding()]
 param(
     [string]$Codex = "",
     [ValidateSet("core", "insights", "both")][string]$Profile = "core",
-    [ValidateSet("preserve", "astra")][string]$Preset = "preserve",
     [string]$Model = "", [string]$Effort = "",
     [ValidateSet("", "default", "fast")][string]$ServiceTier = "",
     [switch]$RestoreNativeContext,
@@ -74,13 +74,15 @@ try {
     if ($InsightsEndpoint) { $insightsArgs += @("--endpoint", $InsightsEndpoint) }
     if ($EnrollmentTokenFile) { $insightsArgs += @("--enrollment-token-file", $EnrollmentTokenFile) }
     if ($EnableInsights) { $insightsArgs += "--enable" }
-    if (($Profile -eq "core" -and $insightsArgs.Count -gt 0) -or ($Profile -eq "insights" -and ($setupArgs.Count -gt 0 -or $Preset -ne "preserve"))) {
+    if (($Profile -eq "core" -and $insightsArgs.Count -gt 0) -or ($Profile -eq "insights" -and $setupArgs.Count -gt 0)) {
         throw "Options must match the selected -Profile core, insights, or both."
     }
     if (!(Get-Command git -ErrorAction SilentlyContinue)) { throw "Install Git before running setup." }
     if (!$Codex) { $Codex = Find-Codex }
     & $Codex plugin add --help | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Codex plugin support is required." }
+    & $Codex plugin marketplace upgrade --help | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Codex marketplace upgrade support is required." }
     & $Codex debug models --help | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Codex debug models support is required." }
     & $Codex doctor --help | Out-Null
@@ -94,8 +96,17 @@ try {
     }
     Set-Stage "preflight" "PASS" 0
     $products = switch ($Profile) { "core" { @("groundline") } "insights" { @("groundline-insights") } "both" { @("groundline", "groundline-insights") } }
+    $verifyProducts = @($products)
+    $checkInsights = $false
+    # Query filesystem presence only; the candidate's existing profile validator
+    # owns parsing and compatibility. Unexpected filesystem errors fail closed.
+    try {
+        $null = Get-Item -LiteralPath (Join-Path $installHome "groundline/insights") -Force -ErrorAction Stop
+        $checkInsights = $true
+    } catch [System.Management.Automation.ItemNotFoundException] {}
+    if ($checkInsights -and $Profile -eq "core") { $verifyProducts += "groundline-insights" }
     $installVersion = ""
-    foreach ($product in $products) {
+    foreach ($product in $verifyProducts) {
         $source = Join-Path $PSScriptRoot "plugins/$product"
         $binary = Join-Path $source "bin/$target/$product.exe"
         Invoke-Step "distribution_$product" $binary @("provider-smoke", "--plugin-root", $source, "--require-installed", "--json")
@@ -105,6 +116,10 @@ try {
         if ($installVersion -and $installVersion -ne $version) { throw "Use one complete release distribution." }
         $installVersion = $version
     }
+    if ($checkInsights) {
+        $candidate = Join-Path $PSScriptRoot "plugins/groundline-insights/bin/$target/groundline-insights.exe"
+        Invoke-Step "insights_server_compatibility" $candidate @("worker", "check-server", "--json")
+    } else { Set-Stage "insights_server_compatibility" "NOT_CONFIGURED" 0 }
     Invoke-Step "marketplace_add" $Codex @("plugin", "marketplace", "add", "https://github.com/jukqaz/groundline.git", "--ref", "stable", "--json")
     Invoke-Step "marketplace_refresh" $Codex @("plugin", "marketplace", "upgrade", "groundline", "--json")
     foreach ($product in $products) {
@@ -124,7 +139,7 @@ try {
             Set-Stage "catalog" "PASS" 0
             $script:ActiveStage = "settings"
             $installed = Join-Path $installHome "plugins/cache/groundline/groundline/$installVersion/bin/$target/groundline.exe"
-            $catalog | & $installed setup --catalog - --preset $Preset @setupArgs --apply
+            $catalog | & $installed setup --catalog - @setupArgs --apply
             if ($LASTEXITCODE -eq 0) { Set-Stage "settings" "PASS" 0 }
             elseif ($LASTEXITCODE -eq 2) { Set-Stage "settings" "ACTION_REQUIRED" 2 }
             else { Set-Stage "settings" "FAIL" $LASTEXITCODE }

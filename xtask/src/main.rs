@@ -41,6 +41,11 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Derive the human release name from a canonical year.MMDD.ordinal version.
+    ReleaseName {
+        #[arg(long)]
+        version: String,
+    },
     /// Check an already-built release binary before uploading it.
     VerifyBinaryPrivacy {
         #[arg(long)]
@@ -336,7 +341,9 @@ fn executable_contract(_path: &Path, _target: &str) -> bool {
 }
 
 fn verify_package_set(root: &Path, version: &str, product: Product) -> Result<(), XtaskError> {
-    if version != env!("CARGO_PKG_VERSION") {
+    if version != env!("CARGO_PKG_VERSION")
+        || groundline_contracts::version::release_display_name(version).is_err()
+    {
         return Err(XtaskError::InvalidPackageSet);
     }
     let expected_targets = SUPPORTED_TARGETS
@@ -486,6 +493,12 @@ fn verify_binary_privacy(binary: &Path) -> Result<(), XtaskError> {
 
 fn run(cli: Cli) -> Result<(), XtaskError> {
     match cli.command {
+        Command::ReleaseName { version } => {
+            let name = groundline_contracts::version::release_display_name(&version)
+                .map_err(|_| XtaskError::InvalidReleaseChannel)?;
+            println!("{name}");
+            Ok(())
+        }
         Command::VerifyBinaryPrivacy { binary } => verify_binary_privacy(&binary),
         Command::PackageBinary {
             product,
@@ -715,6 +728,13 @@ mod tests {
                 serde_json::from_slice(&fs::read(output.join("manifest.json")).unwrap()).unwrap();
             assert_eq!(manifest["target"], *target);
             assert_eq!(manifest["executable"], executable);
+            assert_eq!(manifest["groundline_version"], env!("CARGO_PKG_VERSION"));
+            assert!(
+                groundline_contracts::version::strict_version(
+                    manifest["groundline_version"].as_str().unwrap()
+                )
+                .is_ok()
+            );
             assert_eq!(manifest["size_bytes"], 19);
             let mut digest = Sha256::new();
             digest.update(fs::read(output.join(executable)).unwrap());

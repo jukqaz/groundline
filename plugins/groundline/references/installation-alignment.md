@@ -33,16 +33,13 @@ They require no additional chat request. Native GUI or bare `plugin add` still
 performs package delivery only; no post-install execution callback is assumed.
 
 For an already installed package, default `setup` preserves existing choices and
-native defaults. A guidance review does not select the Astra preset. Use explicit
+native defaults. There is no bundled model preset. Use explicit
 `--model`, `--effort`, and `--service-tier` choices only as requested. Resolve the package executable and the active Codex
 executable with [platform commands](platform-commands.md). Obtain successful
 `codex debug models` output before invoking `groundline setup --catalog - --apply`
 with that JSON on stdin. Do not apply after a failed catalog command, even if it
 produced valid partial JSON. Omit `--apply` for a write-free preview.
 
-Only `setup --preset astra` selects the baseline embedded from `config/setup-defaults.toml`:
-`gpt-6-astra`, `xhigh`, and `service_tier="default"` (Fast off). This is the
-explicit preset, not a claim that OpenAI recommends a universal configuration.
 Remove root context overrides only with `--restore-native-context`. Setup can
 remove only the four recognized retired Core hook trust records.
 Unknown state is never migrated. All other semantic settings remain unchanged;

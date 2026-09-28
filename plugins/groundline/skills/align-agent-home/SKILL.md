@@ -1,78 +1,27 @@
 ---
 name: align-agent-home
-description: Use when installing or applying GroundLine with existing-setting repair, or explicitly aligning Codex guidance, plugins, skills, rules, hooks, model posture, or runtime state.
+description: Install, apply, or verify GroundLine and repair evidenced Codex configuration mistakes within the requested scope.
 ---
 
-# Align Agent Home
+# Install and verify GroundLine
 
-Audit the requested Codex project/home surfaces and apply authorized changes,
-preserving official components and user-owned settings.
+Use [installation alignment](../../references/installation-alignment.md) for
+installation or explicitly requested settings repair. Preserve user settings and
+native defaults. An explicit model/effort choice must exist in the active native
+catalog; no fixed GroundLine preset or automatic optimization writes settings.
+The distribution installer already runs setup; reuse its result.
 
-## Installation and application
+Resolve the installed executable through [platform commands](../../references/platform-commands.md).
+Use `provider-smoke --require-installed` for the package and native artifact.
+Use native strict doctor for effective Codex configuration and the actual Insights
+`worker status` for collection state. A file's existence is not live-state proof.
+Read [configuration review](../../references/codex-configuration.md) only for a
+relevant configuration problem. Scope general skill maintenance to the user's
+request using native tools; Core does not maintain a second skill registry.
 
-When asked to install and apply GroundLine, complete
-[installation alignment](../../references/installation-alignment.md) in the same
-task: inspect existing settings and active instructions, fix evidenced mistakes
-within the requested scope, and verify the affected behavior. Do not stop after
-package installation or give only recommendations when repair was requested.
-Default `setup` preserves existing choices and native defaults. Use `--preset
-astra` only when the user selects that model policy; a guidance review does not
-select it. Explicit `--model` and `--effort` choices use the active host's native
-catalog and report unsupported choices without substitution. The distribution
-installer already runs setup; reuse its result instead of repeating the write.
-Installation alone is package delivery; it does not run a repair hook or grant
-authority to reset settings. A review-only request remains read-only.
-
-For old Codex settings and migration, follow
-[existing settings](../../references/installation-alignment.md#existing-settings-and-migration). Include native schema
-diagnostics and active-layer guidance review; never replace unfamiliar state or
-delete native task data to make a migration check pass.
-
-## Select the relevant checks
-
-Resolve the installed platform binary using
-[platform commands](../../references/platform-commands.md). Source, installed
-package, App-bundled CLI, and PATH CLI are separate evidence. Do not patch
-provider caches or substitute an unrelated binary when one is missing.
-
-- Project structure: `groundline project-audit --repo . --json` inventories
-  guidance, config, skills, agents, rules, hooks, and worktree surfaces.
-- Installed package: `groundline provider-smoke --require-installed --json`
-  verifies the package and native artifact.
-- Slow or inconsistent local state: `groundline doctor --json` checks only
-  presence and installation structure; it does not read stored content.
-- Configuration, model/effort, permissions, or worktree readiness: read
-  [configuration review](../../references/codex-configuration.md). Use its
-  offline `config-audit` and native strict doctor only when relevant.
-- Personal/imported skill inventory, source refresh, deduplication, or regression
-  checks: read [skill maintenance](../../references/skill-maintenance.md).
-  GroundLine owns profile/baseline checks; Codex performs reviewed changes.
-
-Do not load every reference or run every command for a narrow request. Before
-adopting current Codex features, consult official OpenAI documentation and the
-actual runtime. Keep native diagnostics separate from GroundLine checks.
-
-## Apply the requested alignment
-
-Read-only reviews do not authorize edits. An implementation request covers its
-routine in-scope steps; ask only for a material missing choice or new authority.
-Keep user steering attached to the same task while its outcome remains aligned.
-
-Keep global guidance minimal and repository behavior local. Remove custom
-duplicates only after establishing ownership. Preserve model, effort, service
-tier, permissions, experiments, Chronicle, personality, and UI unless the user
-requests a change. Native Codex owns planning, delegation, context management,
-and plugin upgrades; no parallel orchestration layer is needed.
-
-Never copy private configuration, personal skills, credentials, transcripts,
-databases, or runtime caches into the public plugin. Emit structural counts and
-minimal relevant non-secret excerpts, not whole private files. Core has no
-lifecycle hooks; optional Insights has a separate consented checkpoint contract.
-Hook trust alone does not prove installation, dispatch, or collection consent.
-
-Complete the required checks for affected behavior. Reuse passing results;
-broaden or repeat for relevant changes, failures, or unresolved risk. Report
-the result, useful evidence, and remaining gaps without empty templates.
-Distinguish source changes, package validation, installed runtime,
-and live behavior. Name and link the exact skill instruction if it causes a
-pause or changes the requested direction.
+Source validation, package checks, installed executable behavior, and the requested
+live outcome are separate evidence. Verify the affected execution path, retain
+private backups for settings writes, and preserve collection consent, pending
+events, native task data, and user edits. Check App-bundled and PATH CLIs for
+settings changes. A package-only installation does not authorize configuration
+rewrites. Do not expose private config values or patch provider caches.

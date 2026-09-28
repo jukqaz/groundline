@@ -7,8 +7,6 @@ pub mod skill;
 
 #[cfg(feature = "audit")]
 pub mod audit;
-#[cfg(feature = "batch")]
-pub mod batch;
 #[cfg(feature = "efficiency")]
 pub mod delivery;
 #[cfg(feature = "efficiency")]

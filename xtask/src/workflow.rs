@@ -212,6 +212,8 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
         "cancel-in-progress: true",
         "Reject an invalid or version-mismatched release tag before expensive work",
         "release tag must be strict vMAJOR.MINOR.PATCH",
+        "cargo run --quiet --locked -p xtask -- release-name --version \"${RELEASE_TAG#v}\"",
+        "--title \"GroundLine ${release_name}\"",
         "name: fast source checks",
         "Select native setup checks for relevant PR changes",
         "if: github.event_name == 'pull_request' && needs.fast.outputs.native_setup == 'true'",

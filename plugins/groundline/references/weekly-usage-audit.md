@@ -15,6 +15,18 @@ The execution fields distinguish an audit that ran with partial data from a
 recommendation failure. Do not run a second audit or recommendation after this
 combined command. `groundline audit weekly --days 7 --json` remains the raw audit
 interface for callers that explicitly need separate stages.
+For a saved full result from the same observation window, use
+`groundline audit review --input <private-result.json> --json`.
+This reads the saved evidence once, scans no native history, and calculates one
+current offline recommendation from its audit. Saved recommendation text/status
+is not reused as a current policy decision. The summary includes the freshly
+computed `recommendation`, so its action and limits need no second command.
+The distinct summary kind is not a full audit: retain its original saved input
+and source hash. Reuse preserves the window and unknowns; it does not establish
+that current history is unchanged. The window end must be within 24 hours
+(`--max-age-hours` may tighten this). Changed scope or a request for current
+history requires fresh collection. Execution counters measure this command,
+not surrounding agent work, model tokens, or end-to-end savings.
 Check the command exit status, `execution.audit_runs`,
 `execution.recommendation_runs`, and the nested audit/recommendation statuses
 independently. Retain the audit if recommendation fails. Review counts, coverage,
@@ -94,8 +106,19 @@ A weekly sample requires the latest lifecycle event to complete the turn.
 Previous completed turns do not make a resumed or interrupted task complete.
 Activity audits include ongoing work, with `completed_root_coverage=false` on
 export. Unreadable or unclassified inputs make the result `PARTIAL` and remain
-visible as aggregate counts. `selection_coverage` describes selection among
-known eligible roots; it does not mean every stored task was readable.
+visible as aggregate counts. Weekly analysis reads only the relevant indexed
+window, validates native identities, and excludes every ambiguous duplicate in
+that selected sample. `coverage.recommendation_evidence_complete` describes
+that sample; missing or false values cannot qualify a change recommendation.
+
+Whole-store metadata reconciliation is explicit: `groundline audit store --json`.
+It reports unindexed files, stale paths, duplicate identities, unknown archive
+states and traversal limits without changing data. It does not decide the
+requested window's eligibility or certify an atomic population snapshot.
+Weekly `eligible_root_count` and `selection_coverage` remain null because the
+full-history denominator was not measured. A known unrelated old missing row
+does not invalidate current observations; a missing selected row still does.
+Neither sample evidence nor storage diagnostics authorize history resets.
 
 The readout separates parsed-root `collection_issue_count` from store-level
 unreadable root/delegated/Guardian counts and unclassified origins. A zero parser

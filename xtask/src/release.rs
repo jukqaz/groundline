@@ -3,6 +3,7 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::OnceLock;
 
+use groundline_contracts::version::{release_display_name, strict_version};
 use regex::Regex;
 use semver::Version;
 use serde_json::{Value, json};
@@ -78,10 +79,7 @@ fn version_at(repo: &Path, revision: &str) -> Result<Version, XtaskError> {
             .get("version")
             .and_then(Value::as_str)
             .ok_or(XtaskError::InvalidReleaseChannel)?;
-        let parsed = Version::parse(version).map_err(|_| XtaskError::InvalidReleaseChannel)?;
-        if parsed.to_string() != version || !parsed.pre.is_empty() || !parsed.build.is_empty() {
-            return Err(XtaskError::InvalidReleaseChannel);
-        }
+        let parsed = strict_version(version).map_err(|_| XtaskError::InvalidReleaseChannel)?;
         versions.insert(parsed);
     }
     (versions.len() == 1)
@@ -157,14 +155,10 @@ pub fn promote_stable(options: PromotionOptions<'_>) -> Result<Value, XtaskError
     {
         return Err(XtaskError::InvalidReleaseChannel);
     }
-    let release_version =
-        Version::parse(&options.release_tag[1..]).map_err(|_| XtaskError::InvalidReleaseChannel)?;
-    if release_version.to_string() != options.release_tag[1..]
-        || !release_version.pre.is_empty()
-        || !release_version.build.is_empty()
-    {
-        return Err(XtaskError::InvalidReleaseChannel);
-    }
+    let version = &options.release_tag[1..];
+    let release_version = strict_version(version).map_err(|_| XtaskError::InvalidReleaseChannel)?;
+    let release_name =
+        release_display_name(version).map_err(|_| XtaskError::InvalidReleaseChannel)?;
     let candidate = commit(&repo, options.candidate_sha)?;
     let source = commit(&repo, options.source_sha.unwrap_or(&candidate))?;
     if commit(&repo, &format!("refs/tags/{}", options.release_tag))? != source {
@@ -230,6 +224,7 @@ pub fn promote_stable(options: PromotionOptions<'_>) -> Result<Value, XtaskError
         "channel":CHANNEL,
         "action":action,
         "candidate_version":candidate_version.to_string(),
+        "release_name":release_name,
         "mutation_required":action != "noop",
         "mutation_performed":mutation_performed,
         "race_guard":"force_with_lease",

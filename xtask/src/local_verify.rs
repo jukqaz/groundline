@@ -103,7 +103,6 @@ fn check_plan(empty_codex_home: &Path) -> Vec<CheckSpec> {
         ),
     ];
     for (name, feature) in [
-        ("contracts-batch", "batch"),
         ("contracts-efficiency", "efficiency"),
         ("contracts-insights", "insights"),
         ("contracts-integrity", "integrity"),
@@ -203,21 +202,6 @@ fn check_plan(empty_codex_home: &Path) -> Vec<CheckSpec> {
             timeout: Duration::from_secs(300),
             isolated_cargo_target: true,
         },
-        cargo_check(
-            "project-audit",
-            &[
-                "run",
-                "--locked",
-                "--bin",
-                "groundline",
-                "--",
-                "project-audit",
-                "--repo",
-                ".",
-                "--json",
-            ],
-            300,
-        ),
     ]);
     checks
 }
@@ -620,7 +604,7 @@ mod tests {
     #[test]
     fn fallback_plan_is_bounded_and_contains_no_shell_or_network_publisher() {
         let plan = check_plan(Path::new("empty-codex-home"));
-        assert_eq!(plan.len(), 17);
+        assert_eq!(plan.len(), 15);
         assert!(OVERALL_TIMEOUT.as_secs() <= 40 * 60);
         assert!(plan.iter().all(|check| check.timeout <= OVERALL_TIMEOUT));
         assert!(plan.iter().all(|check| !matches!(
@@ -632,7 +616,6 @@ mod tests {
         assert!(plan.iter().any(|check| check.name == "dependency-policy"));
         assert!(plan.iter().any(|check| check.name == "source-contract"));
         assert!(plan.iter().any(|check| check.name == "doctor"));
-        assert!(plan.iter().any(|check| check.name == "project-audit"));
     }
 
     #[test]

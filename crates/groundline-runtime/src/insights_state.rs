@@ -36,6 +36,8 @@ mod collection_stop_tests;
 mod delivery_confirmation;
 mod onboarding;
 pub use onboarding::setup;
+mod server_check;
+pub use server_check::check_server;
 
 const PROFILE_PATH: &str = "groundline/insights/owner-profile.json";
 const ENROLLMENT_TOKEN_PATH: &str = "groundline/insights/enrollment-token";

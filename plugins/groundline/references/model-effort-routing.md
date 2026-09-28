@@ -75,7 +75,7 @@ Frequent high-effort use alone is not evidence of wasted work.
 
 When the user requests adaptive delegation, that request authorizes suitable
 subagents throughout the task; do not ask again for every spawn. The applicable
-evaluate-ai-usage-maturity skill also requests bounded delegation for independent
+optimize-codex-workflow skill also requests bounded delegation for independent
 implementation/research lanes. Respect higher-priority instructions and explicit
 user restrictions. An advisory review alone does not enable delegation or
 override a no-delegation policy.
@@ -119,13 +119,13 @@ passing checks until a change or unresolved concern invalidates them.
 
 ## GPT-6 guidance and evaluation
 
-For user-requested conversation/ClickHouse-driven adjustments, use the
-[evidence routing contract](evidence-routing.md). It joins local classifications,
-direct delivery outcomes, native catalog support and aggregate quality checks;
-an eligible empirical proposal can be applied by native Codex to an authorized
-next lane. Without matched outcomes the CLI returns INCONCLUSIVE with no guessed
-pair; native Codex still makes ordinary task choices. Aggregates are descriptive
-context, not a prerequisite for complete direct outcomes or a model ranking.
+For an empirical comparison of an existing choice, or preparing an `efficiency
+route` packet, use the [evidence routing contract](evidence-routing.md). A plan
+for the next task can use supplied history as descriptive context without
+opening that contract or collecting more data. Label its proposed model/effort
+as a task judgment, not a measured optimum. Matched direct outcomes are needed
+when claiming an evidence-based replacement; missing outcomes do not block an
+ordinary authorized choice.
 
 Keep one authoritative instruction for each behavior. Load specialist detail
 only when relevant. Continue authorized work across steering, ask only for a

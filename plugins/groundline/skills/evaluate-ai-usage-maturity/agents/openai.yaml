@@ -1,6 +1,0 @@
-interface:
-  display_name: "Evaluate AI Usage Maturity"
-  short_description: "Choose GPT-6 model, effort, and useful subagent work"
-  default_prompt: "Use $evaluate-ai-usage-maturity to distribute independent work across GPT-6 subagents with suitable effort and verify their results, preserving my explicit choices and global settings."
-policy:
-  allow_implicit_invocation: true

@@ -194,7 +194,7 @@ jobs:
       - name: Check capability partitions
         run: |
           cargo check --locked -p groundline-contracts --no-default-features
-          for feature in audit batch efficiency insights integrity version; do
+          for feature in audit efficiency insights integrity version; do
             cargo check --locked -p groundline-contracts --no-default-features --features "$feature"
           done
           cargo check --locked -p groundline-runtime --no-default-features
@@ -351,7 +351,6 @@ jobs:
         run: |
           mkdir -p /tmp/groundline-empty-codex-home
           cargo run --locked --bin groundline -- doctor --plugin-root plugins/groundline --codex-home /tmp/groundline-empty-codex-home --json
-          cargo run --locked --bin groundline -- project-audit --repo . --json
           cargo run --locked --bin groundline-insights -- doctor --plugin-root plugins/groundline-insights --codex-home /tmp/groundline-empty-codex-home --json
 
   native-setup:
@@ -619,9 +618,10 @@ jobs:
             echo "release already exists; published releases are not replaced" >&2
             exit 1
           fi
+          release_name="$(cargo run --quiet --locked -p xtask -- release-name --version "${RELEASE_TAG#v}")"
           gh release create "$RELEASE_TAG" release-assets/* \
             --verify-tag \
-            --title "GroundLine ${RELEASE_TAG}" \
+            --title "GroundLine ${release_name}" \
             --notes "Core·Insights와 API를 같은 소스에서 빌드한 릴리스입니다. 일반 HTTPS와 선택형 Tailscale, 등록키 확인 API, 통합 서버 설정을 지원합니다. Codex 플러그인과 CLI로 연결하며, collector 업그레이드 전에 서버 API 호환성을 확인하세요."
 
   publish-image:

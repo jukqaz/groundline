@@ -95,6 +95,14 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum WorkerCommand {
+    /// Check the configured server's candidate collector compatibility without changing state.
+    CheckServer {
+        #[arg(long, hide = true)]
+        codex_home: Option<PathBuf>,
+        /// Output is always JSON, as with the other worker commands.
+        #[arg(long)]
+        json: bool,
+    },
     /// Declare the purpose of future complete collection windows on this host.
     Purpose {
         #[arg(long, value_parser = ["production", "verification", "unclassified"])]
@@ -261,6 +269,21 @@ fn state_failure(error: &insights_state::StateError) -> Value {
 
 async fn run(cli: Cli) -> Result<(), ExitCode> {
     match cli.command {
+        Command::Worker {
+            command:
+                WorkerCommand::CheckServer {
+                    codex_home,
+                    json: _,
+                },
+        } => {
+            let result = insights_state::check_server(codex_home.as_deref()).await;
+            emit(&result, true);
+            if matches!(result["status"].as_str(), Some("PASS" | "NOT_CONFIGURED")) {
+                Ok(())
+            } else {
+                Err(ExitCode::FAILURE)
+            }
+        }
         Command::Setup {
             input,
             endpoint,

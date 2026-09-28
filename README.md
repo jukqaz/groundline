@@ -1,25 +1,23 @@
 # GroundLine
 
-GroundLine optimization targets GPT-6 Astra, Sol, and Luna. Requested adaptive
-delegation selects a supported model and effort per independent native subagent
-task. Historical generations remain readable but are not tuning targets.
+GroundLine uses everyday Codex activity and observed delivery outcomes to inform
+GPT-6 Astra, Sol, and Luna model, effort, and subagent choices. Codex owns
+execution, settings, permissions, agents, worktrees, review, and upgrades.
+Historical generations remain readable but are not optimization targets.
 
-`efficiency route` joins conversation-local task classification and direct
-delivery outcomes with native audit and ClickHouse report evidence to select a
-useful next lane. The [evidence contract](plugins/groundline/references/evidence-routing.md)
-preserves missing measurements and protected outcomes; native Codex executes
-authorized model/effort and capability choices.
+The evidence loop is **audit → delivery → route**: inspect a bounded activity
+sample, record actual results, then compare matched outcomes. Task judgments and
+aggregate usage do not establish a measured optimum or automatic improvement.
+See the [architecture](docs/architecture.md) and
+[evidence contract](plugins/groundline/references/evidence-routing.md).
 
 [한국어](README.ko.md)
 
-GroundLine customizes Codex workflows through usage analysis, token optimization,
-and task-performance improvement. Its public Rust monorepo ships two independently
-installable plugins. Codex remains responsible for execution, settings,
-permissions, agents, worktrees, review, compaction, and upgrades.
+The Rust monorepo ships two independently installable plugins:
 
 | Plugin | Purpose | Default network behavior |
 | --- | --- | --- |
-| `groundline` | Usage analysis, Codex guidance, and evidence-gated token/time optimization trials | Offline; no hooks or collector identity |
+| `groundline` | Local usage evidence, delivery records, and bounded workflow recommendations | Offline; no hooks or collector identity |
 | `groundline-insights` | Optional aggregate collection plus a public self-hosting preview for ClickHouse and Grafana | Disabled until an owner profile and enrollment credential are configured |
 
 The plugin packages are canonical under `plugins/`. Shared Rust contracts and
@@ -46,11 +44,17 @@ intervention, elapsed time, and measured tokens. Additional tokens can be a
 reasonable cost when the resulting quality or reliability justifies them. Net
 token savings are not guaranteed, and successful installation or delivery checks
 do not establish an efficiency benefit. Keep guidance compact, scale verification
-to the task's risk, and reuse valid evidence. Personal guidance trials retain the
-explicit comparison and rollback rules in the
-[personal improvement contract](plugins/groundline/references/personal-improvement.md).
+to the task's risk, and reuse valid evidence. The
+[delivery contract](plugins/groundline/references/delivery-evidence.md) keeps
+requested and observed selections, failed work, missing resources, and
+acceptance evidence separate.
 
 ## Install and upgrade
+
+Releases use a date and daily sequence, such as `2026.09.29-a`. Installation
+and update comparisons use the corresponding numeric version `2026.929.1`.
+The [versioning contract](docs/versioning.md) keeps ordering monotonic across
+same-day releases and date changes.
 
 Use the **install and configure** entry point from a reviewed binary-bearing
 `stable` distribution. It preserves existing Codex choices by default and reports
@@ -138,45 +142,32 @@ the plugins, server profile, consent, credentials, cursor, and pending events.
 ### Existing settings and migration
 
 Installation validates existing choices and removes only four recognized retired
-Core hook approval entries. Use `--preset astra` (`-Preset astra`) only when
-requesting Astra/xhigh/Fast off, and `--restore-native-context`
+Core hook approval entries. Model, effort, and service tier change only through
+explicit options; there is no fixed model preset. Use `--restore-native-context`
 (`-RestoreNativeContext`) only when intentionally restoring native context sizing.
 Changed configuration receives a private backup. An unchanged retry writes no
 extra backup. The [migration guide](plugins/groundline/references/installation-alignment.md#existing-settings-and-migration)
 covers old native options, profiles, conflicting instructions, and recovery.
 
-## Maintain personal skills
+## Core skills and configuration
 
-For broader guidance alignment, ask `$groundline:align-agent-home` to apply GroundLine and
-repair evidenced mistakes in existing Codex settings and active guidance, with
-private backups and focused verification. A bare `plugin add` only installs the
-package; it does not run a personal-setting repair hook. See
-[installation alignment](plugins/groundline/references/installation-alignment.md).
+| Skill | Scope |
+| --- | --- |
+| `align-agent-home` | Requested installation, configuration, and guidance alignment |
+| `audit-agent-history` | Explicit history inspection and redacted usage evidence |
+| `optimize-codex-workflow` | Task-scoped GPT-6 choices and review of observed workflow outcomes |
 
-The installed `groundline setup --catalog <native-models.json> --apply` command
-uses the same preserve policy, resolving `CODEX_HOME` automatically.
-Omit `--apply` for a write-free preview. Unsupported models, efforts, or unresolved
-profile/provider/catalog overrides fail without changing the configuration.
-Use `--model <id> --effort <level>` for an explicit catalog-supported choice.
+Only alignment and optimization are implicitly invocable. Ordinary planning,
+Goals, handoffs, and execution stay native to Codex. Imported skill maintenance
+uses native file review rather than a separate GroundLine inventory or baseline.
 
-`groundline config-repair --config <config.toml> --catalog <native-models.json>`
-previews invalid-context repairs. Apply the same reviewed inputs with
-`--apply --expect-plan <hash> --backup <new-file>`. Restoring otherwise positive
-context overrides requires the explicit `--restore-native-context` option.
-
-For Codex configuration/model posture, use `groundline config-audit --config
-<config.toml> --catalog <native-models.json> --json` (or `--catalog -` for stdin).
-It checks selected fields against the supplied native catalog without printing
-values or changing settings; native strict doctor validates effective config.
-See [configuration review](plugins/groundline/references/codex-configuration.md).
-
-Ask `$groundline:align-agent-home` to review or update imported skills. Core
-handles local source tracking, drift/metadata checks, and private fingerprint
-receipts with `groundline guidance audit|snapshot`. A host-local profile selects
-roots; a separate path-free baseline records comparisons. Codex reviews upstream
-changes, applies the authorized patch, and runs affected behavior tests. User
-skills, settings, and provenance stay outside this public repository; plugin
-upgrades never overwrite them. See [skill maintenance](plugins/groundline/references/skill-maintenance.md).
+`groundline setup --catalog <native-models.json> --apply` preserves existing
+choices and native defaults. Omit `--apply` for a write-free preview; supply
+`--model <id> --effort <level>` only for an explicit supported choice. Configuration
+review and bounded repairs remain available through `config-audit` and
+`config-repair`. See [installation alignment](plugins/groundline/references/installation-alignment.md)
+and [configuration review](plugins/groundline/references/codex-configuration.md)
+for native catalog checks, private backups, and repair-plan binding.
 
 ## Privacy and security
 
@@ -234,20 +225,19 @@ See [integrations and installation profiles](docs/integrations.md),
 [Security](SECURITY.md), [changes](CHANGELOG.md), and the
 [release checklist](docs/release-checklist.md).
 
-## Personal workflow improvement
+## Workflow evidence
 
-Use `$groundline:improve-personal-workflow` to turn usage patterns and relevant
-current Codex guidance into improvements to GroundLine or the owner's environment.
-A weekly review first evaluates the previous change, reuses one bounded native
-audit, researches applicable updates, and proposes one testable improvement.
-Context selection, evidence reuse, and appropriate native concurrency matter
-alongside model choice. See [the optimization loop](plugins/groundline/references/codex-optimization-loop.md).
+Use `$groundline:optimize-codex-workflow` for task selection or a requested
+workflow review. Follow [the optimization loop](plugins/groundline/references/codex-optimization-loop.md)
+and [CLI examples](docs/examples.md); Insights is optional.
 
-Core personal commands trial reviewed guidance for approval continuity, diagnosis
-before retry, evidence reuse, just-in-time context, and bounded parallel reads.
-Token and elapsed-time objectives use resources per verified delivery, including
-failed work in the numerator, with protected quality and rollback gates. Native
-Codex performs research, authorized edits, and activation verification; the CLI
-does not silently apply settings or activate instructions. Missing evidence never
-authorizes a change, and source changes do not update installed plugins. See
-[the personal trial contract](plugins/groundline/references/personal-improvement.md).
+Weekly audits describe a selected task-window sample. Full-population coverage
+stays unknown; `audit store` is a separate whole-store metadata diagnostic.
+`audit review --input <saved-audit.json>` reuses saved evidence without scanning
+history and recomputes one recommendation under the current code.
+
+Record actual deliveries, including failed and incomplete work, before claiming
+an empirical model/effort improvement. `route` compares matched direct outcomes;
+it does not learn gains automatically or apply settings. Existing private
+personal-trial state can only be inspected with `personal status` or recovered
+with `personal rollback`; see [personal recovery](plugins/groundline/references/personal-recovery.md).

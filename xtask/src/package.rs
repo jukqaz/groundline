@@ -41,11 +41,7 @@ static PRIVATE_MATCHER: OnceLock<AhoCorasick> = OnceLock::new();
 const CORE_SKILLS: &[&str] = &[
     "align-agent-home",
     "audit-agent-history",
-    "close-live-work",
-    "evaluate-ai-usage-maturity",
-    "improve-personal-workflow",
-    "package-agent-task",
-    "reconcile-current-state",
+    "optimize-codex-workflow",
 ];
 const HOOK_EVENTS: &[&str] = &["PostCompact", "SessionEnd", "SessionStart", "Stop"];
 
@@ -228,6 +224,7 @@ fn manifest(path: &Path, expected_name: &str) -> Result<PluginManifest, XtaskErr
     let manifest: PluginManifest = serde_json::from_slice(&regular_bytes(path)?)?;
     if manifest.name != expected_name
         || manifest.version != env!("CARGO_PKG_VERSION")
+        || groundline_contracts::version::release_display_name(&manifest.version).is_err()
         || manifest.repository != "https://github.com/jukqaz/groundline"
         || !(1..=3).contains(&manifest.interface.default_prompt.len())
         || manifest

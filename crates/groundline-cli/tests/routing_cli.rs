@@ -13,15 +13,16 @@ fn fixture() -> (TempDir, Value, Value, Value) {
         {"slug":"gpt-6-sol","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"medium"}]},
         {"slug":"gpt-6-luna","default_reasoning_level":"low","supported_reasoning_levels":[{"effort":"low"}]}
     ]});
-    let packet = json!({"kind":"groundline-routing-evidence","schema":1,
+    let packet = json!({"kind":"groundline-routing-evidence","schema":2,
         "generated_at_utc":now,"catalog_checked_at_utc":now,
         "catalog_sha256":format!("{:x}",Sha256::digest(serde_json::to_vec(&catalog).unwrap())),
         "quality_status":"PASS","cohort_sha256":"a".repeat(64),
-        "task":{"kind":"implementation","phase":"implementation","complexity":"routine","independent_lanes":false,"evidence_sha256":"b".repeat(64)},
+        "task":{"kind":"implementation","phase":"implementation","complexity":"routine","evidence_sha256":"b".repeat(64)},
         "current":{"model":"gpt-6-sol","effort":"medium","explicit":false},
-        "objective":"balanced","outcomes":[],"features":[]});
+        "objective":"balanced","outcomes":[]});
     let audit = json!({"kind":"groundline-codex-weekly-audit","schema":1,"status":"PASS",
         "collection_complete":true,
+        "coverage":{"recommendation_evidence_complete":true},
         "scope":{"generated_at":now,"completed_root_sample_count":10,"selected_root_count":10,
             "minimum_root_sample_count":5,"sample_sufficient":true},
         "root":{"activity":{},"model_effort":{"counts":{"gpt-6-sol|medium":10}},
@@ -361,6 +362,7 @@ fn comparable_deliveries(dir: &TempDir, packet: &Value) {
         };
         let mut manifest = delivery_receipt(index, &packet["cohort_sha256"], model, effort, tokens);
         manifest["kind"] = json!("groundline-delivery-manifest");
+        manifest["schema"] = json!(2);
         for field in [
             "activation_verified",
             "observed_selection_matches_requested",
@@ -373,24 +375,11 @@ fn comparable_deliveries(dir: &TempDir, packet: &Value) {
             .remove("authenticity_verified");
         let evidence = dir.path().join("evidence").join(index.to_string());
         fs::create_dir_all(&evidence).unwrap();
-        for (field, kind) in [
-            ("requested", "groundline-selection-request"),
-            ("effective", "groundline-native-selection-observation"),
-            (
-                "verification",
-                "groundline-delivery-verification-observation",
-            ),
-        ] {
-            let mut observation = json!({"kind":kind,"schema":1,"source":"operator_supplied"});
-            for key in if field == "verification" {
-                ["status", "evidence_kind"]
-            } else {
-                ["model", "effort"]
-            } {
-                observation[key] = manifest[field][key].clone();
-            }
-            let bytes = serde_json::to_vec(&observation).unwrap();
-            let path = evidence.join(format!("{field}.json"));
+        for field in ["requested", "effective", "verification"] {
+            // Record observed evidence bytes directly; no duplicate typed
+            // operator-observation JSON is needed beside the manifest.
+            let bytes = format!("fixture delivery {index}: observed {field} evidence").into_bytes();
+            let path = evidence.join(format!("{field}.txt"));
             fs::write(&path, &bytes).unwrap();
             manifest[field]["artifact_path"] = json!(path);
             manifest[field]["evidence_sha256"] = json!(format!("{:x}", Sha256::digest(&bytes)));
@@ -459,12 +448,21 @@ fn recorded_deliveries_compare_without_aggregate_context_and_preserve_receipts()
 }
 
 #[test]
-fn unobserved_execution_blocks_comparison_but_preserves_pin() {
+fn child_selection_cannot_replace_unobserved_root_execution_or_override_pin() {
     let (dir, mut packet, catalog, mut audit) = fixture();
     complete_audit(&mut audit);
     let mut receipt = delivery_receipt(20, &packet["cohort_sha256"], "gpt-6-luna", "low", 70);
     receipt["effective"] = Value::Null;
     receipt["observed_selection_matches_requested"] = Value::Null;
+    receipt["resources"]["entries"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
+            "owner":"child","unit_hash":"e".repeat(64),"response_hash":"f".repeat(64),
+            "effective":{"model":"gpt-6-luna","effort":"low","evidence_sha256":"a".repeat(64)},
+            "input_tokens":2,"cached_input_tokens":0,"output_tokens":1,
+            "reasoning_output_tokens":0,"total_tokens":3
+        }));
     write_delivery(&dir, "unknown.json", &receipt);
     let report = report_fixture().to_string();
     // Incomplete actual work remains an explicit blocker even when no outcomes
@@ -889,6 +887,45 @@ fn known_native_usage_gap_is_reported_and_blocks_aggregate_readiness() {
             .contains(&json!("native_usage_gap"))
     );
     assert_eq!(out["status"], "EMPIRICAL");
+}
+
+#[test]
+fn native_pass_does_not_hide_unknown_or_incomplete_recommendation_coverage() {
+    for coverage in [None, Some(json!(null)), Some(json!(false))] {
+        let (dir, mut packet, catalog, mut audit) = fixture();
+        complete_audit(&mut audit);
+        direct_outcomes(&mut packet);
+        let reason = if coverage == Some(json!(false)) {
+            "native_recommendation_evidence_incomplete"
+        } else {
+            "native_recommendation_evidence_unknown"
+        };
+        if let Some(coverage) = coverage {
+            audit["coverage"]["recommendation_evidence_complete"] = coverage;
+        } else {
+            audit.as_object_mut().unwrap().remove("coverage");
+        }
+        let out = run(
+            &dir,
+            &packet,
+            &catalog,
+            &audit,
+            Some(&report_fixture().to_string()),
+        );
+        assert_eq!(out["native_audit"]["status"], "PASS");
+        assert_eq!(out["native_audit"]["complete_for_aggregate_context"], false);
+        assert_eq!(out["data_readiness"]["aggregate_sources_ready"], false);
+        assert!(
+            out["native_audit"]["reason_codes"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(reason))
+        );
+        // Direct matched outcome evidence keeps its independent role; incomplete
+        // aggregate context must not be promoted to ready or model evidence.
+        assert_eq!(out["status"], "EMPIRICAL");
+        assert_eq!(out["native_audit"]["used_for_model_ranking"], false);
+    }
 }
 
 #[test]

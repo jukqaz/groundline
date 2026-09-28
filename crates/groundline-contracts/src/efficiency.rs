@@ -5,27 +5,6 @@ use serde_json::{Map, Value, json};
 
 use crate::ContractError;
 
-const METRIC_NAMES: &[&str] = &[
-    "input_tokens",
-    "cached_input_tokens",
-    "non_cached_input_tokens",
-    "output_tokens",
-    "reasoning_output_tokens",
-    "total_tokens",
-    "tool_calls",
-    "compactions",
-    "failure_signals",
-    "long_turns",
-];
-
-const CHRONICLE_SIGNAL_FIELDS: &[&str] = &[
-    "goal_switches",
-    "implementation_restarts",
-    "user_corrections",
-    "app_context_switches",
-    "completed_outcome_observations",
-];
-
 const COMPARISON_COHORT_FIELDS: &[&str] = &[
     "schema_version",
     "groundline_version",
@@ -95,59 +74,6 @@ const OPTIMIZATION_ACTIONS: &[(&str, &[&str])] = &[
     ),
 ];
 
-struct Reductions {
-    cached_input: f64,
-    non_cached_input: f64,
-    output: f64,
-    reasoning: f64,
-    tool_calls: f64,
-    compactions: f64,
-    failures: f64,
-    long_turns: f64,
-}
-
-const SCENARIOS: &[(&str, Reductions)] = &[
-    (
-        "lower_reduction_assumption",
-        Reductions {
-            cached_input: 0.40,
-            non_cached_input: 0.10,
-            output: 0.22,
-            reasoning: 0.25,
-            tool_calls: 0.24,
-            compactions: 0.45,
-            failures: 0.20,
-            long_turns: 0.20,
-        },
-    ),
-    (
-        "middle_reduction_assumption",
-        Reductions {
-            cached_input: 0.56,
-            non_cached_input: 0.22,
-            output: 0.36,
-            reasoning: 0.45,
-            tool_calls: 0.385,
-            compactions: 0.65,
-            failures: 0.35,
-            long_turns: 0.40,
-        },
-    ),
-    (
-        "higher_reduction_assumption",
-        Reductions {
-            cached_input: 0.69,
-            non_cached_input: 0.32,
-            output: 0.50,
-            reasoning: 0.60,
-            tool_calls: 0.5125,
-            compactions: 0.80,
-            failures: 0.50,
-            long_turns: 0.55,
-        },
-    ),
-];
-
 fn object<'a>(value: &'a Value, error: &str) -> Result<&'a Map<String, Value>, ContractError> {
     value
         .as_object()
@@ -156,18 +82,6 @@ fn object<'a>(value: &'a Value, error: &str) -> Result<&'a Map<String, Value>, C
 
 fn non_negative_int(map: &Map<String, Value>, name: &str) -> u64 {
     map.get(name).and_then(Value::as_u64).unwrap_or(0)
-}
-
-fn checked_sum(values: impl IntoIterator<Item = u64>) -> Result<u64, ContractError> {
-    values.into_iter().try_fold(0_u64, |total, value| {
-        total
-            .checked_add(value)
-            .ok_or_else(|| ContractError("numeric_overflow".to_owned()))
-    })
-}
-
-fn reduced(value: u64, fraction: f64) -> u64 {
-    ((value as f64) * (1.0 - fraction)).round_ties_even() as u64
 }
 
 fn round_to(value: f64, digits: i32) -> f64 {
@@ -189,330 +103,6 @@ fn normalized_utc_timestamp(value: Option<&Value>) -> Option<String> {
             .with_timezone(&Utc)
             .to_rfc3339_opts(SecondsFormat::AutoSi, true),
     )
-}
-
-fn known_usage_source(value: Option<&Value>) -> Option<&str> {
-    value.and_then(Value::as_str).filter(|source| {
-        matches!(
-            *source,
-            "codex-cumulative-total-snapshots"
-                | "codex-cumulative-and-last-usage-fallback"
-                | "codex-last-usage-events-summed-fallback"
-                | "codex-cumulative-window-delta"
-                | "codex-window-delta-and-last-usage-fallback"
-                | "codex-last-usage-events-summed-window"
-                | "codex-response-usage-records"
-                | "codex-mixed-usage-sources"
-        )
-    })
-}
-
-pub fn audit_metrics(audit: &Value) -> Result<BTreeMap<&'static str, u64>, ContractError> {
-    let audit = object(audit, "unsupported_codex_audit")?;
-    if audit.get("kind").and_then(Value::as_str) != Some("groundline-codex-session-audit")
-        || audit.get("schema").and_then(Value::as_u64) != Some(1)
-    {
-        return Err(ContractError("unsupported_codex_audit".to_owned()));
-    }
-    let usage = audit
-        .get("provider_reported_usage")
-        .and_then(Value::as_object)
-        .ok_or_else(|| ContractError("incomplete_codex_audit".to_owned()))?;
-    let activity = audit
-        .get("activity")
-        .and_then(Value::as_object)
-        .ok_or_else(|| ContractError("incomplete_codex_audit".to_owned()))?;
-    let tools = audit
-        .get("tools")
-        .and_then(Value::as_object)
-        .ok_or_else(|| ContractError("incomplete_codex_audit".to_owned()))?;
-    let latency = audit
-        .get("task_latency")
-        .and_then(Value::as_object)
-        .ok_or_else(|| ContractError("incomplete_codex_audit".to_owned()))?;
-    let failure_signals = match tools.get("failure_signals") {
-        None | Some(Value::Null) => Map::new(),
-        Some(Value::Object(value)) => value.clone(),
-        Some(_) => return Err(ContractError("invalid_failure_signals".to_owned())),
-    };
-    // The current audit contract permits unknown splits. A hypothetical reduction
-    // needs a complete decomposition; unknown usage must not become a zero baseline.
-    if known_usage_source(usage.get("source")).is_none()
-        || !usage
-            .get("rollout_count_with_usage")
-            .and_then(Value::as_u64)
-            .is_some_and(|count| count > 0)
-    {
-        return Err(ContractError("unavailable_usage_provenance".to_owned()));
-    }
-    let usage_count = |field: &str| {
-        // Numeric aggregates alone cannot prove a split was reported: the audit
-        // reducer can retain a zero for a field missing from an owned source.
-        if usage
-            .get("token_field_availability")
-            .and_then(Value::as_object)
-            .and_then(|availability| availability.get(field))
-            .and_then(Value::as_bool)
-            != Some(true)
-        {
-            return Err(ContractError(format!(
-                "unverified_codex_usage_field:{field}"
-            )));
-        }
-        required_count(usage, field, &format!("provider_reported_usage.{field}"))
-    };
-    let input_tokens = usage_count("input_tokens")?;
-    let cached_input_tokens = usage_count("cached_input_tokens")?;
-    let output_tokens = usage_count("output_tokens")?;
-    let reasoning_output_tokens = usage_count("reasoning_output_tokens")?;
-    let total_tokens = usage_count("total_tokens")?;
-    if cached_input_tokens > input_tokens || reasoning_output_tokens > output_tokens {
-        return Err(ContractError("inconsistent_codex_usage_subsets".to_owned()));
-    }
-    if total_tokens != checked_sum([input_tokens, output_tokens])? {
-        return Err(ContractError("inconsistent_codex_usage_total".to_owned()));
-    }
-    let non_cached_input_tokens = input_tokens - cached_input_tokens;
-    if let Some(value) = usage.get("non_cached_input_tokens")
-        && value.as_u64() != Some(non_cached_input_tokens)
-    {
-        return Err(ContractError(
-            "inconsistent_non_cached_input_tokens".to_owned(),
-        ));
-    }
-
-    let failure_signal_count = checked_sum(
-        failure_signals
-            .keys()
-            .map(|field| required_count(&failure_signals, field, "failure_signals"))
-            .collect::<Result<Vec<_>, _>>()?,
-    )?;
-    Ok(BTreeMap::from([
-        ("input_tokens", input_tokens),
-        ("cached_input_tokens", cached_input_tokens),
-        ("non_cached_input_tokens", non_cached_input_tokens),
-        ("output_tokens", output_tokens),
-        ("reasoning_output_tokens", reasoning_output_tokens),
-        ("total_tokens", total_tokens),
-        (
-            "tool_calls",
-            required_count(tools, "call_count", "tools.call_count")?,
-        ),
-        (
-            "compactions",
-            required_count(activity, "compactions", "activity.compactions")?,
-        ),
-        ("failure_signals", failure_signal_count),
-        (
-            "long_turns",
-            required_count(latency, "long_turn_count", "task_latency.long_turn_count")?,
-        ),
-    ]))
-}
-
-fn simulation_audit(audit: &Value) -> Result<(&Value, &'static str), ContractError> {
-    if audit.get("schema").and_then(Value::as_u64) != Some(1) {
-        return Err(ContractError("unsupported_codex_audit".to_owned()));
-    }
-    match audit.get("kind").and_then(Value::as_str) {
-        Some("groundline-codex-session-audit") => Ok((audit, "supplied_session_rollouts")),
-        Some("groundline-codex-weekly-audit") => audit
-            .get("root")
-            .map(|root| (root, "selected_root_rollouts"))
-            .ok_or_else(|| ContractError("incomplete_weekly_root_audit".to_owned())),
-        Some("groundline-codex-weekly-review") => {
-            let weekly = audit
-                .get("audit")
-                .filter(|value| {
-                    value.get("kind").and_then(Value::as_str)
-                        == Some("groundline-codex-weekly-audit")
-                })
-                .ok_or_else(|| ContractError("incomplete_weekly_review_audit".to_owned()))?;
-            simulation_audit(weekly)
-        }
-        _ => Err(ContractError("unsupported_codex_audit".to_owned())),
-    }
-}
-
-pub fn simulate(audits: &[Value]) -> Result<Value, ContractError> {
-    if audits.is_empty() {
-        return Err(ContractError("simulation_audit_required".to_owned()));
-    }
-    if audits.len() != 1 {
-        return Err(ContractError("simulation_single_audit_required".to_owned()));
-    }
-    let mut baseline = METRIC_NAMES
-        .iter()
-        .map(|name| (*name, 0_u64))
-        .collect::<BTreeMap<_, _>>();
-    let mut input_scopes = Vec::new();
-    for input in audits {
-        let (audit, usage_scope) = simulation_audit(input)?;
-        for (name, value) in audit_metrics(audit)? {
-            let total = baseline.entry(name).or_default();
-            *total = total
-                .checked_add(value)
-                .ok_or_else(|| ContractError("numeric_overflow".to_owned()))?;
-        }
-        let usage_source = known_usage_source(audit.pointer("/provider_reported_usage/source"));
-        input_scopes.push(json!({
-            "input_kind": input.get("kind"),
-            "usage_scope": usage_scope,
-            "usage_source": usage_source,
-            "usage_observed_rollouts": audit.pointer("/provider_reported_usage/rollout_count_with_usage").and_then(Value::as_u64),
-            "usage_missing_rollouts": audit.pointer("/provider_reported_usage/rollout_count_without_usage").and_then(Value::as_u64),
-        }));
-    }
-    let baseline_total = baseline["total_tokens"];
-    let mut scenarios = Map::new();
-    for (name, reduction) in SCENARIOS {
-        let cached = reduced(baseline["cached_input_tokens"], reduction.cached_input);
-        let non_cached = reduced(
-            baseline["non_cached_input_tokens"],
-            reduction.non_cached_input,
-        );
-        let output = reduced(baseline["output_tokens"], reduction.output);
-        let projected_total = checked_sum([cached, non_cached, output])?;
-        let reduction_ratio = (baseline_total != 0)
-            .then(|| round_to(1.0 - (projected_total as f64 / baseline_total as f64), 4));
-        scenarios.insert(
-            (*name).to_owned(),
-            json!({
-                "total_tokens": projected_total,
-                "total_reduction_ratio": reduction_ratio,
-                "input_tokens": checked_sum([cached, non_cached])?,
-                "cached_input_tokens": cached,
-                "non_cached_input_tokens": non_cached,
-                "output_tokens": output,
-                "reasoning_output_tokens": reduced(baseline["reasoning_output_tokens"], reduction.reasoning),
-                "tool_calls": reduced(baseline["tool_calls"], reduction.tool_calls),
-                "compactions": reduced(baseline["compactions"], reduction.compactions),
-                "failure_signals": reduced(baseline["failure_signals"], reduction.failures),
-                "long_turns": reduced(baseline["long_turns"], reduction.long_turns),
-                "assumed_reduction_fractions": {
-                    "cached_input_tokens": reduction.cached_input,
-                    "non_cached_input_tokens": reduction.non_cached_input,
-                    "output_tokens": reduction.output,
-                    "reasoning_output_tokens": reduction.reasoning,
-                    "tool_calls": reduction.tool_calls,
-                    "compactions": reduction.compactions,
-                    "failure_signals": reduction.failures,
-                    "long_turns": reduction.long_turns,
-                },
-            }),
-        );
-    }
-    Ok(json!({
-        "kind": "groundline-efficiency-simulation",
-        "schema": 2,
-        "status": if baseline_total == 0 { "INCONCLUSIVE" } else { "PASS" },
-        "reason_codes": if baseline_total == 0 { vec!["zero_observed_token_baseline"] } else { vec![] },
-        "audit_count": audits.len(),
-        "input_scopes": input_scopes,
-        "baseline": baseline,
-        "scenarios": scenarios,
-        "evidence_class": "counterfactual_not_measured",
-        "assumptions": {
-            "source": "fixed_hypothetical_reduction_fractions",
-            "learned_from_usage": false,
-            "scenario_labels_are_forecasts": false,
-            "scope": "observed_reported_counters_only",
-            "unobserved_usage_imputed": false,
-            "sample_representativeness_assessed": false,
-            "single_audit_input_required": true,
-            "cached_input_is_subset_of_input": true,
-            "reasoning_output_is_subset_of_output": true,
-            "total_formula": "cached_input_tokens + non_cached_input_tokens + output_tokens",
-            "quality_improvement_measured": false,
-        },
-        "billing_inference_performed": false,
-        "quality_regression_allowed": false,
-        "mutation_performed": false,
-        "raw_content_emitted": false,
-    }))
-}
-
-fn chronicle_signals(packet: &Value) -> Result<BTreeMap<&'static str, u64>, ContractError> {
-    let packet = object(packet, "unsupported_chronicle_aggregate")?;
-    if packet.get("kind").and_then(Value::as_str) != Some("groundline-chronicle-aggregate")
-        || packet.get("schema").and_then(Value::as_u64) != Some(1)
-    {
-        return Err(ContractError("unsupported_chronicle_aggregate".to_owned()));
-    }
-    if packet.get("raw_content_excluded").and_then(Value::as_bool) != Some(true) {
-        return Err(ContractError(
-            "chronicle_raw_content_not_excluded".to_owned(),
-        ));
-    }
-    if packet
-        .get("chronicle_state_changed")
-        .and_then(Value::as_bool)
-        != Some(false)
-    {
-        return Err(ContractError(
-            "chronicle_state_change_not_allowed".to_owned(),
-        ));
-    }
-    if packet
-        .get("experiment_ledger_changed")
-        .and_then(Value::as_bool)
-        != Some(false)
-    {
-        return Err(ContractError(
-            "chronicle_ledger_change_not_allowed".to_owned(),
-        ));
-    }
-    let signals = packet
-        .get("signals")
-        .and_then(Value::as_object)
-        .ok_or_else(|| ContractError("invalid_chronicle_signals".to_owned()))?;
-    if signals.len() != CHRONICLE_SIGNAL_FIELDS.len()
-        || !CHRONICLE_SIGNAL_FIELDS
-            .iter()
-            .all(|name| signals.contains_key(*name))
-    {
-        return Err(ContractError("invalid_chronicle_signals".to_owned()));
-    }
-    CHRONICLE_SIGNAL_FIELDS
-        .iter()
-        .map(|name| {
-            signals
-                .get(*name)
-                .and_then(Value::as_u64)
-                .map(|value| (*name, value))
-                .ok_or_else(|| ContractError(format!("invalid_non_negative_count:{name}")))
-        })
-        .collect()
-}
-
-pub fn fuse(audit: &Value, chronicle: &Value) -> Result<Value, ContractError> {
-    let metrics = audit_metrics(audit)?;
-    let signals = chronicle_signals(chronicle)?;
-    let recommendation = if signals["goal_switches"] > 0
-        || signals["implementation_restarts"] >= 2
-        || signals["user_corrections"] >= 3
-    {
-        "reconcile_in_current_task"
-    } else if signals["app_context_switches"] >= 5 {
-        "review_task_boundary"
-    } else {
-        "preserve_current_boundary"
-    };
-    Ok(json!({
-        "kind": "groundline-codex-chronicle-evidence",
-        "schema": 1,
-        "status": "PASS",
-        "codex_usage": metrics,
-        "chronicle_signals": signals,
-        "recommendation": recommendation,
-        "exact_usage_source": "codex_reported",
-        "chronicle_role": "behavior_boundary_only",
-        "token_conversion_performed": false,
-        "chronicle_state_changed": false,
-        "experiment_ledger_changed": false,
-        "mutation_performed": false,
-        "raw_content_emitted": false,
-    }))
 }
 
 fn exact_keys(map: &Map<String, Value>, keys: &[&str]) -> bool {
@@ -934,7 +524,22 @@ pub fn recommend_weekly_optimization(audit: &Value) -> Result<Value, ContractErr
         "verification_success_ratio": bounded_ratio(verification_success, resolved_verification),
         "task_boundary_review_recommended": boundary_review,
     });
-    let evidence_quality = if audit_status == "PASS"
+    // This gate covers only the indexed observation sample. Whole-store
+    // population completeness is a separate diagnostic, not a prerequisite.
+    // Missing sample coverage remains unknown.
+    let recommendation_evidence_complete = audit
+        .get("coverage")
+        .and_then(|coverage| coverage.get("recommendation_evidence_complete"))
+        .and_then(Value::as_bool);
+    let recommendation_evidence_status = match recommendation_evidence_complete {
+        Some(true) => "complete",
+        Some(false) => "incomplete",
+        None => "unknown",
+    };
+    let evidence_quality = if recommendation_evidence_complete.is_none() {
+        "unknown"
+    } else if recommendation_evidence_complete == Some(true)
+        && audit_status == "PASS"
         && scope.get("sample_sufficient").and_then(Value::as_bool) == Some(true)
         && root_count >= 5
     {
@@ -944,7 +549,8 @@ pub fn recommend_weekly_optimization(audit: &Value) -> Result<Value, ContractErr
     } else {
         "insufficient"
     };
-    let bounded_partial = evidence_quality == "partial"
+    let bounded_partial = recommendation_evidence_complete == Some(true)
+        && evidence_quality == "partial"
         && audit_status == "PARTIAL"
         && scope.get("sample_sufficient").and_then(Value::as_bool) == Some(true)
         && root_count >= 5
@@ -963,9 +569,7 @@ pub fn recommend_weekly_optimization(audit: &Value) -> Result<Value, ContractErr
     let candidate_evidence = gpt6_only && (evidence_quality == "sufficient" || bounded_partial);
     let recommendation_scope = if !gpt6_only {
         "outside_gpt6_optimization_scope"
-    } else if evidence_quality == "sufficient" {
-        "weekly_completed_root_cohort"
-    } else if bounded_partial {
+    } else if candidate_evidence {
         "selected_completed_root_sample"
     } else {
         "unavailable"
@@ -1034,7 +638,11 @@ pub fn recommend_weekly_optimization(audit: &Value) -> Result<Value, ContractErr
             "model_or_effort_change_allowed": false,
             "one_candidate_only": true,
             "bounded_partial_sample_used": bounded_partial,
-            "generalization_to_unselected_roots_allowed": gpt6_only && evidence_quality == "sufficient",
+            "recommendation_evidence_complete": recommendation_evidence_complete,
+            "recommendation_evidence_status": recommendation_evidence_status,
+            "recommendation_evidence_source": "native_weekly_window_sample",
+            "recommendation_evidence_path": "/coverage/recommendation_evidence_complete",
+            "generalization_to_unselected_roots_allowed": false,
         },
         "automatic_application_allowed": false,
         "weekly_review_required": false,
@@ -1052,394 +660,7 @@ pub fn recommend_weekly_optimization(audit: &Value) -> Result<Value, ContractErr
 mod tests {
     use serde_json::json;
 
-    use super::{compare_aggregate_periods, fuse, recommend_weekly_optimization, simulate};
-
-    fn audit() -> serde_json::Value {
-        json!({
-            "kind": "groundline-codex-session-audit",
-            "schema": 1,
-            "provider_reported_usage": {
-                "source": "codex-cumulative-window-delta",
-                "rollout_count_with_usage": 1,
-                "input_tokens": 1000,
-                "cached_input_tokens": 700,
-                "non_cached_input_tokens": 300,
-                "output_tokens": 200,
-                "reasoning_output_tokens": 40,
-                "total_tokens": 1200,
-                "token_field_availability": {
-                    "input_tokens": true,
-                    "cached_input_tokens": true,
-                    "cache_write_input_tokens": false,
-                    "output_tokens": true,
-                    "reasoning_output_tokens": true,
-                    "total_tokens": true
-                }
-            },
-            "activity": {"compactions": 2},
-            "tools": {"call_count": 20, "failure_signals": {"nonzero_exit": 2}},
-            "task_latency": {"long_turn_count": 3}
-        })
-    }
-
-    #[test]
-    fn simulation_matches_the_existing_counterfactual_contract() {
-        let result = simulate(&[audit()]).expect("valid audit");
-        assert_eq!(result["baseline"]["non_cached_input_tokens"], 300);
-        assert_eq!(result["schema"], 2);
-        assert_eq!(
-            result["scenarios"]["middle_reduction_assumption"]["total_tokens"],
-            670
-        );
-        assert_eq!(
-            result["scenarios"]["middle_reduction_assumption"]["total_reduction_ratio"],
-            0.4417
-        );
-        assert_eq!(result["evidence_class"], "counterfactual_not_measured");
-        assert_eq!(
-            result["assumptions"]["source"],
-            "fixed_hypothetical_reduction_fractions"
-        );
-        assert_eq!(result["assumptions"]["learned_from_usage"], false);
-        assert_eq!(
-            result["assumptions"]["scenario_labels_are_forecasts"],
-            false
-        );
-        assert_eq!(result["assumptions"]["unobserved_usage_imputed"], false);
-        assert_eq!(
-            result["scenarios"]["middle_reduction_assumption"]["assumed_reduction_fractions"]["cached_input_tokens"],
-            0.56
-        );
-        for scenario in result["scenarios"].as_object().unwrap().values() {
-            assert_eq!(
-                scenario["total_tokens"].as_u64().unwrap(),
-                scenario["input_tokens"].as_u64().unwrap()
-                    + scenario["output_tokens"].as_u64().unwrap()
-            );
-            assert_eq!(
-                scenario["input_tokens"].as_u64().unwrap(),
-                scenario["cached_input_tokens"].as_u64().unwrap()
-                    + scenario["non_cached_input_tokens"].as_u64().unwrap()
-            );
-            assert!(
-                scenario["reasoning_output_tokens"].as_u64().unwrap()
-                    <= scenario["output_tokens"].as_u64().unwrap()
-            );
-        }
-    }
-
-    #[test]
-    fn simulation_accepts_current_weekly_audit_and_combined_review_without_mixing_ownership() {
-        let mut weekly = weekly_audit();
-        let mut root = audit();
-        root["provider_reported_usage"]["source"] = json!("codex-mixed-usage-sources");
-        root["provider_reported_usage"]["rollout_count_with_usage"] = json!(3);
-        root["provider_reported_usage"]["rollout_count_without_usage"] = json!(2);
-        let mut merged_root = weekly["root"].as_object().unwrap().clone();
-        merged_root.extend(root.as_object().unwrap().clone());
-        weekly["root"] = json!(merged_root);
-        weekly["delegated"] = audit();
-        weekly["guardian"] = audit();
-        let combined = crate::weekly_review::review(weekly.clone()).unwrap();
-        let direct = simulate(&[weekly]).unwrap();
-        let from_review = simulate(&[combined]).unwrap();
-        assert_eq!(direct["baseline"], from_review["baseline"]);
-        assert_eq!(direct["baseline"]["total_tokens"], 1200);
-        assert_eq!(from_review["audit_count"], 1);
-        assert_eq!(
-            from_review["input_scopes"][0]["usage_scope"],
-            "selected_root_rollouts"
-        );
-        assert_eq!(
-            from_review["input_scopes"][0]["usage_source"],
-            "codex-mixed-usage-sources"
-        );
-        assert_eq!(from_review["input_scopes"][0]["usage_observed_rollouts"], 3);
-        assert_eq!(from_review["input_scopes"][0]["usage_missing_rollouts"], 2);
-        assert_eq!(
-            from_review["assumptions"]["scope"],
-            "observed_reported_counters_only"
-        );
-    }
-
-    #[test]
-    fn simulation_rejects_missing_null_or_invalid_token_splits() {
-        for field in [
-            "input_tokens",
-            "cached_input_tokens",
-            "output_tokens",
-            "reasoning_output_tokens",
-            "total_tokens",
-        ] {
-            for replacement in [None, Some(json!(null)), Some(json!(-1)), Some(json!("100"))] {
-                let mut incomplete = audit();
-                let usage = incomplete["provider_reported_usage"]
-                    .as_object_mut()
-                    .unwrap();
-                if let Some(value) = replacement {
-                    usage.insert(field.to_owned(), value);
-                } else {
-                    usage.remove(field);
-                }
-                assert_eq!(
-                    simulate(&[incomplete]).unwrap_err().0,
-                    format!("invalid_non_negative_count:provider_reported_usage.{field}")
-                );
-            }
-        }
-        let mut total_only = audit();
-        total_only["provider_reported_usage"] = json!({"total_tokens": 1200});
-        assert!(simulate(&[total_only]).is_err());
-    }
-
-    #[test]
-    fn simulation_requires_verified_usage_provenance_without_echoing_untrusted_strings() {
-        let mut input = audit();
-        input["provider_reported_usage"]["source"] = json!("private fixture marker");
-        assert_eq!(
-            simulate(&[input]).unwrap_err().0,
-            "unavailable_usage_provenance"
-        );
-        for field in ["source", "rollout_count_with_usage"] {
-            for replacement in [
-                None,
-                Some(json!(null)),
-                Some(json!(0)),
-                Some(json!("private fixture marker")),
-            ] {
-                let mut input = audit();
-                let usage = input["provider_reported_usage"].as_object_mut().unwrap();
-                if let Some(value) = replacement {
-                    usage.insert(field.to_owned(), value);
-                } else {
-                    usage.remove(field);
-                }
-                assert_eq!(
-                    simulate(&[input]).unwrap_err().0,
-                    "unavailable_usage_provenance"
-                );
-            }
-        }
-        let mut input = audit();
-        input["provider_reported_usage"]["rollout_count_without_usage"] =
-            json!("private fixture marker");
-        let result = simulate(&[input]).unwrap();
-        assert!(result["input_scopes"][0]["usage_missing_rollouts"].is_null());
-        assert!(!result.to_string().contains("private fixture marker"));
-    }
-
-    #[test]
-    fn simulation_requires_reported_field_availability_not_zero_filled_splits() {
-        for field in [
-            "input_tokens",
-            "cached_input_tokens",
-            "output_tokens",
-            "reasoning_output_tokens",
-            "total_tokens",
-        ] {
-            for availability in [
-                None,
-                Some(json!(false)),
-                Some(json!(null)),
-                Some(json!("true")),
-            ] {
-                let mut input = audit();
-                // These numbers conserve the total even when the optional source
-                // fields were absent and the upstream reducer retained zero.
-                input["provider_reported_usage"]["cached_input_tokens"] = json!(0);
-                input["provider_reported_usage"]["non_cached_input_tokens"] = json!(1000);
-                input["provider_reported_usage"]["reasoning_output_tokens"] = json!(0);
-                let map = input["provider_reported_usage"]["token_field_availability"]
-                    .as_object_mut()
-                    .unwrap();
-                if let Some(value) = availability {
-                    map.insert(field.to_owned(), value);
-                } else {
-                    map.remove(field);
-                }
-                assert_eq!(
-                    simulate(&[input]).unwrap_err().0,
-                    format!("unverified_codex_usage_field:{field}")
-                );
-            }
-        }
-        for availability in [None, Some(json!(null)), Some(json!([]))] {
-            let mut input = audit();
-            let usage = input["provider_reported_usage"].as_object_mut().unwrap();
-            if let Some(value) = availability {
-                usage.insert("token_field_availability".to_owned(), value);
-            } else {
-                usage.remove("token_field_availability");
-            }
-            assert_eq!(
-                simulate(&[input]).unwrap_err().0,
-                "unverified_codex_usage_field:input_tokens"
-            );
-        }
-    }
-
-    #[test]
-    fn simulation_rejects_unavailable_or_inconsistent_usage_without_clamping() {
-        for (field, value, error) in [
-            (
-                "cached_input_tokens",
-                json!(1001),
-                "inconsistent_codex_usage_subsets",
-            ),
-            (
-                "reasoning_output_tokens",
-                json!(201),
-                "inconsistent_codex_usage_subsets",
-            ),
-            (
-                "non_cached_input_tokens",
-                json!(301),
-                "inconsistent_non_cached_input_tokens",
-            ),
-            (
-                "total_tokens",
-                json!(1240),
-                "inconsistent_codex_usage_total",
-            ),
-            ("total_tokens", json!(0), "inconsistent_codex_usage_total"),
-            (
-                "source",
-                json!("unavailable"),
-                "unavailable_usage_provenance",
-            ),
-            (
-                "rollout_count_with_usage",
-                json!(0),
-                "unavailable_usage_provenance",
-            ),
-        ] {
-            let mut inconsistent = audit();
-            inconsistent["provider_reported_usage"][field] = value;
-            assert_eq!(simulate(&[inconsistent]).unwrap_err().0, error);
-        }
-    }
-
-    #[test]
-    fn zero_observed_baseline_is_inconclusive_not_zero_percent_savings() {
-        let mut zero = audit();
-        for field in [
-            "input_tokens",
-            "cached_input_tokens",
-            "non_cached_input_tokens",
-            "output_tokens",
-            "reasoning_output_tokens",
-            "total_tokens",
-        ] {
-            zero["provider_reported_usage"][field] = json!(0);
-        }
-        let result = simulate(&[zero]).unwrap();
-        assert_eq!(result["status"], "INCONCLUSIVE");
-        assert_eq!(
-            result["reason_codes"],
-            json!(["zero_observed_token_baseline"])
-        );
-        for scenario in result["scenarios"].as_object().unwrap().values() {
-            assert!(scenario["total_reduction_ratio"].is_null());
-        }
-        assert_eq!(simulate(&[]).unwrap_err().0, "simulation_audit_required");
-    }
-
-    #[test]
-    fn unsupported_simulation_envelopes_are_rejected() {
-        let mut weekly = weekly_audit();
-        weekly["root"] = audit();
-        for field in ["schema", "kind"] {
-            let mut invalid = weekly.clone();
-            invalid["root"][field] = json!("unsupported");
-            assert_eq!(
-                simulate(&[invalid]).unwrap_err().0,
-                "unsupported_codex_audit"
-            );
-        }
-        let mut invalid_review =
-            json!({"kind":"groundline-codex-weekly-review", "schema":1, "audit":weekly});
-        invalid_review["audit"]["schema"] = json!(2);
-        assert_eq!(
-            simulate(&[invalid_review]).unwrap_err().0,
-            "unsupported_codex_audit"
-        );
-    }
-
-    #[test]
-    fn simulation_rejects_multiple_inputs_without_disjoint_ownership_proof() {
-        let input = audit();
-        assert_eq!(
-            simulate(&[input.clone(), input]).unwrap_err().0,
-            "simulation_single_audit_required"
-        );
-        let mut weekly = weekly_audit();
-        weekly["root"] = audit();
-        assert_eq!(
-            simulate(&[weekly, audit()]).unwrap_err().0,
-            "simulation_single_audit_required"
-        );
-    }
-
-    #[test]
-    fn oversized_aggregate_counters_fail_without_panicking() {
-        let mut overflowing = audit();
-        overflowing["tools"]["failure_signals"] = json!({
-            "nonzero_exit": u64::MAX,
-            "timeout": 1,
-        });
-
-        assert_eq!(simulate(&[overflowing]).unwrap_err().0, "numeric_overflow");
-    }
-
-    #[test]
-    fn chronicle_fusion_keeps_usage_and_behavior_roles_separate() {
-        let result = fuse(
-            &audit(),
-            &json!({
-                "kind": "groundline-chronicle-aggregate",
-                "schema": 1,
-                "raw_content_excluded": true,
-                "chronicle_state_changed": false,
-                "experiment_ledger_changed": false,
-                "signals": {
-                    "goal_switches": 0,
-                    "implementation_restarts": 2,
-                    "user_corrections": 1,
-                    "app_context_switches": 3,
-                    "completed_outcome_observations": 1
-                }
-            }),
-        )
-        .expect("valid evidence");
-        assert_eq!(result["recommendation"], "reconcile_in_current_task");
-        assert_eq!(result["chronicle_role"], "behavior_boundary_only");
-        assert_eq!(result["token_conversion_performed"], false);
-    }
-
-    #[test]
-    fn negative_chronicle_counts_are_rejected() {
-        let result = fuse(
-            &audit(),
-            &json!({
-                "kind": "groundline-chronicle-aggregate",
-                "schema": 1,
-                "raw_content_excluded": true,
-                "chronicle_state_changed": false,
-                "experiment_ledger_changed": false,
-                "signals": {
-                    "goal_switches": -1,
-                    "implementation_restarts": 0,
-                    "user_corrections": 0,
-                    "app_context_switches": 0,
-                    "completed_outcome_observations": 0
-                }
-            }),
-        );
-        assert_eq!(
-            result.unwrap_err().0,
-            "invalid_non_negative_count:goal_switches"
-        );
-    }
+    use super::{compare_aggregate_periods, recommend_weekly_optimization};
 
     #[test]
     fn comparison_requires_matching_cohorts_and_sufficient_samples() {
@@ -1533,6 +754,7 @@ mod tests {
             "kind": "groundline-codex-weekly-audit",
             "schema": 1,
             "status": "PASS",
+            "coverage": {"recommendation_evidence_complete": true},
             "scope": {
                 "generated_at": "2026-08-03T00:00:00Z",
                 "completed_root_sample_count": 10,
@@ -1561,6 +783,29 @@ mod tests {
             "rollout_paths_emitted": false,
             "secret_value_printed": false
         })
+    }
+
+    #[test]
+    fn valid_indexed_sample_never_authorizes_unobserved_population_claims() {
+        let mut audit = weekly_audit();
+        audit["coverage"]["denominator_complete"] = json!(false);
+        audit["coverage"]["eligible_root_count"] = serde_json::Value::Null;
+        audit["coverage"]["selection_coverage"] = serde_json::Value::Null;
+        let result = recommend_weekly_optimization(&audit).unwrap();
+        assert_eq!(result["optimization_model_cohort_eligible"], true);
+        assert_eq!(result["evidence_quality"], "sufficient");
+        assert_eq!(
+            result["recommendation_scope"],
+            "selected_completed_root_sample"
+        );
+        assert_eq!(
+            result["quality_contract"]["generalization_to_unselected_roots_allowed"],
+            false
+        );
+        assert_eq!(
+            result["quality_contract"]["model_or_effort_change_allowed"],
+            false
+        );
     }
 
     #[test]
@@ -1623,6 +868,104 @@ mod tests {
     }
 
     #[test]
+    fn weekly_recommendations_require_explicit_complete_sample_evidence() {
+        for status in ["PASS", "PARTIAL"] {
+            for coverage in [
+                None,
+                Some(json!({})),
+                Some(json!({"recommendation_evidence_complete": null})),
+                Some(json!({"recommendation_evidence_complete": "true"})),
+                Some(json!({"recommendation_evidence_complete": false})),
+            ] {
+                let mut audit = weekly_audit();
+                audit["status"] = json!(status);
+                // Previously the sufficient PASS path and the truncated PARTIAL
+                // path both emitted candidates without native parity evidence.
+                audit["scope"]["root_truncated_count"] = json!(2);
+                for name in ["root", "delegated", "guardian"] {
+                    audit[name]["status"] = json!("PASS");
+                }
+                if let Some(coverage) = coverage {
+                    audit["coverage"] = coverage;
+                } else {
+                    audit.as_object_mut().unwrap().remove("coverage");
+                }
+                let expected = audit
+                    .pointer("/coverage/recommendation_evidence_complete")
+                    .and_then(serde_json::Value::as_bool);
+                let result = recommend_weekly_optimization(&audit).unwrap();
+                assert_eq!(
+                    result["recommended_change"]["code"],
+                    "preserve_current_workflow"
+                );
+                assert_eq!(result["recommended_change"]["confidence"], "low");
+                assert_eq!(result["recommendation_scope"], "unavailable");
+                assert_eq!(result["deferred_candidate_codes"], json!([]));
+                assert_eq!(
+                    result["quality_contract"]["bounded_partial_sample_used"],
+                    false
+                );
+                assert_eq!(
+                    result["quality_contract"]["generalization_to_unselected_roots_allowed"],
+                    false
+                );
+                assert_eq!(
+                    result["quality_contract"]["recommendation_evidence_complete"],
+                    json!(expected)
+                );
+                assert_eq!(
+                    result["quality_contract"]["recommendation_evidence_status"],
+                    if expected == Some(false) {
+                        "incomplete"
+                    } else {
+                        "unknown"
+                    }
+                );
+                assert_eq!(
+                    result["evidence_quality"],
+                    if expected == Some(false) {
+                        "partial"
+                    } else {
+                        "unknown"
+                    }
+                );
+                assert_eq!(result["signals"]["completed_root_count"], 10);
+            }
+        }
+    }
+
+    #[test]
+    fn bounded_partial_recommendation_remains_limited_to_explicitly_covered_sample() {
+        let mut audit = weekly_audit();
+        audit["status"] = json!("PARTIAL");
+        audit["scope"]["root_truncated_count"] = json!(2);
+        for name in ["root", "delegated", "guardian"] {
+            audit[name]["status"] = json!("PASS");
+        }
+        let result = recommend_weekly_optimization(&audit).unwrap();
+        assert_eq!(
+            result["recommended_change"]["code"],
+            "reconcile_in_current_task"
+        );
+        assert_eq!(
+            result["recommendation_scope"],
+            "selected_completed_root_sample"
+        );
+        assert_eq!(
+            result["quality_contract"]["bounded_partial_sample_used"],
+            true
+        );
+        assert_eq!(
+            result["quality_contract"]["recommendation_evidence_status"],
+            "complete"
+        );
+        assert_eq!(
+            result["quality_contract"]["generalization_to_unselected_roots_allowed"],
+            false
+        );
+    }
+
+    #[test]
     fn model_and_effort_labels_do_not_authorize_task_or_setting_changes() {
         for model in ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"] {
             for effort in ["high", "xhigh", "max", "ultra"] {
@@ -1664,23 +1007,5 @@ mod tests {
         );
         assert_eq!(result["automatic_application_allowed"], false);
         assert_eq!(result["weekly_review_required"], false);
-    }
-
-    #[test]
-    fn observed_goal_switches_only_reconcile_the_current_task() {
-        let result = fuse(
-            &audit(),
-            &json!({
-                "kind": "groundline-chronicle-aggregate", "schema": 1,
-                "raw_content_excluded": true, "chronicle_state_changed": false,
-                "experiment_ledger_changed": false,
-                "signals": {"goal_switches": 1, "implementation_restarts": 0,
-                    "user_corrections": 0, "app_context_switches": 0,
-                    "completed_outcome_observations": 0}
-            }),
-        )
-        .unwrap();
-        assert_eq!(result["recommendation"], "reconcile_in_current_task");
-        assert_eq!(result["mutation_performed"], false);
     }
 }

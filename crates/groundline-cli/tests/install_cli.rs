@@ -102,7 +102,6 @@ impl Fixture {
         for option in options {
             let argument = if cfg!(windows) {
                 match *option {
-                    "--preset" => "-Preset",
                     "--profile" => "-Profile",
                     "--model" => "-Model",
                     "--effort" => "-Effort",
@@ -256,7 +255,18 @@ fn installer_applies_and_checks_without_another_manual_setup_request() {
         &f.home.join("config.toml"),
         b"model_context_window=0\nservice_tier='fast'\n",
     );
-    let output = f.run_options(false, &["--preset", "astra", "--restore-native-context"]);
+    let output = f.run_options(
+        false,
+        &[
+            "--model",
+            "gpt-6-astra",
+            "--effort",
+            "xhigh",
+            "--service-tier",
+            "default",
+            "--restore-native-context",
+        ],
+    );
     assert!(
         output.status.success(),
         "{}\n{}\n{}",
@@ -276,9 +286,20 @@ fn installer_applies_and_checks_without_another_manual_setup_request() {
     assert!(!calls.contains("groundline-insights"));
     let before = fs::read(f.home.join("config.toml")).unwrap();
     assert!(
-        f.run_options(false, &["--preset", "astra", "--restore-native-context"])
-            .status
-            .success()
+        f.run_options(
+            false,
+            &[
+                "--model",
+                "gpt-6-astra",
+                "--effort",
+                "xhigh",
+                "--service-tier",
+                "default",
+                "--restore-native-context"
+            ]
+        )
+        .status
+        .success()
     );
     assert_eq!(before, fs::read(f.home.join("config.toml")).unwrap());
     assert_eq!(
@@ -351,6 +372,37 @@ fn mismatched_installed_artifact_stops_before_setup() {
 }
 
 #[test]
+fn invalid_distribution_checksum_stops_before_native_marketplace_changes() {
+    let f = Fixture::new();
+    let original = b"model='gpt-6-astra'\nmodel_reasoning_effort='xhigh'\nservice_tier='fast'\n";
+    common::write_owned_config(&f.home.join("config.toml"), original);
+    let executable = f.installed.file_name().unwrap().to_str().unwrap();
+    let checksum = f
+        .root
+        .join("plugins/groundline/bin")
+        .join(&f.target)
+        .join(format!("{executable}.sha256"));
+    fs::write(checksum, format!("{}  {executable}\n", "0".repeat(64))).unwrap();
+    let output = f.run(false);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        receipt(&output)["stages"]["distribution_groundline"]["status"],
+        "FAIL"
+    );
+    let calls = fs::read_to_string(&f.calls).unwrap();
+    assert!(!calls.contains("plugin marketplace add "), "{calls}");
+    assert!(
+        !calls.contains("plugin marketplace upgrade groundline"),
+        "{calls}"
+    );
+    assert!(
+        !calls.contains("plugin add groundline@groundline"),
+        "{calls}"
+    );
+    assert_eq!(fs::read(f.home.join("config.toml")).unwrap(), original);
+}
+
+#[test]
 fn default_install_preserves_existing_choices_and_emits_stage_results() {
     let f = Fixture::new();
     let original = b"model='gpt-6-astra'\nmodel_reasoning_effort='xhigh'\nservice_tier='fast'\n";
@@ -381,7 +433,7 @@ fn doctor_failure_preserves_completed_settings_and_can_resume() {
         original.replacen("#!/bin/sh\n", &format!("#!/bin/sh\n{failure}"), 1)
     };
     fs::write(&f.codex, changed).unwrap();
-    let result = f.run_options(false, &["--preset", "astra"]);
+    let result = f.run_options(false, &["--model", "gpt-6-astra"]);
     assert_eq!(result.status.code(), Some(2), "{result:?}");
     let report = receipt(&result);
     assert_eq!(report["status"], "ACTION_REQUIRED");
@@ -389,7 +441,7 @@ fn doctor_failure_preserves_completed_settings_and_can_resume() {
     assert_eq!(report["stages"]["native_doctor"]["exit_code"], 42);
     let before = fs::read(f.home.join("config.toml")).unwrap();
     fs::write(&f.codex, original).unwrap();
-    let result = f.run_options(false, &["--preset", "astra"]);
+    let result = f.run_options(false, &["--model", "gpt-6-astra"]);
     assert!(result.status.success(), "{result:?}");
     assert_eq!(fs::read(f.home.join("config.toml")).unwrap(), before);
     assert_eq!(receipt(&result)["status"], "PASS");

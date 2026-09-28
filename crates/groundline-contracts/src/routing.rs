@@ -14,22 +14,6 @@ use comparison::{
 };
 
 const MODELS: &[&str] = &["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"];
-const FEATURES: &[&str] = &[
-    "subagents",
-    "parallel_tools",
-    "async_wait",
-    "skills",
-    "mcp_apps",
-    "browser",
-    "computer_use",
-    "worktrees",
-    "review",
-    "artifacts",
-    "memory",
-    "goals",
-    "automations",
-    "auto_review",
-];
 const MIN_UNITS: usize = 10;
 const ROUTING_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max", "ultra"];
 
@@ -62,7 +46,6 @@ struct Packet {
     current: Selection,
     objective: String,
     outcomes: Vec<Outcome>,
-    features: Vec<Feature>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -70,7 +53,6 @@ struct Task {
     kind: String,
     phase: Option<String>,
     complexity: String,
-    independent_lanes: bool,
     evidence_sha256: String,
 }
 #[derive(Deserialize)]
@@ -95,18 +77,6 @@ struct Outcome {
     wall_duration_ms: Option<u64>,
     owned_resources_complete: bool,
     completed_at_utc: String,
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Feature {
-    name: String,
-    availability: String,
-    authorized: bool,
-    explicit_user_request: bool,
-    eligible_count: Option<u32>,
-    used_count: Option<u32>,
-    verified_count: Option<u32>,
-    evidence_sha256: Option<String>,
 }
 #[derive(Deserialize)]
 struct Catalog {
@@ -144,7 +114,7 @@ fn validate(
     let catalog_bytes = serde_json::to_vec(catalog_value).map_err(|_| error("invalid_catalog"))?;
     let catalog_hash = format!("{:x}", Sha256::digest(&catalog_bytes));
     if packet.kind != "groundline-routing-evidence"
-        || packet.schema != 1
+        || packet.schema != 2
         || !["PASS", "PARTIAL", "FAIL"].contains(&packet.quality_status.as_str())
         || ![
             "implementation",
@@ -169,7 +139,6 @@ fn validate(
         || !MODELS.contains(&packet.current.model.as_str())
         || !ROUTING_EFFORTS.contains(&packet.current.effort.as_str())
         || packet.outcomes.len() > 1000
-        || packet.features.len() > FEATURES.len()
         || generated > now + Duration::minutes(5)
         || now - generated > Duration::hours(24)
     {
@@ -193,29 +162,6 @@ fn validate(
             return Err(error("invalid_outcome"));
         }
     }
-    let mut feature_names = BTreeSet::new();
-    for feature in &packet.features {
-        if !FEATURES.contains(&feature.name.as_str())
-            || !feature_names.insert(&feature.name)
-            || !["available", "unavailable", "unknown"].contains(&feature.availability.as_str())
-            || feature
-                .evidence_sha256
-                .as_deref()
-                .is_some_and(|s| !digest(s))
-            || feature
-                .used_count
-                .zip(feature.eligible_count)
-                .is_some_and(|(used, eligible)| used > eligible)
-            || (feature.used_count.is_some() && feature.eligible_count.is_none())
-            || (feature.verified_count.is_some() && feature.used_count.is_none())
-            || feature
-                .verified_count
-                .zip(feature.used_count)
-                .is_some_and(|(verified, used)| verified > used)
-        {
-            return Err(error("invalid_feature"));
-        }
-    }
     // Native catalog is an availability source, not an instruction. Reject ambiguous entries.
     let mut model_names = BTreeSet::new();
     for model in &catalog.models {
@@ -237,82 +183,18 @@ fn validate(
 
 /// Return a next-lane suggestion. This never writes Codex configuration.
 pub fn propose(packet: &Value, catalog: &Value) -> Result<Value, ContractError> {
+    if packet["schema"] != 2 {
+        return Err(error("unsupported_evidence_schema"));
+    }
     let packet: Packet =
         serde_json::from_value(packet.clone()).map_err(|_| error("invalid_evidence"))?;
     let parsed_catalog: Catalog =
         serde_json::from_value(catalog.clone()).map_err(|_| error("invalid_catalog"))?;
     validate(&packet, &parsed_catalog, catalog)?;
-    let by_name = packet
-        .features
-        .iter()
-        .map(|f| (f.name.as_str(), f))
-        .collect::<BTreeMap<_, _>>();
-    let feature_assessment = FEATURES
-        .iter()
-        .map(|name| {
-            let Some(f) = by_name.get(name) else {
-                return json!({"name":name,"availability":"unknown","authorized":null,
-                "eligible_count":null,"used_count":null,"verified_count":null,
-                "status":"UNKNOWN","reason_code":"no_direct_observation"});
-            };
-            let (status, reason) = if f.availability == "unknown" {
-                ("UNKNOWN", "availability_unknown")
-            } else if f.availability == "unavailable" {
-                ("UNAVAILABLE", "not_available_on_active_surface")
-            } else if !f.authorized {
-                ("NOT_AUTHORIZED", "authorization_required")
-            } else if ["goals", "automations", "auto_review"].contains(name)
-                && !f.explicit_user_request
-            {
-                ("NOT_AUTHORIZED", "explicit_user_request_required")
-            } else if packet.quality_status == "FAIL" {
-                ("UNKNOWN", "evidence_quality_failed")
-            } else if *name == "subagents" && !packet.task.independent_lanes {
-                ("NOT_APPLICABLE", "no_independent_lane")
-            } else if f.evidence_sha256.is_none()
-                || f.eligible_count.is_none()
-                || f.used_count.is_none()
-                || f.verified_count.is_none()
-            {
-                ("UNKNOWN", "opportunity_evidence_incomplete")
-            } else if f.eligible_count == Some(0) {
-                ("NO_OPPORTUNITY", "no_eligible_opportunity_observed")
-            } else if f
-                .used_count
-                .zip(f.verified_count)
-                .is_some_and(|(used, verified)| used > verified)
-            {
-                ("NEEDS_VERIFICATION", "observed_use_not_yet_verified")
-            } else if f
-                .eligible_count
-                .zip(f.used_count)
-                .is_some_and(|(eligible, used)| eligible > used)
-            {
-                ("SUGGESTED", "direct_unused_opportunity")
-            } else {
-                ("USED", "no_observed_unused_opportunity")
-            };
-            json!({"name":name,"availability":f.availability,"authorized":f.authorized,
-            "eligible_count":f.eligible_count,"used_count":f.used_count,
-            "verified_count":f.verified_count,"status":status,"reason_code":reason})
-        })
-        .collect::<Vec<_>>();
-    let feature_suggestions = feature_assessment.iter()
-        .filter(|f| f["status"] == "SUGGESTED")
-        .map(|f| json!({"name":f["name"],"evidence_class":"direct_unused_opportunity",
-            "eligible_count":f["eligible_count"],"used_count":f["used_count"],"verified_count":f["verified_count"]}))
-        .collect::<Vec<_>>();
-    let verification_needed = feature_assessment.iter()
-        .filter(|f| f["status"] == "NEEDS_VERIFICATION")
-        .map(|f| json!({"name":f["name"],"action":"verify_existing_execution_before_repeating_it",
-            "used_count":f["used_count"],"verified_count":f["verified_count"],"failure_inferred":false}))
-        .collect::<Vec<_>>();
     let base = |status: &str, reasons: Vec<&str>, suggestion: Value| {
         json!({
-            "kind":"groundline-routing-proposal","schema":1,"status":status,
-            "reason_codes":reasons,"suggestion":suggestion,"feature_suggestions":feature_suggestions,
-            "feature_assessment":feature_assessment,
-            "verification_needed":verification_needed,
+            "kind":"groundline-routing-proposal","schema":2,"status":status,
+            "reason_codes":reasons,"suggestion":suggestion,
             "candidate_assessment":[],
             "selection_policy":{"minimum_units_per_pair":MIN_UNITS,
                 "minimum_relative_improvement":f64::from(MIN_IMPROVEMENT_PERCENT) / 100.0,"typical_resources_must_not_regress":true,
@@ -371,16 +253,6 @@ pub fn propose(packet: &Value, catalog: &Value) -> Result<Value, ContractError> 
             Value::Null,
         ));
     }
-    let subagents_available = packet.task.independent_lanes
-        && packet.features.iter().any(|f| {
-            f.name == "subagents"
-                && f.authorized
-                && f.availability == "available"
-                && f.evidence_sha256.is_some()
-                && f.eligible_count
-                    .zip(f.used_count)
-                    .is_some_and(|(eligible, used)| eligible > used)
-        });
     if packet.quality_status == "PASS" {
         let mut groups: BTreeMap<(&str, &str), Vec<&Outcome>> = BTreeMap::new();
         for row in &packet.outcomes {
@@ -410,16 +282,13 @@ pub fn propose(packet: &Value, catalog: &Value) -> Result<Value, ContractError> 
             }
             let candidate = metrics(&rows);
             let candidate_ready = eligible(&candidate);
-            let mut reasons = if let Some(baseline) = baseline.as_ref() {
+            let reasons = if let Some(baseline) = baseline.as_ref() {
                 comparison_reasons(&candidate, baseline, &packet.objective)
             } else {
                 let mut reasons = eligibility_reasons(&candidate);
                 reasons.push("baseline_outcomes_missing");
                 reasons
             };
-            if effort == "ultra" && !subagents_available {
-                reasons.push("ultra_requires_available_authorized_lanes");
-            }
             if baseline_ready && candidate_ready {
                 comparable_candidates += 1;
             }
@@ -516,13 +385,13 @@ mod tests {
     fn packet(catalog: &Value) -> Value {
         let now = Utc::now().to_rfc3339();
         json!({
-            "kind":"groundline-routing-evidence","schema":1,
+            "kind":"groundline-routing-evidence","schema":2,
             "generated_at_utc":now,"catalog_checked_at_utc":now,
             "catalog_sha256":format!("{:x}",Sha256::digest(serde_json::to_vec(catalog).unwrap())),
             "quality_status":"PASS",
-            "task":{"kind":"implementation","complexity":"multi_step","independent_lanes":false,"evidence_sha256":h(1)},
+            "task":{"kind":"implementation","complexity":"multi_step","evidence_sha256":h(1)},
             "cohort_sha256":h(2),"current":{"model":"gpt-6-sol","effort":"medium","explicit":false},
-            "objective":"tokens","outcomes":[],"features":[]
+            "objective":"tokens","outcomes":[]
         })
     }
     fn row(n: u64, model: &str, effort: &str, tokens: Option<u64>) -> Value {
@@ -619,8 +488,6 @@ mod tests {
     fn task_shapes_without_direct_outcomes_require_native_judgment() {
         let c = catalog();
         let mut p = packet(&c);
-        p["features"] = json!([{"name":"subagents","availability":"available","authorized":true,
-            "explicit_user_request":false,"eligible_count":2,"used_count":0,"verified_count":0,"evidence_sha256":h(5)}]);
         for kind in [
             "implementation",
             "research",
@@ -629,24 +496,21 @@ mod tests {
             "documentation",
         ] {
             for complexity in ["routine", "multi_step", "deep_judgment"] {
-                for independent in [false, true] {
-                    for quality in ["PASS", "PARTIAL"] {
-                        p["task"]["kind"] = json!(kind);
-                        p["task"]["complexity"] = json!(complexity);
-                        p["task"]["independent_lanes"] = json!(independent);
-                        p["quality_status"] = json!(quality);
-                        let result = propose(&p, &c).unwrap();
-                        assert_eq!(result["status"], "INCONCLUSIVE");
-                        assert_eq!(
-                            result["reason_codes"],
-                            json!(["native_task_judgment_required"])
-                        );
-                        assert!(result["suggestion"].is_null());
-                        assert_eq!(
-                            result["selection_policy"]["task_shape_used_for_model_ranking"],
-                            false
-                        );
-                    }
+                for quality in ["PASS", "PARTIAL"] {
+                    p["task"]["kind"] = json!(kind);
+                    p["task"]["complexity"] = json!(complexity);
+                    p["quality_status"] = json!(quality);
+                    let result = propose(&p, &c).unwrap();
+                    assert_eq!(result["status"], "INCONCLUSIVE");
+                    assert_eq!(
+                        result["reason_codes"],
+                        json!(["native_task_judgment_required"])
+                    );
+                    assert!(result["suggestion"].is_null());
+                    assert_eq!(
+                        result["selection_policy"]["task_shape_used_for_model_ranking"],
+                        false
+                    );
                 }
             }
         }
@@ -673,7 +537,7 @@ mod tests {
         }
     }
     #[test]
-    fn empirical_ultra_requires_independent_authorized_available_subagents() {
+    fn supported_ultra_uses_the_same_outcome_guards_without_feature_policy() {
         let c = catalog();
         let mut p = packet(&c);
         twenty(&mut p);
@@ -681,57 +545,14 @@ mod tests {
             row["model"] = json!("gpt-6-astra");
             row["effort"] = json!("ultra");
         }
+        let result = propose(&p, &c).unwrap();
+        assert_eq!(result["status"], "EMPIRICAL");
+        assert_eq!(result["schema"], 2);
+        assert!(result.get("feature_assessment").is_none());
+        assert!(result.get("feature_suggestions").is_none());
+        assert!(result.get("verification_needed").is_none());
+        p["outcomes"][10]["rework"] = json!(true);
         assert_eq!(propose(&p, &c).unwrap()["status"], "RETAIN");
-        p["task"]["independent_lanes"] = json!(true);
-        p["features"] = json!([{"name":"subagents","availability":"available","authorized":true,
-            "explicit_user_request":false,"eligible_count":1,"used_count":0,"verified_count":0,"evidence_sha256":h(12)}]);
-        assert_eq!(propose(&p, &c).unwrap()["status"], "EMPIRICAL");
-    }
-    #[test]
-    fn feature_gates_require_direct_eligible_unused_evidence_and_explicit_schedule_authority() {
-        let c = catalog();
-        let mut p = packet(&c);
-        p["features"] = json!([
-            {"name":"parallel_tools","availability":"available","authorized":true,"explicit_user_request":false,
-                "eligible_count":3,"used_count":1,"verified_count":1,"evidence_sha256":h(7)},
-            {"name":"browser","availability":"unknown","authorized":true,"explicit_user_request":false,
-                "eligible_count":2,"used_count":0,"verified_count":0,"evidence_sha256":h(8)},
-            {"name":"automations","availability":"available","authorized":true,"explicit_user_request":false,
-                "eligible_count":1,"used_count":0,"verified_count":0,"evidence_sha256":h(9)},
-            {"name":"skills","availability":"available","authorized":true,"explicit_user_request":false,
-                "eligible_count":null,"used_count":null,"verified_count":null,"evidence_sha256":h(10)}
-        ]);
-        let result = propose(&p, &c).unwrap();
-        assert_eq!(result["feature_suggestions"].as_array().unwrap().len(), 1);
-        assert_eq!(result["feature_suggestions"][0]["name"], "parallel_tools");
-        assert_eq!(
-            result["feature_assessment"].as_array().unwrap().len(),
-            FEATURES.len()
-        );
-        assert_eq!(
-            result["feature_assessment"][12]["reason_code"],
-            "explicit_user_request_required"
-        );
-    }
-    #[test]
-    fn absent_feature_rows_are_unknown_not_zero_or_unused() {
-        let c = catalog();
-        let p = packet(&c);
-        let result = propose(&p, &c).unwrap();
-        assert_eq!(
-            result["feature_assessment"].as_array().unwrap().len(),
-            FEATURES.len()
-        );
-        assert!(
-            result["feature_assessment"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .all(|row| row["status"] == "UNKNOWN"
-                    && row["eligible_count"].is_null()
-                    && row["authorized"].is_null())
-        );
-        assert!(result["feature_suggestions"].as_array().unwrap().is_empty());
     }
     #[test]
     fn private_fields_duplicate_units_and_stale_catalog_are_rejected() {
@@ -753,7 +574,7 @@ mod tests {
         assert!(propose(&p, &c).is_err());
     }
     #[test]
-    fn arbitrary_effort_and_contradictory_feature_counts_are_rejected() {
+    fn arbitrary_effort_and_retired_policy_fields_are_rejected() {
         let c = catalog();
         let mut p = packet(&c);
         p["current"]["effort"] = json!("none");
@@ -762,9 +583,20 @@ mod tests {
         p["outcomes"] = json!([row(1, "gpt-6-sol", "legacy_effort", Some(1))]);
         assert!(propose(&p, &c).is_err());
         p["outcomes"] = json!([]);
-        p["features"] = json!([{"name":"review","availability":"available","authorized":true,
-            "explicit_user_request":false,"eligible_count":null,"used_count":1,"verified_count":1,"evidence_sha256":h(13)}]);
+        p["features"] = json!([]);
         assert!(propose(&p, &c).is_err());
+        p.as_object_mut().unwrap().remove("features");
+        p["task"]["independent_lanes"] = json!(true);
+        assert!(propose(&p, &c).is_err());
+        p["task"]
+            .as_object_mut()
+            .unwrap()
+            .remove("independent_lanes");
+        p["schema"] = json!(1);
+        assert_eq!(
+            propose(&p, &c).unwrap_err().0,
+            "routing_unsupported_evidence_schema"
+        );
     }
     #[test]
     fn unsupported_historical_gpt6_effort_is_not_silently_excluded() {
@@ -776,26 +608,14 @@ mod tests {
         assert!(result["suggestion"].is_null());
     }
     #[test]
-    fn failed_evidence_cannot_bootstrap_or_enable_features() {
+    fn failed_evidence_cannot_bootstrap_a_replacement() {
         let c = catalog();
         let mut p = packet(&c);
+        twenty(&mut p);
         p["quality_status"] = json!("FAIL");
-        p["features"] = json!([{"name":"parallel_tools","availability":"available","authorized":true,
-            "explicit_user_request":false,"eligible_count":1,"used_count":0,"verified_count":0,"evidence_sha256":h(13)}]);
         let out = propose(&p, &c).unwrap();
         assert_eq!(out["status"], "INCONCLUSIVE");
         assert!(out["suggestion"].is_null());
-        assert!(out["feature_suggestions"].as_array().unwrap().is_empty());
-    }
-    #[test]
-    fn auto_review_needs_specific_request_not_a_utilization_target() {
-        let c = catalog();
-        let mut p = packet(&c);
-        p["features"] = json!([{"name":"auto_review","availability":"available","authorized":true,
-            "explicit_user_request":false,"eligible_count":1,"used_count":0,"verified_count":0,"evidence_sha256":h(13)}]);
-        let out = propose(&p, &c).unwrap();
-        assert!(out["feature_suggestions"].as_array().unwrap().is_empty());
-        assert_eq!(out["feature_assessment"][13]["status"], "NOT_AUTHORIZED");
     }
     #[test]
     fn small_gains_and_typical_regressions_explain_why_a_candidate_is_rejected() {
@@ -842,52 +662,5 @@ mod tests {
         );
         assert!(out["candidate_assessment"][0]["median_tokens"].is_null());
         assert!(out["suggestion"].is_null());
-    }
-    #[test]
-    fn unverified_feature_use_needs_verification_before_more_use() {
-        let c = catalog();
-        let mut p = packet(&c);
-        p["features"] = json!([{"name":"skills","availability":"available","authorized":true,
-            "explicit_user_request":false,"eligible_count":2,"used_count":1,"verified_count":0,"evidence_sha256":h(13)}]);
-        let out = propose(&p, &c).unwrap();
-        assert_eq!(out["feature_assessment"][3]["status"], "NEEDS_VERIFICATION");
-        assert!(out["feature_suggestions"].as_array().unwrap().is_empty());
-        assert_eq!(out["verification_needed"][0]["name"], "skills");
-        assert_eq!(out["verification_needed"][0]["failure_inferred"], false);
-        p["features"][0]["verified_count"] = json!(1);
-        let out = propose(&p, &c).unwrap();
-        assert_eq!(out["feature_assessment"][3]["status"], "SUGGESTED");
-        assert!(out["verification_needed"].as_array().unwrap().is_empty());
-    }
-    #[test]
-    fn pending_delegation_is_visible_without_blocking_independent_lanes() {
-        let c = catalog();
-        let mut p = packet(&c);
-        p["task"]["complexity"] = json!("deep_judgment");
-        p["task"]["independent_lanes"] = json!(true);
-        p["features"] = json!([{"name":"subagents","availability":"available","authorized":true,
-            "explicit_user_request":false,"eligible_count":2,"used_count":1,"verified_count":0,"evidence_sha256":h(13)}]);
-        let out = propose(&p, &c).unwrap();
-        assert!(out["suggestion"].is_null());
-        assert_eq!(
-            out["reason_codes"],
-            json!(["native_task_judgment_required"])
-        );
-        assert_eq!(out["verification_needed"][0]["name"], "subagents");
-        twenty(&mut p);
-        for row in p["outcomes"].as_array_mut().unwrap().iter_mut().skip(10) {
-            row["model"] = json!("gpt-6-astra");
-            row["effort"] = json!("ultra");
-        }
-        let out = propose(&p, &c).unwrap();
-        assert_eq!(out["status"], "EMPIRICAL");
-        assert_eq!(out["verification_needed"][0]["name"], "subagents");
-        p["features"][0]["eligible_count"] = json!(1);
-        let out = propose(&p, &c).unwrap();
-        assert_eq!(out["status"], "RETAIN");
-        assert_eq!(
-            out["candidate_assessment"][0]["reason_codes"],
-            json!(["ultra_requires_available_authorized_lanes"])
-        );
     }
 }

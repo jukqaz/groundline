@@ -10,14 +10,13 @@ name = "audit_benchmark"
 required-features = ["audit"]
 
 [features]
-default = ["audit", "batch", "efficiency", "version"]
+default = ["audit", "efficiency", "version"]
 audit = ["dep:chrono", "dep:serde", "dep:serde_json", "serde_json/raw_value", "dep:sha2", "dep:shlex", "dep:oxc_allocator", "dep:oxc_ast", "dep:oxc_parser", "dep:oxc_span"]
-batch = ["dep:serde_json"]
 efficiency = ["dep:chrono", "dep:serde", "dep:serde_json", "dep:sha2", "version"]
 insights = ["dep:chrono", "dep:serde", "dep:serde_json", "dep:sha2", "dep:uuid", "version"]
 integrity = ["dep:hmac", "dep:sha2"]
 guidance = ["dep:serde", "dep:serde-saphyr"]
-version = ["dep:semver"]
+version = ["dep:chrono", "dep:semver"]
 
 [dependencies]
 chrono = { workspace = true, optional = true }

@@ -1,119 +1,99 @@
 # GroundLine
 
-GroundLine optimization targets GPT-6 Astra, Sol, and Luna. Requested adaptive
-delegation selects a supported model and effort per independent native subagent
-task. Historical generations remain readable but are not tuning targets.
+GroundLine uses local Codex activity and observed delivery outcomes to inform
+GPT-6 Astra, Sol, and Luna model, effort, and subagent choices. Historical
+records remain intact. Codex owns execution, settings, permissions, agents,
+worktrees, review, and upgrades.
 
-GroundLine is a public, local-first Codex plugin for repeatable task setup,
-evidence-aware completion, project configuration audits, and aggregate usage
-analysis. It complements Codex; it does not replace Codex execution, settings,
-permissions, agents, worktrees, review, or upgrades.
+The workflow is **audit → delivery → route**. Aggregate activity describes a
+sample; matched direct outcomes support an empirical comparison. Neither a
+proposal nor a passing synthetic test establishes improved quality or savings.
+See [the optimization loop](references/codex-optimization-loop.md).
+
+## Skills
+
+| Skill | Scope |
+| --- | --- |
+| `align-agent-home` | Requested installation, configuration, and guidance alignment |
+| `audit-agent-history` | Explicit history inspection and redacted usage evidence |
+| `optimize-codex-workflow` | Task-scoped GPT-6 selection and workflow assessment |
+
+Alignment and optimization are implicitly invocable; history inspection requires
+an explicit request. Native Codex handles planning, Goals, handoffs, and reviewed
+file edits. GroundLine does not provide a second orchestration or imported-skill
+management layer.
 
 ## Privacy boundary
 
-The public plugin has a deliberately small capability surface:
+Core has no lifecycle hooks, background process, scheduler, collector identity,
+or network client. Audit commands open bounded local state read-only and return
+aggregates without raw prompts, transcripts, paths, or configuration values.
+Explicit delivery recording creates private local receipts; nothing is uploaded.
 
-- no lifecycle hooks, background process, scheduler, or collector identity;
-- no network client, upload destination, authentication token, or remote storage;
-- no prompt, transcript, path, repository name, or configuration value emission;
-- local audit commands open bounded regular files read-only and return aggregate
-  counters or stable reason codes.
-
-`groundline provider-smoke --plugin-root <path> --json` fails if an owner hook
-manifest is present. Repository qualification rejects personal or secret markers,
-Python runtime dependencies, duplicate package roots, and CI contract drift.
+`groundline provider-smoke --plugin-root <path> --json` rejects an owner hook
+manifest. Optional Insights is a separate plugin with its own consent contract.
 
 ## Install and upgrade
 
-Add `https://github.com/jukqaz/groundline.git` as a Codex marketplace and install
-the `groundline` plugin. This installs Core only; it does not install or activate
-`groundline-insights`. Codex owns refresh and upgrade. GroundLine does not
-self-update or change plugin trust.
-
-To apply GroundLine after installation, ask `$groundline:align-agent-home` to
-inspect and repair evidenced mistakes in existing settings and active guidance,
-with private backups and verification. Follow
-[installation alignment](references/installation-alignment.md). Native package
-installation alone does not execute this workflow or rewrite personal settings.
-
-The repository's reviewed stable distribution includes `install.sh` and
-`install.ps1` for installation and setup in one invocation. Its default preserves
-existing choices and native defaults. `groundline setup --catalog
-<native-models.json> --apply` uses the same policy; add `--preset astra` to select
-**gpt-6-astra / xhigh / Fast off**, or `--model` and `--effort` for another supported
-choice. Context restoration requires `--restore-native-context`. Changed files
-receive private backups. Without `--apply`, setup previews without writes.
-See [existing settings and migration](references/installation-alignment.md#existing-settings-and-migration).
+Use the repository's reviewed binary-bearing `stable` distribution and its
+`install.sh` or `install.ps1`, or install the package through native Codex:
 
 ```console
 codex plugin marketplace add https://github.com/jukqaz/groundline.git --ref stable --json
 codex plugin add groundline@groundline --json
 ```
 
-Use [native upgrade](references/native-upgrade.md) to refresh the installed
-package. Version tags contain source; use the binary-bearing `stable`
-distribution for installation.
+Core installation does not install or activate Insights. Package-only
+installation does not run a personal-setting repair hook. For requested
+application or repair, use `$groundline:align-agent-home` and
+[installation alignment](references/installation-alignment.md).
 
-After an upgrade, verify the installed package and native artifact independently:
+Setup preserves existing choices and native defaults. Explicit `--model`,
+`--effort`, and `--service-tier` options use the supplied native catalog; there is
+no fixed model preset. Context restoration requires `--restore-native-context`.
+Changed settings receive private backups, and omitting `--apply` previews without
+writes. See [configuration review](references/codex-configuration.md).
+
+Use [native upgrade](references/native-upgrade.md), then verify the installed
+package and checksum separately from live behavior:
 
 ```console
 groundline provider-smoke --plugin-root /path/to/installed/groundline --require-installed --json
 groundline doctor --plugin-root /path/to/installed/groundline --json
 ```
 
-The package supports Apple Silicon and Intel macOS, ARM64 and x86_64 Linux, and
-ARM64 and x86_64 Windows. Release artifacts are built from the moving Rust
-`stable` channel and include a strict manifest plus SHA-256 checksum.
-Resolve the executable from the installed plugin's `bin/<target>` directory;
-plugin installation does not by itself promise a user-shell `PATH` entry.
+Native packages cover Apple Silicon/Intel macOS and ARM64/x86_64 Linux/Windows.
+Resolve the installed executable from `bin/<target>`; installation does not
+promise a shell `PATH` entry. Source tags do not contain installable binaries.
 
-## Commands
+## Usage evidence and delivery comparison
+
+Run these examples in an owner-private working directory outside the public repository.
 
 ```console
-groundline platform --json
-groundline project-audit --repo . --json
-groundline config-audit --config /private/config.toml --catalog /private/models.json --json
-groundline setup --catalog /private/models.json --apply
-groundline config-repair --config /private/config.toml --catalog /private/models.json
-groundline guidance audit --profile /private/review/profile.json --baseline /private/review/baseline.json --json
-groundline audit weekly --days 7 --json
-groundline efficiency batch --input batch.json --json
-groundline efficiency compare --input comparison.json --json
-groundline efficiency route --input routing.json --catalog native-models.json --audit weekly.json --report insights-7.json --json
+groundline audit weekly --days 7 --review --json > weekly.json
+groundline audit review --input weekly.json --json
 groundline efficiency record-delivery --input manifest.json --output receipts/delivery.json --json
+groundline efficiency delivery-summary --deliveries receipts --json
+groundline efficiency route --input routing.json --catalog native-models.json --audit weekly.json --deliveries receipts --json
 ```
 
-Use [private delivery receipts](references/delivery-evidence.md) to connect an
-authorized lane's recommendation, observed selection and verified outcome.
-Feed a dedicated receipt directory into `efficiency route --deliveries` with an
-empty packet `outcomes` array. Recording is local and explicit; incomplete
-execution or resource evidence cannot establish an empirical improvement.
+Use one fresh audit or reuse a saved one as appropriate. Saved review scans no
+history and recomputes one recommendation under the current code. Weekly audits
+cover the selected task-window sample; full-population coverage remains unknown.
+`groundline audit store --json` separately inspects whole-store metadata. See
+[weekly audit](references/weekly-usage-audit.md) for limits and evidence scope.
 
-`project-audit` counts Codex guidance, config, skills, agents, rules, plugins,
-and `.worktreeinclude` without reading or returning their values. Audit commands
-read the local Codex state store without modifying it. Efficiency commands accept
-explicit JSON files and never transmit them.
+The [delivery contract](references/delivery-evidence.md) defines manifests,
+private receipts, observed effective selections, quality, rework, and owned
+resources. Failed work and unknown measurements remain visible. Pass a dedicated
+receipt directory to `route --deliveries` with an empty packet `outcomes` array.
+The [routing contract](references/evidence-routing.md) defines matched comparison
+and catalog requirements; aggregate reports are optional context. Routing does
+not change settings or establish an automatically learned improvement.
 
-`config-repair` previews bounded context-limit repairs and writes only with a
-matching plan hash, `--apply`, and a new private backup. See
-[configuration review](references/codex-configuration.md) for scope and recovery.
-The existing `align-agent-home` skill handles installation alignment and
-requested imported-skill maintenance.
-`guidance snapshot` creates a new path-free private baseline without overwriting
-skills or existing files. `guidance audit` freshly inventories profile-selected
-roots, reports additions/removals, and optionally compares upstream checkouts.
-The host-local profile and portable baseline use strict GroundLine contracts;
-there is no personal-registry adapter or duplicate initialization command.
-See [skill maintenance](references/skill-maintenance.md) for source review,
-local-change preservation, and behavior-test routing. No language-specific SDK
-or user-home verification script is required by the native commands.
-
-The state database must be an owner-owned, non-symlinked regular file no larger
-than 8 GiB. Audits read at most 100,000 thread metadata rows and accept rollout
-files only below the canonical, non-symlinked `sessions` or `archived_sessions`
-root. Streaming input is bounded to 1 GiB per rollout and 8 GiB per audit, with
-at most 512 MiB of retained audit records. See [weekly audit](references/weekly-usage-audit.md)
-for event windows, independent native/UI baselines, and incomplete history.
+`personal status` and `personal rollback` only inspect or recover existing private
+trial state. They do not start new trials. See [personal recovery](references/personal-recovery.md).
 
 ## Development
 
@@ -124,20 +104,11 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo run --locked -p xtask -- verify-source --root . --json
 ```
 
-Pull requests run only the fast lane. Full qualification and six-platform release
-artifacts run for release tags or explicit manual requests, with concurrency cancellation, timeouts,
-and short artifact retention.
+Pull requests run the fast lane. Full qualification and six-platform release
+artifacts run for release tags or explicit manual requests.
 
-See the repository [integration profiles](https://github.com/jukqaz/groundline/blob/main/docs/integrations.md),
+See [architecture](https://github.com/jukqaz/groundline/blob/main/docs/architecture.md),
+[integration profiles](https://github.com/jukqaz/groundline/blob/main/docs/integrations.md),
 [Privacy](https://github.com/jukqaz/groundline/blob/main/docs/privacy.md),
-[Security](SECURITY.md), and
+[Security](SECURITY.md), and the
 [release checklist](https://github.com/jukqaz/groundline/blob/main/docs/release-checklist.md).
-
-## Personal workflow improvement
-
-Use `$groundline:improve-personal-workflow` to review current model guidance and
-affected instructions. That route does not require Insights. For a requested
-usage-based trial, combine Insights reports, native audits, and private
-completion evidence. Core personal
-commands review, trial, evaluate, and restore dedicated guidance while preserving
-user edits. Missing evidence never authorizes a change. See [the contract](references/personal-improvement.md).

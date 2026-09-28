@@ -1,24 +1,23 @@
 # GroundLine
 
-최적화 기준은 GPT-6 Astra·Sol·Luna입니다. 자동 분배를 요청한 작업에서는
-독립적인 서브에이전트마다 지원되는 모델·effort를 선택합니다. 이전 세대는
-기록을 보존하되 추천·튜닝 대상에서 제외합니다.
+GroundLine은 평소 Codex 활동과 실제 완료 결과를 바탕으로 GPT-6 Astra·Sol·Luna의
+모델·effort·서브에이전트 선택을 돕습니다. 실행, 설정, 권한, 에이전트, worktree,
+리뷰와 업그레이드는 Codex가 담당합니다. 이전 세대의 기록은 보존하지만 최적화
+대상으로 사용하지 않습니다.
 
-`efficiency route`는 대화에서 확인한 작업 특성과 완료 결과, 로컬 감사,
-ClickHouse 보고서를 결합해 다음 작업의 모델·effort와 유용한 Codex 기능을
-선택하도록 돕습니다. [근거 기반 선택 계약](plugins/groundline/references/evidence-routing.md)은
-누락된 측정과 성능 악화를 명시하며 실제 적용은 네이티브 Codex가 수행합니다.
+증거 흐름은 **audit → delivery → route**입니다. 범위가 제한된 활동 표본을
+확인하고, 실제 결과를 기록한 뒤, 조건이 맞는 결과를 비교합니다. 작업 판단이나
+집계 사용량만으로 실측 최적 조합 또는 자동 개선을 입증하지 않습니다.
+[제품 구조](docs/architecture.md)와
+[근거 기반 선택 계약](plugins/groundline/references/evidence-routing.md)을 참고하세요.
 
 [English](README.md) · [한국어 문서](docs/ko/index.md)
 
-GroundLine은 사용 패턴 분석, 토큰 최적화, 작업 성능 개선으로 Codex 사용환경을
-맞춤화합니다. 공개 Rust 모노레포 하나에서 서로 독립적으로 설치할 수 있는
-플러그인 두 개를 제공합니다. Codex의 실행, 설정, 권한, 에이전트, worktree,
-리뷰, compaction, 업그레이드 기능을 대체하지 않습니다.
+공개 Rust 모노레포에서 서로 독립적으로 설치할 수 있는 플러그인 두 개를 제공합니다.
 
 | 플러그인 | 역할 | 기본 네트워크 동작 |
 | --- | --- | --- |
-| `groundline` | 사용량 분석, Codex 지침, 증거 기반 토큰·시간 최적화 실험 | 오프라인, hook·collector identity 없음 |
+| `groundline` | 로컬 사용 근거, 완료 기록, 범위가 제한된 작업 개선 추천 | 오프라인, hook·collector identity 없음 |
 | `groundline-insights` | 선택형 집계 수집과 ClickHouse·Grafana 공개 self-hosting preview | owner profile과 enrollment credential 설정 전에는 비활성 |
 
 설치 package의 canonical source는 `plugins/` 아래 두 디렉터리뿐입니다. 실제
@@ -42,25 +41,29 @@ Core의 스킬 설명과 읽은 지침은 모델 입력을 늘립니다. 모델�
 실측 토큰을 함께 평가합니다. 추가 토큰으로 얻는 품질이나 신뢰성이 충분하다면
 합당한 비용일 수 있습니다. 총토큰 절감은 보장하지 않으며, 설치·전송 검증 성공만으로
 효율 개선을 입증할 수는 없습니다. 지침은 간결하게 유지하고, 작업 위험에 맞게
-검증하며, 유효한 증거는 재사용합니다. 개인 지침 시험에는
-[개인 개선 계약](plugins/groundline/references/personal-improvement.md)의 비교·복구 조건을 적용합니다.
-
-## 주간 개선 루틴
-
-`$groundline:improve-personal-workflow`는 사용 패턴과 현재 Codex 정보를 연결해
-GroundLine 자체 또는 개인 Codex 환경의 개선안을 만듭니다. 지난 변경의 효과를
-먼저 평가하고, 한 번 수집한 주간 감사 결과를 재사용하며, 관련 공식 변경 사항을
-조사해 검증 가능한 개선안 하나를 제시합니다. 모델 선택뿐 아니라 필요한 컨텍스트의
-선택, 유효한 증거의 재사용, 적절한 네이티브 병렬 실행을 함께 다룹니다.
-[최적화 흐름](plugins/groundline/references/codex-optimization-loop.md)을 참고하세요.
-
-개인 실험은 승인 연속성, 재시도 전 진단, 증거 재사용, 필요 시점의 컨텍스트 로딩,
-독립적인 읽기의 제한된 병렬화를 지원합니다. 토큰·시간 목표는 실패한 작업의 자원도
-포함한 검증 완료 결과당 사용량으로 평가하며, 품질 보호와 복구 조건을 유지합니다.
-조사·승인된 편집·실제 지침 활성화 확인은 Codex가 수행합니다. CLI가 설정을 몰래
-적용하거나 지침을 활성화하지 않으며, 소스 수정만으로 설치된 플러그인이 바뀌지 않습니다.
+검증하며, 유효한 증거는 재사용합니다.
+[완료 기록 계약](plugins/groundline/references/delivery-evidence.md)은 요청한 선택과
+관측한 실제 선택, 실패한 작업, 누락된 자원과 완료 근거를 구분합니다.
 
 ## 설치와 업그레이드
+
+릴리스는 `2026.09.29-a`처럼 날짜와 당일 순번으로 표시합니다. 설치·업데이트에서
+비교하는 숫자 버전은 `2026.929.1`이며 [버전 규칙](docs/versioning.md)에 따라
+같은 날 재배포와 다음 날짜 모두 증가합니다.
+
+실행 파일이 포함된 검토한 `stable` 배포본의 설치 스크립트를 사용합니다. 기본은
+Core 설치와 기존 Codex 선택 보존이며 완료·대기 중인 단계를 각각 보고합니다.
+Git과 Codex가 먼저 설치되어 있어야 합니다.
+
+```console
+git clone --branch stable --single-branch https://github.com/jukqaz/groundline.git groundline-install
+bash groundline-install/install.sh
+```
+
+Windows에서는 `powershell -File groundline-install/install.ps1`을 실행합니다.
+Insights도 설치하려면 `--profile both` 또는 `-Profile both`, Insights만 설치하려면
+`insights`를 선택합니다. 모델 선택, 비공개 연결 입력, 동의, 첫 수집과 재실행은
+[통합 설치 안내](docs/installation.md)를 참고하세요. 패키지만 설치하는 명령도 아래에 있습니다.
 
 **GroundLine은 Codex 플러그인과 네이티브 CLI로 동작합니다.**
 Codex App과 CLI에서 같은 플러그인을 사용합니다.
@@ -127,74 +130,35 @@ Grafana 대시보드에서 확인합니다. [Insights 명령 안내](plugins/gro
 별도 GroundLine Desktop 앱은 제공을 종료했습니다. 기존 앱을 제거해도 플러그인,
 서버 설정, 수집 동의, 인증 정보, 커서와 미전송 이벤트는 유지됩니다.
 
-### 설치와 초기 설정
+### 기존 설정과 이전
 
-검토한 `stable` 배포본의 설치 스크립트가 공식 초기 설정 경로입니다.
-기본은 Core 설치와 기존 설정 보존이며, `--profile both` 또는 `-Profile both`로
-Insights를 함께 선택할 수 있습니다. 모델·연결·동의·단계별 결과와 재실행 방법은
-[통합 설치 안내](docs/installation.md) 한 곳에서 관리합니다.
+설치는 기존 선택을 검증하고 확인된 퇴역 Core hook 승인 항목 네 개만 정리합니다.
+모델·effort·서비스 등급은 명시적인 옵션으로만 변경하며 고정 모델 프리셋은 없습니다.
+컨텍스트 크기를 네이티브 기본값으로 복원하려는 경우에만 `--restore-native-context`
+또는 `-RestoreNativeContext`를 사용합니다. 실제 설정 변경에는 비공개 백업을 만들고
+같은 설정에 재적용하면 추가 쓰기·백업이 없습니다.
+[이전 절차](plugins/groundline/references/installation-alignment.md#existing-settings-and-migration)는
+이전 네이티브 옵션, profile, 지침 충돌과 복구 범위를 다룹니다.
 
-```console
-git clone --branch stable --single-branch https://github.com/jukqaz/groundline.git groundline-install
-bash groundline-install/install.sh
-```
+## Core 스킬과 설정
 
-Windows에서는 두 번째 줄 대신 `powershell -File groundline-install/install.ps1`을
-실행합니다. 실제 App 런타임의 CLI가 자동 탐지와 다르면 shell의 `--codex` 인자,
-PowerShell의 `-Codex` 인자로 경로를 전달합니다. 같은 설정에 재적용하면 쓰기와
-추가 백업이 없습니다. 배포본과 설치된 실행 파일이 다르면 중단합니다.
+| 스킬 | 범위 |
+| --- | --- |
+| `align-agent-home` | 요청한 설치·설정·지침 정비 |
+| `audit-agent-history` | 명시적으로 요청한 이력 조사와 비식별 사용 근거 |
+| `optimize-codex-workflow` | 작업별 GPT-6 선택과 관측한 작업 결과 검토 |
 
-## 개인 스킬 관리
+설정 정비와 최적화 스킬만 작업에 맞춰 자동 호출할 수 있습니다. 이력 조사는 명시
+요청이 필요합니다. 일반적인 계획, Goal, 인계와 실행은 네이티브 Codex가 담당합니다.
+가져온 스킬의 정비도 별도 GroundLine 목록·기준 기록 없이 네이티브 파일 검토로 수행합니다.
 
-설정 외에 지침까지 정리할 때는 다음 요청을 사용합니다.
-
-> `$groundline:align-agent-home`으로 GroundLine을 적용하고, 기존 Codex 설정과
-> 지침의 오류를 현재 모델의 공식 지침에 맞춰 백업·수정·검증해 줘.
-
-이 적용 과정은 잘못된 설정을 보고만 하고 끝내지 않습니다. 근거가 확인된
-오류는 요청 범위에서 수정하고, 의도적인 모델·추론·권한 선택은 보존합니다.
-단순 `plugin add`는 설치만 수행하며 개인 설정 수정 hook을 실행하지 않습니다.
-[설정 정리·마이그레이션 절차](plugins/groundline/references/installation-alignment.md#existing-settings-and-migration)를 참고하세요.
-
-설치된 `groundline setup --catalog <native-models.json> --apply`도 기존 선택과
-Codex 기본값을 보존합니다. Astra는 `--preset astra`, 컨텍스트 복원은
-`--restore-native-context`로 명시합니다. `--apply`를 빼면 미리보기만
-수행합니다. 해당 PC에서 지원되지 않는 모델·추론 수준이나 해석되지 않은
-profile/provider/catalog override는 파일을 바꾸지 않고 명시적으로 거부합니다.
-
-`groundline config-repair --config <config.toml> --catalog <native-models.json>`은
-잘못된 컨텍스트 제한의 수정안을 미리 보여줍니다. `--apply --expect-plan <hash>
---backup <new-file>`로 검토한 입력과 일치할 때만 백업 후 적용하며,
-정상적인 수동 제한을 해제하려면 `--restore-native-context`를 명시합니다.
-
-Codex 설정·모델 점검은 `groundline config-audit --config <config.toml>
---catalog <native-models.json> --json`으로 실행합니다. `--catalog -`로 네이티브
-카탈로그를 바로 전달할 수도 있습니다. 선택된 항목만 비교하며 설정값을 출력하거나
-수정하지 않습니다. 실제 유효 설정은 Codex의 strict doctor로 별도 검증합니다.
-[설정 점검](plugins/groundline/references/codex-configuration.md)을 참고하세요.
-
-`$groundline:align-agent-home`에 가져온 스킬의 점검·업데이트를 요청하면 됩니다.
-GroundLine은 `guidance audit|snapshot`으로 스킬의 추가·삭제·변경, 원본 비교,
-메타데이터와 파일 지문을 관리합니다. 기기별 경로 설정과 경로 없는 비교 기록을
-분리하며, 이전 개인 JSON 형식을 런타임 호환 코드로 유지하지 않습니다. Codex는 원본 변경을 리뷰하고
-승인된 수정을 적용한 뒤 관련 테스트를 실행합니다. 개인 스킬·설정·출처 기록은
-공개 저장소 밖에 남으며 플러그인 업그레이드가 이를 덮어쓰지 않습니다.
-자세한 절차는 [스킬 관리](plugins/groundline/references/skill-maintenance.md)를 참고하세요.
-
-## 사용 패턴에 따른 개인 개선
-
-`$groundline:improve-personal-workflow`는 Insights 보고서, 로컬 감사, 현재 모델의
-공식 지침과 직접 확인한 완료 결과를 함께 검토합니다. `groundline personal
-review|evaluate|rollback`은 승인된 전용 개인 지침에 한 가지 변경만 시험하고,
-동일한 조건의 별도 작업 결과를 비교해 유지하거나 복구합니다.
-
-근거가 부족하면 `OBSERVE`, 비교 조건이 달라지면 `INCONCLUSIVE`로 남습니다.
-선택한 모델·추론 수준·권한·프로젝트 지침은 자동으로 바꾸지 않습니다. 최신 모델
-지침은 실행 시 Codex가 공식 문서에서 확인하며, 모델 가용성과 추론 수준은
-실제 네이티브 카탈로그로 판정합니다. 최적화 대상은 GPT-6
-Astra·Sol·Luna로 한정하며, 이전 세대와 세대 미구분 집계는 추천·개인 실험의
-대상으로 사용하지 않습니다. 기존 기록과 복구 기능은 유지합니다. 파일 생성과 실제 지침 적용은 따로 검증합니다.
-자세한 입력·개인정보·복구 조건은 [개인 개선 계약](plugins/groundline/references/personal-improvement.md)에 있습니다.
+`groundline setup --catalog <native-models.json> --apply`는 기존 선택과 Codex
+기본값을 보존합니다. `--apply`를 빼면 쓰기 없이 미리 봅니다. 지원되는 모델·effort를
+명시적으로 선택할 때만 `--model <id> --effort <level>`을 전달합니다. 설정 점검과
+범위가 제한된 수정에는 `config-audit`와 `config-repair`를 사용합니다.
+네이티브 카탈로그 검증, 비공개 백업과 수정 계획 일치 조건은
+[설치·적용 절차](plugins/groundline/references/installation-alignment.md)와
+[설정 점검](plugins/groundline/references/codex-configuration.md)에 있습니다.
 
 ## 개인정보와 보안
 
@@ -224,3 +188,20 @@ runner와 production credential을 요구하지 않습니다.
 [Codex 업데이트 대응과 지원 범위](docs/ko/codex-compatibility.md),
 [Insights 셀프호스팅](docs/ko/self-hosting.md), 영문 README,
 [변경 기록](CHANGELOG.md), [release checklist](docs/release-checklist.md)를 참조하세요.
+
+## 작업 결과 근거
+
+`$groundline:optimize-codex-workflow`로 작업 선택 또는 요청한 업무 개선 검토를
+수행합니다. [최적화 흐름](plugins/groundline/references/codex-optimization-loop.md)과
+[CLI 예제](docs/examples.md)를 따르며 Insights는 선택 사항입니다.
+
+주간 audit는 선택한 기간의 작업 표본을 설명합니다. 전체 모집단 coverage는
+미확인으로 두고, 전체 저장소 metadata는 별도 `audit store` 명령으로 진단합니다.
+`audit review --input <saved-audit.json>`는 이력을 다시 읽지 않고 저장된 근거를
+재사용하며 현재 코드로 추천을 한 번 재계산합니다.
+
+모델·effort의 실측 개선을 주장하려면 실패·미완료 작업을 포함한 실제 완료 결과를
+먼저 기록해야 합니다. `route`는 조건이 맞는 직접 결과를 비교하며 자동으로 이득을
+학습하거나 설정을 적용하지 않습니다. 기존 비공개 개인 실험 상태는 `personal status`로
+확인하고 `personal rollback`으로 복구할 수 있습니다.
+[기존 상태 복구](plugins/groundline/references/personal-recovery.md)를 참고하세요.

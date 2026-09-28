@@ -1,8 +1,9 @@
 # Conversation and ClickHouse evidence for GPT-6 selection
 
-Read this route when the user requests usage-driven model/effort adjustment.
-Use [model/effort routing](model-effort-routing.md) for ordinary task selection
-and [capability routing](capability-routing.md) for useful native features.
+Read this contract for an empirical comparison of an existing model/effort
+choice, or to prepare or inspect an `efficiency route` packet. Prospective
+task/lane plans, including plans with descriptive history, use only
+[model/effort routing](model-effort-routing.md) unless that comparison is requested.
 This command evaluates a private evidence packet; native Codex classifies the
 conversation and executes the authorized choice. It is not an inference proxy.
 
@@ -72,7 +73,7 @@ forward and reassess the next independent lane at a real phase change. Keep thes
 semantic notes private; the command still accepts only the schema below and does
 not implement an automatic conversation classifier.
 
-## Private schema-1 packet
+## Private schema-2 packet
 
 `groundline efficiency route --input routing.json --catalog native-models.json
 [--audit weekly.json] [--report insights-7.json] --json` is offline and read-only.
@@ -83,16 +84,15 @@ are rejected. It contains:
 
 | Field | Contract |
 | --- | --- |
-| `kind`, `schema` | `groundline-routing-evidence`, `1` |
+| `kind`, `schema` | `groundline-routing-evidence`, `2` |
 | `generated_at_utc` | RFC3339, within 24 hours |
 | `catalog_checked_at_utc`, `catalog_sha256` | Checked before packet generation within 24 hours; SHA-256 of canonical `serde_json::to_vec(catalog)` bytes. Hashes bind inputs; they do not prove live availability. |
 | `quality_status` | `PASS`, `PARTIAL`, or `FAIL`; never upgrade incomplete evidence |
-| `task` | `kind`: implementation/research/review/operations/documentation; `complexity`: routine/multi_step/deep_judgment; `independent_lanes`: boolean; `evidence_sha256`: direct private task evidence; optional `phase` from the delivery phase enum, required with `--deliveries` |
+| `task` | `kind`: implementation/research/review/operations/documentation; `complexity`: routine/multi_step/deep_judgment; `evidence_sha256`: direct private task evidence; optional `phase` from the delivery phase enum, required with `--deliveries` |
 | `cohort_sha256` | Same work kind, phase, difficulty, acceptance criteria, runtime, tools, permissions, service tier, delegation policy, observed child model/effort and work allocation, and non-routing guidance; deliberately exclude the model/effort being compared |
 | `current` | Exact GPT-6 `model`, native `effort`, and `explicit` boolean. A task-level explicit selection is preserved; a stored default is not automatically a task-level pin. |
 | `objective` | `tokens`, `latency`, or `balanced`; balanced accepts only improvements with neither resource worse |
 | `outcomes` | Up to 1,000 directly classified, distinct deliveries from the last 30 days, including failures and unknowns |
-| `features` | At most one row per supported capability; missing observations stay unknown |
 
 Each outcome has `unit_hash`, `evidence_sha256`, `cohort_sha256`, `model`,
 `effort`, `completed_at_utc`, `outcome` (verified/failed/unknown), `evidence_kind`
@@ -102,14 +102,6 @@ unobserved evidence. Nullable resource measurements remain null. Count all
 attributable root, child and approval-review resources once, including failed
 attempts. A user message, turn, or collector window is not itself a delivery.
 Include eligible unsuccessful work; never cherry-pick only successful tasks.
-
-Each capability has `name`, `availability` (available/unavailable/unknown),
-`authorized`, `explicit_user_request`, nullable `eligible_count`, `used_count`,
-`verified_count`, and nullable `evidence_sha256`. Names are subagents,
-parallel_tools, async_wait, skills, mcp_apps, browser, computer_use, worktrees,
-review, artifacts, memory, goals, automations, and auto_review. Direct evidence
-must support the counts and current availability. Goals/automations/auto-review require
-an explicit request; authorization never overrides an active runtime boundary.
 
 For a model/effort-only comparison, keep actual delegated composition comparable:
 child roles, observed effective model/effort and work allocation must match, or
@@ -157,13 +149,8 @@ candidate that fails the outcome/resource/margin checks leads to RETAIN.
 coverage, freshness and missing reports. Resolve only the relevant gap; do not repeat collection
 merely because the final decision is inconclusive.
 
-Feature calls with fewer verified results than uses are NEEDS_VERIFICATION.
-Inspect the existing operation before repeating it; absence of a verified
-result is not a failure verdict or a reason to serialize independent work.
-Ultra requires an observed remaining independent lane, current availability
-and authority; unfinished agents remain visible for later verification.
-These checks do not turn ordinary feature selection into an
-unrequested global configuration change.
+Native Codex evaluates capability availability, authorization and useful independent
+work at execution time. A routing packet is not a feature-enablement request.
 
 The CLI attaches optional local audit and ClickHouse coverage and freshness as
 context only. Missing, stale or partial aggregates do not downgrade complete

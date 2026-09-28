@@ -5,7 +5,6 @@ INSTALL_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_HOME="${CODEX_HOME:-$HOME/.codex}"
 INSTALL_CODEX=""
 INSTALL_PROFILE=core
-INSTALL_PRESET=preserve
 INSTALL_SETUP=(--apply)
 INSTALL_INSIGHTS=(--verify)
 INSTALL_FAILED=0
@@ -15,7 +14,8 @@ INSTALL_STAGES=()
 usage() {
   cat <<'HELP'
 Usage: install.sh [--codex PATH] [--profile core|insights|both]
-  --preset preserve|astra     Keep existing/native choices (default), or opt into Astra/xhigh/Fast off
+  Existing/native model, effort, and service tier remain unchanged unless selected below.
+  Profiles select explicit setup; native refresh can also update other installed marketplace plugins.
   --model MODEL --effort EFFORT --service-tier default|fast
   --restore-native-context   Explicitly remove existing root context overrides
   --insights-profile FILE    Owner-private connection profile, or use the next two options
@@ -47,12 +47,11 @@ checked() {
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h) usage; exit 0 ;;
-    --codex|--profile|--preset|--model|--effort|--service-tier|--insights-profile|--insights-endpoint|--enrollment-token-file)
+    --codex|--profile|--model|--effort|--service-tier|--insights-profile|--insights-endpoint|--enrollment-token-file)
       [[ $# -ge 2 ]] || { usage >&2; exit 1; }
       case "$1" in
         --codex) INSTALL_CODEX=$2 ;;
         --profile) INSTALL_PROFILE=$2 ;;
-        --preset) INSTALL_PRESET=$2 ;;
         --model|--effort|--service-tier) INSTALL_SETUP+=("$1" "$2") ;;
         --insights-profile) INSTALL_INSIGHTS+=(--input "$2") ;;
         --insights-endpoint) INSTALL_INSIGHTS+=(--endpoint "$2") ;;
@@ -64,7 +63,7 @@ while [[ $# -gt 0 ]]; do
     *) usage >&2; exit 1 ;;
   esac
 done
-case "$INSTALL_PROFILE/$INSTALL_PRESET" in core/preserve|core/astra|insights/preserve|both/preserve|both/astra) ;; *) usage >&2; exit 1 ;; esac
+case "$INSTALL_PROFILE" in core|insights|both) ;; *) usage >&2; exit 1 ;; esac
 if [[ $INSTALL_PROFILE == core && ${#INSTALL_INSIGHTS[@]} -gt 1 ]] || [[ $INSTALL_PROFILE == insights && ${#INSTALL_SETUP[@]} -gt 1 ]]; then usage >&2; exit 1; fi
 trap finish EXIT
 
@@ -101,6 +100,7 @@ INSTALL_APP_BUNDLED=0
 if [[ $(uname -s) == Darwin ]] && app_codex_bundle "$INSTALL_CODEX"; then INSTALL_APP_BUNDLED=1; fi
 if ! command -v git >/dev/null || [[ -z "$INSTALL_CODEX" ]] ||
    ! "$INSTALL_CODEX" plugin add --help >/dev/null ||
+   ! "$INSTALL_CODEX" plugin marketplace upgrade --help >/dev/null ||
    ! "$INSTALL_CODEX" debug models --help >/dev/null ||
    ! "$INSTALL_CODEX" doctor --help >/dev/null; then
   echo 'Install Git and a Codex runtime with plugin, debug models, and doctor support; use --codex to select it.' >&2
@@ -118,8 +118,17 @@ esac
 stage preflight PASS 0
 INSTALL_PRODUCTS=(groundline)
 case "$INSTALL_PROFILE" in insights) INSTALL_PRODUCTS=(groundline-insights) ;; both) INSTALL_PRODUCTS+=(groundline-insights) ;; esac
+INSTALL_VERIFY_PRODUCTS=("${INSTALL_PRODUCTS[@]}")
+INSTALL_CHECK_INSIGHTS=0
+# Native refresh can advance an installed collector even for --profile core.
+# Let the candidate's existing profile validator decide compatibility without
+# changing consent, enrollment, collection state, or Codex plugin metadata.
+if [[ -e "$INSTALL_HOME/groundline/insights" || -L "$INSTALL_HOME/groundline/insights" ]]; then
+  INSTALL_CHECK_INSIGHTS=1
+  if [[ $INSTALL_PROFILE == core ]]; then INSTALL_VERIFY_PRODUCTS+=(groundline-insights); fi
+fi
 INSTALL_VERSION=""
-for product in "${INSTALL_PRODUCTS[@]}"; do
+for product in "${INSTALL_VERIFY_PRODUCTS[@]}"; do
   source_root="$INSTALL_ROOT/plugins/$product"
   binary="$source_root/bin/$INSTALL_TARGET/$product"
   checked "distribution_$product" "$binary" provider-smoke --plugin-root "$source_root" --require-installed --json || exit 1
@@ -128,6 +137,9 @@ for product in "${INSTALL_PRODUCTS[@]}"; do
   if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || [[ -n "$INSTALL_VERSION" && "$INSTALL_VERSION" != "$version" ]]; then stage distribution_version FAIL 1; exit 1; fi
   INSTALL_VERSION=$version
 done
+if [[ $INSTALL_CHECK_INSIGHTS == 1 ]]; then
+  checked insights_server_compatibility "$INSTALL_ROOT/plugins/groundline-insights/bin/$INSTALL_TARGET/groundline-insights" worker check-server --json || exit 1
+else stage insights_server_compatibility NOT_CONFIGURED 0; fi
 checked marketplace_add "$INSTALL_CODEX" plugin marketplace add https://github.com/jukqaz/groundline.git --ref stable --json || exit 1
 checked marketplace_refresh "$INSTALL_CODEX" plugin marketplace upgrade groundline --json || exit 1
 for product in "${INSTALL_PRODUCTS[@]}"; do
@@ -143,7 +155,7 @@ if [[ $INSTALL_PROFILE != insights ]]; then
   if INSTALL_CATALOG=$("$INSTALL_CODEX" debug models); then
     stage catalog PASS 0
     binary="$INSTALL_HOME/plugins/cache/groundline/groundline/$INSTALL_VERSION/bin/$INSTALL_TARGET/groundline"
-    if printf '%s' "$INSTALL_CATALOG" | "$binary" setup --catalog - --preset "$INSTALL_PRESET" "${INSTALL_SETUP[@]}"; then stage settings PASS 0
+    if printf '%s' "$INSTALL_CATALOG" | "$binary" setup --catalog - "${INSTALL_SETUP[@]}"; then stage settings PASS 0
     else code=$?; if [[ $code == 2 ]]; then stage settings ACTION_REQUIRED "$code"; else stage settings FAIL "$code"; fi; fi
     unset INSTALL_CATALOG
   else code=$?; stage catalog FAIL "$code"; stage settings NOT_RUN 0; fi

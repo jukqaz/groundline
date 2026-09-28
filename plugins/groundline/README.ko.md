@@ -1,127 +1,99 @@
 # GroundLine
 
-최적화 기준은 GPT-6 Astra·Sol·Luna입니다. 자동 분배를 요청한 작업에서는
-독립적인 서브에이전트마다 지원되는 모델·effort를 선택합니다. 이전 세대는
-기록을 보존하되 추천·튜닝 대상에서 제외합니다.
+GroundLine은 평소 Codex 활동과 실제 작업 결과를 바탕으로 GPT-6 Astra·Sol·Luna의
+모델·effort·서브에이전트 선택을 돕습니다. 이전 기록은 보존합니다. 실행, 설정,
+권한, 에이전트, worktree, 리뷰와 업그레이드는 Codex가 담당합니다.
 
-GroundLine은 Codex 작업 준비, 증거 기반 완료, 프로젝트 설정 감사, 집계 사용량
-분석을 반복 가능하게 만드는 공개 로컬 우선 플러그인입니다. Codex의 실행,
-설정, 권한, 에이전트, worktree, 리뷰, 업그레이드 기능을 대체하지 않습니다.
+흐름은 **audit → delivery → route**입니다. 활동 집계는 표본을 설명하고, 조건이
+맞는 직접 결과는 실측 비교에 사용합니다. 추천이나 합성 테스트 통과만으로 품질
+개선·비용 절감을 입증하지 않습니다. [최적화 흐름](references/codex-optimization-loop.md)을
+참고하세요.
+
+## 스킬
+
+| 스킬 | 범위 |
+| --- | --- |
+| `align-agent-home` | 요청한 설치·설정·지침 정비 |
+| `audit-agent-history` | 명시적으로 요청한 이력 조사와 비식별 사용 근거 |
+| `optimize-codex-workflow` | 작업별 GPT-6 선택과 업무 결과 검토 |
+
+설정 정비와 최적화 스킬은 작업에 맞춰 호출할 수 있으며, 이력 조사는 명시 요청이
+필요합니다. 계획, Goal, 인계와 승인된 파일 수정은 네이티브 Codex가 수행합니다.
+별도의 작업 실행 계층이나 개인·외부 스킬 관리 CLI는 제공하지 않습니다.
 
 ## 개인정보 경계
 
-공개 플러그인은 다음 불변식을 지킵니다.
-
-- lifecycle hook, 백그라운드 프로세스, 스케줄러, 수집 식별자가 없습니다.
-- 네트워크 클라이언트, 업로드 목적지, 인증 토큰, 원격 저장소가 없습니다.
-- prompt, transcript, 경로, 저장소 이름, 설정 값을 출력하지 않습니다.
-- 로컬 감사 명령은 크기가 제한된 일반 파일을 읽기 전용으로 열고 집계 수치와
-  안정적인 reason code만 반환합니다.
+Core에는 lifecycle hook, 백그라운드 프로세스, 스케줄러, 수집 식별자와 네트워크
+클라이언트가 없습니다. audit는 범위가 제한된 로컬 상태를 읽기 전용으로 열고,
+원문 prompt·transcript·경로·설정 값을 제외한 집계를 반환합니다. 명시적인 완료
+기록은 비공개 로컬 receipt로 저장하며 업로드하지 않습니다.
 
 `groundline provider-smoke --plugin-root <path> --json`는 owner hook manifest가
-있으면 실패합니다. 저장소 qualification은 개인·secret 표식, Python runtime
-의존성, 중복 package root, CI 계약 이탈을 거부합니다.
+있으면 실패합니다. 선택 기능인 Insights는 별도 설치·동의 계약을 사용합니다.
 
 ## 설치와 업그레이드
 
-Codex marketplace에 `https://github.com/jukqaz/groundline.git`을 추가하고
-`groundline` 플러그인을 설치합니다. 이 명령은 Core만 설치하며
-`groundline-insights`를 설치하거나 활성화하지 않습니다. refresh와 upgrade는
-Codex가 담당하며, GroundLine은 자체 업데이트나 trust 변경을 수행하지 않습니다.
-
-설치 후 `$groundline:align-agent-home`으로 GroundLine 적용과 기존 설정·지침
-오류 수정을 요청하면, 근거 확인부터 비공개 백업·수정·검증까지 이어집니다.
-[설치·적용 절차](references/installation-alignment.md)를 참고하세요.
-
-저장소의 검토한 stable 배포본에 있는 `install.sh` 또는 `install.ps1`은 설치와
-설정 점검을 한 번에 실행합니다. 기본 동작은 기존 선택과 Codex 기본값 보존입니다.
-`groundline setup --catalog <native-models.json> --apply`도 같은 정책을 사용합니다.
-**Astra / xhigh / Fast 끔**은 `--preset astra`로 명시하며, 다른 모델·effort도 선택할
-수 있습니다. 컨텍스트 복원은 `--restore-native-context`로 별도 요청합니다.
-실제 변경만 백업하고 Insights 상태는 보존합니다. `--apply`를 빼면 미리보기이며,
-해당 PC의 카탈로그에서 지원하지 않는 선택은 명시적으로 거부합니다.
-단순 package 설치는 이 절차를 자동 실행하거나 개인 설정을 덮어쓰지 않습니다.
+실행 파일이 포함된 검토한 `stable` 배포본의 `install.sh` 또는 `install.ps1`을
+사용하거나 네이티브 Codex로 패키지를 설치합니다.
 
 ```console
 codex plugin marketplace add https://github.com/jukqaz/groundline.git --ref stable --json
 codex plugin add groundline@groundline --json
 ```
 
-갱신 절차는 [네이티브 업그레이드](references/native-upgrade.md)를 따릅니다.
-버전 태그에는 소스가 있으므로 설치에는 실행 파일이 포함된 `stable`을 사용합니다.
+Core 설치는 Insights를 설치하거나 활성화하지 않습니다. 패키지 설치만으로 개인
+설정 수정 hook이 실행되지 않습니다. 적용·수정을 요청하려면
+`$groundline:align-agent-home`과 [설치·적용 절차](references/installation-alignment.md)를
+사용합니다.
 
-업그레이드 후 설치 package와 native artifact를 각각 검증합니다.
+setup은 기존 선택과 Codex 기본값을 보존합니다. 명시한 `--model`, `--effort`,
+`--service-tier`만 적용하며 고정 모델 프리셋은 없습니다. 모델·effort는 제공한
+네이티브 카탈로그로 검증합니다. 컨텍스트 복원에는 `--restore-native-context`가
+필요합니다. 변경한 설정은 비공개 백업을 만들고 `--apply`를 빼면 쓰기 없이
+미리 봅니다. 자세한 범위는 [설정 점검](references/codex-configuration.md)에 있습니다.
+
+[네이티브 업그레이드](references/native-upgrade.md) 후 설치 패키지·checksum과
+실제 동작을 구분해 확인합니다.
 
 ```console
 groundline provider-smoke --plugin-root /path/to/installed/groundline --require-installed --json
 groundline doctor --plugin-root /path/to/installed/groundline --json
 ```
 
-Apple Silicon/Intel macOS, ARM64/x86_64 Linux, ARM64/x86_64 Windows를
-지원합니다. release artifact는 이동하는 Rust `stable` 채널로 빌드되며 엄격한
-manifest와 SHA-256 checksum을 포함합니다.
-실행 파일은 설치된 plugin의 `bin/<target>`에서 찾습니다. plugin 설치가 사용자
-shell의 `PATH` 등록까지 보장하는 것은 아닙니다.
+Apple Silicon/Intel macOS, ARM64/x86_64 Linux·Windows를 지원합니다. 실행 파일은
+설치된 플러그인의 `bin/<target>`에서 찾습니다. 설치가 shell `PATH` 등록까지
+보장하지 않으며 소스 태그에는 설치용 실행 파일이 없습니다.
 
-## 사용 패턴에 따른 개인 개선
+## 사용 근거와 완료 결과 비교
 
-`$groundline:improve-personal-workflow`로 현재 공식 모델 지침과 관련 지침 파일을
-검토합니다. 이 경로에는 Insights가 필요하지 않습니다. 사용량 기반 실험을
-요청한 경우에만 Insights·로컬 감사·직접 확인한 작업 결과로 개선 후보를 평가합니다.
-`personal review`는 기본 읽기 전용이며, 근거와 기존 권한이 충분할 때만 `--apply`로
-전용 개인 지침을 시험합니다. `personal evaluate`는 서로 겹치지 않는 동일 조건의
-작업을 비교하고, 결과가 나빠지면 복구합니다. `personal rollback`으로 직접 복구할
-수도 있으며 사용자 편집은 덮어쓰지 않습니다.
-
-데이터가 부족하면 관찰 상태를 유지합니다. 모델·추론 수준·전역 설정·권한은 바꾸지
-않으며 자동 주기 실행은 사용자가 요청한 Codex 네이티브 자동화로만 구성합니다.
-[개인 개선 계약](references/personal-improvement.md)에 입력과 적용·복구 조건을 정리했습니다.
-
-## 주요 명령
+다음 예제는 공개 저장소 밖의 비공개 작업 디렉터리에서 실행합니다.
 
 ```console
-groundline platform --json
-groundline project-audit --repo . --json
-groundline config-audit --config /private/config.toml --catalog /private/models.json --json
-groundline setup --catalog /private/models.json --apply
-groundline config-repair --config /private/config.toml --catalog /private/models.json
-groundline guidance audit --profile /private/review/profile.json --baseline /private/review/baseline.json --json
-groundline audit weekly --days 7 --json
-groundline efficiency batch --input batch.json --json
-groundline efficiency compare --input comparison.json --json
-groundline efficiency route --input routing.json --catalog native-models.json --audit weekly.json --report insights-7.json --json
+groundline audit weekly --days 7 --review --json > weekly.json
+groundline audit review --input weekly.json --json
 groundline efficiency record-delivery --input manifest.json --output receipts/delivery.json --json
+groundline efficiency delivery-summary --deliveries receipts --json
+groundline efficiency route --input routing.json --catalog native-models.json --audit weekly.json --deliveries receipts --json
 ```
 
-[비공개 완료 기록](references/delivery-evidence.md)은 승인된 작업의 추천·관측 모델과
-완료 결과를 연결합니다. 라우팅 패킷의 `outcomes`를 비우고 `efficiency route
---deliveries`에 전용 기록 디렉터리를 전달하면 다음 비교에 재사용합니다. 기록은 로컬에서
-명시적으로 생성하며, 실행·자원 근거가 부족하면 실측 개선으로 판정하지 않습니다.
+필요에 따라 새 audit를 한 번 수집하거나 저장된 결과를 재사용합니다. 저장 결과의
+review는 이력을 다시 읽지 않고 현재 코드로 추천을 한 번 재계산합니다. 주간 audit는
+선택한 기간의 작업 표본을 다루며 전체 모집단 coverage는 미확인으로 둡니다.
+`groundline audit store --json`는 전체 저장소 metadata를 별도로 진단합니다.
+범위와 제한은 [주간 감사](references/weekly-usage-audit.md)에 정리되어 있습니다.
 
-`project-audit`는 Codex guidance, config, skill, agent, rule, plugin,
-`.worktreeinclude` 개수만 세고 내용은 읽거나 반환하지 않습니다. audit는 로컬
-Codex state store를 수정하지 않으며, efficiency 입력은 외부로 전송하지 않습니다.
+[완료 기록 계약](references/delivery-evidence.md)은 manifest·비공개 receipt,
+관측한 실제 모델·effort, 품질·재작업·소유 자원을 정의합니다. 실패한 작업과 알 수
+없는 값도 남깁니다. 라우팅 패킷의 `outcomes`를 비우고 전용 기록 디렉터리를
+`route --deliveries`로 전달합니다. 비교 조건과 카탈로그 요구사항은
+[라우팅 계약](references/evidence-routing.md)을 따릅니다. 집계 보고서는 선택적
+맥락이며, route는 설정을 변경하거나 자동 학습된 개선을 입증하지 않습니다.
 
-`efficiency route`는 [대화·ClickHouse 근거 계약](references/evidence-routing.md)에
-따라 GPT-6의 다음 작업 조합과 조건에 맞는 Codex 기능을 제안합니다. 직접 결과
-표본이 충분하지 않으면 실측 최적 조합이라고 주장하지 않으며, 원문 대화는
-로컬에서만 확인합니다. 적용과 실행 결과 검증은 네이티브 Codex가 담당합니다.
+`personal status`와 `personal rollback`은 기존 비공개 실험 상태 확인·복구만
+지원합니다. 새 실험을 만들지 않습니다. [기존 상태 복구](references/personal-recovery.md)를
+참고하세요.
 
-`config-audit`는 제공한 네이티브 모델 카탈로그와 설정을 비교합니다.
-`config-repair`는 컨텍스트 제한의 수정안을 미리 보여주며, 같은 입력의 계획 해시와
-`--apply`, 새 백업 파일이 있을 때만 적용합니다. 범위와 복구 조건은
-[설정 점검](references/codex-configuration.md)에 있습니다.
-`align-agent-home`은 설치 적용과 개인 스킬 점검을 담당하며, `guidance audit`는 추가·삭제·변경을
-확인하고 `guidance snapshot`은 기존 파일을 덮어쓰지 않는 비공개 기준 기록을
-만듭니다. 자세한 절차는 [스킬 관리](references/skill-maintenance.md)를 참고하세요.
-
-state database는 현재 사용자 소유의 symlink가 아닌 8 GiB 이하 regular file이어야
-합니다. audit은 thread metadata를 최대 100,000개만 읽고, canonical하며 symlink가
-아닌 `sessions` 또는 `archived_sessions` 아래 기록만 읽습니다. 압축 해제 입력은
-파일당 1 GiB, 감사당 8 GiB, 보관할 집계 레코드는 512 MiB로 제한합니다.
-사용량 기준값과 불완전 이력의 처리는 [주간 감사](references/weekly-usage-audit.md)에
-정리되어 있습니다.
-
-Insights 선택 기준은 [연동과 설치 프로필](https://github.com/jukqaz/groundline/blob/main/docs/ko/integrations.md), 개발
-검증 명령은 [영문 README](README.md)와 [release checklist](https://github.com/jukqaz/groundline/blob/main/docs/release-checklist.md)를
-참조하세요.
+개발 검증 명령은 [영문 README](README.md), 제품 구조는
+[아키텍처](https://github.com/jukqaz/groundline/blob/main/docs/architecture.md),
+Insights 선택 기준은 [연동과 설치 프로필](https://github.com/jukqaz/groundline/blob/main/docs/ko/integrations.md)을
+참고하세요.

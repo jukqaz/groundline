@@ -30,6 +30,27 @@ Installing through Codex's plugin UI or `plugin add` delivers the package only.
 Finish through this installer, or invoke the installed setup commands with the
 documented inputs. Do not assume a plugin post-install callback ran.
 
+## Update an existing installation
+
+Obtain the current complete `stable` distribution and run the same installer with
+the same intended Codex executable and `CODEX_HOME`. It refreshes the native
+marketplace, installs the selected IDs again, checks the installed artifacts,
+then rechecks setup and strict doctor. No separate updater runs in the background.
+
+Profiles select explicit installation and setup steps. Native marketplace refresh
+can also update another already-installed product from this shared channel:
+`--profile core` does not keep an installed Insights collector on its old version.
+Check the owner API's compatibility before updating a home with enabled Insights.
+See the [native upgrade boundary](../plugins/groundline/references/native-upgrade.md).
+
+When Insights state exists, the installer first verifies the candidate Insights
+artifact and runs `worker check-server` before any native marketplace write.
+This reads the existing profile and checks the API's ingest capabilities. A
+malformed profile or incompatible/unreachable API stops the update without
+changing collection state. No profile means no network request; a fresh Core
+installation remains offline apart from native package delivery. This check
+does not enroll, grant consent, run collection, or prove successful delivery.
+
 ## Settings policy
 
 Default setup preserves existing model, effort, Fast, permissions, experiments,
@@ -39,14 +60,13 @@ doctor checks effective configuration separately from the bounded file review.
 
 | Explicit choice | Shell option | PowerShell option |
 | --- | --- | --- |
-| Astra / xhigh / Fast off | `--preset astra` | `-Preset astra` |
 | A supported model | `--model <id>` | `-Model <id>` |
 | Supported effort | `--effort <level>` | `-Effort <level>` |
 | Service tier | `--service-tier default` or `fast` | `-ServiceTier default` or `fast` |
 | Restore native context sizing | `--restore-native-context` | `-RestoreNativeContext` |
 
-Do not combine the Astra preset with individual model, effort, or tier overrides.
-An unsupported selection stops settings changes without substitution. Resolve
+There is no fixed model preset. An unsupported explicit selection stops settings
+changes without substitution. Resolve
 profile/provider/catalog overrides in their owning layer. See
 [existing settings and migration](../plugins/groundline/references/installation-alignment.md#existing-settings-and-migration).
 Personal guidance repair remains an explicit `groundline:align-agent-home` task.
@@ -117,6 +137,6 @@ between download and installation, obtain the complete new distribution instead
 of running a mismatched cached binary.
 
 For release qualification, verify all six native targets plus real Codex package
-installation, existing 5.6 preservation, explicit Astra selection, partial-failure
-recovery, and a real hook-to-server receipt. Synthetic provider tests prove the
+installation, preservation of existing model choices, explicit supported
+model/effort selection, partial-failure recovery, and a real hook-to-server receipt. Synthetic provider tests prove the
 installer contract, not authenticated Codex behavior or private server delivery.

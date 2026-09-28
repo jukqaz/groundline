@@ -5,12 +5,16 @@ Its audit commands open Codex state read-only and return aggregate counts withou
 prompt text, response text, task titles, repository names, filesystem paths,
 configuration values, credentials, or database rows.
 
-The optional personal workflow commands accept an explicit private outcome sample
-and current model evidence. Only an authorized trial writes generated guidance
-and a bounded local journal outside Git. Local delivery hashes, document hashes,
-and outcome records are not included in Insights uploads or public summaries.
-The commands perform no model calls, change no Codex settings, and preserve user
-edits. See the [personal improvement contract](../plugins/groundline/references/personal-improvement.md).
+Delivery recording accepts explicit local manifests and evidence artifacts and
+creates new owner-private receipts. Requested and observed effective selections,
+verification, and resource gaps remain distinct. Receipt hashes and local outcome
+records are not included in Insights uploads. See the
+[delivery contract](../plugins/groundline/references/delivery-evidence.md).
+
+`personal status` reads existing private trial state; `personal rollback` may
+restore unchanged GroundLine-generated guidance while preserving user edits.
+These recovery commands do not create or evaluate new trials, call a model, or
+change Codex settings. See [personal recovery](../plugins/groundline/references/personal-recovery.md).
 
 GroundLine Insights is separately installed, does not require Core, and remains
 inactive until the owner configures and enables it. It writes only bounded
