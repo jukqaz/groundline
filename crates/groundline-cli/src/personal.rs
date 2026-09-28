@@ -335,6 +335,11 @@ fn model_context(
     {
         return Err(error("invalid_model_evidence"));
     }
+    if !groundline_contracts::model::optimization_model(&e.selected_model)
+        || !groundline_contracts::model::optimization_model(&e.latest_reference_model)
+    {
+        return Err(error("optimization_requires_gpt6"));
+    }
     fresh(&e.checked_at_utc, now, Duration::hours(24))?;
     let catalog: Catalog =
         serde_json::from_slice(catalog_bytes).map_err(|_| error("invalid_catalog"))?;
@@ -942,7 +947,13 @@ fn review(
     let report = WeeklyReport::from_slice(&bytes(input.report)?)
         .map_err(|_| error("invalid_insights_report"))?;
     let audit: Value = read(input.audit)?;
-    groundline_contracts::efficiency::recommend_weekly_optimization(&audit)?;
+    let weekly_review = groundline_contracts::efficiency::recommend_weekly_optimization(&audit)?;
+    let gpt6_audit = weekly_review["optimization_model_cohort_eligible"] == true;
+    let report_contexts = &report.cohorts.model_effort_context_distribution;
+    let gpt6_report = !report_contexts.is_empty()
+        && report_contexts
+            .iter()
+            .all(|row| groundline_contracts::model::optimization_model(&row.model_family));
     let sample: Option<Sample> = input.outcomes.map(read).transpose()?;
     if let Some(s) = &sample {
         validate_sample(s, &context, now)?;
@@ -952,12 +963,16 @@ fn review(
     let mut state_reasons = Vec::new();
     let mut state_checked = false;
     let rule = loop {
+        if !gpt6_audit {
+            break None;
+        }
         let candidate = select_rule(&remaining, sample.as_ref(), &audit).or_else(|| {
             let workflow = &report.weekly_metrics.workflow;
-            ((workflow.repeated_call_rate.is_some_and(|rate| rate >= 0.10)
-                || workflow
-                    .failure_signal_rate
-                    .is_some_and(|rate| rate >= 0.04))
+            (gpt6_report
+                && (workflow.repeated_call_rate.is_some_and(|rate| rate >= 0.10)
+                    || workflow
+                        .failure_signal_rate
+                        .is_some_and(|rate| rate >= 0.04))
                 && remaining
                     .behavior_focus
                     .contains(&Rule::DiagnoseBeforeRetry))
@@ -979,6 +994,9 @@ fn review(
         break candidate;
     };
     let mut reasons = Vec::new();
+    if !gpt6_audit {
+        reasons.push("outside_gpt6_optimization_scope");
+    }
     if report.data_quality.status != "PASS" || report.collection_health.freshness_status != "FRESH"
     {
         reasons.push("insights_quality_or_freshness");
@@ -1047,7 +1065,7 @@ fn review(
         "workflow": report.weekly_metrics.workflow,
         "tokens": report.weekly_metrics.tokens,
         "verification": report.weekly_metrics.verification,
-        "model_effort_tokens_available": report.cohorts.model_token_distribution.as_ref().is_some_and(|rows|rows.iter().any(|r|r.model_family!="unknown" && r.total_tokens>0)),
+        "model_effort_tokens_available": report.cohorts.model_token_distribution.as_ref().is_some_and(|rows|rows.iter().any(|r|groundline_contracts::model::optimization_model(&r.model_family) && r.total_tokens>0)),
         "model_token_distribution": report.cohorts.model_token_distribution,
         "model_performance_attribution_available": false,
     });

@@ -965,7 +965,7 @@ mod tests {
         );
         assert_eq!(
             event["metrics"]["root"]["model_effort"][0]["model_family"],
-            "astra"
+            "gpt-6-astra"
         );
     }
 

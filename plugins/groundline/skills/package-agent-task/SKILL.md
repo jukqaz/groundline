@@ -26,8 +26,9 @@ future turn can execute without guessing the goal, boundaries, or proof needed.
 8. Use a qualitative context budget only when it helps the recipient choose
    what to load: `lean`, `standard`, or `expanded`.
 9. Name what to load first, what to defer or omit, and when to stop loading.
-10. If delegation is explicitly requested, name independent lanes and a
-    stop-spawning condition. Otherwise continue with the current agent.
+10. For requested delegation, including an active adaptive-delegation request,
+    name independent lanes and a stop-spawning condition. Otherwise continue
+    with the current agent.
 11. Produce a handoff that another agent can continue from.
 
 ## Rules
@@ -41,9 +42,10 @@ future turn can execute without guessing the goal, boundaries, or proof needed.
 - Use `lean` unless multiple repositories, providers, or evidence surfaces are
   required. A larger context budget is not a substitute for a clear goal.
 - Do not invent a token count when the provider does not expose one.
-- Default to `single`. Use `bounded-parallel` only when explicitly authorized
-  by the user and useful for independent, read-heavy
-  lanes whose results can return as compact evidence rather than raw logs.
+- Use `bounded-parallel` when authorized by the user's delegation request or
+  standing policy and useful for independent lanes with disjoint ownership.
+  Apply [GPT-6 model/effort selection](../../references/model-effort-routing.md)
+  and return compact evidence. Otherwise use `single`.
 
 ## Output Contract
 

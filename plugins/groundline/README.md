@@ -1,5 +1,9 @@
 # GroundLine
 
+GroundLine optimization targets GPT-6 Astra, Sol, and Luna. Requested adaptive
+delegation selects a supported model and effort per independent native subagent
+task. Historical generations remain readable but are not tuning targets.
+
 GroundLine is a public, local-first Codex plugin for repeatable task setup,
 evidence-aware completion, project configuration audits, and aggregate usage
 analysis. It complements Codex; it does not replace Codex execution, settings,
@@ -75,7 +79,15 @@ groundline guidance audit --profile /private/review/profile.json --baseline /pri
 groundline audit weekly --days 7 --json
 groundline efficiency batch --input batch.json --json
 groundline efficiency compare --input comparison.json --json
+groundline efficiency route --input routing.json --catalog native-models.json --audit weekly.json --report insights-7.json --json
+groundline efficiency record-delivery --input manifest.json --output receipts/delivery.json --json
 ```
+
+Use [private delivery receipts](references/delivery-evidence.md) to connect an
+authorized lane's recommendation, observed selection and verified outcome.
+Feed a dedicated receipt directory into `efficiency route --deliveries` with an
+empty packet `outcomes` array. Recording is local and explicit; incomplete
+execution or resource evidence cannot establish an empirical improvement.
 
 `project-audit` counts Codex guidance, config, skills, agents, rules, plugins,
 and `.worktreeinclude` without reading or returning their values. Audit commands

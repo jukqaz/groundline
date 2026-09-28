@@ -23,7 +23,8 @@ validation, installed runtime validation, and user-visible behavior as separate
 evidence lanes.
 
 Use the actual App runtime first. On macOS inspect bundle metadata and the
-`Contents/Resources/codex` executable in standard Applications locations;
+`Contents/Resources/codex-cli/bin/codex` executable in standard Applications
+locations (or `Contents/Resources/codex` in an older verified bundle);
 product display names do not determine bundle paths, and Codex may ship inside
 ChatGPT.app. Only fall back to PATH CLI when the App runtime cannot be verified,
 and label that evidence scope. Do not treat a CLI feature flag as active App
@@ -40,11 +41,17 @@ server receipt. Resolve one active root and read this reference and its audit
 skill from that same installation. Missing required files or commands are
 UNVERIFIED, not grounds to substitute a different cache or unpublished binary.
 
-When using the separate-stage interface, run the weekly audit once. Retain its redacted JSON in process memory and pass
-those same bytes to `groundline efficiency recommend --audit - --json` through
+Before execution, choose how the full redacted result will survive tool return:
+retain it in a persistent runner or, within an authorized analysis artifact scope,
+save it once to a new owner-private file outside the repository. Capture the
+result before printing a bounded projection. An exit code or top-level key list
+cannot replace the audit's status, coverage and missing-data reasons.
+
+When using the separate-stage interface, run the weekly audit once. Retain its
+redacted JSON and pass those same bytes to `groundline efficiency recommend --audit - --json` through
 standard input (maximum 2 MiB). Check both commands' exit status independently.
-Do not use `/dev/stdin`, write an unapproved temporary report, or repeat the
-expensive audit because its output was discarded. If recommendation fails,
+Do not use `/dev/stdin`, write outside the authorized artifact scope, or repeat
+the expensive audit merely because a projection discarded its evidence. If recommendation fails,
 report the captured audit and the recommendation failure separately. A regular
 JSON file remains supported when saving it is authorized.
 
@@ -65,8 +72,8 @@ The command is read-only, performs no network request, and does not emit raw
 task content or private paths. The surrounding research is native Codex work,
 not functionality hidden inside this command. Reuse the same in-memory audit
 for that research; extract its nested `audit` value for raw-audit consumers
-without running collection again. Do not create temporary report files or use
-`/dev/stdin` to bridge stages. Save a redacted report only when authorized.
+without running collection again. A saved result follows the same authorized
+private-artifact scope; it is not a new collector, ledger or uploaded transcript.
 
 For the final weekly report, preserve `report_ko` task samples, completed turns,
 usage source, observed/selected rollouts, and unresolved reasons; cross-check
@@ -104,7 +111,9 @@ histories without a known ownership boundary remain excluded. Do not claim full
 fork or subagent coverage. Response records count as fallback rollouts and have
 an explicit bounded provenance label, separate from last-usage-only evidence.
 
-Model contexts use bounded family and effort labels, including Astra. They do
+Model contexts use bounded family and effort labels. New GPT-6 observations
+use gpt-6-astra, gpt-6-sol, and gpt-6-luna; historical unversioned labels remain
+descriptive and outside optimization scope. They do
 not attribute token totals to individual models or estimate billing.
 
 Report completed root tasks and completed turns separately. `task_latency` counts

@@ -2,19 +2,19 @@ use super::*;
 use tempfile::TempDir;
 
 fn model() -> (ModelEvidence, Vec<u8>) {
-    let catalog=serde_json::to_vec(&json!({"models":[{"slug":"future-model-2030","supported_reasoning_levels":[{"effort":"adaptive"}]}]})).unwrap();
+    let catalog=serde_json::to_vec(&json!({"models":[{"slug":"gpt-6-sol","supported_reasoning_levels":[{"effort":"medium"}]}]})).unwrap();
     let e = ModelEvidence {
         kind: "groundline-model-evidence".into(),
         schema: 1,
         checked_at_utc: Utc::now().to_rfc3339(),
         runtime_version: "0.153.4".into(),
         runtime_family: "codex_app".into(),
-        selected_model: "future-model-2030".into(),
-        selected_effort: "adaptive".into(),
-        latest_reference_model: "future-model-2030".into(),
+        selected_model: "gpt-6-sol".into(),
+        selected_effort: "medium".into(),
+        latest_reference_model: "gpt-6-sol".into(),
         catalog_sha256: hash(&catalog),
         official_sources: vec![Source {
-            applies_to_model: "future-model-2030".into(),
+            applies_to_model: "gpt-6-sol".into(),
             url: "https://developers.openai.com/api/docs/guides/latest-model".into(),
             sha256: "a".repeat(64),
             checked_at_utc: Utc::now().to_rfc3339(),
@@ -94,16 +94,16 @@ fn audit() -> Value {
     json!({"kind":"groundline-codex-weekly-audit","schema":1,"status":"PASS",
         "raw_content_emitted":false,"private_paths_emitted":false,"thread_ids_emitted":false,"rollout_paths_emitted":false,"secret_value_printed":false,
         "scope":{"generated_at":Utc::now().to_rfc3339(),"sample_sufficient":true,"completed_root_sample_count":10},
-        "root":{"activity":{"user_messages_with_text":20},"model_effort":{"counts":{}},"task_latency":{},"prompt_shape":{"short_message_count":20,"broad_scope_message_count":20},
+        "root":{"activity":{"user_messages_with_text":20},"model_effort":{"counts":{"gpt-6-sol|medium":20}},"task_latency":{},"prompt_shape":{"short_message_count":20,"broad_scope_message_count":20},
         "tools":{"call_count":100,"calls_in_exact_repeated_groups":20},"boundary_signals":{}}})
 }
 #[test]
-fn current_native_catalog_accepts_future_models_but_rejects_stale_or_unofficial_evidence() {
+fn gpt6_catalog_rejects_stale_or_unofficial_evidence() {
     let (mut e, c) = model();
     assert!(model_context(&e, &c, Utc::now()).is_ok());
     e.selected_effort = "unknown".into();
     assert!(model_context(&e, &c, Utc::now()).is_err());
-    e.selected_effort = "adaptive".into();
+    e.selected_effort = "medium".into();
     e.checked_at_utc = (Utc::now() - Duration::days(2)).to_rfc3339();
     assert!(model_context(&e, &c, Utc::now()).is_err());
     e.checked_at_utc = Utc::now().to_rfc3339();
@@ -116,8 +116,74 @@ fn current_native_catalog_accepts_future_models_but_rejects_stale_or_unofficial_
 }
 
 #[test]
-fn failure_candidates_preserve_partial_evidence_for_astra_and_sol_without_applying() {
-    for selected in ["gpt-6-astra", "gpt-5.6-sol"] {
+fn older_models_cannot_start_or_evaluate_trials_but_rollback_remains_available() {
+    for legacy in [
+        "gpt-5.6-sol",
+        "gpt-5.6-luna",
+        "gpt-5.5",
+        "sol",
+        "future-model-2030",
+    ] {
+        let (mut evidence, _) = model();
+        evidence.selected_model = legacy.into();
+        evidence.latest_reference_model = legacy.into();
+        evidence.official_sources[0].applies_to_model = legacy.into();
+        let catalog = serde_json::to_vec(&json!({"models":[{
+            "slug":legacy,"supported_reasoning_levels":[{"effort":"medium"}]
+        }]}))
+        .unwrap();
+        evidence.catalog_sha256 = hash(&catalog);
+        let root = tempdir().unwrap();
+        let absent = root.path().join("unread-input.json");
+        let error = review(
+            ReviewInputs {
+                report: &absent,
+                audit: &absent,
+                outcomes: None,
+                state_dir: Some(root.path()),
+                apply: true,
+            },
+            &evidence,
+            &catalog,
+        )
+        .unwrap_err();
+        assert_eq!(error.0, "personal_optimization_requires_gpt6");
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+
+        let (state, _, _, sample) = trial();
+        let before = fs::read(state.path().join("personal-guidance.md")).unwrap();
+        assert_eq!(
+            evaluate(state.path(), sample, &evidence, &catalog)
+                .unwrap_err()
+                .0,
+            "personal_optimization_requires_gpt6"
+        );
+        assert_eq!(
+            fs::read(state.path().join("personal-guidance.md")).unwrap(),
+            before
+        );
+        // Restoring an existing trial does not require choosing a supported model.
+        assert!(
+            run(Command::Rollback {
+                state_dir: state.path().to_owned(),
+                json: true
+            })
+            .is_ok()
+        );
+    }
+    let (mut evidence, catalog) = model();
+    evidence.latest_reference_model = "gpt-5.6-sol".into();
+    assert_eq!(
+        model_context(&evidence, &catalog, Utc::now())
+            .unwrap_err()
+            .0,
+        "personal_optimization_requires_gpt6"
+    );
+}
+
+#[test]
+fn failure_candidates_preserve_partial_evidence_for_all_gpt6_tiers_without_applying() {
+    for selected in ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"] {
         for native_failure in [false, true] {
             let root = tempdir().unwrap();
             let (mut e, _) = model();
@@ -126,11 +192,12 @@ fn failure_candidates_preserve_partial_evidence_for_astra_and_sol_without_applyi
             e.selected_effort = "xhigh".into();
             let c = serde_json::to_vec(&json!({"models": [
                 {"slug":"gpt-6-astra","supported_reasoning_levels":[{"effort":"xhigh"}]},
-                {"slug":"gpt-5.6-sol","supported_reasoning_levels":[{"effort":"xhigh"}]}
+                {"slug":"gpt-6-sol","supported_reasoning_levels":[{"effort":"xhigh"}]},
+                {"slug":"gpt-6-luna","supported_reasoning_levels":[{"effort":"xhigh"}]}
             ]}))
             .unwrap();
             e.catalog_sha256 = hash(&c);
-            e.official_sources = ["gpt-6-astra", "gpt-5.6-sol"]
+            e.official_sources = ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]
                 .map(|name| Source {
                     applies_to_model: name.into(),
                     url: format!("https://developers.openai.com/api/docs/models/{name}"),
@@ -152,8 +219,8 @@ fn failure_candidates_preserve_partial_evidence_for_astra_and_sol_without_applyi
             report["comparison_readiness"]["reason_codes"] =
                 json!(["comparison_baseline_not_included", "data_quality_not_pass"]);
             report["cohorts"]["model_effort_context_distribution"] = json!([
-                {"model_family":"astra","effort":"xhigh","context_count":2},
-                {"model_family":"sol","effort":"high","context_count":3}
+                {"model_family":"gpt-6-astra","effort":"xhigh","context_count":2},
+                {"model_family":"gpt-6-sol","effort":"high","context_count":3}
             ]);
             let mut audit = audit();
             audit["root"]["tools"]["calls_in_exact_repeated_groups"] = json!(0);
@@ -922,6 +989,9 @@ fn aggregate_signals_alone_cannot_authorize_a_trial() {
         if source == "native_failure" {
             audit["root"]["tools"]["failure_signals"] = json!({"nonzero_exit":4});
         } else if source == "insights_failure" {
+            report["cohorts"]["model_effort_context_distribution"] = json!([
+                {"model_family":"gpt-6-sol","effort":"medium","context_count":2}
+            ]);
             let workflow = &mut report["weekly_metrics"]["workflow"];
             workflow["tool_call_count"] = json!(100);
             workflow["failure_signal_count"] = json!(4);
@@ -959,6 +1029,53 @@ fn aggregate_signals_alone_cannot_authorize_a_trial() {
         );
         assert_eq!(out["mutation_performed"], false);
         assert!(!root.path().join("trial.json").exists());
+    }
+}
+
+#[test]
+fn gpt6_selection_does_not_optimize_historical_or_mixed_audit_evidence() {
+    for counts in [
+        json!({"sol|medium":20}),
+        json!({"gpt-6-sol|medium":19,"luna|high":1}),
+        json!({}),
+    ] {
+        let root = tempdir().unwrap();
+        let (e, catalog) = model();
+        let mut report = report_fixture();
+        report["generated_at_utc"] =
+            json!(Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+        let mut native = audit();
+        native["root"]["model_effort"]["counts"] = counts;
+        let baseline = sample(&model_context(&e, &catalog, Utc::now()).unwrap(), 1, "gpt6");
+        let report_path = root.path().join("report.json");
+        let audit_path = root.path().join("audit.json");
+        let outcomes_path = root.path().join("outcomes.json");
+        put(&report_path, &report);
+        put(&audit_path, &native);
+        put(&outcomes_path, &serde_json::to_value(baseline).unwrap());
+        let result = review(
+            ReviewInputs {
+                report: &report_path,
+                audit: &audit_path,
+                outcomes: Some(&outcomes_path),
+                state_dir: Some(root.path()),
+                apply: true,
+            },
+            &e,
+            &catalog,
+        )
+        .unwrap();
+        assert_eq!(result["status"], "OBSERVE");
+        assert!(result["candidate"].is_null());
+        assert!(
+            result["reason_codes"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("outside_gpt6_optimization_scope"))
+        );
+        assert_eq!(result["mutation_performed"], false);
+        assert!(!root.path().join("trial.json").exists());
+        assert_eq!(read::<Value>(&audit_path).unwrap(), native);
     }
 }
 

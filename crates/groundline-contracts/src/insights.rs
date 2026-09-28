@@ -14,7 +14,7 @@ pub mod analysis;
 pub const MAX_WEEKLY_REPORT_BYTES: usize = 128 * 1024;
 pub const MAX_BASIC_EVENT_BYTES: usize = 64 * 1024;
 /// Semantic allowlist revision, independent of the envelope schema version.
-pub const BASIC_CONTRACT_REVISION: u64 = 7;
+pub const BASIC_CONTRACT_REVISION: u64 = 8;
 
 pub fn ingest_capabilities() -> Value {
     serde_json::json!({"basic_schema_versions":[5], "basic_contract_revision":BASIC_CONTRACT_REVISION})

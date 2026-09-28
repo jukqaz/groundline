@@ -1,8 +1,11 @@
 # GroundLine Insights changes
 
-This package summary covers the current release line. The repository
-[changelog](https://github.com/jukqaz/groundline/blob/main/CHANGELOG.md) records shared changes. A source version entry
-does not prove that its image or `stable` distribution has been published.
+## 0.29.0
+
+- GPT-6 Astra·Sol·Luna의 집계 라벨을 분리하고 ingest contract revision 8을 사용합니다. 업그레이드 전에 owner API가 새 계약을 광고하는지 확인해야 합니다.
+- API의 기존 신뢰 판정 정의를 원본 보존·재검증·중단 후 재개 가능한 명시적 마이그레이션으로 이행합니다. 알 수 없는 정의와 SQL식 변조는 거절합니다.
+- 공유 계약과 SQL 분석 bucket 제한을 통일해 유효한 81·89·90개 조합을 보존합니다.
+- Codex 기본 프롬프트 길이 제한과 독립적인 Core/Insights 설치 계약을 유지합니다. 수집 동의·목적·기존 이벤트 기록을 자동으로 재설정하지 않습니다.
 
 ## 0.25.5
 

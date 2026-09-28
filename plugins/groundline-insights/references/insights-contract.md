@@ -78,7 +78,8 @@ the updated executable on every collector process, including detached hooks.
 Every due worker cycle checks `/healthz` before enrollment or upload, even when
 a collector token is already cached. The API advertises Basic envelope schema
 versions and a semantic allowlist revision in `ingest_capabilities`. Collectors
-require schema 5 and revision 6 or newer, not an exact package version. Revision 6
+require schema 5 and revision 8 or newer, not an exact package version. Revision 8
+includes exact GPT-6 model labels. Revision 6 introduced support that
 accepts independent output-signal counts, including overlapping labels and results
 from calls in an earlier window. These fixed-key, bounded counts are output
 proxies, not counts of failed calls. Canonical cache ratios, bounded and disjoint
@@ -166,12 +167,14 @@ usage, lifecycle, latency, verification, and boundary counters plus
 low-cardinality platform/runtime fields.
 
 Model/effort dimensions are shared Rust allowlists used by normalization,
-ingestion, weekly reports, and comparisons. Astra has its own family label;
-unknown model IDs remain `other`. These labels do not route models or prove
+ingestion, weekly reports, and comparisons. GPT-6 Astra/Sol/Luna have separate
+versioned labels. Historical astra/sol/luna labels remain unchanged and cannot
+qualify GPT-6 optimization. Unknown model IDs remain `other`. These labels do not route models or prove
 account availability. Usage provenance is also a shared bounded allowlist;
 native response-only usage and mixed-source aggregates have distinct labels.
-An API must support newly introduced labels before updated collectors are
-enabled; rejected events stay operator-visible.
+Contract revision 8 requires API support for these labels before updated
+collectors are enabled; rejected events stay operator-visible. Event envelope
+schema 5 and existing stored events remain unchanged.
 
 Activity samples count selected ongoing or completed roots with
 `completed_root_coverage=false`; weekly samples require a final completed turn.

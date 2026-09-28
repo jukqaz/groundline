@@ -1,5 +1,14 @@
 # GroundLine
 
+최적화 기준은 GPT-6 Astra·Sol·Luna입니다. 자동 분배를 요청한 작업에서는
+독립적인 서브에이전트마다 지원되는 모델·effort를 선택합니다. 이전 세대는
+기록을 보존하되 추천·튜닝 대상에서 제외합니다.
+
+`efficiency route`는 대화에서 확인한 작업 특성과 완료 결과, 로컬 감사,
+ClickHouse 보고서를 결합해 다음 작업의 모델·effort와 유용한 Codex 기능을
+선택하도록 돕습니다. [근거 기반 선택 계약](plugins/groundline/references/evidence-routing.md)은
+누락된 측정과 성능 악화를 명시하며 실제 적용은 네이티브 Codex가 수행합니다.
+
 [English](README.md) · [한국어 문서](docs/ko/index.md)
 
 GroundLine은 사용 패턴 분석, 토큰 최적화, 작업 성능 개선으로 Codex 사용환경을
@@ -59,8 +68,10 @@ Git과 Codex만 있으면 됩니다. 아래 명령은 개인 모델·추론·권
 수집은 Insights 연결 설정과 명시적 동의 후 Codex 훅이 실행될 때 동작합니다.
 
 아래 `codex`는 실제 사용하는 Codex의 CLI를 뜻합니다. macOS에서 Codex App만
-설치했다면 `/Applications/ChatGPT.app/Contents/Resources/codex` 전체 경로로
-바꿔 실행할 수 있습니다. App과 CLI가 같은 설정을 사용하려면 같은 `CODEX_HOME`을 유지합니다.
+설치했다면 `/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex`
+전체 경로로 바꿔 실행할 수 있습니다. 설치기는 시스템·사용자 Applications에서
+번들 식별자를 확인하고, 이전 `Contents/Resources/codex` 배치도 인식합니다.
+App과 CLI가 같은 설정을 사용하려면 같은 `CODEX_HOME`을 유지합니다.
 
 moving `stable` branch를 한 번 등록한 뒤 설치 프로필을 선택합니다. 두 플러그인은
 독립적이며 하나를 설치해도 다른 플러그인이 자동 설치·활성화되지 않습니다.
@@ -179,8 +190,10 @@ review|evaluate|rollback`은 승인된 전용 개인 지침에 한 가지 변경
 
 근거가 부족하면 `OBSERVE`, 비교 조건이 달라지면 `INCONCLUSIVE`로 남습니다.
 선택한 모델·추론 수준·권한·프로젝트 지침은 자동으로 바꾸지 않습니다. 최신 모델
-지침은 실행 시 Codex가 공식 문서와 실제 네이티브 카탈로그를 확인하며, 모델 이름을
-고정된 목록으로 판정하지 않습니다. 파일 생성과 실제 지침 적용은 따로 검증합니다.
+지침은 실행 시 Codex가 공식 문서에서 확인하며, 모델 가용성과 추론 수준은
+실제 네이티브 카탈로그로 판정합니다. 최적화 대상은 GPT-6
+Astra·Sol·Luna로 한정하며, 이전 세대와 세대 미구분 집계는 추천·개인 실험의
+대상으로 사용하지 않습니다. 기존 기록과 복구 기능은 유지합니다. 파일 생성과 실제 지침 적용은 따로 검증합니다.
 자세한 입력·개인정보·복구 조건은 [개인 개선 계약](plugins/groundline/references/personal-improvement.md)에 있습니다.
 
 ## 개인정보와 보안

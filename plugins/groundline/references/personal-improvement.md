@@ -5,6 +5,12 @@ and consent are unchanged. Native Codex fetches reports/docs, classifies direct
 outcomes, and performs authorized orchestration. Core never routes models,
 changes native settings, grants permissions, or starts background work.
 
+Optimization targets are GPT-6 Astra, Sol, and Luna. Review/evaluate reject
+older or unrecognized selected/reference models with
+`personal_optimization_requires_gpt6`, even if a native catalog lists them.
+Rollback remains available without model evidence so existing guidance can be
+restored. Historical records are preserved; never relabel them as GPT-6.
+
 ## Native orchestration workflow
 
 Read this route for a tracked personal guidance trial. Start broader usage-driven
@@ -68,10 +74,15 @@ Review output retains the report's quality reasons, coverage denominators,
 missing/fallback usage counts, package versions, and model/effort context counts.
 Small collection-window samples are distinct from missing usage; neither proves
 database row loss. Preserve incomplete history and nullable metrics. Mixed
-cohorts do not establish GPT-6 or GPT-5.6 performance.
+or historical unversioned cohorts do not establish GPT-6 performance. New
+observations distinguish gpt-6-astra, gpt-6-sol, and gpt-6-luna. The weekly
+recommendation is withheld for older, mixed-generation, or unknown root cohorts.
+These reports remain descriptive and cannot be used to tune an earlier model.
 
 Repeated calls at 10% or failure signals at 4% can propose diagnosis for review
-from either the native audit or Insights. These are triage thresholds, not model
+from GPT-6 native audit evidence or a fully GPT-6 Insights cohort. An older,
+mixed, or unknown native root cohort prevents a trial even when the selected
+model is GPT-6. These are triage thresholds, not model
 performance targets or evidence of avoidable retries. Classify expected nonzero
 results and environment failures first. A candidate remains OBSERVE until the
 existing trial gates and relevant direct outcomes are satisfied. Separately
@@ -109,8 +120,9 @@ actual evidence; example dates and hashes are deliberately not ready to apply.
 Model evidence expires after 24 hours, official sources after seven days. Only
 HTTPS developers.openai.com, platform.openai.com, and learn.chatgpt.com URLs
 without credentials, queries, or custom ports are accepted. Sources must cover
-the selected model as well as the latest reference model. Future model IDs and
-efforts are accepted when present in the supplied native catalog. Empty
+the selected model as well as the latest reference model. Both models must be
+within the explicit GPT-6 optimization scope; efforts are validated against the
+supplied native catalog. Empty
 behavior_focus selects no candidate. No model/effort setting is rewritten.
 
 The CLI checks contracts, hashes, timestamps, and catalog availability. It does

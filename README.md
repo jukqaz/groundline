@@ -1,5 +1,15 @@
 # GroundLine
 
+GroundLine optimization targets GPT-6 Astra, Sol, and Luna. Requested adaptive
+delegation selects a supported model and effort per independent native subagent
+task. Historical generations remain readable but are not tuning targets.
+
+`efficiency route` joins conversation-local task classification and direct
+delivery outcomes with native audit and ClickHouse report evidence to select a
+useful next lane. The [evidence contract](plugins/groundline/references/evidence-routing.md)
+preserves missing measurements and protected outcomes; native Codex executes
+authorized model/effort and capability choices.
+
 [한국어](README.ko.md)
 
 GroundLine customizes Codex workflows through usage analysis, token optimization,
@@ -64,7 +74,9 @@ collection starts only after connection setup and explicit consent, on Codex hoo
 
 Here, `codex` means the CLI belonging to the Codex installation you use. On macOS
 with only Codex App installed, replace it with the full executable path
-`/Applications/ChatGPT.app/Contents/Resources/codex`. Keep the same `CODEX_HOME`
+`/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex`. The installer
+finds a verified Codex App bundle in system or user Applications, including
+older bundles with `Contents/Resources/codex`. Keep the same `CODEX_HOME`
 when sharing configuration between App and CLI.
 
 Register this repository once on the moving `stable` branch, then choose a

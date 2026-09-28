@@ -83,21 +83,45 @@ Do not remove the server deny record or silently replay the retired outbox.
 `trusted_event_v5` is a materialized UInt8 result of the current envelope and
 payload/projection validation predicate. Inserts compute it in ClickHouse.
 Explicit values and unknown JSON fields are rejected. Startup checks its type,
-materialized kind, and predicate fingerprint. Changing the validation predicate
-requires a new explicit migration; reusing old trust decisions is rejected.
+materialized kind, predicate fingerprint, and parsed SQL expression. ClickHouse
+may print that expression with different spacing and parentheses; the API
+compares its `EXPLAIN AST` result with the source expression. A matching comment
+alone cannot authorize a changed definition. Unknown schema states fail closed.
 
-Raw envelopes, counters, event IDs, generations, and timestamps stay intact.
+The one supported transition is from the previous released fingerprint
+`d653ba15120d6bdb9b5d0d4077c2dd6fd0eb7aeb00f225c996f82964871ae316`.
+Startup first makes `basic_current` return no rows, which also guards its active
+and quarantined views. It switches TTL to the new predicate directly, then adds
+`trusted_event_v5_revalidated` with a pending marker. Existing parts calculate
+that new materialized column from their original fields, never from the old
+stored trust bit. The API checks every row's new result, row count, and a hash
+of event ID, collector ID, generation, receipt time, idempotency key, and raw
+payload before and after one atomic metadata operation that replaces the old
+column. It marks the new definition complete only after that check. The staged
+column and pending comment let startup resume after a crash; repeated startup
+is idempotent. The raw event fields are not rewritten by the transition.
+
+The verification scans have a 20-second server limit and two threads. A scan
+that does not finish leaves the published event views guarded and startup fails;
+it does not launch an unbounded background materialization. Plan a maintenance
+window for a large table. This is a per-scan limit, not a bound on the preceding
+metadata changes or total startup; the API's 30-second ClickHouse request
+timeout can also stop an overloaded migration before its scans. Stop old API
+writers before upgrading, take a
+recoverable backup, and inventory TTL-expired rows and disk headroom. Retention
+merges may remove already expired rows, while concurrent inserts can change the
+row count/hash between checks; either can require operator investigation. Do
+not reset or overwrite an unknown column to make startup pass. Rehearse against
+a separate database and compare original rows, active/quarantined counts, and
+reports before applying the package to production.
+
 `FINAL`, active-generation selection, retirement filtering, quarantine, and TTL
-remain in the query path. Existing parts calculate the new column lazily until
-materialized. Startup does not launch an unbounded materialization job.
-
-Before materializing old parts, take a consistent recoverable backup and rehearse
-on a separate database. Compare original-column hashes, trusted/quarantined
-counts, and all dashboard results. Then scope `MATERIALIZE COLUMN
-trusted_event_v5` to inventoried partitions, await mutation completion, and
-repeat those comparisons. Check disk headroom and concurrent receipts; never
-mount production storage into a rehearsal. An image rollback alone does not
-undo schema or TTL changes.
+remain in the restored query path. Existing parts calculate the new column
+lazily until an optional, separately planned materialization. For that later
+maintenance, scope `MATERIALIZE COLUMN trusted_event_v5` to inventoried
+partitions, await mutation completion, and repeat source-row and view checks.
+Never mount production storage into a rehearsal. An image rollback alone does
+not undo schema or TTL changes.
 
 ## Diagnostic logging
 
@@ -176,6 +200,8 @@ The current v5 event envelope's optional `analysis` observation is advertised by
 contract revision 7. When absent, existing accepted envelopes remain unchanged
 and their tokens are projected as unattributed. Present observations have strict
 keys, bounded labels, and exact token-conservation checks in Rust and ClickHouse.
+The SQL bucket limit uses the same `MAX_MODEL_CONTEXTS` constant as Rust; the
+current catalog permits 90 distinct non-unknown model/effort pairs.
 Inconsistent native/UI counter baselines, missing links, and conflicting contexts
 remain unattributed. No event's total is spread over context frequencies.
 
@@ -199,7 +225,10 @@ Browser verification must also cover All, single/multiple selections, empty
 results, and a roster-to-analysis link with its time range preserved.
 Health responses alone do not prove this path.
 
-Deploy the API advertising contract revision 7 before upgrading collectors.
+Deploy the API advertising contract revision 8 before upgrading collectors.
+Revision 8 adds generation-specific GPT-6 tier labels. Historical labels and
+events are preserved; older, mixed, and unversioned cohorts are not optimization
+targets. This change does not require rewriting existing ClickHouse rows.
 Verify source, package, install, and a fresh receipt independently. A Windows
 build or server-reported version does not prove that device's installed files.
 Use a consistent temporary backup and an isolated restore for schema changes.

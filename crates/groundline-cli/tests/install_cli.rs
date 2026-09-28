@@ -17,6 +17,7 @@ struct Fixture {
     home: PathBuf,
     codex: PathBuf,
     installed: PathBuf,
+    target: String,
     catalog: PathBuf,
     calls: PathBuf,
 }
@@ -75,6 +76,7 @@ impl Fixture {
             home,
             codex,
             installed: installed.join("bin").join(target).join(executable),
+            target: target.to_owned(),
             catalog,
             calls,
         }
@@ -148,6 +150,102 @@ impl Fixture {
         }
         #[cfg(not(windows))]
         calls
+    }
+
+    #[cfg(target_os = "macos")]
+    fn fake_codex(&self, path: &Path, marker: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let source = fs::read_to_string(&self.codex).unwrap();
+        let script = source.replacen(
+            "#!/bin/sh\n",
+            &format!("#!/bin/sh\nprintf '{marker}\\n' >> \"$GROUNDLINE_TEST_CALLS\"\n"),
+            1,
+        );
+        fs::write(path, script).unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    fn fake_app(&self, applications: &Path, name: &str, bundle_id: &str, layouts: &[&str]) {
+        let app = applications.join(format!("{name}.app"));
+        let contents = app.join("Contents");
+        fs::create_dir_all(&contents).unwrap();
+        fs::write(
+            contents.join("Info.plist"),
+            format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict><key>CFBundleIdentifier</key><string>{bundle_id}</string></dict></plist>\n"),
+        )
+        .unwrap();
+        for (index, layout) in layouts.iter().enumerate() {
+            self.fake_codex(
+                &contents.join("Resources").join(layout),
+                &format!("APP_{name}_{index}"),
+            );
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn fake_insights_package(&self) {
+        use std::os::unix::fs::PermissionsExt;
+        let relative = Path::new("bin")
+            .join(&self.target)
+            .join("groundline-insights");
+        let script = format!(
+            "#!/bin/sh\ncase \"$1\" in\n --version) echo 'groundline-insights {}' ;;\n setup) printf 'FAMILY=%s\\n' \"${{GROUNDLINE_RUNTIME_FAMILY-unset}}\" >> \"$GROUNDLINE_TEST_CALLS\" ;;\nesac\n",
+            env!("CARGO_PKG_VERSION")
+        );
+        let source = self
+            .root
+            .join("plugins/groundline-insights")
+            .join(&relative);
+        let installed = self
+            .home
+            .join(format!(
+                "plugins/cache/groundline/groundline-insights/{}",
+                env!("CARGO_PKG_VERSION")
+            ))
+            .join(&relative);
+        for path in [source, installed] {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, &script).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn run_with_app_search(&self, applications: &Path, explicit_codex: Option<&Path>) -> Output {
+        let script_path = self.root.join("install.sh");
+        let original = fs::read_to_string(&script_path).unwrap();
+        let old = "for applications in /Applications \"$HOME/Applications\"; do";
+        let replacement = format!(
+            "for applications in \"{}\" \"$HOME/Applications\"; do",
+            applications.display()
+        );
+        if original.contains(old) {
+            fs::write(&script_path, original.replacen(old, &replacement, 1)).unwrap();
+        } else {
+            assert!(original.contains(&replacement));
+        }
+        let path_dir = self.home.join("path-bin");
+        self.fake_codex(&path_dir.join("codex"), "PATH_CODEX");
+        let mut paths = vec![path_dir];
+        paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
+        let mut command = Command::new("bash");
+        command.arg(script_path);
+        if let Some(path) = explicit_codex {
+            command.arg("--codex").arg(path);
+        }
+        command
+            .args(["--profile", "insights"])
+            .env("HOME", &self.home)
+            .env("PATH", std::env::join_paths(paths).unwrap())
+            .env("CODEX_HOME", &self.home)
+            .env("GROUNDLINE_TEST_CATALOG", &self.catalog)
+            .env("GROUNDLINE_TEST_CALLS", &self.calls)
+            .env_remove("GROUNDLINE_RUNTIME_FAMILY")
+            .env_remove("CODEX_INTERNAL_ORIGINATOR_OVERRIDE")
+            .output()
+            .unwrap()
     }
 }
 
@@ -295,4 +393,64 @@ fn doctor_failure_preserves_completed_settings_and_can_resume() {
     assert!(result.status.success(), "{result:?}");
     assert_eq!(fs::read(f.home.join("config.toml")).unwrap(), before);
     assert_eq!(receipt(&result)["status"], "PASS");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn implicit_installer_prefers_verified_new_app_cli_and_marks_app_family() {
+    let f = Fixture::new();
+    f.fake_insights_package();
+    let applications = f.home.join("test-system-applications");
+    f.fake_app(
+        &applications,
+        "A-Other",
+        "example.other",
+        &["codex-cli/bin/codex"],
+    );
+    f.fake_app(
+        &applications,
+        "Z-RenamedCodex",
+        "com.openai.codex",
+        &["codex", "codex-cli/bin/codex"],
+    );
+    let result = f.run_with_app_search(&applications, None);
+    assert!(result.status.success(), "{result:?}");
+    assert_eq!(
+        receipt(&result)["stages"]["insights_setup"]["status"],
+        "PASS"
+    );
+    let calls = fs::read_to_string(&f.calls).unwrap();
+    assert!(calls.contains("APP_Z-RenamedCodex_1"), "{calls}");
+    assert!(calls.contains("FAMILY=codex_app"), "{calls}");
+    assert!(!calls.contains("APP_Z-RenamedCodex_0"), "{calls}");
+    assert!(!calls.contains("APP_A-Other"), "{calls}");
+    assert!(!calls.contains("PATH_CODEX"), "{calls}");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn explicit_codex_stays_selected_and_legacy_app_layout_remains_recognized() {
+    let f = Fixture::new();
+    f.fake_insights_package();
+    let applications = f.home.join("test-system-applications");
+    let user_applications = f.home.join("Applications");
+    f.fake_app(
+        &user_applications,
+        "CodexOldLayout",
+        "com.openai.codex",
+        &["codex"],
+    );
+    let explicit = f.codex.clone();
+    let result = f.run_with_app_search(&applications, Some(&explicit));
+    assert!(result.status.success(), "{result:?}");
+    let calls = fs::read_to_string(&f.calls).unwrap();
+    assert!(calls.contains("FAMILY=unset"), "{calls}");
+    assert!(!calls.contains("APP_CodexOldLayout"), "{calls}");
+    fs::write(&f.calls, "").unwrap();
+    let result = f.run_with_app_search(&applications, None);
+    assert!(result.status.success(), "{result:?}");
+    let calls = fs::read_to_string(&f.calls).unwrap();
+    assert!(calls.contains("APP_CodexOldLayout_0"), "{calls}");
+    assert!(calls.contains("FAMILY=codex_app"), "{calls}");
+    assert!(!calls.contains("PATH_CODEX"), "{calls}");
 }

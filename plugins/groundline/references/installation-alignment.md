@@ -88,14 +88,15 @@ patches, use the native editing tools after inspecting the exact diff. The Rust
 setup and repair commands handle only their documented rules; neither is a
 general config upgrader or a natural-language instruction rewriter.
 
-For Astra guidance review, look for overbroad skill triggers, unnecessary repeated
+For GPT-6 guidance review, look for overbroad skill triggers, unnecessary repeated
 approval, forced task creation, unconditional delegation, and instructions that
 either suppress required verification or demand exhaustive tests for every edit.
 Also check for skill text that silently overrides a user's explicit instruction.
 Revise only a rule that actually conflicts with the current request or user policy.
-The official delegation example is tunable guidance, not permission to spawn
-agents or overwrite a user's no-delegation default. Avoid copying a long Astra
-prompt into every skill. Keep one concise owning rule and link from references.
+Apply [adaptive delegation](model-effort-routing.md) within a user's requested
+or standing scope; installation alone does not override a no-delegation policy.
+Keep the GPT-6 selection rule in that reference instead of duplicating prompts
+in every skill. Preserve an earlier selected model without optimizing it.
 
 ## Finish and recover
 

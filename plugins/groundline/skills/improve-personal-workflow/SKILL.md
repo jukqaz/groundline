@@ -22,9 +22,11 @@ does not authorize settings, source, plugin, or collection changes.
 
 For a model-guidance or instruction review, read
 [model and effort guidance](../../references/model-effort-routing.md), fetch the
-selected model's current official documentation, and inspect the relevant active
-instructions. Fix evidenced conflicts within the requested scope and validate
-the changed surface. Insights reports, admin credentials, history audits, and
+selected GPT-6 model's current official documentation, and inspect the relevant
+active instructions. Optimize Astra, Sol, and Luna only. Preserve older records
+and choices without tuning them. For requested adaptive delegation, use the
+reference's native per-lane selection and verification policy. Fix evidenced
+conflicts within the requested scope and validate the changed surface. Insights reports, admin credentials, history audits, and
 personal trials are not prerequisites. Report unmeasured behavioral effects.
 
 ## Outcome-based personal trial

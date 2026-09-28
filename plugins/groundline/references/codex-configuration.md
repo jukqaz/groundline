@@ -100,7 +100,7 @@ Only supplied files are checked. Effective layer resolution, full native schema,
 and fresh-task behavior still require native verification. No state is reset,
 no retired format is migrated, and no package or hook is installed by this command.
 
-## Astra and context posture
+## GPT-6 and context posture
 
 Follow [model and effort guidance](model-effort-routing.md) on demand. Use the
 native catalog's supported efforts instead of translating effort names or
@@ -128,6 +128,34 @@ not justify disabling normal compaction, pinning context limits, or resetting
 history. Verify the affected feature and current incident status before proposing
 a scoped change. Do not encode temporary provider incidents as permanent defaults.
 
+## Scoped automatic review
+
+For a requested approval-policy adjustment, first identify the exact blocked
+operation and the active App/PATH versions. On hosts that support it,
+`auto_review.extra_policy` adds local review guidance alongside the main policy;
+managed `guardian_extra_policy` takes precedence. Prefer a narrow additive rule
+for the already authorized scope. Do not replace the policy just to reduce prompts.
+`auto_review.policy` and managed `guardian_policy_config` replace the current
+policy; they require access to its full current text and preservation of existing
+rules. If that text is unavailable, do not override it.
+
+Auto-review applies only to eligible interactive prompts under `on-request` or
+relevant granular approval categories. With `never`, there is no prompt to review;
+it cannot expand the active sandbox or change managed restrictions. Granular
+categories control which prompts can appear, not blanket permission to execute.
+For connected tools, inspect server/tool-specific `default_tools_approval_mode`
+and `approval_mode` before considering broad permission changes. Computer Use
+app approvals remain separate. Verify supported keys with both the actual bundled
+and PATH CLI, and distinguish a parsed file from the effective fresh-task policy.
+
+Remove a reported obsolete feature only within an authorized settings repair
+and after verifying the exact key on the actual host. For example,
+`features.thread_tools` is absent from the September 28 App/PATH feature lists;
+do not invent a replacement switch or infer that native thread tools are absent.
+GroundLine guidance does not modify the active policy, enable all capabilities,
+or turn a denial into permission. A refusal needs its exact reason and a materially
+safer authorized alternative; increasing model effort cannot resolve it.
+
 ## Worktrees and private surfaces
 
 For App-managed local worktrees, prefer checked-in local environments. Add root
@@ -141,7 +169,8 @@ MCP headers, and environment values out of source and diagnostic output. Trust
 records alone do not prove activation. Core has no lifecycle hooks; optional
 Insights uses its own reviewed hook and explicit collection-consent contract.
 
-Sources checked 2026-09-07:
+Sources checked 2026-09-28:
 - [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)
 - [Astra prompting best practices](https://developers.openai.com/api/docs/guides/latest-model#prompting-best-practices)
 - [Codex subagent configuration](https://learn.chatgpt.com/docs/agent-configuration/subagents)
+- [Automatic review boundaries](https://learn.chatgpt.com/docs/sandboxing/auto-review)

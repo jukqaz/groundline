@@ -10,6 +10,8 @@ pub mod audit;
 #[cfg(feature = "batch")]
 pub mod batch;
 #[cfg(feature = "efficiency")]
+pub mod delivery;
+#[cfg(feature = "efficiency")]
 pub mod efficiency;
 #[cfg(feature = "insights")]
 pub mod event;
@@ -23,6 +25,8 @@ pub mod integrity;
 pub mod model;
 #[cfg(feature = "audit")]
 pub mod rollout;
+#[cfg(feature = "efficiency")]
+pub mod routing;
 #[cfg(any(feature = "audit", feature = "insights"))]
 mod usage;
 #[cfg(feature = "version")]

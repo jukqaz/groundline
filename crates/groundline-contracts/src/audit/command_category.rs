@@ -27,6 +27,9 @@ pub(super) fn category(arguments: &str) -> &'static str {
     ]) {
         return "other_command";
     }
+    let Some((command, cargo_environment)) = strip_cargo_environment(command) else {
+        return "other_command";
+    };
     let Some(words) = shlex::split(command) else {
         return "other_command";
     };
@@ -34,6 +37,9 @@ pub(super) fn category(arguments: &str) -> &'static str {
         return "other_command";
     };
     let program = program.rsplit('/').next().unwrap_or(program);
+    if cargo_environment && program != "cargo" {
+        return "other_command";
+    }
     let first = args.first().map(String::as_str);
     if args
         .iter()
@@ -66,6 +72,30 @@ pub(super) fn category(arguments: &str) -> &'static str {
     } else {
         "other_command"
     }
+}
+
+fn strip_cargo_environment(command: &str) -> Option<(&str, bool)> {
+    let mut command = command.trim_start_matches([' ', '\t']);
+    let mut found = false;
+    loop {
+        let (word, rest) = command.split_once([' ', '\t']).unwrap_or((command, ""));
+        let Some((name, path)) = word.split_once('=') else {
+            break;
+        };
+        // Check the original spelling before shlex removes quotes/escapes. Only
+        // these Cargo paths are supported, not arbitrary shell assignments.
+        if !matches!(name, "CARGO_HOME" | "CARGO_TARGET_DIR")
+            || !path.starts_with('/')
+            || !path.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'_' | b'-')
+            })
+        {
+            return None;
+        }
+        found = true;
+        command = rest.trim_start_matches([' ', '\t']);
+    }
+    Some((command, found))
 }
 
 #[cfg(test)]
@@ -115,6 +145,68 @@ mod tests {
             "{\"other\":\"cargo test\"}",
         ] {
             assert_eq!(category(command), "other_command", "{command}");
+        }
+    }
+
+    #[test]
+    fn classifies_literal_cargo_environment_paths() {
+        for (command, expected) in [
+            (
+                "CARGO_HOME=/private/tmp/cargo-union.1 cargo test --locked",
+                "verification",
+            ),
+            ("CARGO_TARGET_DIR=/tmp/build cargo check", "verification"),
+            (
+                "\t CARGO_HOME=/tmp/cargo\tCARGO_TARGET_DIR=/tmp/build /usr/bin/cargo clippy",
+                "verification",
+            ),
+            ("CARGO_HOME=/tmp/cargo cargo fmt --check", "verification"),
+            ("CARGO_HOME=/tmp/cargo cargo test --help", "inspection"),
+            ("CARGO_HOME=/tmp/cargo cargo fmt", "mutation"),
+        ] {
+            assert_eq!(category(command), expected, "{command}");
+            assert_eq!(
+                category(&serde_json::json!({"cmd": command}).to_string()),
+                expected,
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_nonliteral_or_non_cargo_environment_prefixes() {
+        for command in [
+            "CARGO_HOME=/tmp/cargo",
+            "CARGO_HOME= cargo test",
+            "CARGO_HOME=relative cargo test",
+            "CARGO_HOME=~/cargo cargo test",
+            "CARGO_HOME='/tmp/cargo' cargo test",
+            "CARGO_HOME=\"/tmp/cargo\" cargo test",
+            "'CARGO_HOME=/tmp/cargo' cargo test",
+            "\"CARGO_HOME\"=/tmp/cargo cargo test",
+            "CARGO_HOME=/tmp/cargo\\ dir cargo test",
+            "CARGO_HOME=/tmp/* cargo test",
+            "CARGO_HOME=/tmp/cargo? cargo test",
+            "CARGO_HOME=/tmp/{cargo,other} cargo test",
+            "CARGO_HOME=$HOME/cargo cargo test",
+            "CARGO_HOME=$(pwd) cargo test",
+            "CARGO_HOME=C:/cargo cargo test",
+            "CARGO_HOME=/tmp/한글 cargo test",
+            "OTHER=/tmp/cargo cargo test",
+            "CARGO_HOME=/tmp/cargo OTHER=/tmp/build cargo test",
+            "env CARGO_HOME=/tmp/cargo cargo test",
+            "sh -c 'CARGO_HOME=/tmp/cargo cargo test'",
+            "CARGO_HOME=/tmp/cargo cargo test && cargo clippy",
+            "CARGO_HOME=/tmp/cargo cargo test\ncargo clippy",
+            "CARGO_HOME=/tmp/cargo pytest",
+            "CARGO_HOME=/tmp/cargo rg 'cargo test' src",
+        ] {
+            assert_eq!(category(command), "other_command", "{command}");
+            assert_eq!(
+                category(&serde_json::json!({"cmd": command}).to_string()),
+                "other_command",
+                "{command}"
+            );
         }
     }
 }
