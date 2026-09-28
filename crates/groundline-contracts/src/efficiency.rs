@@ -108,7 +108,7 @@ struct Reductions {
 
 const SCENARIOS: &[(&str, Reductions)] = &[
     (
-        "conservative",
+        "lower_reduction_assumption",
         Reductions {
             cached_input: 0.40,
             non_cached_input: 0.10,
@@ -121,7 +121,7 @@ const SCENARIOS: &[(&str, Reductions)] = &[
         },
     ),
     (
-        "expected",
+        "middle_reduction_assumption",
         Reductions {
             cached_input: 0.56,
             non_cached_input: 0.22,
@@ -134,7 +134,7 @@ const SCENARIOS: &[(&str, Reductions)] = &[
         },
     ),
     (
-        "optimistic",
+        "higher_reduction_assumption",
         Reductions {
             cached_input: 0.69,
             non_cached_input: 0.32,
@@ -404,7 +404,7 @@ pub fn simulate(audits: &[Value]) -> Result<Value, ContractError> {
     }
     Ok(json!({
         "kind": "groundline-efficiency-simulation",
-        "schema": 1,
+        "schema": 2,
         "status": if baseline_total == 0 { "INCONCLUSIVE" } else { "PASS" },
         "reason_codes": if baseline_total == 0 { vec!["zero_observed_token_baseline"] } else { vec![] },
         "audit_count": audits.len(),
@@ -415,7 +415,7 @@ pub fn simulate(audits: &[Value]) -> Result<Value, ContractError> {
         "assumptions": {
             "source": "fixed_hypothetical_reduction_fractions",
             "learned_from_usage": false,
-            "expected_label_is_measured_expectation": false,
+            "scenario_labels_are_forecasts": false,
             "scope": "observed_reported_counters_only",
             "unobserved_usage_imputed": false,
             "sample_representativeness_assessed": false,
@@ -705,7 +705,15 @@ pub fn compare_aggregate_periods(packet: &Value) -> Result<Value, ContractError>
     let changed_value_differs = changed_dimension == "none"
         || baseline.cohort.get(changed_dimension) != candidate.cohort.get(changed_dimension);
     let mut reasons = Vec::new();
-    let status = if !mismatch_fields.is_empty() || !changed_value_differs {
+    let gpt6_only = [&baseline, &candidate].iter().all(|snapshot| {
+        snapshot.cohort["model_family"]
+            .as_str()
+            .is_some_and(crate::model::optimization_model)
+    });
+    let status = if !gpt6_only {
+        reasons.push("outside_gpt6_optimization_scope".to_owned());
+        "OUTSIDE_OPTIMIZATION_SCOPE"
+    } else if !mismatch_fields.is_empty() || !changed_value_differs {
         reasons.extend(
             mismatch_fields
                 .iter()
@@ -870,8 +878,13 @@ pub fn recommend_weekly_optimization(audit: &Value) -> Result<Value, ContractErr
         .unwrap_or_default();
     let mut turn_contexts = 0_u64;
     let mut high_depth_contexts = 0_u64;
+    let mut gpt6_only = !model_counts.is_empty();
     for (label, raw_count) in model_counts {
         let count = raw_count.as_u64().unwrap_or(0);
+        let supported = label.split_once('|').is_some_and(|(model, effort)| {
+            crate::model::optimization_model(model) && !effort.contains('|') && count > 0
+        });
+        gpt6_only &= supported;
         turn_contexts = turn_contexts
             .checked_add(count)
             .ok_or_else(|| ContractError("numeric_overflow".to_owned()))?;
@@ -947,8 +960,10 @@ pub fn recommend_weekly_optimization(audit: &Value) -> Result<Value, ContractErr
                 .and_then(Value::as_str)
                 == Some("PASS")
         });
-    let candidate_evidence = evidence_quality == "sufficient" || bounded_partial;
-    let recommendation_scope = if evidence_quality == "sufficient" {
+    let candidate_evidence = gpt6_only && (evidence_quality == "sufficient" || bounded_partial);
+    let recommendation_scope = if !gpt6_only {
+        "outside_gpt6_optimization_scope"
+    } else if evidence_quality == "sufficient" {
         "weekly_completed_root_cohort"
     } else if bounded_partial {
         "selected_completed_root_sample"
@@ -997,6 +1012,8 @@ pub fn recommend_weekly_optimization(audit: &Value) -> Result<Value, ContractErr
         "generated_at_utc": generated_at,
         "evidence_quality": evidence_quality,
         "recommendation_scope": recommendation_scope,
+        "optimization_model_scope": "gpt-6",
+        "optimization_model_cohort_eligible": gpt6_only,
         "signals": signals,
         "recommended_change": {
             "code": recommended,
@@ -1017,7 +1034,7 @@ pub fn recommend_weekly_optimization(audit: &Value) -> Result<Value, ContractErr
             "model_or_effort_change_allowed": false,
             "one_candidate_only": true,
             "bounded_partial_sample_used": bounded_partial,
-            "generalization_to_unselected_roots_allowed": evidence_quality == "sufficient",
+            "generalization_to_unselected_roots_allowed": gpt6_only && evidence_quality == "sufficient",
         },
         "automatic_application_allowed": false,
         "weekly_review_required": false,
@@ -1069,9 +1086,13 @@ mod tests {
     fn simulation_matches_the_existing_counterfactual_contract() {
         let result = simulate(&[audit()]).expect("valid audit");
         assert_eq!(result["baseline"]["non_cached_input_tokens"], 300);
-        assert_eq!(result["scenarios"]["expected"]["total_tokens"], 670);
+        assert_eq!(result["schema"], 2);
         assert_eq!(
-            result["scenarios"]["expected"]["total_reduction_ratio"],
+            result["scenarios"]["middle_reduction_assumption"]["total_tokens"],
+            670
+        );
+        assert_eq!(
+            result["scenarios"]["middle_reduction_assumption"]["total_reduction_ratio"],
             0.4417
         );
         assert_eq!(result["evidence_class"], "counterfactual_not_measured");
@@ -1081,12 +1102,12 @@ mod tests {
         );
         assert_eq!(result["assumptions"]["learned_from_usage"], false);
         assert_eq!(
-            result["assumptions"]["expected_label_is_measured_expectation"],
+            result["assumptions"]["scenario_labels_are_forecasts"],
             false
         );
         assert_eq!(result["assumptions"]["unobserved_usage_imputed"], false);
         assert_eq!(
-            result["scenarios"]["expected"]["assumed_reduction_fractions"]["cached_input_tokens"],
+            result["scenarios"]["middle_reduction_assumption"]["assumed_reduction_fractions"]["cached_input_tokens"],
             0.56
         );
         for scenario in result["scenarios"].as_object().unwrap().values() {
@@ -1441,7 +1462,7 @@ mod tests {
                 "os_family": "macos",
                 "runtime_family": "codex_app",
                 "execution_mode": "desktop",
-                "model_family": "sol",
+                "model_family": "gpt-6-sol",
                 "effort": "xhigh"
             },
             "sample": {
@@ -1478,6 +1499,18 @@ mod tests {
         assert_eq!(ready["statistical_confidence"], "not_estimated");
         assert_eq!(ready["causal_effect_estimated"], false);
         assert!(ready.get("confidence").is_none());
+        for historical in ["sol", "luna", "astra", "gpt-5", "unknown"] {
+            let mut old = packet.clone();
+            old["baseline"]["cohort"]["model_family"] = json!(historical);
+            old["candidate"]["cohort"]["model_family"] = json!(historical);
+            let excluded = compare_aggregate_periods(&old).unwrap();
+            assert_eq!(excluded["status"], "OUTSIDE_OPTIMIZATION_SCOPE");
+            assert_eq!(
+                excluded["reason_codes"],
+                json!(["outside_gpt6_optimization_scope"])
+            );
+            assert_eq!(excluded["metric_deltas"], ready["metric_deltas"]);
+        }
         assert_eq!(
             ready["metric_deltas"]["compactions_per_root"]["relative_delta"],
             -0.5
@@ -1508,7 +1541,7 @@ mod tests {
             },
             "root": {
                 "activity": {"compactions": 30, "user_messages_with_text": 20},
-                "model_effort": {"counts": {"gpt-5.6-sol|xhigh": 18, "gpt-5.6-sol|high": 2}},
+                "model_effort": {"counts": {"gpt-6-sol|xhigh": 18, "gpt-6-sol|high": 2}},
                 "task_latency": {"completed_count": 10, "long_turn_count": 3},
                 "prompt_shape": {"short_message_count": 12, "broad_scope_message_count": 10},
                 "tools": {
@@ -1528,6 +1561,33 @@ mod tests {
             "rollout_paths_emitted": false,
             "secret_value_printed": false
         })
+    }
+
+    #[test]
+    fn weekly_advice_excludes_older_mixed_and_unversioned_model_cohorts() {
+        for counts in [
+            json!({"gpt-5.6-sol|xhigh":20}),
+            json!({"sol|xhigh":20}),
+            json!({"astra|high":20}),
+            json!({"gpt-6-sol|high":19,"gpt-5.6-luna|high":1}),
+            json!({"gpt-6-luna|high":19,"unknown|unset":1}),
+            json!({}),
+        ] {
+            let mut audit = weekly_audit();
+            audit["root"]["model_effort"]["counts"] = counts;
+            let result = recommend_weekly_optimization(&audit).unwrap();
+            assert_eq!(result["optimization_model_cohort_eligible"], false);
+            assert_eq!(
+                result["recommended_change"]["code"],
+                "preserve_current_workflow"
+            );
+            assert_eq!(
+                result["recommendation_scope"],
+                "outside_gpt6_optimization_scope"
+            );
+            assert_eq!(result["signals"]["completed_root_count"], 10);
+            assert_eq!(result["mutation_performed"], false);
+        }
     }
 
     #[test]
@@ -1564,7 +1624,7 @@ mod tests {
 
     #[test]
     fn model_and_effort_labels_do_not_authorize_task_or_setting_changes() {
-        for model in ["gpt-6-astra", "gpt-5.6-sol"] {
+        for model in ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"] {
             for effort in ["high", "xhigh", "max", "ultra"] {
                 let mut audit = weekly_audit();
                 audit["root"]["model_effort"]["counts"] = json!({format!("{model}|{effort}"): 20});

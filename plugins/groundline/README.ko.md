@@ -1,5 +1,9 @@
 # GroundLine
 
+최적화 기준은 GPT-6 Astra·Sol·Luna입니다. 자동 분배를 요청한 작업에서는
+독립적인 서브에이전트마다 지원되는 모델·effort를 선택합니다. 이전 세대는
+기록을 보존하되 추천·튜닝 대상에서 제외합니다.
+
 GroundLine은 Codex 작업 준비, 증거 기반 완료, 프로젝트 설정 감사, 집계 사용량
 분석을 반복 가능하게 만드는 공개 로컬 우선 플러그인입니다. Codex의 실행,
 설정, 권한, 에이전트, worktree, 리뷰, 업그레이드 기능을 대체하지 않습니다.
@@ -85,11 +89,23 @@ groundline guidance audit --profile /private/review/profile.json --baseline /pri
 groundline audit weekly --days 7 --json
 groundline efficiency batch --input batch.json --json
 groundline efficiency compare --input comparison.json --json
+groundline efficiency route --input routing.json --catalog native-models.json --audit weekly.json --report insights-7.json --json
+groundline efficiency record-delivery --input manifest.json --output receipts/delivery.json --json
 ```
+
+[비공개 완료 기록](references/delivery-evidence.md)은 승인된 작업의 추천·관측 모델과
+완료 결과를 연결합니다. 라우팅 패킷의 `outcomes`를 비우고 `efficiency route
+--deliveries`에 전용 기록 디렉터리를 전달하면 다음 비교에 재사용합니다. 기록은 로컬에서
+명시적으로 생성하며, 실행·자원 근거가 부족하면 실측 개선으로 판정하지 않습니다.
 
 `project-audit`는 Codex guidance, config, skill, agent, rule, plugin,
 `.worktreeinclude` 개수만 세고 내용은 읽거나 반환하지 않습니다. audit는 로컬
 Codex state store를 수정하지 않으며, efficiency 입력은 외부로 전송하지 않습니다.
+
+`efficiency route`는 [대화·ClickHouse 근거 계약](references/evidence-routing.md)에
+따라 GPT-6의 다음 작업 조합과 조건에 맞는 Codex 기능을 제안합니다. 직접 결과
+표본이 충분하지 않으면 실측 최적 조합이라고 주장하지 않으며, 원문 대화는
+로컬에서만 확인합니다. 적용과 실행 결과 검증은 네이티브 Codex가 담당합니다.
 
 `config-audit`는 제공한 네이티브 모델 카탈로그와 설정을 비교합니다.
 `config-repair`는 컨텍스트 제한의 수정안을 미리 보여주며, 같은 입력의 계획 해시와

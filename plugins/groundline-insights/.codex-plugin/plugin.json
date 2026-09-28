@@ -1,6 +1,6 @@
 {
   "name": "groundline-insights",
-  "version": "0.28.0",
+  "version": "0.29.0",
   "description": "Independently installable, opt-in self-hosted Insights for Codex.",
   "author": {
     "name": "GroundLine contributors",
@@ -28,7 +28,9 @@
       "Write",
       "Private Insights"
     ],
-    "defaultPrompt": "Check the GroundLine Insights collector, upload, ClickHouse, and Grafana evidence lanes without exposing secrets or raw Codex content.",
+    "defaultPrompt": [
+      "Check GroundLine Insights collection, upload, ClickHouse, and Grafana without exposing private data."
+    ],
     "websiteURL": "https://github.com/jukqaz/groundline/tree/main/plugins/groundline-insights",
     "privacyPolicyURL": "https://github.com/jukqaz/groundline/blob/main/docs/privacy.md",
     "termsOfServiceURL": "https://github.com/jukqaz/groundline/blob/main/docs/terms.md",

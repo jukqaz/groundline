@@ -377,7 +377,7 @@ mod tests {
     }
 
     #[test]
-    fn astra_labels_use_the_same_allowlist_for_collection_and_validation() {
+    fn gpt6_labels_preserve_generation_and_historical_counts() {
         let counts = json!({"model_effort":{"counts":{
             "gpt-6-astra|high":2,"astra|high":3,"gpt-6.1|low":1,"private-console|low":4
         }}});
@@ -385,8 +385,9 @@ mod tests {
         assert_eq!(
             result,
             json!([
-                {"model_family":"astra","effort":"high","count":5},
+                {"model_family":"astra","effort":"high","count":3},
                 {"model_family":"gpt-6","effort":"low","count":1},
+                {"model_family":"gpt-6-astra","effort":"high","count":2},
                 {"model_family":"other","effort":"low","count":4}
             ])
         );

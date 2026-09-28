@@ -31,9 +31,12 @@
   Ask for new authority only when scope or external effects materially change.
 - Use other GroundLine skills only when their explicit workflow matches the
   request; ordinary planning and implementation stay Codex-native.
-- Spawn subagents only when the user explicitly asks for delegation, parallel
-  work, or subagents. Give each agent one independent lane and a compact return
-  contract.
+- Optimize model guidance and personal trials for GPT-6 Astra, Sol, and Luna
+  only; preserve older records without treating them as optimization targets.
+- A user request or applicable GPT-6 selection skill can authorize useful
+  independent subagents throughout that task. Follow the GPT-6 model/effort reference for per-lane
+  selection, compact handoffs, disjoint ownership, and integration checks.
+  Preserve explicit task-level selections and any no-delegation policy.
 - Use Codex built-in agents and any user-owned specialist agents directly;
   GroundLine does not install or override custom agents.
 - Leave model and reasoning effort unpinned unless the user explicitly requests

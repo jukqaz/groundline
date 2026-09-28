@@ -68,10 +68,37 @@ case "$INSTALL_PROFILE/$INSTALL_PRESET" in core/preserve|core/astra|insights/pre
 if [[ $INSTALL_PROFILE == core && ${#INSTALL_INSIGHTS[@]} -gt 1 ]] || [[ $INSTALL_PROFILE == insights && ${#INSTALL_SETUP[@]} -gt 1 ]]; then usage >&2; exit 1; fi
 trap finish EXIT
 
+app_codex_bundle() {
+  local app plist bundle_id
+  case "$1" in
+    */Contents/Resources/codex-cli/bin/codex) app=${1%/Contents/Resources/codex-cli/bin/codex} ;;
+    */Contents/Resources/codex) app=${1%/Contents/Resources/codex} ;;
+    *) return 1 ;;
+  esac
+  plist="$app/Contents/Info.plist"
+  [[ -x "$1" && -f "$plist" ]] || return 1
+  bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist" 2>/dev/null) || return 1
+  [[ "$bundle_id" == com.openai.codex ]]
+}
+find_app_codex() {
+  local resource_path applications app candidate
+  for resource_path in codex-cli/bin/codex codex; do
+    for applications in /Applications "$HOME/Applications"; do
+      for app in "$applications"/*.app; do
+        [[ -d "$app" ]] || continue
+        candidate="$app/Contents/Resources/$resource_path"
+        if app_codex_bundle "$candidate"; then printf '%s\n' "$candidate"; return 0; fi
+      done
+    done
+  done
+  return 1
+}
 if [[ -z "$INSTALL_CODEX" ]]; then
-  if [[ -x /Applications/ChatGPT.app/Contents/Resources/codex ]]; then INSTALL_CODEX=/Applications/ChatGPT.app/Contents/Resources/codex
-  else INSTALL_CODEX="$(command -v codex || true)"; fi
+  if [[ $(uname -s) == Darwin ]]; then INSTALL_CODEX=$(find_app_codex) || true; fi
+  if [[ -z "$INSTALL_CODEX" ]]; then INSTALL_CODEX="$(command -v codex || true)"; fi
 fi
+INSTALL_APP_BUNDLED=0
+if [[ $(uname -s) == Darwin ]] && app_codex_bundle "$INSTALL_CODEX"; then INSTALL_APP_BUNDLED=1; fi
 if ! command -v git >/dev/null || [[ -z "$INSTALL_CODEX" ]] ||
    ! "$INSTALL_CODEX" plugin add --help >/dev/null ||
    ! "$INSTALL_CODEX" debug models --help >/dev/null ||
@@ -129,7 +156,7 @@ if [[ $INSTALL_PROFILE != core ]]; then
   # any explicit runtime/originator choice, including remote automation.
   insights_setup() (
     if [[ -z ${GROUNDLINE_RUNTIME_FAMILY+x} && -z ${CODEX_INTERNAL_ORIGINATOR_OVERRIDE+x} ]]; then
-      case "$INSTALL_CODEX" in */ChatGPT.app/Contents/Resources/codex) export GROUNDLINE_RUNTIME_FAMILY=codex_app ;; esac
+      if [[ $INSTALL_APP_BUNDLED == 1 ]]; then export GROUNDLINE_RUNTIME_FAMILY=codex_app; fi
     fi
     "$binary" setup "${INSTALL_INSIGHTS[@]}"
   )

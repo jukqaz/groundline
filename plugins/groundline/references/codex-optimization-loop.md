@@ -7,6 +7,12 @@ the fewest tool calls or the most enabled features. Native Codex remains the
 executor. Core is an offline evidence and trial engine; it does not research
 the web, activate instructions, or create a second scheduler/model router.
 
+Optimization applies only to GPT-6 Astra, Sol, and Luna. Use
+[model/effort and adaptive delegation](model-effort-routing.md) for task-level
+selection. Earlier or unversioned cohorts remain historical evidence, not tuning
+targets. Mixed/unknown root generations receive no aggregate optimization
+candidate; collect appropriate future evidence without rewriting prior data.
+
 ## Review before collecting again
 
 Start with the last candidate or trial and its authorized scope. Report retained,
@@ -16,7 +22,7 @@ an outcome because a week elapsed. If a trial is active, evaluate it before
 proposing another confounded intervention.
 
 For a weekly run, follow [the weekly audit contract](weekly-usage-audit.md) once
-and retain its redacted result in memory. Reuse that result for recommendations,
+and retain its full redacted result before emitting a smaller projection. Reuse that result for recommendations,
 research, and supported counterfactuals. Reuse available Insights reports when
 their scope is adequate; fetch only missing authorized windows needed for the
 question. Never run another audit because research revealed a new idea or an
@@ -24,12 +30,37 @@ earlier output was lost. Keep missing history, source ownership, and collector
 health separate. A partial audit can expose a reproducible source defect even
 when it cannot qualify a personal trial.
 
+For authorized remote analysis, identify the blocked layer: edge/SSO login,
+application/API authorization, or database access. A sign-in page establishes
+pending authentication, not a rejected database credential. Complete the normal
+existing sign-in flow within the user's requested destination; stop for an
+actual denial, unavailable credential or required user challenge. Do not create
+credentials, broaden access or bypass a gate. Confirm a successful data query
+before reporting access restored. Browser dashboard observations remain distinct
+from a strict owner report; preserve filters, timestamps and completeness.
+
 Classify patterns using evidence appropriate to the claim: repeated reading
 with unchanged inputs, oversized irrelevant results, premature handoffs,
 avoidable serial waits, missed acceptance checks, or skill-selection conflicts.
 Aggregate ratios identify candidates; they do not prove any of these causes.
 Long tasks, high effort, compactions, and valid approvals are not waste by
 themselves. Do not upload raw conversations for diagnosis.
+
+Before proposing a model change, distinguish aggregate root/delegated token
+shares from per-delivery owned resources. A high aggregate root share flags root
+context and integration for investigation; only matched delivery receipts can
+establish a task-level bottleneck or savings. High cached input is not proof of
+waste or permission to reset context. Low repeated-call or failure-signal ratios
+do not establish that retry suppression is the main saving, either; inspect
+their definitions, denominator and actual calls before prioritizing that change.
+Keep collector purpose (`production`/`verification`/`unclassified`) separate from
+task kind and phase. It is an explicit declaration for future collection windows,
+not an inferred classification of conversations. Never relabel it from task text.
+Derive only relevant task/phase and acceptance notes from authorized local
+conversations. Missing outcome evidence limits measured comparisons; it does not
+require the user to manually label every prompt or prevent useful native task
+judgment. Report a concrete behavior change,
+its acceptance check, and whether it was applied, merely prepared, or measured.
 
 ## Research only relevant changes
 
@@ -60,7 +91,7 @@ change hook trust, or force a model merely to increase feature use.
 | --- | --- | --- |
 | Eager, irrelevant context or conflicting instructions | Narrow skill triggers and conditional references; task-local context selection | Required evidence still loaded; verified outcomes and owned tokens compared |
 | Repeated valid investigation or verification | Reuse evidence tied to unchanged inputs, environment, scope, and risk | Reuse remains valid; changed inputs trigger affected revalidation |
-| Independent reads performed serially | Bounded native concurrent reads; separately authorized agents only when useful | Correct per-call results; elapsed time compared without losing coverage |
+| Independent reads performed serially | Bounded native concurrent reads; GPT-6 agents under an active delegation request or standing policy | Correct per-call results; elapsed time compared without losing coverage |
 | Long native operations repeatedly polled without need | Supported async execution/wait mechanism with explicit result correlation | Completion captured and failures handled; no invented terminal success |
 | Missing relevant tool/skill or repeated setup | Task-scoped discovery, authenticated MCP, or native worktree setup where justified | Actual invocation/setup succeeds; context/setup cost included |
 | Delayed review or follow-up | Appropriate native review or user-requested automation | Requested result verified; scheduled triggers distinguished from manual calls |
@@ -69,6 +100,25 @@ These are review surfaces, not auto-applied recipes or newly implemented CLI
 controls. Research availability locally; respect the owner's delegation policy.
 Count feature opportunities only when eligibility was directly observed. A
 missing denominator is unknown, not zero utilization.
+
+For a bounded, feature-aware review, use the conditional
+[capability routing matrix](capability-routing.md). Classify only the requested
+conversation window and relevant work items; do not inventory every Codex
+surface on every turn. Missing or unreadable history means UNKNOWN, not UNUSED.
+Use the live host/account catalog and task tools for availability; stored flags,
+provider documentation, and aggregate call counts are not proof of activation.
+
+The offline `groundline efficiency route --input ... --catalog ...
+[--audit ...] [--report ...] --json` interface joins conversation-local semantic
+eligibility classifications with current capability evidence, audit quality and
+coverage, model/effort token attribution, and matched per-delivery outcomes. It
+returns matched-outcome replacement candidates and verification needs; without
+matched outcomes, native task judgment selects the model and effort. Aggregates
+are optional descriptive context; it does not
+invent eligibility from aggregate counts, enable features, edit settings, or
+change the running root. Native Codex executes an authorized task or lane choice
+through controls actually exposed by the host. Follow the
+[private evidence contract](evidence-routing.md) for inputs and acceptance checks.
 
 ## One actionable improvement
 
@@ -118,6 +168,6 @@ comparison contract; do not silently relax gates. Retain, revise, or restore
 the authorized change from actual evidence and carry unresolved evidence into
 the next scheduled review without repeating completed work.
 
-Official guidance reviewed 2026-09-21:
+Official guidance reviewed 2026-09-28:
 - [Astra skills and prompts](https://developers.openai.com/blog/rethinking-skills-and-prompts-for-gpt-6-astra): concise selection descriptions, conditional references, and task-appropriate persistence.
 - [Evaluation design](https://developers.openai.com/api/docs/guides/evaluation-best-practices): use task-specific outcome checks; a hypothetical scenario is not a measured result.

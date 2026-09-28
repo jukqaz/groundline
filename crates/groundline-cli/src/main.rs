@@ -13,9 +13,11 @@ use serde_json::{Value, json};
 
 mod config_audit;
 mod config_repair;
+mod delivery;
 mod guidance;
 mod operations;
 mod personal;
+mod routing;
 mod setup;
 
 #[derive(Debug, Parser)]
@@ -174,6 +176,33 @@ enum AuditCommand {
 
 #[derive(Debug, Subcommand)]
 enum EfficiencyCommand {
+    /// Compare private GPT-6 outcomes with a native catalog and optional aggregate context.
+    Route {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        catalog: PathBuf,
+        /// Optional native weekly audit or combined weekly review; - accepts stdin.
+        #[arg(long)]
+        audit: Option<PathBuf>,
+        /// Strict owner Insights report from ClickHouse; absence stays explicit.
+        #[arg(long)]
+        report: Option<PathBuf>,
+        /// Private completed-delivery receipts; input outcomes must be empty.
+        #[arg(long)]
+        deliveries: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Record one delivery with local evidence in a NEW private receipt.
+    RecordDelivery {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
     /// Assess a Goal batch without changing Codex or GroundLine state.
     Batch {
         #[arg(long)]
@@ -313,7 +342,7 @@ fn emit(value: &Value, json_output: bool) {
 }
 
 fn failure(error: ContractError) -> Value {
-    let mutation = if error.0.starts_with("personal_") {
+    let mutation = if error.0.starts_with("personal_") || error.0.starts_with("delivery_") {
         Value::Null
     } else {
         json!(false)
@@ -466,6 +495,32 @@ fn run(cli: Cli) -> Result<(), ExitCode> {
                 })
                 .map(|value| (value, json))
         }
+        Command::Efficiency {
+            command:
+                EfficiencyCommand::Route {
+                    input,
+                    catalog,
+                    audit,
+                    report,
+                    deliveries,
+                    json,
+                },
+        } => routing::run(
+            &input,
+            &catalog,
+            audit.as_deref(),
+            report.as_deref(),
+            deliveries.as_deref(),
+        )
+        .map(|value| (value, json)),
+        Command::Efficiency {
+            command:
+                EfficiencyCommand::RecordDelivery {
+                    input,
+                    output,
+                    json,
+                },
+        } => delivery::record(&input, &output).map(|value| (value, json)),
         Command::Efficiency {
             command: EfficiencyCommand::Batch { input, json },
         } => load_object(&input)

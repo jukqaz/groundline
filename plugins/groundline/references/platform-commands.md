@@ -38,7 +38,8 @@ differs from the App's bundled executable.
 On macOS, use the actual application bundle metadata and its bundled executable;
 the display name does not determine the `.app` directory name. Inspect the
 standard system/user Applications directories narrowly and match the application's
-bundle identifier before resolving `Contents/Resources/codex`. Do not declare the
+bundle identifier before resolving `Contents/Resources/codex-cli/bin/codex`
+(or `Contents/Resources/codex` in an older verified bundle). Do not declare the
 App absent after checking one guessed directory. Capture resolved paths privately;
 report the executable's version and whether it is App-bundled or PATH-resolved.
 

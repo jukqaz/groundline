@@ -54,6 +54,13 @@ struct PluginManifest {
     name: String,
     version: String,
     repository: String,
+    interface: PluginInterface,
+}
+
+#[derive(Debug, Deserialize)]
+struct PluginInterface {
+    #[serde(rename = "defaultPrompt")]
+    default_prompt: Vec<String>,
 }
 
 pub(super) fn regular_bytes(path: &Path) -> Result<Vec<u8>, XtaskError> {
@@ -222,6 +229,12 @@ fn manifest(path: &Path, expected_name: &str) -> Result<PluginManifest, XtaskErr
     if manifest.name != expected_name
         || manifest.version != env!("CARGO_PKG_VERSION")
         || manifest.repository != "https://github.com/jukqaz/groundline"
+        || !(1..=3).contains(&manifest.interface.default_prompt.len())
+        || manifest
+            .interface
+            .default_prompt
+            .iter()
+            .any(|prompt| prompt.trim().is_empty() || prompt.chars().count() > 128)
     {
         return Err(XtaskError::InvalidSource);
     }
@@ -423,9 +436,33 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        contains_private_marker, contains_private_marker_outside_scanner_fixtures,
+        contains_private_marker, contains_private_marker_outside_scanner_fixtures, manifest,
         private_source_name, regular_bytes, source_scan_path,
     };
+
+    #[test]
+    fn starter_prompts_must_fit_native_codex_limits() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("plugin.json");
+        for (prompts, accepted) in [
+            (serde_json::json!(["a".repeat(128)]), true),
+            (serde_json::json!(["한".repeat(128)]), true),
+            (serde_json::json!(["one", "two", "three"]), true),
+            (serde_json::json!(["a".repeat(129)]), false),
+            (serde_json::json!(["one", "two", "three", "four"]), false),
+            (serde_json::json!([" "]), false),
+            (serde_json::json!([]), false),
+            (serde_json::json!("not an array"), false),
+        ] {
+            let value = serde_json::json!({
+                "name":"groundline", "version":env!("CARGO_PKG_VERSION"),
+                "repository":"https://github.com/jukqaz/groundline",
+                "interface":{"defaultPrompt":prompts}
+            });
+            std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+            assert_eq!(manifest(&path, "groundline").is_ok(), accepted);
+        }
+    }
 
     #[test]
     fn source_reads_reject_symlinks_and_generated_binary_trees() {

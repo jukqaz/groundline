@@ -32,6 +32,7 @@ use uuid::Uuid;
 mod analysis;
 mod projection;
 mod telemetry;
+mod trust_migration;
 
 const API_VERSION: &str = "3";
 const MAX_REQUEST_BYTES: usize = 64 * 1024;
@@ -589,34 +590,12 @@ impl ClickHouse {
             self.request_at(query, &[], None, index != 0).await?;
         }
         let consistency = projection::consistency_sql();
-        let analysis_valid = analysis::predicate();
-        let trust_expression = format!(
-            "ifNull(({TRUSTED_EVENT_PREDICATE}) AND ({consistency}) AND ({analysis_valid}), 0)"
-        );
-        let trust_fingerprint = format!("{:x}", Sha256::digest(trust_expression.as_bytes()));
-        self.request(
-            &format!("ALTER TABLE groundline.basic_weekly ADD COLUMN IF NOT EXISTS trusted_event_v5 UInt8 MATERIALIZED {trust_expression} COMMENT '{trust_fingerprint}'"),
-            &[], None,
-        ).await?;
-        // A changed validation contract requires an explicit migration, never a
-        // silent reuse of previously stored trust decisions.
-        let trust_column = self.json_row(
-            "SELECT type, default_kind, comment FROM system.columns WHERE database = 'groundline' AND table = 'basic_weekly' AND name = 'trusted_event_v5' FORMAT JSONEachRow",
-            &[],
-        ).await?.ok_or_else(ApiError::storage)?;
-        if trust_column["type"] != "UInt8"
-            || trust_column["default_kind"] != "MATERIALIZED"
-            || trust_column["comment"] != trust_fingerprint
-        {
-            return Err(ApiError::storage());
-        }
+        let trust_expression = trust_migration::expression(&analysis::predicate());
+        trust_migration::ensure(self, config.retention_days, &trust_expression).await?;
         // Existing parts compute missing values lazily; materializing them is a
         // separately verified maintenance operation, not an unbounded startup job.
         let trusted = "trusted_event_v5 = 1".to_owned();
-        let expiry = format!(
-            "toDateTime(received_at) + toIntervalDay(if({trusted}, {}, {QUARANTINE_RETENTION_DAYS}))",
-            config.retention_days
-        );
+        let expiry = trust_migration::expiry(&trusted, config.retention_days);
         self.request(
             &format!("ALTER TABLE groundline.basic_weekly MODIFY TTL {expiry}"),
             &[],
@@ -2587,7 +2566,7 @@ mod tests {
         assert_eq!(row["root_status"], "PASS");
         assert_eq!(row["delegated_status"], "PASS");
         assert_eq!(row["guardian_status"], "PASS");
-        assert_eq!(row["model_families"], json!(["astra"]));
+        assert_eq!(row["model_families"], json!(["gpt-6-astra"]));
         assert_eq!(row["efforts"], json!(["high"]));
         assert_eq!(row["model_effort_counts"], json!([1]));
         assert_eq!(row["fallback_rollout_count"], 1);
@@ -3094,6 +3073,553 @@ mod tests {
             .unwrap_err()
             .into_response();
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    #[ignore = "manual process rehearsal fixture; requires an isolated loopback ClickHouse, schema reset, and explicit seed opt-in"]
+    async fn process_rehearsal_seed_previous_trust() {
+        let _database_guard = CLICKHOUSE_TEST_LOCK.lock().await;
+        let config = clickhouse_test_config();
+        assert_eq!(
+            std::env::var("GROUNDLINE_CLICKHOUSE_TEST_ALLOW_SCHEMA_RESET").as_deref(),
+            Ok("true"),
+            "schema reset is allowed only for a disposable ClickHouse test container"
+        );
+        assert_eq!(
+            std::env::var("GROUNDLINE_CLICKHOUSE_TEST_SEED_CANONICAL_OLD").as_deref(),
+            Ok("true"),
+            "this fixture is only for an explicit process rehearsal"
+        );
+        let fixture_dir = std::env::var("GROUNDLINE_CLICKHOUSE_TEST_FIXTURE_DIR")
+            .expect("writable output directory for synthetic event fixture");
+        let db = ClickHouse::new(&config).unwrap();
+        db.request_at("DROP DATABASE IF EXISTS groundline", &[], None, false)
+            .await
+            .unwrap();
+        db.ensure_storage(&config).await.unwrap();
+        let previous_expression =
+            trust_migration::expression(&analysis::previous_storage_predicate());
+        db.request(
+            &format!("ALTER TABLE groundline.basic_weekly MODIFY COLUMN trusted_event_v5 UInt8 MATERIALIZED {previous_expression} COMMENT 'd653ba15120d6bdb9b5d0d4077c2dd6fd0eb7aeb00f225c996f82964871ae316'"),
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+
+        let collector_id = Uuid::new_v4();
+        let mut old_valid = integration_event(collector_id, 0);
+        old_valid.as_object_mut().unwrap().remove("analysis");
+        reseal_event(&mut old_valid);
+        let mut newly_valid = integration_event(collector_id, 0);
+        let zero_tokens = newly_valid["analysis"]["root"]["unattributed"].clone();
+        newly_valid["analysis"]["root"]["buckets"] = json!([{
+            "model_family":"gpt-6-sol", "effort":"medium", "tokens":zero_tokens
+        }]);
+        reseal_event(&mut newly_valid);
+        let rows = [
+            event_row(&old_valid, Utc::now()).unwrap(),
+            event_row(&newly_valid, Utc::now()).unwrap(),
+        ];
+        for row in &rows {
+            let mut body = serde_json::to_vec(row).unwrap();
+            body.push(b'\n');
+            db.request(
+                "INSERT INTO groundline.basic_weekly FORMAT JSONEachRow",
+                &[],
+                Some(body),
+            )
+            .await
+            .unwrap();
+        }
+        assert_eq!(
+            db.request(
+                "SELECT count() FROM groundline.basic_weekly WHERE trusted_event_v5 = 1 FORMAT TabSeparated",
+                &[],
+                None,
+            )
+            .await
+            .unwrap(),
+            b"1\n"
+        );
+        let live_event = integration_event(Uuid::new_v4(), 0);
+        assert!(validate_basic_event_bytes(&serde_json::to_vec(&live_event).unwrap()).is_ok());
+        std::fs::write(
+            std::path::Path::new(&fixture_dir).join("live-event.json"),
+            serde_json::to_vec(&live_event).unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "requires an isolated loopback ClickHouse and explicit mutation opt-in"]
+    async fn clickhouse_canonical_old_only_upgrade_rejects_tampered_definition() {
+        let _database_guard = CLICKHOUSE_TEST_LOCK.lock().await;
+        let config = clickhouse_test_config();
+        assert_eq!(
+            std::env::var("GROUNDLINE_CLICKHOUSE_TEST_ALLOW_SCHEMA_RESET").as_deref(),
+            Ok("true"),
+            "schema reset is allowed only for a disposable ClickHouse test container"
+        );
+        let db = ClickHouse::new(&config).unwrap();
+        db.request_at("DROP DATABASE IF EXISTS groundline", &[], None, false)
+            .await
+            .unwrap();
+        for (index, query) in STORAGE_MIGRATIONS.iter().enumerate() {
+            db.request_at(query, &[], None, index != 0).await.unwrap();
+        }
+        let old_expression = trust_migration::expression(&analysis::previous_storage_predicate());
+        let old_fingerprint = "d653ba15120d6bdb9b5d0d4077c2dd6fd0eb7aeb00f225c996f82964871ae316";
+        db.request(
+            &format!("ALTER TABLE groundline.basic_weekly ADD COLUMN trusted_event_v5 UInt8 MATERIALIZED {old_expression} COMMENT '{old_fingerprint}'"),
+            &[], None,
+        ).await.unwrap();
+        let mut event = integration_event(Uuid::new_v4(), 0);
+        let zero_tokens = event["analysis"]["root"]["unattributed"].clone();
+        event["analysis"]["root"]["buckets"] = json!([{
+            "model_family":"gpt-6-sol", "effort":"medium", "tokens":zero_tokens
+        }]);
+        reseal_event(&mut event);
+        let mut body = serde_json::to_vec(&event_row(&event, Utc::now()).unwrap()).unwrap();
+        body.push(b'\n');
+        db.request(
+            "INSERT INTO groundline.basic_weekly FORMAT JSONEachRow",
+            &[],
+            Some(body),
+        )
+        .await
+        .unwrap();
+        let before = db
+            .request(
+                "SELECT * FROM groundline.basic_weekly ORDER BY event_id FORMAT JSONEachRow",
+                &[],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            db.request(
+                "SELECT trusted_event_v5 FROM groundline.basic_weekly FORMAT TabSeparated",
+                &[],
+                None,
+            )
+            .await
+            .unwrap(),
+            b"0\n"
+        );
+
+        // A comment that still claims the released hash cannot authorize a
+        // different default expression. No guard or migration is applied.
+        db.request(
+            &format!("ALTER TABLE groundline.basic_weekly MODIFY COLUMN trusted_event_v5 UInt8 MATERIALIZED toUInt8(1) COMMENT '{old_fingerprint}'"),
+            &[], None,
+        ).await.unwrap();
+        assert!(db.ensure_storage(&config).await.is_err());
+        assert_eq!(
+            db.request(
+                "SELECT * FROM groundline.basic_weekly ORDER BY event_id FORMAT JSONEachRow",
+                &[],
+                None,
+            )
+            .await
+            .unwrap(),
+            before
+        );
+        db.request(
+            &format!("ALTER TABLE groundline.basic_weekly MODIFY COLUMN trusted_event_v5 UInt8 MATERIALIZED {old_expression} COMMENT '{old_fingerprint}'"),
+            &[], None,
+        ).await.unwrap();
+        db.ensure_storage(&config).await.unwrap();
+        db.ensure_storage(&config).await.unwrap();
+        assert_eq!(
+            db.request(
+                "SELECT * FROM groundline.basic_weekly ORDER BY event_id FORMAT JSONEachRow",
+                &[],
+                None,
+            )
+            .await
+            .unwrap(),
+            before
+        );
+        assert_eq!(
+            db.request(
+                "SELECT trusted_event_v5 FROM groundline.basic_weekly FORMAT TabSeparated",
+                &[],
+                None,
+            )
+            .await
+            .unwrap(),
+            b"1\n"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires an isolated loopback ClickHouse and explicit mutation opt-in"]
+    async fn clickhouse_canonical_trust_migration_preserves_rows_and_analysis_boundaries() {
+        let _database_guard = CLICKHOUSE_TEST_LOCK.lock().await;
+        let config = clickhouse_test_config();
+        assert_eq!(
+            std::env::var("GROUNDLINE_CLICKHOUSE_TEST_ALLOW_SCHEMA_RESET").as_deref(),
+            Ok("true"),
+            "schema reset is allowed only for a disposable ClickHouse test container"
+        );
+        let db = ClickHouse::new(&config).unwrap();
+        db.request_at("DROP DATABASE IF EXISTS groundline", &[], None, false)
+            .await
+            .unwrap();
+        for (index, query) in STORAGE_MIGRATIONS.iter().enumerate() {
+            db.request_at(query, &[], None, index != 0).await.unwrap();
+        }
+        let old_expression = trust_migration::expression(&analysis::previous_storage_predicate());
+        db.request(
+            &format!("ALTER TABLE groundline.basic_weekly ADD COLUMN trusted_event_v5 UInt8 MATERIALIZED {old_expression} COMMENT 'd653ba15120d6bdb9b5d0d4077c2dd6fd0eb7aeb00f225c996f82964871ae316'"),
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+        db.request(
+            "CREATE VIEW groundline.basic_current AS SELECT *, trusted_event_v5 FROM groundline.basic_weekly",
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+        db.request(
+            "CREATE VIEW groundline.basic_active AS SELECT * FROM groundline.basic_current WHERE trusted_event_v5 = 1",
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+
+        let collector_id = Uuid::new_v4();
+        let mut old_valid = integration_event(collector_id, 0);
+        old_valid.as_object_mut().unwrap().remove("analysis");
+        reseal_event(&mut old_valid);
+        let mut newly_valid = integration_event(collector_id, 0);
+        let zero_tokens = newly_valid["analysis"]["root"]["unattributed"].clone();
+        newly_valid["analysis"]["root"]["buckets"] = json!([{
+            "model_family":"gpt-6-astra", "effort":"high", "tokens":zero_tokens
+        }]);
+        reseal_event(&mut newly_valid);
+        let malformed = integration_event(collector_id, 0);
+        let mut rows = vec![
+            event_row(&old_valid, Utc::now()).unwrap(),
+            event_row(&newly_valid, Utc::now()).unwrap(),
+            event_row(&malformed, Utc::now()).unwrap(),
+        ];
+        rows[2]["root_count"] = json!(999);
+        for row in &rows {
+            let mut body = serde_json::to_vec(row).unwrap();
+            body.push(b'\n');
+            db.request(
+                "INSERT INTO groundline.basic_weekly FORMAT JSONEachRow",
+                &[],
+                Some(body),
+            )
+            .await
+            .unwrap();
+        }
+        let before = db
+            .request(
+                "SELECT * FROM groundline.basic_weekly ORDER BY event_id FORMAT JSONEachRow",
+                &[],
+                None,
+            )
+            .await
+            .unwrap();
+        let old_trust = db
+            .json_rows(
+                "SELECT event_id, trusted_event_v5 FROM groundline.basic_weekly ORDER BY event_id FORMAT JSONEachRow",
+                &[],
+            )
+            .await
+            .unwrap();
+        assert_eq!(old_trust.len(), 3);
+        assert_eq!(
+            db.request(
+                "SELECT count() FROM groundline.basic_weekly WHERE trusted_event_v5 = 1 FORMAT TabSeparated",
+                &[],
+                None,
+            )
+            .await
+            .unwrap(),
+            b"1\n"
+        );
+
+        // A stopped process can leave the fresh column staged and all reads
+        // guarded. Restart must resume from that exact metadata state.
+        let current_expression = trust_migration::expression(&analysis::predicate());
+        let current_fingerprint = format!("{:x}", Sha256::digest(current_expression.as_bytes()));
+        let pending_comment = format!(
+            "migration:d653ba15120d6bdb9b5d0d4077c2dd6fd0eb7aeb00f225c996f82964871ae316:{current_fingerprint}:pending"
+        );
+        db.request(
+            "CREATE OR REPLACE VIEW groundline.basic_current AS SELECT *, trusted_event_v5 FROM groundline.basic_weekly WHERE 0",
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            db.request(
+                "SELECT count() FROM groundline.basic_active FORMAT TabSeparated",
+                &[],
+                None,
+            )
+            .await
+            .unwrap(),
+            b"0\n"
+        );
+        db.request(
+            &format!("ALTER TABLE groundline.basic_weekly ADD COLUMN trusted_event_v5_revalidated UInt8 MATERIALIZED {current_expression} COMMENT '{pending_comment}'"),
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+        let metadata = db
+            .json_rows(
+                "SELECT name, default_expression FROM system.columns WHERE database='groundline' AND table='basic_weekly' AND name IN ('trusted_event_v5','trusted_event_v5_revalidated') FORMAT JSONEachRow",
+                &[],
+            )
+            .await
+            .unwrap();
+        assert_eq!(metadata.len(), 2);
+        for column in metadata {
+            let expected = if column["name"] == "trusted_event_v5" {
+                &old_expression
+            } else {
+                &current_expression
+            };
+            let stored = column["default_expression"].as_str().unwrap();
+            let expected_ast = db
+                .request(&format!("EXPLAIN AST SELECT {expected} FROM groundline.basic_weekly FORMAT TabSeparatedRaw"), &[], None)
+                .await
+                .unwrap();
+            let stored_ast = db
+                .request(&format!("EXPLAIN AST SELECT {stored} FROM groundline.basic_weekly FORMAT TabSeparatedRaw"), &[], None)
+                .await
+                .unwrap();
+            assert_eq!(
+                Sha256::digest(&expected_ast),
+                Sha256::digest(&stored_ast),
+                "{} AST differs from the canonical source",
+                column["name"]
+            );
+        }
+        db.ensure_storage(&config).await.unwrap();
+        let after = db
+            .request(
+                "SELECT * FROM groundline.basic_weekly ORDER BY event_id FORMAT JSONEachRow",
+                &[],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(after, before, "migration must preserve every base column");
+        assert_eq!(
+            db.request(
+                "SELECT count() FROM groundline.basic_weekly WHERE trusted_event_v5 = 1 FORMAT TabSeparated",
+                &[],
+                None,
+            )
+            .await
+            .unwrap(),
+            b"2\n",
+            "the previously hidden valid GPT-6 row must be rejudged"
+        );
+        for (event, trusted) in [(&old_valid, 1), (&newly_valid, 1), (&malformed, 0)] {
+            let observed = db
+                .json_row(
+                    "SELECT trusted_event_v5 FROM groundline.basic_weekly WHERE event_id={id:UUID} FORMAT JSONEachRow",
+                    &[("id", event["event_id"].as_str().unwrap().to_owned())],
+                )
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(observed["trusted_event_v5"], trusted);
+        }
+
+        // Simulate a crash after the atomic swap but before its final comment
+        // and view restoration. The next startup verifies and completes it.
+        db.request(
+            &format!("ALTER TABLE groundline.basic_weekly COMMENT COLUMN trusted_event_v5 '{pending_comment}'"),
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+        db.request(
+            "CREATE OR REPLACE VIEW groundline.basic_current AS SELECT *, trusted_event_v5 FROM groundline.basic_weekly WHERE 0",
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+        db.ensure_storage(&config).await.unwrap();
+        db.ensure_storage(&config).await.unwrap();
+        assert_eq!(
+            db.request(
+                "SELECT * FROM groundline.basic_weekly ORDER BY event_id FORMAT JSONEachRow",
+                &[],
+                None,
+            )
+            .await
+            .unwrap(),
+            before,
+            "restart and repeat must preserve base rows"
+        );
+
+        let mut state = unit_state(28, 4);
+        state.config = config;
+        state.clickhouse = db.clone();
+        let router = app(state);
+        let labels = groundline_contracts::model::MODEL_FAMILIES
+            .iter()
+            .filter(|model| **model != "unknown")
+            .flat_map(|model| {
+                groundline_contracts::model::EFFORTS
+                    .iter()
+                    .filter(|effort| **effort != "unknown")
+                    .map(move |effort| (*model, *effort))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(labels.len(), 90);
+        let mut boundary_collectors = Vec::new();
+        for bucket_count in [81, 89, 90] {
+            let collector_id = Uuid::new_v4();
+            boundary_collectors.push(collector_id);
+            let enrollment = json!({
+                "schema_version":2,"kind":"groundline-insights-owner-enrollment",
+                "collector_instance_id":collector_id,"collector_token":"c".repeat(32),
+                "os_family":"linux","runtime_family":"codex_cli",
+                "execution_mode":"local_headless",
+                "groundline_version":env!("CARGO_PKG_VERSION")
+            });
+            let response = router
+                .clone()
+                .oneshot(local_request(
+                    Method::POST,
+                    "/v1/enroll",
+                    &"e".repeat(32),
+                    Some(&enrollment),
+                    &[],
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::CREATED);
+            let mut event = integration_event(collector_id, 0);
+            let zero_tokens = event["analysis"]["root"]["unattributed"].clone();
+            event["analysis"]["root"]["buckets"] = Value::Array(
+                labels[..bucket_count]
+                    .iter()
+                    .map(|(model, effort)| json!({"model_family":model,"effort":effort,"tokens":zero_tokens}))
+                    .collect(),
+            );
+            reseal_event(&mut event);
+            assert!(validate_basic_event_bytes(&serde_json::to_vec(&event).unwrap()).is_ok());
+            let headers = [
+                ("x-groundline-collector-id", collector_id.to_string()),
+                ("x-groundline-version", env!("CARGO_PKG_VERSION").to_owned()),
+                (
+                    "idempotency-key",
+                    event["idempotency_key"].as_str().unwrap().to_owned(),
+                ),
+            ];
+            let response = router
+                .clone()
+                .oneshot(local_request(
+                    Method::POST,
+                    "/v1/events",
+                    &"c".repeat(32),
+                    Some(&event),
+                    &headers,
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::ACCEPTED, "{bucket_count}");
+            let params = [("id", event["event_id"].as_str().unwrap().to_owned())];
+            assert_eq!(
+                db.request("SELECT count() FROM groundline.basic_active WHERE event_id={id:UUID} FORMAT TabSeparated", &params, None).await.unwrap(),
+                b"1\n",
+                "{bucket_count} valid buckets must be visible"
+            );
+            assert_eq!(
+                db.request("SELECT count() FROM groundline.model_usage WHERE event_id={id:UUID} AND component='root' AND attributed=1 FORMAT TabSeparated", &params, None).await.unwrap(),
+                format!("{bucket_count}\n").as_bytes(),
+                "{bucket_count} buckets must survive the usage view"
+            );
+        }
+        for malformed_case in ["duplicate", "unknown_model", "negative_tokens", "wrong_sum"] {
+            let mut valid = integration_event(boundary_collectors[0], 0);
+            let zero_tokens = valid["analysis"]["root"]["unattributed"].clone();
+            valid["analysis"]["root"]["buckets"] = Value::Array(
+                labels
+                    .iter()
+                    .map(|(model, effort)| json!({"model_family":model,"effort":effort,"tokens":zero_tokens}))
+                    .collect(),
+            );
+            reseal_event(&mut valid);
+            let mut bad = valid.clone();
+            match malformed_case {
+                "duplicate" => {
+                    bad["analysis"]["root"]["buckets"][89] =
+                        bad["analysis"]["root"]["buckets"][0].clone()
+                }
+                "unknown_model" => {
+                    bad["analysis"]["root"]["buckets"][0]["model_family"] = json!("private-model")
+                }
+                "negative_tokens" => {
+                    bad["analysis"]["root"]["buckets"][0]["tokens"]["total_tokens"] = json!(-1)
+                }
+                "wrong_sum" => {
+                    bad["analysis"]["root"]["buckets"][0]["tokens"]["total_tokens"] = json!(1)
+                }
+                _ => unreachable!(),
+            }
+            reseal_event(&mut bad);
+            assert!(!groundline_contracts::insights::analysis::valid(
+                &bad["analysis"],
+                &bad["metrics"]
+            ));
+            assert!(validate_basic_event_bytes(&serde_json::to_vec(&bad).unwrap()).is_err());
+            // Direct storage writes are an independent guard: the database
+            // must quarantine malformed analysis even if ingest is bypassed.
+            let mut row = event_row(&valid, Utc::now()).unwrap();
+            row["payload_json"] = json!(serde_json::to_string(&bad).unwrap());
+            row["event_id"] = bad["event_id"].clone();
+            row["idempotency_key"] = bad["idempotency_key"].clone();
+            let mut body = serde_json::to_vec(&row).unwrap();
+            body.push(b'\n');
+            db.request(
+                "INSERT INTO groundline.basic_weekly FORMAT JSONEachRow",
+                &[],
+                Some(body),
+            )
+            .await
+            .unwrap();
+            let params = [("id", bad["event_id"].as_str().unwrap().to_owned())];
+            assert_eq!(
+                db.request("SELECT count() FROM groundline.basic_quarantined WHERE event_id={id:UUID} FORMAT TabSeparated", &params, None).await.unwrap(),
+                b"1\n",
+                "{malformed_case} must be quarantined by SQL"
+            );
+        }
+        let response = router
+            .oneshot(local_request(
+                Method::GET,
+                "/v3/reports/weekly?days=7",
+                &"a".repeat(32),
+                None,
+                &[],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let report = response_json(response).await;
+        assert!(report["coverage"]["event_count"].as_u64().unwrap_or(0) >= 3);
     }
 
     #[tokio::test]
@@ -3646,11 +4172,11 @@ mod tests {
                 .expect("model contexts")
                 .iter()
                 .any(|context| {
-                    context["model_family"] == "astra"
+                    context["model_family"] == "gpt-6-astra"
                         && context["effort"] == "high"
                         && context["context_count"].as_u64().unwrap_or(0) >= 1
                 }),
-            "Astra context must survive collection, ClickHouse, and report validation"
+            "GPT-6 Astra context must survive collection, ClickHouse, and report validation"
         );
         assert!(
             report["coverage"]["event_count"].as_u64().unwrap_or(0) >= 1,

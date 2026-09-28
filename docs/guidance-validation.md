@@ -11,7 +11,8 @@ changes. `cargo xtask verify-source --json` includes the same structural gate:
 
 - every indexed skill has readable frontmatter and UI metadata;
 - names and invocation tokens agree, without duplicate index entries;
-- only the three intentionally implicit skills are automatically invocable;
+- only the four intentionally implicit skills are automatically invocable,
+  including task-scoped GPT-6 selection and bounded delegation;
 - local Markdown links resolve inside the package;
 - missing files, malformed YAML, invalid types, and symlink escapes fail.
 
@@ -39,6 +40,26 @@ contracts and CLI integration tests. These do not require a user's home files,
 upstream network access, Python, Dart, Flutter, or live provider credentials.
 
 ## Behavioral acceptance cases
+
+`efficiency route` contract and CLI tests cover preserved explicit choices,
+native catalog binding, matched GPT-6 delivery comparisons, missing/failed
+evidence, protected outcomes and resources, no guessed model from task labels, and capability eligibility/authority. Synthetic tests establish
+algorithm and integration behavior, not performance improvements. An empirical route
+needs current catalog evidence and complete matched direct outcomes; aggregate
+audits/reports are optional descriptive context. Missing or partial aggregate
+reports remain visible without weakening direct evidence. No-outcome routing is
+INCONCLUSIVE with no model/effort suggestion. Verify that this prevents an
+unsupported evidence-based replacement without blocking ordinary native task
+selection. Supplied malformed context still fails validation. Native activation
+and live outcome quality need their own evidence.
+
+`efficiency record-delivery` and `route --deliveries` exercise local artifact
+hash/observation matching, actual versus requested selection, unknown/failed
+outcomes, partial resources, overflow, duplicate ownership, time/cohort filters,
+private write-once files, and symlink rejection. The fixtures are synthetic:
+passing these tests proves recording and gating, not provider attestation or a
+measured reduction in a user's real work. Preserve the separate live and
+existing-storage migration gates when qualifying a release.
 
 `cargo test --locked -p groundline-cli` also covers `config-audit`: supplied
 catalog effort support, future model IDs, unresolved profiles, manual context
@@ -71,6 +92,8 @@ or make external writes merely to satisfy this document.
 | Same failing probe, no changed input | Diagnose or report the blocker; no unbounded retry |
 | User refines the same task while it runs | Preserve completed work and compatible approval; no unsolicited fork |
 | Choose a model on a host with a new catalog | Use available models and preserve explicit choices; no config write |
+| Any task shape, no matched outcomes | CLI returns INCONCLUSIVE with no guessed pair; native task judgment can continue authorized work while preserving explicit selections |
+| Complete direct outcomes, missing/partial aggregate reports | Compare the direct outcomes; report aggregate limits separately; do not downgrade direct quality |
 | Ultra selected, no delegation requested | No subagent merely because of the effort label |
 | Installed binary or optional tool missing | Report the affected lane; no invented tool or unrelated PATH binary |
 | Core plus consented Insights installed | Apply each plugin's own hook contract, not Core's zero-hook rule to Insights |
@@ -89,7 +112,17 @@ or make external writes merely to satisfy this document.
 | Research the selected model's guidance without requesting a personal trial | Fetch current official docs and inspect relevant instructions; no Insights credentials or usage-report prerequisite |
 | General guidance alignment with an intentional model/effort selection | Preserve the selection; do not run the opt-in `setup` preset |
 | Change approach or move between repositories within an authorized task | Reconcile the affected scope in place; no unsolicited task or fork |
-| Review Insights with GPT-6 or GPT-5.6 selected | Preserve model/effort/tier; show cohort and coverage limits; no model-performance claim from aggregate counters |
+| Review Insights with a GPT-6 tier selected | Preserve explicit model/effort/tier; show cohort and coverage limits; no model-performance claim from aggregate counters |
+| Earlier model selected or used as the personal trial reference | Reject optimization without writing guidance; retain existing settings/history and allow rollback |
+| Older, mixed-generation or unversioned aggregate cohort | Retain descriptive counters; withhold optimization candidates/comparison readiness |
+| GPT-6 adaptive delegation requested | Choose supported model/effort per independent lane, honor custom overrides, validate and integrate outputs |
+| Known hard single problem, depth preferred over latency | Consider supported xhigh/max immediately; no required failures at lower efforts and no automatic Ultra fan-out |
+| Sol or Luna is appropriate but its bounded problem needs maximum reasoning | Consider that model's supported max; no artificial Astra-only restriction or claimed equivalence between models |
+| Hard judgment is complete and a mechanical follow-up remains | Reassess for lower effort; retain finished work and verify any actual setting change |
+| Several independent lanes have different complexity | Allow different supported efforts within the same task; no high-only default or diversity quota |
+| API configuration_update exists but local Codex exposes no equivalent control | Use supported native controls for subsequent work; no claim of an in-place root setting change |
+| Small sequential task under adaptive delegation | Complete directly when delegation adds no useful independent work |
+| Luna agent needs reasoning beyond its supported effort | Reassign the remaining problem within GPT-6; never request Luna/ultra or an older model |
 | Failure signals are high but exact repetition is low | Propose bounded diagnosis; classify expected results and environment failures before treating retries as waste |
 | Partial historical report exposes a source-guidance conflict | Keep the trial OBSERVE gate; complete separately authorized source repair without deleting data or fabricating outcomes |
 | Long tasks or compactions trigger weekly advice | Reconcile within the current task; no inferred new task, extra approval, or recurring schedule |
@@ -100,7 +133,7 @@ advice, including scope changes during final verification and explicit task/fork
 requests. They do not prove a model followed the skill text. Metadata validation
 and reduced instruction word counts likewise are not model-performance results.
 
-The contracts and CLI suites also exercise Astra/Sol catalog inputs, advisory
+The contracts and CLI suites also exercise Astra/Sol/Luna catalog inputs, advisory
 failure candidates from each aggregate source, missing/fallback evidence
 preservation, and refusal to apply without matching direct outcomes. An offline
 replay with real reports validates routing and contracts; it is not an inference

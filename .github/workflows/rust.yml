@@ -75,7 +75,7 @@ jobs:
         if: github.event_name == 'pull_request'
         id: setup-changes
         run: |
-          if git diff --quiet HEAD^ HEAD -- .gitattributes Cargo.toml Cargo.lock crates/groundline-cli crates/groundline-contracts/src/artifact.rs crates/groundline-insights-cli crates/groundline-runtime/src/local_file.rs crates/groundline-runtime/src/insights_state.rs crates/groundline-runtime/src/insights_state plugins/groundline/config install.sh install.ps1 .github/workflows/rust.yml .github/actions/setup-rust-stable; then
+          if git diff --quiet HEAD^ HEAD -- .gitattributes Cargo.toml Cargo.lock crates/groundline-cli crates/groundline-contracts crates/groundline-insights-cli crates/groundline-runtime/src/local_file.rs crates/groundline-runtime/src/insights_state.rs crates/groundline-runtime/src/insights_state plugins/groundline/config install.sh install.ps1 .github/workflows/rust.yml .github/actions/setup-rust-stable; then
             echo "needed=false" >> "$GITHUB_OUTPUT"
           else
             echo "needed=true" >> "$GITHUB_OUTPUT"
@@ -247,6 +247,7 @@ jobs:
           GROUNDLINE_CLICKHOUSE_TEST_USER: groundline_test
           GROUNDLINE_CLICKHOUSE_TEST_PASSWORD: groundline_test_password
           GROUNDLINE_CLICKHOUSE_TEST_ALLOW_MUTATION: "true"
+          GROUNDLINE_CLICKHOUSE_TEST_ALLOW_SCHEMA_RESET: "true"
         run: >-
           cargo test --locked -p groundline-insights-api --lib clickhouse_
           -- --ignored --nocapture
@@ -403,7 +404,7 @@ jobs:
           echo "${cc_key}=musl-gcc" >> "$GITHUB_ENV"
           echo "${linker_key}=musl-gcc" >> "$GITHUB_ENV"
       - name: Verify user ownership, repair, setup, and installer behavior
-        run: cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --lib --test config_repair_cli --test setup_cli --test install_cli -- --show-output
+        run: cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --lib --test config_repair_cli --test setup_cli --test install_cli --test delivery_cli --test routing_cli -- --show-output
       - name: Verify native checksum endings for both plugins
         run: |
           cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --test cli_contract provider_smoke
@@ -502,7 +503,7 @@ jobs:
           cargo test --locked -p xtask dataset_roots_are_portable_absolute_and_injection_safe
       - name: Verify setup and installer behavior on each native target
         run: |
-          cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --lib --test setup_cli --test config_repair_cli --test install_cli
+          cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --lib --test setup_cli --test config_repair_cli --test install_cli --test delivery_cli --test routing_cli
           cargo test --locked -p groundline-insights-cli --target "${{ matrix.target }}" --test cli_contract
       - name: Verify collection stop across native processes
         run: cargo test --locked -p groundline-runtime --all-features --target "${{ matrix.target }}" collection_stop_tests

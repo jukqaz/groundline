@@ -5,25 +5,38 @@ use std::process::{Command, Stdio};
 use tempfile::tempdir;
 
 fn catalog() -> Vec<u8> {
-    serde_json::to_vec(&json!({"models":[{
-        "slug":"gpt-6-astra", "default_reasoning_level":"low",
-        "supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"}],
-        "support_verbosity":true
-    }]}))
-    .unwrap()
+    let models = ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"].map(|slug| {
+        let efforts: Vec<Value> = ["low", "medium", "high", "xhigh", "max", "ultra"]
+            .into_iter()
+            .filter(|effort| slug != "gpt-6-luna" || *effort != "ultra")
+            .map(|effort| json!({"effort":effort}))
+            .collect();
+        json!({"slug":slug,"default_reasoning_level":"medium",
+                "supported_reasoning_levels":efforts,"support_verbosity":true})
+    });
+    serde_json::to_vec(&json!({"models":models})).unwrap()
 }
 
 #[test]
 fn native_catalog_stdin_is_private_bounded_and_read_only() {
     let root = tempdir().unwrap();
     let config = root.path().join("config.toml");
-    for (text, expected) in [
-        ("", 0),
-        ("model='gpt-6-astra'\nmodel_reasoning_effort='medium'", 0),
-        ("model='gpt-6-astra'\nmodel_reasoning_effort='none'", 1),
-        ("model_context_window=272000", 0),
-    ] {
-        fs::write(&config, text).unwrap();
+    let mut cases = vec![
+        (String::new(), 0),
+        ("model_context_window=272000".into(), 0),
+    ];
+    for model in ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"] {
+        for effort in ["low", "medium", "high", "xhigh", "max", "ultra", "none"] {
+            let expected =
+                i32::from(effort == "none" || (model == "gpt-6-luna" && effort == "ultra"));
+            cases.push((
+                format!("model='{model}'\nmodel_reasoning_effort='{effort}'"),
+                expected,
+            ));
+        }
+    }
+    for (text, expected) in cases {
+        fs::write(&config, &text).unwrap();
         let mut child = Command::new(env!("CARGO_BIN_EXE_groundline"))
             .args(["config-audit", "--config"])
             .arg(&config)
@@ -35,7 +48,7 @@ fn native_catalog_stdin_is_private_bounded_and_read_only() {
             .unwrap();
         child.stdin.take().unwrap().write_all(&catalog()).unwrap();
         let output = child.wait_with_output().unwrap();
-        assert_eq!(output.status.code(), Some(expected));
+        assert_eq!(output.status.code(), Some(expected), "{text}");
         let result: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(result["mutation_performed"], false);
         assert_eq!(result["network_performed"], false);

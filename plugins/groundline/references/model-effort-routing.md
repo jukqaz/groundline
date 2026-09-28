@@ -1,96 +1,151 @@
-# Model and effort routing
+# GPT-6 model, effort, and delegation
 
-Let Codex choose its recommended model and effort by default. Recommend an
-override only for a concrete task benefit, using the active session's catalog.
-Do not install a separate model registry or change global defaults during
-ordinary work. The explicitly selected installation `setup` preset is a
-separate configuration operation; see [installation alignment](installation-alignment.md).
+GroundLine optimizes for `gpt-6-astra`, `gpt-6-sol`, and `gpt-6-luna` only.
+Do not recommend, tune, benchmark for adoption, or silently fall back to earlier
+generations. Preserve historical records and explicit user selections; an
+older selected model requires a separately authorized move to an available
+GPT-6 model before optimization. Configuration audit remains catalog-based and
+can describe existing settings without making them optimization targets.
 
-Choose from the models and efforts actually available on the execution host:
+## Resolve the execution surface
 
-- Clear, repeatable work with deterministic checks: favor speed and cost.
-- Everyday implementation, exploration, and review: favor balanced capability.
-- Ambiguous or high-value work: favor reasoning depth and judgment.
-- Difficult end-to-end work spanning tools and several dependent stages: favor
-  sustained reasoning and completion capability.
+Use the active host catalog or the actual App-bundled `codex debug models`.
+Intersect the GPT-6 scope with available models and supported efforts. Never
+invent an alias, transfer API options into Codex TOML, or claim account access
+from bundled metadata. Refresh evidence after a relevant runtime/catalog change.
+If no suitable GPT-6 model is available, report that boundary instead of choosing
+an older generation. Preserve the user's explicit task-level model/effort and
+service tier; dynamic selection applies only within the delegated scope.
 
-The current Astra guide emphasizes sustained work across code, browsers, and
-other tools. Use the active catalog for available alternatives, not a fixed
-family ladder. Preserve explicit user selections and intentional economy roles. Recommend the
-lowest supported effort appropriate to the difficulty, without requiring a
-low-effort trial for an obviously hard task. Max and Ultra are reasoning levels
-when supported; neither requires nor authorizes subagents. Codex delegation
-requires the user's explicit request in this workflow. Do not import ChatGPT
-Work's proactive Ultra delegation policy into local Codex. Model, effort,
-delegation, and service tier are distinct decisions.
+The September 28 App and PATH bundled catalogs list low/medium/high/xhigh/max for all three
+models and ultra for Astra/Sol only. Max allocates more reasoning to one task;
+Ultra combines maximum reasoning with suitable parallel delegation. Choose by
+the work's shape, not an assumption that Ultra is always better than Max.
+Apply the host's delegation controls and user policy. Ultra is not required for
+explicitly authorized subagents with individually selected efforts.
 
-Use `codex debug models` from the actual runtime for catalog evidence. A
-`--bundled` entry, a release note, and account access are different observations.
-Never infer token price, quota, or savings from an effort label or a Fast badge.
-Check current official pricing only when a cost comparison is requested.
+API Sol/Luna also support none; this does not establish native none support.
+API context sizes and reasoning modes are not Codex defaults. The API's
+configuration_update mechanism does not prove that a Codex agent can change its
+own running effort. Use only controls exposed by the active runtime.
 
-## GPT-6 priority and GPT-5.6 support
+## Select per work item
 
-Use the same concise authority, continuity, and verification contract for both
-families. Prioritize Astra's instruction-conflict and interruption risks when
-reviewing GroundLine; do not introduce a model router or force GPT-5.6 users onto
-GPT-6. Model-specific advice supplements the common contract only where the
-active runtime and official guidance establish a relevant difference.
+Select model and effort independently using ambiguity, dependencies, verification
+difficulty, failure impact, context needs, and the user's time/quality preference.
+Official starting points are Sol/medium, Luna/high, and Astra/low; these are
+recommendations, not the catalog's default values or ceilings. The observed App/PATH bundled catalogs default to Astra/low and Sol/Luna/medium.
+These observations are versioned metadata, not verified live account defaults. Use the whole supported effort range
+when justified, without quotas or a fixed explorer/worker/reviewer ladder. Start
+from the actual phase and acceptance check, not task length or token history.
+Ordinary task selection needs no history audit or empirical sample. Preserve an
+accepted baseline when claiming a measured replacement; missing data cannot
+establish that a cheaper choice preserves its quality.
 
-For GPT-5.6, start with lean instructions: state each constraint once and retain
-the context needed to judge success. Its concise default still needs explicit
-acceptance evidence; a blanket brevity rule must not suppress material findings
-or unfinished work. Compare changes with the same selected effort before
-recommending another setting. API prompt or reasoning parameters are not native
-Codex configuration keys.
+| Model | Work fit | Effort choice |
+| --- | --- | --- |
+| Luna | Clear briefs, coordinated edits, context gathering across apps, and problems with explicit constraints and objective checks | Low for fine-grained work; medium/high for creation and reasoning; xhigh for constrained analysis and prioritization; max for greater depth when workload checks support it |
+| Sol | Implementation, research and ambiguous multi-step work | Low through max according to depth; do not cap demanding Sol work at high |
+| Astra | Nuanced work, broad projects, coupled reasoning and synthesis across tools | Low for a scoped task needing Astra capability; medium through max for increasing depth and uncertainty |
 
-## Astra-specific review
+| Effort | Select when | Example, not a mandatory role mapping |
+| --- | --- | --- |
+| low | Steps and success criteria are clear, with little ambiguity | Known-symbol inventory or a mechanical follow-up |
+| medium | Routine planning and several dependent steps need checking | A bounded implementation with established tests |
+| high | Logic tracing, assumptions and edge cases need sustained attention | A state-machine change or a focused correctness review |
+| xhigh | Interacting hypotheses or constraints need deep analysis | A difficult concurrency diagnosis or conflicting research evidence |
+| max | The hardest single problem warrants depth over latency/usage | A subtle invariant, algorithm or architectural decision with a concrete acceptance check |
+| ultra | A supported model has a complex task with useful independent lanes | Coordinated end-to-end work under the host's delegation policy |
 
-The official Astra guide calls out sensitivity to conflicting skills and
-instructions, unnecessary clarification pauses, verbose formatting, and
-over-broad verification. Optimize the workflow for these observed risks:
+Max is a first-choice option for a known hard problem, not a last resort after
+every lower effort has failed. All three GPT-6 models may use Max when supported;
+Luna/Max is neither equivalent to nor guaranteed cheaper than Sol/medium. Choose
+a stronger model directly when the issue is capability or broad judgment.
+Use Ultra only when decomposition adds value; a hard serial bottleneck can use
+Max while other agents handle independent work at lower efforts.
 
-- Keep a single authoritative instruction for each behavior. Move conditional
-  detail out of skill entrypoints, and do not load unrelated skills.
-- For an implementation request, complete authorized local work and verify it;
-  ask only for information or authority that can materially change the result.
-- Keep compatible approvals and completed work when the user steers a task.
-  Answer a side question and resume; revise the approach in place unless a new
-  task is requested. Prepare independent work before asking for a missing final
-  approval. The optional batch command offers advice, not orchestration.
-- Give the model a clear outcome, relevant evidence, constraints, and acceptance
-  criteria. Let native Codex choose the intervening steps. Reuse context and
-  inspect only new evidence needed after compaction; avoid replaying full logs.
-- Keep reports concise and evidence-backed; omit empty templates and repeated
-  safety prose. Use lists only when they make the result easier to understand.
-- Complete meaningful checks for changed behavior before claiming success.
-  Token economy, a small diff, or reversibility does not justify skipping
-  acceptance evidence. Reuse passing results while their inputs and scope
-  remain valid; broaden or repeat for a change, failure, or unresolved risk.
+Reassess at a new lane or a meaningful phase change. Raise effort for an unresolved
+reasoning problem; lower it for mechanical follow-up after the uncertainty is
+resolved. Do not replay completed work just to exercise another setting. Count
+coordination, failures and retries in total quality/time/usage; do not infer
+subscription savings from API prices or prefer diversity for its own sake.
+Frequent high-effort use alone is not evidence of wasted work.
 
-Use available native async tools for independent work while a tool or question
-is pending. Await dependencies before acting on them. GroundLine does not add a
-second scheduler, model proxy, compaction engine, or unconditional delegation.
+## Adaptive delegation
 
-For a guidance-only review, current official docs and affected instructions are
-sufficient inputs. A requested Insights review can also expose source defects
-or conflicting guidance that Codex may repair within existing authority. The
-personal trial's strict quality and outcome gates govern its automatic guidance
-application, not separately authorized source repairs. Source checks cannot
-establish that either model became faster or more accurate: compare observable
-completion, correction, and failure outcomes under the same model/effort before
-claiming an improvement.
+When the user requests adaptive delegation, that request authorizes suitable
+subagents throughout the task; do not ask again for every spawn. The applicable
+evaluate-ai-usage-maturity skill also requests bounded delegation for independent
+implementation/research lanes. Respect higher-priority instructions and explicit
+user restrictions. An advisory review alone does not enable delegation or
+override a no-delegation policy.
 
-Use [configuration review](codex-configuration.md) to compare explicit settings
-with native catalog evidence. `none` and `minimal` are not supported by the
-observed Astra catalog; do not silently translate them. For future models or
-catalog updates, use the returned support list. Do not equate an API example's
-parameters, context limit, or delegation prompt with Codex configuration or
-permission to spawn agents.
+The root retains the goal, dependencies, integration, and final verification.
+Before delegating, carry the agreed outcome, current acceptance criteria and
+authority into each lane. Keep the serial critical path coherent; the number of
+available slots is not a target. For broad visual work, establish a representative
+accepted result before parallel production when that acceptance is still unknown.
+Spawn only a concrete independent lane while useful root work can proceed.
+Choose a supported GPT-6 model and effort together for each lane. Inspect custom
+agent overrides before assuming the requested pair will take effect. Full-history
+forks may inherit the parent's model; use the runtime's supported bounded-context
+mode when a different model is needed, carrying forward decision-critical context.
+Do not claim a running root switched itself when no supported control exists.
+If an existing child cannot be reconfigured, reassign only the remaining work
+with a compact handoff when justified. Asking it to "think harder" does not
+prove its effective reasoning setting changed.
 
-Sources checked 2026-09-11:
-- [Astra instruction and testing guidance](https://developers.openai.com/api/docs/guides/latest-model)
-- [GPT-5.6 prompting guidance](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.6)
-- [GPT-5.6 Sol model reference](https://developers.openai.com/api/docs/models/gpt-5.6-sol)
-- [Codex best practices](https://learn.chatgpt.com/guides/best-practices)
-- [Focused skills and progressive disclosure](https://learn.chatgpt.com/docs/build-skills)
+Start with the useful independent lanes, usually one or two, and stay within the
+host concurrency limit. Do not manufacture parallel work or recursively fan out.
+Assign disjoint edit ownership and separate browser/UI sessions where needed.
+Give each agent its goal, scope, constraints, relevant evidence, completion check,
+and compact return contract: result, evidence, checks, and unresolved issues.
+Reuse an existing agent for related follow-up when its context/settings still fit.
+For a long task, hand off the goal, user corrections, decisions, relevant files,
+completed checks, rejected hypotheses and remaining acceptance work. Do not fork,
+reset or copy the whole history merely because compaction occurred.
+
+For example, independent lanes might use Luna/low for a known API inventory,
+Sol/high for a bounded feature and Sol/max or Astra/max for a hard invariant
+review. A later mechanical follow-up can use a lower effort. Each choice still
+needs suitable context, a completion check and actual independence.
+
+Validate returned evidence before integration. Missing information calls for
+better inputs; network, permission, and tool failures need their actual cause
+resolved. Raise effort or reassign to a stronger GPT-6 model only for demonstrated
+reasoning/complexity needs. Carry completed work and rejected hypotheses forward;
+never repeat an unchanged failure or run an unbounded escalation loop. Reuse
+passing checks until a change or unresolved concern invalidates them.
+
+## GPT-6 guidance and evaluation
+
+For user-requested conversation/ClickHouse-driven adjustments, use the
+[evidence routing contract](evidence-routing.md). It joins local classifications,
+direct delivery outcomes, native catalog support and aggregate quality checks;
+an eligible empirical proposal can be applied by native Codex to an authorized
+next lane. Without matched outcomes the CLI returns INCONCLUSIVE with no guessed
+pair; native Codex still makes ordinary task choices. Aggregates are descriptive
+context, not a prerequisite for complete direct outcomes or a model ranking.
+
+Keep one authoritative instruction for each behavior. Load specialist detail
+only when relevant. Continue authorized work across steering, ask only for a
+material missing choice, and prepare independent work while awaiting an answer.
+State outcomes, evidence and acceptance criteria; let native Codex plan the steps.
+The official family guide's behavior examples originate with Astra; evaluate them
+on the selected Sol/Luna workload before claiming the same effects.
+
+Compare the same task, model/effort, tools, service tier, and delegated composition
+when assessing a guidance change. Report completion, rework, failures, total owned
+tokens and elapsed time. Historical unversioned astra/sol/luna cohorts and mixed
+or unknown generations cannot establish GPT-6 improvement. Core validates evidence
+offline; it does not add a model proxy, scheduler, or automatic inference service.
+
+Sources checked 2026-09-28:
+- [Reasoning effort and Max](https://developers.openai.com/api/docs/guides/reasoning)
+- [Current skill and prompt guidance](https://developers.openai.com/blog/rethinking-skills-and-prompts-for-gpt-6-astra)
+- [GPT-6 family guidance](https://developers.openai.com/api/docs/guides/latest-model)
+- [GPT-6 Sol](https://developers.openai.com/api/docs/models/gpt-6-sol)
+- [GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna)
+- [Task-specific model choice](https://developers.openai.com/api/docs/guides/model-selection)
+- [Codex model selection](https://learn.chatgpt.com/docs/models)
+- [Native subagent model and effort controls](https://learn.chatgpt.com/docs/agent-configuration/subagents)

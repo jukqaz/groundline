@@ -11,6 +11,7 @@ use super::package::regular_bytes;
 const IMPLICIT_SKILLS: &[&str] = &[
     "align-agent-home",
     "close-live-work",
+    "evaluate-ai-usage-maturity",
     "reconcile-current-state",
 ];
 
