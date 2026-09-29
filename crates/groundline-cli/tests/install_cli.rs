@@ -495,6 +495,51 @@ fn default_install_preserves_existing_choices_and_emits_stage_results() {
     assert_eq!(report["stages"]["insights_setup"]["status"], "NOT_SELECTED");
 }
 
+#[cfg(windows)]
+#[test]
+fn installer_uses_its_host_security_module_with_an_incompatible_module_path() {
+    let f = Fixture::new();
+    let modules = f.calls.parent().unwrap().join("incompatible modules");
+    let security = modules.join("Microsoft.PowerShell.Security");
+    fs::create_dir_all(&security).unwrap();
+    fs::write(
+        security.join("Microsoft.PowerShell.Security.psd1"),
+        "@{ ModuleVersion = '99.0.0'; PowerShellVersion = '99.0'; RootModule = 'Security.psm1'; FunctionsToExport = @('Get-Acl') }",
+    )
+    .unwrap();
+    fs::write(
+        security.join("Security.psm1"),
+        "function Get-Acl { throw 'incompatible module was selected' }",
+    )
+    .unwrap();
+    let run = |script: &str| {
+        Command::new("powershell.exe")
+            .args(["-NoProfile", "-Command", script])
+            .env("GROUNDLINE_TEST_MODULES", &modules)
+            .env("GROUNDLINE_TEST_INSTALLER", f.root.join("install.ps1"))
+            .env("GROUNDLINE_TEST_CODEX", &f.codex)
+            .env("GROUNDLINE_TEST_OWNER_ROOT", &f.root)
+            .env("CODEX_HOME", &f.home)
+            .env("GROUNDLINE_TEST_CATALOG", &f.catalog)
+            .env("GROUNDLINE_TEST_CALLS", &f.calls)
+            .output()
+            .unwrap()
+    };
+    // Assign after startup so the child cannot sanitize the incompatible search
+    // path. The original unqualified Get-Acl must fail under this exact input.
+    let probe = run(
+        "$ErrorActionPreference = 'Stop'; $env:PSModulePath = $env:GROUNDLINE_TEST_MODULES; Get-Acl -LiteralPath $env:GROUNDLINE_TEST_OWNER_ROOT | Out-Null",
+    );
+    assert!(!probe.status.success(), "{probe:?}");
+    let result = run(
+        "$env:PSModulePath = $env:GROUNDLINE_TEST_MODULES; & $env:GROUNDLINE_TEST_INSTALLER -Codex $env:GROUNDLINE_TEST_CODEX; exit $LASTEXITCODE",
+    );
+    assert!(result.status.success(), "{result:?}");
+    let report = receipt(&result);
+    assert_eq!(report["stages"]["distribution_revision"]["status"], "PASS");
+    assert_eq!(report["stages"]["installed_state"]["status"], "PASS");
+}
+
 #[test]
 fn doctor_failure_preserves_completed_settings_and_can_resume() {
     let f = Fixture::new();

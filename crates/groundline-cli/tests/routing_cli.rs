@@ -2,7 +2,7 @@ use chrono::{Duration, Utc};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::io::Write;
+use std::io::Seek;
 use std::process::{Command, Stdio};
 use tempfile::TempDir;
 
@@ -278,17 +278,23 @@ fn run_with_context(
     fs::write(&input, serde_json::to_vec(packet).unwrap()).unwrap();
     fs::write(&models, serde_json::to_vec(catalog).unwrap()).unwrap();
     fs::write(&private_config, "model='gpt-6-sol'\n").unwrap();
+    // Invalid packets or receipts can be rejected before audit stdin is read.
+    // Preload stdin so that early exit cannot race a parent-side pipe writer.
+    let stdin = if let Some(audit) = audit {
+        let mut file = tempfile::tempfile().unwrap();
+        serde_json::to_writer(&mut file, audit).unwrap();
+        file.rewind().unwrap();
+        Stdio::from(file)
+    } else {
+        Stdio::null()
+    };
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_groundline"));
     cmd.args(["efficiency", "route", "--input"])
         .arg(&input)
         .arg("--catalog")
         .arg(&models)
         .arg("--json")
-        .stdin(if audit.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
+        .stdin(stdin)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if audit.is_some() {
@@ -302,16 +308,7 @@ fn run_with_context(
     if dir.path().join("deliveries").exists() {
         cmd.arg("--deliveries").arg(dir.path().join("deliveries"));
     }
-    let mut child = cmd.spawn().unwrap();
-    if let Some(audit) = audit {
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(&serde_json::to_vec(audit).unwrap())
-            .unwrap();
-    }
-    let output = child.wait_with_output().unwrap();
+    let output = cmd.output().unwrap();
     let value: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(output.status.success(), value["status"] != "FAIL");
     for private in ["PRIVATE_SENTINEL", dir.path().to_str().unwrap()] {

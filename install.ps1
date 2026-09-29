@@ -71,9 +71,13 @@ function Get-CleanCommit([string]$Root, [bool]$NativeSnapshot = $false) {
             # Elevated Windows tokens may create files owned by their default owner
             # SID rather than the user SID; accept only these current-token owners.
             $currentOwners = @($identity.User.Value, $identity.Owner.Value)
+            # A pwsh -> native process -> powershell.exe chain can inherit PS7
+            # modules. Load this host's built-in ACL cmdlet, not the inherited path.
+            $checkpoint = "security_module"
+            Import-Module (Join-Path $PSHOME "Modules/Microsoft.PowerShell.Security/Microsoft.PowerShell.Security.psd1") -ErrorAction Stop
             $checkpoint = "path_owner"
             foreach ($path in @($directory.FullName, $gitDirectory.FullName)) {
-                $owner = (Get-Acl -LiteralPath $path).GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+                $owner = (Microsoft.PowerShell.Security\Get-Acl -LiteralPath $path).GetOwner([System.Security.Principal.SecurityIdentifier]).Value
                 if ($owner -notin $currentOwners) { throw "Git distribution ownership is unsupported." }
             }
         } finally { $identity.Dispose() }
