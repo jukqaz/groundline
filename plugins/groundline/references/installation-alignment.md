@@ -1,128 +1,97 @@
 # Installation and existing-setting repair
 
-Use this workflow when the user asks to install **and apply** GroundLine, align
-the existing environment, or fix old settings. Carry the authorized work through
-repair and verification in the same task. A request only to install the package
-does not authorize unrelated personal-policy edits. A review stays read-only.
+Use this workflow for requested installation **and application**, environment
+alignment, or old-setting repair. Complete authorized repair and verification
+in the same task. Package-only installation authorizes no unrelated policy edit;
+a review remains read-only. Core has no hooks, and hook trust is not config consent.
 
 ## Establish the active surface
 
-Resolve the actual host, Codex home, App executable, installed Core package,
-selected model/effort, profile, and target project. Use
-[platform commands](platform-commands.md) and native help. Upgrade through
-[native upgrade](native-upgrade.md) when requested; never edit installed caches.
+Resolve the host, Codex home, App executable, installed package, selected
+model/effort, profile, and project with [platform commands](platform-commands.md).
+Inspect only relevant user/profile/trusted-project layers and active
+`AGENTS.override.md`/`AGENTS.md`, skills, agents, rules, and hooks. Let native Codex
+resolve precedence; an inactive file proves no loaded behavior. Privately record
+each finding's source, owner, reason, proposed change, and verification.
 
-Inspect relevant user, selected-profile, and trusted project config layers.
-Let Codex resolve precedence. Inspect active `AGENTS.override.md`/`AGENTS.md`,
-applicable skills, custom agents, rules, and hooks only where they affect this
-request. Reading an inactive base file is not evidence about loaded guidance.
-Record source, owner, reason, proposed change, and verification privately for
-each finding. Do not upload raw config, catalogs, prompts, or personal files.
-
-Use [configuration review](codex-configuration.md) for bounded catalog checks
-and native strict doctor. Fetch the selected model's current official guidance;
-do not substitute a generic model preset. A stale catalog, terminal warning,
-network failure, or task-store warning does not prove a configuration defect.
+Use [configuration review](codex-configuration.md) for catalog and strict-doctor
+checks and current official guidance for the selected model. Stale catalogs,
+terminal/network warnings, or task-store failures alone prove no config defect.
+Never publish raw config, catalogs, prompts, or personal files.
 
 ## Decide and repair
 
-For the published install-and-apply flow, run the distribution's `install.sh`
-(macOS/Linux) or `install.ps1` (Windows). They verify the native artifact, use
-Codex's marketplace installer, run `setup --apply`, and finish with strict doctor.
-They require no additional chat request. Native GUI or bare `plugin add` still
-performs package delivery only; no post-install execution callback is assumed.
+The reviewed distribution's `install.sh` joins checked native installation,
+`setup --apply`, and strict doctor on macOS/Linux. Follow
+[native upgrade](native-upgrade.md) for commit pinning, API preflight, and recovery.
+GUI installation or bare `plugin add` delivers the package only.
 
-For an already installed package, default `setup` preserves existing choices and
-native defaults. A guidance review does not select the Astra preset. Use explicit
-`--model`, `--effort`, and `--service-tier` choices only as requested. Resolve the package executable and the active Codex
-executable with [platform commands](platform-commands.md). Obtain successful
-`codex debug models` output before invoking `groundline setup --catalog - --apply`
-with that JSON on stdin. Do not apply after a failed catalog command, even if it
-produced valid partial JSON. Omit `--apply` for a write-free preview.
+For an installed package, obtain successful `codex debug models` output before
+passing its JSON to `groundline setup --catalog - --apply`. Valid partial output
+from a failed catalog command is insufficient. Omit `--apply` for a write-free
+preview. Default setup preserves existing/native choices; there is no model
+preset. Supply `--model`, `--effort`, and `--service-tier` only as requested.
 
-Only `setup --preset astra` selects the baseline embedded from `config/setup-defaults.toml`:
-`gpt-6-astra`, `xhigh`, and `service_tier="default"` (Fast off). This is the
-explicit preset, not a claim that OpenAI recommends a universal configuration.
-Remove root context overrides only with `--restore-native-context`. Setup can
-remove only the four recognized retired Core hook trust records.
-Unknown state is never migrated. All other semantic settings remain unchanged;
-comments and formatting are retained where the TOML editor supports them.
+`--restore-native-context` explicitly removes root context overrides. Setup can
+also remove only the four recognized retired Core hook trust records; Insights
+and other trust remain intact. Unknown state is not migrated. Other semantic
+settings remain unchanged, with formatting/comments retained where TOML editing
+supports them.
 
-The home is resolved from `CODEX_HOME`, then the OS user home; `--codex-home`
-selects a specific existing home for testing. An absent config is created
-exclusively. An existing config gets a new owner-private sibling backup named
-`config.toml.groundline-backup-<uuid>` before replacement; the JSON report gives
-only this basename. Repeated unchanged application writes nothing. Symlinked,
-hardlinked (Unix), malformed, unsupported profile/provider/catalog, or unavailable
-model/effort inputs fail without replacing the config. GroundLine serializes its
-own writers and rechecks bytes before replacement; unrelated editors do not share
-its lock. Keep backups on uncertain write outcomes. Inspect higher-priority
-project/profile/system settings with native Codex before claiming runtime proof.
+Setup resolves `CODEX_HOME`, then the OS home; `--codex-home` selects an existing
+home for testing. It exclusively creates absent config or first saves an
+owner-private `config.toml.groundline-backup-<uuid>` sibling (only the basename is
+reported). Unchanged repeats write nothing. Symlinks, hardlinks, malformed inputs,
+unsupported profile/provider/catalog state, and unavailable model/effort fail
+without replacement. Its lock serializes GroundLine writers, not other editors;
+bytes are rechecked before replacement. Preserve backups on uncertain outcomes.
+Native higher-priority layers still require separate verification.
 
 ## Existing settings and migration
 
-The setup report links here when a selected model, profile, unsupported type, or
-unfamiliar format prevents applying a policy. Preview with `setup --catalog -`
-before using `--apply`. Never print or commit the native model catalog. Native
-strict doctor checks the effective configuration separately from this bounded
-file review.
+When unsupported selections, types, or formats need review, inspect a setup
+preview. Native strict doctor remains a separate check.
 
-| Evidence | Action within an installation-and-repair request |
+| Evidence | Action within the requested repair |
 | --- | --- |
-| No model or effort selected | Retain native Codex defaults |
-| Nonpositive context limit, or compaction limit above an explicit window | Preview `config-repair`, then apply the same plan with a new private backup |
-| Positive context overrides copied from an earlier setup without a remaining requirement | Establish their origin and intended native defaults; use `--restore-native-context` only for that approved choice |
-| Unsupported model/effort in refreshed active-host evidence | Preserve any explicit choice; fix a typo only when the intended supported value is established; otherwise obtain that missing choice |
-| Unknown/deprecated native setting | Verify native schema/doctor and official replacement; patch the specific owning layer with a backup, without maintaining old aliases |
-| Duplicate or conflicting personal guidance | Trace the active instruction chain; revise the obsolete rule in its owning file, preserving the user's current policy |
-| Stale imported skill or provider cache | Review source and local changes; use the owning updater, not direct cache patches |
-| Duplicate hooks or obsolete command paths | Establish ownership and equivalent behavior; repair only the conflicting definition; leave trust and collection consent to their native workflow |
-| Recognized retired Core hook approval | Remove only its validated record; preserve Insights and other hook trust |
-| Intentional model, effort, service tier, delegation, permissions, experiment | Preserve unless a concrete requested change covers it |
-| Unparseable input, unknown ownership, managed policy, or unresolved layer | Preserve bytes and report the specific missing evidence/authority; continue independent repairs |
+| Model/effort omitted or an intentional model, tier, delegation, permission, or experiment choice | Preserve native defaults or the explicit choice unless the request covers a change |
+| Nonpositive context limit or compaction above an explicit window | Preview `config-repair`; apply that exact plan with a new private backup |
+| Old positive context overrides without a remaining requirement | Establish origin and intended defaults; use `--restore-native-context` for the approved restoration |
+| Unsupported model/effort in fresh active-host evidence | Fix only an established typo; otherwise obtain the missing intended choice |
+| Unknown/deprecated native setting | Verify schema/doctor and official replacement; patch its owning layer without old aliases |
+| Conflicting guidance, hooks, or command paths | Trace active ownership and equivalent behavior; revise only the obsolete rule and preserve trust/consent boundaries |
+| Stale imported skill/provider cache | Review source and local changes; use its updater, never patch a cache |
+| Recognized retired Core hook approval | Remove only the validated record |
+| Unparseable input, unknown owner, managed policy, or unresolved layer | Preserve bytes, report missing evidence/authority, and continue independent repairs |
 
-Back up each changed personal file outside repositories with owner-only access.
-Never overwrite a previous backup. Prepare the smallest patch, reread the file
-before writing, and preserve intervening user edits. For ordinary config/guidance
-patches, use the native editing tools after inspecting the exact diff. The Rust
-setup and repair commands handle only their documented rules; neither is a
-general config upgrader or a natural-language instruction rewriter.
+For other personal-file edits, use native editing tools, an exact reviewed diff,
+and a new owner-only backup outside repositories. Reread before writing and
+preserve intervening edits. Setup/config-repair implement only documented rules;
+they are not general config upgraders or instruction rewriters.
 
-For Astra guidance review, look for overbroad skill triggers, unnecessary repeated
-approval, forced task creation, unconditional delegation, and instructions that
-either suppress required verification or demand exhaustive tests for every edit.
-Also check for skill text that silently overrides a user's explicit instruction.
-Revise only a rule that actually conflicts with the current request or user policy.
-The official delegation example is tunable guidance, not permission to spawn
-agents or overwrite a user's no-delegation default. Avoid copying a long Astra
-prompt into every skill. Keep one concise owning rule and link from references.
+For guidance review, check overbroad triggers, repeated approval, forced task
+creation/delegation, suppressed verification, exhaustive tests for trivial edits,
+and skill rules that override explicit user instructions. Revise only conflicts
+with the current request/policy. Keep [GPT-6 selection and adaptive delegation](model-effort-routing.md)
+in that reference; installation does not override no-delegation choices or
+optimize a previously selected older model.
 
 ## Finish and recover
 
-After changing config, run native strict doctor once and interpret the config
-row separately from environment/network rows. After changing guidance, validate
-metadata/links and exercise the affected behavior in an authorized isolated
-workspace or fresh task. Do not create another task solely for validation
-without the user's request. Report behavioral proof unavailable when necessary.
+Run strict doctor once after config changes, separating its config row from
+other failures. For guidance, validate metadata/links and exercise affected
+behavior in an authorized isolated workspace or fresh task. Do not create a task
+without a request merely for testing; label unavailable behavioral proof.
 
-If verification implicates this change, compare the current file with the exact
-post-edit bytes before restoring its private backup. Never overwrite subsequent
-user edits; merge or ask for the new decision. Preserve failed-write backups and
-report an uncertain write outcome explicitly. Do not reset unsupported state,
-delete sessions, weaken approvals, or enable Insights to make a check pass.
+If this change causes failure, restore its private backup only after the current
+file still matches the post-edit bytes. Merge intervening edits or obtain the
+new decision. Preserve failed-write backups and state uncertainty explicitly.
+Never reset unsupported state, delete sessions, weaken approvals, or enable
+Insights to pass a check. Native tasks, identity, consent, cursors, and outbox
+remain untouched by configuration migration.
 
-For the detailed parser and repair contract, use
-[configuration review](codex-configuration.md). Configuration migration never
-resets native tasks, Insights identity, consent, cursors, or queued events. A
-successful file edit is separate from native runtime behavior. Exit 2 means
-review remains; resolve it and rerun the same installer. Package, settings,
-native diagnostics, and Insights outcomes remain separate in the final receipt.
-
-Report installation, files repaired, intentional choices retained, and native
-runtime/behavior evidence separately. Record an unresolved finding rather than
-claiming a clean setup. An unchanged repeat application should write nothing;
-rerun only after changed settings, instructions, runtime, or requested scope.
-
-Core has no lifecycle hooks. The explicit installer or install/apply request
-starts this workflow under the user's existing authority. Hook trust is never
-used as configuration consent.
+Report package, repaired files, retained choices, native diagnostics, behavior,
+and Insights outcomes separately. Exit 2 means review remains: resolve it and
+rerun the same installer. Repeat passed checks only for changed settings,
+instructions, runtime, scope, or unresolved evidence. Detailed parser, plan,
+locking, and repair guarantees are in [configuration review](codex-configuration.md).

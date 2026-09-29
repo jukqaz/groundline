@@ -95,22 +95,16 @@ fn secrets(path: &Path) -> Result<(BTreeMap<String, String>, bool), ComposeError
 }
 
 fn normalized_dataset_root(value: &str) -> Option<String> {
-    let normalized = value.replace('\\', "/");
-    let normalized = normalized.trim_end_matches('/');
-    let bytes = normalized.as_bytes();
-    let unix_absolute = normalized.starts_with('/') && !normalized.starts_with("//");
-    let windows_absolute =
-        bytes.len() >= 4 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/';
+    let normalized = value.trim_end_matches('/');
     if normalized.len() > 512
-        || !(unix_absolute || windows_absolute)
-        || normalized.matches(':').count() != usize::from(windows_absolute)
+        || !normalized.starts_with('/')
+        || normalized.starts_with("//")
         || normalized
             .bytes()
-            .any(|byte| !byte.is_ascii_alphanumeric() && !b" /._-:".contains(&byte))
+            .any(|byte| !byte.is_ascii_alphanumeric() && !b" /._-".contains(&byte))
         || normalized
             .split('/')
             .any(|component| matches!(component, "." | ".."))
-        || normalized.ends_with(':')
     {
         return None;
     }
@@ -451,14 +445,10 @@ mod tests {
     }
 
     #[test]
-    fn dataset_roots_are_portable_absolute_and_injection_safe() {
+    fn dataset_roots_are_unix_absolute_and_reject_windows_paths_and_injection() {
         assert_eq!(
             normalized_dataset_root("/srv/groundline-insights/"),
             Some("/srv/groundline-insights".to_owned())
-        );
-        assert_eq!(
-            normalized_dataset_root(r"D:\GroundLine Data\insights"),
-            Some("D:/GroundLine Data/insights".to_owned())
         );
         assert_eq!(
             normalized_dataset_root("/Volumes/External SSD/groundline insights"),
@@ -468,6 +458,10 @@ mod tests {
             "relative/data",
             "/",
             "C:/",
+            "C:/GroundLine Data/insights",
+            r"D:\GroundLine Data\insights",
+            r"\GroundLine Data\insights",
+            r"\\server\share\insights",
             "//server/share",
             "/srv/../private",
             "/srv/groundline\nother",

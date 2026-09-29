@@ -1,14 +1,9 @@
 # GroundLine Insights 셀프호스팅
 
-Codex 플러그인 설치와 owner가 운영하는 서비스 배포는 서로 다른 작업입니다.
-플러그인에는 collector binary가 들어 있고, 서비스 소스 checkout에는 Axum API
-image, ClickHouse, Grafana, 비밀값을 출력하지 않는 Compose renderer가 있습니다.
-플러그인만 설치해도 maintainer 서비스에 연결되지는 않습니다.
-
-범용 Compose 경로는 선택형 공개 self-hosting preview입니다. hosted GroundLine
-서비스가 아니며 Core의 필수 조건도 아닙니다. 운영 준비 완료로 판단하기 전에 정확한
-release를 fresh host에서 검증하고 외부 TLS/Tailnet gate를 별도로 확인합니다.
-
+이 문서는 운영자 소유 API·ClickHouse·Grafana를 배포합니다.
+[수집기 설치](../installation.md)는 별도입니다. 공개 Compose는 self-hosting
+preview이며 Core의 필수 조건이 아닙니다. 운영 준비는 정확한 릴리스를 실제
+호스트에서 검증하고 인증된 외부 접근까지 확인해야 판단할 수 있습니다.
 
 ## 일반 HTTPS와 선택형 Tailscale
 
@@ -17,19 +12,6 @@ release를 fresh host에서 검증하고 외부 TLS/Tailnet gate를 별도로 �
 Tailscale을 선택할 때만 `--require-tailnet --bind-ip 100.64.0.1`을 지정하고 실제 서버의 Tailnet IPv4로 바꾸세요. API의 `GROUNDLINE_REQUIRE_TAILNET=true`가 전용 접근을 강제합니다. 기본 일반 HTTPS 모드에서는 이 값이 false이며, 등록키·수집기 토큰·관리자 토큰 인증과 요청 제한은 그대로 적용됩니다. Tailscale 접근이 필요 없는 클라이언트는 로컬 Tailscale 설치나 로그인 상태를 검사하지 않습니다.
 
 API 자체는 TLS를 종료하지 않습니다. 외부에는 유효한 인증서를 가진 HTTPS 프록시를 제공하세요. 공개 인터넷에서 HTTP로 자격증명을 전송하지 마세요. 로컬 개발용 loopback HTTP와 선택형 Tailnet HTTP만 예외로 허용합니다.
-
-## 기기 연결에 사용할 등록키
-
-수집기의 등록키에는 Insights API 컨테이너의
-`GROUNDLINE_ENROLLMENT_TOKEN` 값을 사용합니다. Compose 생성 도구가 만든
-비공개 `secrets.json`에서는 같은 값의 이름이 `ENROLLMENT_TOKEN`입니다.
-TrueNAS 관리 API 키는 NAS 앱 조회·배포용이고, Grafana 관리자 비밀번호는
-대시보드 로그인용입니다. 기기 등록에는 Insights 등록키를 전달하세요.
-
-수집에서 `api_upgrade_required`가 나오면 현재 수집 계약을 지원한다고 응답하는
-Insights API 배포본으로 서버를 먼저 업데이트해야 합니다. TrueNAS custom app의
-`1.0.0`이나 `최신` 표기만으로 API 제품 버전을 확인할 수는 없습니다.
-서버 기동, 등록키 확인, 실제 수신·저장을 각각 확인하세요.
 
 ## 요구 사항
 
@@ -48,8 +30,8 @@ Tailnet 전용 접근을 유지합니다. 일반 HTTPS로 전환하려면 TLS �
   `infrastructure/compatibility.json`은 해당 release에서 검증한 기본 조합이며
   영구적인 최대 지원 버전이 아닙니다.
 
-Linux, macOS, Windows Docker host에서 절대 dataset path를 렌더링할 수 있습니다.
-Docker Desktop에서는 VM과 공유되는 경로를 사용합니다. collector 플러그인은 세
+Linux와 macOS Docker host에서 절대 dataset path를 렌더링할 수 있습니다.
+Docker Desktop에서는 VM과 공유되는 경로를 사용합니다. collector 플러그인은 두
 운영체제의 ARM64·x86-64 binary로 별도 배포됩니다.
 
 ## 1. 버전이 지정된 소스 checkout
@@ -66,7 +48,8 @@ git switch --detach "$RELEASE_TAG"
 ```
 
 블록을 실행하기 전에 세 placeholder assignment를 모두 실제 값으로 교체합니다.
-`RELEASE_TAG`에는 검토한 `vMAJOR.MINOR.PATCH` release를 지정합니다. 같은 release의
+`RELEASE_TAG`에는 canonical 숫자 버전의 태그를 지정합니다.
+예를 들어 `v2026.929.1`의 표시 이름은 `2026.09.29-a`입니다. 같은 release의
 binary checksum은 GitHub Release에서 확인하고,
 `ghcr.io/jukqaz/groundline-insights-api:$RELEASE_TAG`는 GHCR에서 inspect합니다.
 게시된 multi-platform index digest를
@@ -76,19 +59,6 @@ reference로 복사합니다. 운영에는 moving image tag를 사용하지 않�
 소스 태그에는 설치용 플러그인 실행 파일이 없습니다. 수집기는 검증한 `stable`
 배포본으로 별도 설치합니다. 태그·릴리스 이름만으로 GitHub의 변경 잠금이
 입증되지는 않으므로 정확한 커밋, 자산 체크섬, 서명된 빌드 출처를 확인합니다.
-
-PowerShell도 같은 소스 버전과 digest가 지정된 이미지를 사용합니다.
-
-```powershell
-$ReleaseTag = "vMAJOR.MINOR.PATCH"
-$InsightsImageDigest = "ghcr.io/jukqaz/groundline-insights-api@sha256:REPLACE_WITH_64_HEX_DIGEST"
-$InsightsAccessUrl = "https://grafana.example.com"
-$CompatibilityProfile = "infrastructure/compatibility.json"
-git clone https://github.com/jukqaz/groundline.git
-Set-Location groundline
-git fetch --tags
-git switch --detach $ReleaseTag
-```
 
 ## 2. Git 밖에 owner-private 경로 준비
 
@@ -105,19 +75,8 @@ mkdir -p "$DATASET_ROOT/clickhouse" "$DATASET_ROOT/grafana"
 chmod 0750 "$DATASET_ROOT/clickhouse" "$DATASET_ROOT/grafana"
 ```
 
-Windows PowerShell에서는 Docker와 공유되는 absolute path를 사용합니다.
-
-```powershell
-$DeployRoot = Join-Path $env:LOCALAPPDATA "GroundLine\Insights"
-$DatasetRoot = Join-Path $DeployRoot "data"
-$ComposeFile = Join-Path $DeployRoot "compose.yaml"
-$SecretsFile = Join-Path $DeployRoot "secrets.json"
-$BindIp = "127.0.0.1"
-New-Item -ItemType Directory -Force "$DatasetRoot\clickhouse", "$DatasetRoot\grafana"
-```
-
-owner 디렉터리는 저장소 안에 두지 않습니다. Unix·macOS volume·Windows drive의
-absolute path에 포함된 공백은 지원하지만 relative path, UNC share, traversal
+owner 디렉터리는 저장소 안에 두지 않습니다. Linux·macOS absolute path에
+포함된 공백은 지원하지만 relative path, Windows drive path, UNC share, traversal
 segment는 거부합니다.
 
 ## 3. 비밀값을 출력하지 않고 Compose 렌더링
@@ -137,23 +96,6 @@ cargo run --locked -p xtask -- render-compose \
 docker compose -f "$COMPOSE_FILE" config --quiet
 ```
 
-PowerShell에서는 다음과 같습니다.
-
-```powershell
-cargo run --locked -p xtask -- render-compose `
-  --output $ComposeFile `
-  --secrets-file $SecretsFile `
-  --dataset-root $DatasetRoot `
-  --bind-ip $BindIp `
-  --dashboard-port 13000 `
-  --ingest-port 18080 `
-  --image $InsightsImageDigest `
-  --compatibility-profile $CompatibilityProfile `
-  --access-url $InsightsAccessUrl `
-  --json
-docker compose -f $ComposeFile config --quiet
-```
-
 `INSIGHTS_IMAGE_DIGEST`는 immutable registry digest여야 합니다. compatibility
 profile은 ClickHouse·Nginx·Grafana image reference와 Grafana ClickHouse plugin
 reference를 제공합니다. 일반 렌더링은 모든 image에 `@sha256`이 있고 plugin에는
@@ -165,81 +107,23 @@ overwrite를 거부합니다.
 
 `SECRETS_FILE`과 rendered `COMPOSE_FILE`에는 모두 실제 service credential이
 들어 있으므로 같은 owner-secret 정책으로 보호·백업·회전·삭제해야 합니다.
-Compose 파일도 공개 가능한 파생물이 아닙니다. `insights fetch-report`에는
-`GROUNDLINE_ADMIN_TOKEN` 값만 담긴 별도 비공개 파일을 만들고
-`--admin-token-file`로 전달합니다. collector token은 owner-wide report에서
-의도적으로 거부됩니다.
+Compose 파일도 공개 가능한 파생물이 아닙니다.
 
-기본 서비스는 event를 365일 보존하고 collector별 retained event 4,096개와
-논리 payload 256 MiB를 제한하며, 200만 row 또는 64 GiB dataset ceiling의 마지막
-10%를 관리 작업용으로 남깁니다. retention·collector quota·dataset ceiling을
-바꾸려면 owner-private rendered Compose에서 문서화된 `GROUNDLINE_*` 값을 사용해야
-하며 API는 안전 범위를 벗어난 값을 거부합니다.
-
-일회성 `grafana-storage-init` service가 Grafana bind directory를 UID 472, mode
-`0750`으로 맞춥니다. ownership 오류를 `0777`로 우회하지 않습니다. Grafana는 첫
-시작에 고정된 ClickHouse datasource plugin을 내려받기 위한 outbound access가
-필요합니다. API·ClickHouse·ingress는 private data network를 공유합니다.
-ingress는 Docker의 loopback 또는 Tailnet 포트 게시에 필요한 전용 bridge도
-사용하며 Nginx는 loopback·해당 bridge gateway·Tailnet source만 허용하고
-목적지를 API로 고정합니다.
-Grafana는 별도 plugin-download egress network를 사용합니다. 이 bridge 분리는
-service path 격리이지 application-layer outbound firewall은 아니므로 그 경계가
-필요한 운영 환경은 host egress policy를 추가해야 합니다. Grafana usage
-reporting, 버전 확인,
-플러그인 업데이트 확인, preinstalled plugin 자동 업데이트는 비활성화되며
-template은 compatibility profile이 선택한 dependency만 설치합니다.
+저장소 초기화 서비스는 Grafana 디렉터리를 UID 472, mode `0750`으로 맞춥니다.
+소유권 오류를 `0777`로 우회하지 않습니다. Grafana는 첫 시작에 고정된 plugin을
+내려받습니다. API·ClickHouse·ingress의 private network, ingress의 포트 게시용
+bridge, Grafana의 download bridge는 outbound firewall을 대신하지 않습니다.
+필요한 환경에는 호스트 egress 정책을 적용합니다. Grafana 사용 보고와 자동
+버전·plugin 업데이트는 꺼져 있습니다. 보존·용량·로그 정책은
+[운영 안내](../insights-operations.md#diagnostic-logging)에 모았습니다.
 
 ## 더 최신 dependency 조합 검증
 
-Compose template에는 ClickHouse·Nginx·Grafana·datasource plugin의 최대 지원
-버전을 박아두지 않습니다. 더 최신 조합을 시험하려면 Git 밖에 네 구성요소를 모두
-담은 compatibility JSON을 만들고 `--compatibility-profile`로 넘깁니다. 재현 가능한
-후보는 image마다 정확한 registry digest를, plugin에는 정확한 stable 버전을
-사용합니다. `verify-compatibility-profile`은 Docker 실행 전에 일부 입력만 있는 조합,
-잘못된 형식, prerelease, 알 수 없는 field를 거부합니다.
-
-최신 버전 탐색 단계에 한해서 image 세 개에 명시적 moving tag를 쓰고 plugin을
-`grafana-clickhouse-datasource`로만 지정할 수 있습니다. 검증과 렌더링 모두에
-`--allow-unpinned-dependencies`를 추가합니다. 이 Compose는 운영에 보존하지 않습니다.
-전체 stack과 모든 dashboard·변수·의미 검증 query가 통과하면 실제 image digest와 설치된 plugin
-버전을 pinned 후보 profile에 기록하고, override 없이 다시 렌더링·검증합니다.
-
-GitHub 수동 workflow에도 후보 입력 네 개가 있습니다. 네 개를 모두 주거나 하나도
-주지 않아야 합니다. 선택한 ClickHouse에서 mutation integration lane을 실행하고,
-선택한 전체 stack을 렌더링해 인증된 Grafana semantic check까지 수행합니다. 후보
-run 성공은 호환성 증거일 뿐 기본 profile 수정, image 게시, `stable` 승격, owner
-배포를 자동 수행하지 않습니다.
-
-### 기존 설치 마이그레이션
-
-검증한 profile의 모든 버전을 고정하고 현재 image, plugin 버전, 설정 fingerprint,
-애플리케이션 테이블의 건수를 기록합니다. API image만 바꾸면 ClickHouse, Grafana,
-Nginx, datasource plugin은 업데이트되지 않습니다.
-
-DB 저장소를 마운트하기 전에 실제 호스트에서 선택한 image를 확인합니다.
-`docker run --rm --network none --entrypoint clickhouse <image> --version`
-[공식 ClickHouse 26.6 이상 기본 amd64 빌드](https://hub.docker.com/_/clickhouse)는
-AVX2를 포함한 x86-64-v3가 필요합니다.
-다른 CPU에서 통과한 CI만으로 호스트 호환성을 확인할 수 없습니다. 지원하지 않는
-CPU라면 해당 호스트에서 지원되는 LTS profile을 명시적으로 검증하거나 호환되는
-하드웨어로 이전합니다. image를 조용히 다른 버전으로 대체하지 않습니다.
-
-일관된 백업을 위해 수집과 Grafana를 일시 중지합니다. ClickHouse 데이터, Grafana
-DB와 plugin, 비공개 배포 설정을 소유자 저장소에 함께 보관합니다. 격리된 복제본에서
-ClickHouse를 업그레이드하고 모든 애플리케이션 테이블의 변경 전후 값을 비교합니다.
-리허설 컨테이너에 운영 데이터 디렉터리를 마운트하지 않습니다.
-
-더 엄격한 API 계약이나 격리 TTL을 적용하기 전에 대상 collector의
-`insights validate-event`로 기존 이벤트를 검사합니다. 유형별 목록과 복원 가능한
-원본 백업을 남기고, 구형 이벤트를 현재 규격에 맞추려고 측정값을 만들어 내지
-않습니다. 과거 데이터 제거는 구체적인 범위에 대한 소유자 승인이 필요합니다.
-목록 작성과 교체 사이에 새 수신 데이터가 생기지 않았는지도 확인합니다.
-
-마이그레이션 후 API 저장소 준비 상태, Grafana의 모든 query, 설치된 datasource
-버전, 새 collector 수신 확인과 DB 행의 일치를 검증합니다. 등록 인증정보, 수집 동의,
-네트워크 정책과 보존 설정을 유지합니다. DB 업그레이드 실패 시 이전 image를 시작하기
-전에 그 버전과 일치하는 백업을 복원합니다. image만 되돌리는 것은 DB 복원이 아닙니다.
+기본 profile은 검증한 조합이며 최대 지원 버전이 아닙니다. 변경 전
+[의존성 검증과 마이그레이션](../insights-operations.md#dependency-upgrades-and-recovery)을
+따릅니다. API 이미지만 바꾸면 ClickHouse·Grafana·Nginx·datasource plugin은
+바뀌지 않습니다. 데이터와 설정의 일관된 백업을 보존하고 격리 복제본에서 검증합니다.
+이미지만 되돌리는 것은 DB 복원이 아닙니다.
 
 ## 4. 실제 stack 시작과 semantic 검증
 
@@ -250,18 +134,6 @@ cargo run --locked -p xtask --bin groundline-deploy -- verify-stack \
   --grafana-url "http://$BIND_IP:13000/api/health" \
   --access-url "$INSIGHTS_ACCESS_URL" \
   --secrets-file "$SECRETS_FILE" \
-  --json
-```
-
-PowerShell에서는 다음과 같습니다.
-
-```powershell
-docker compose -f $ComposeFile up --detach --wait --wait-timeout 240
-cargo run --locked -p xtask --bin groundline-deploy -- verify-stack `
-  --api-url "http://${BindIp}:18080/healthz" `
-  --grafana-url "http://${BindIp}:13000/api/health" `
-  --access-url $InsightsAccessUrl `
-  --secrets-file $SecretsFile `
   --json
 ```
 
@@ -290,19 +162,24 @@ case "$http_status" in 302|401) ;; *) echo "unexpected unauthenticated status: $
 
 ## 5. collector별 설정
 
-새 수집기를 설치하거나 켜기 전에 API를 먼저 올립니다. `/healthz`는 Basic
-schema 5와 ingest contract revision 6 이상을 제공해야 하며, 등록 응답에서
-현재 수집 generation을 받습니다. 기존 identity와 token은 재사용합니다.
-지원하지 않는 로컬 상태는 삭제해서 새 등록을 강제하지 않고 운영자 검토를 위해
-보존합니다.
+새 수집기보다 API를 먼저 업데이트합니다. 현재 요구 사항은 Basic schema 5와
+ingest contract revision 8 이상입니다. `worker check-server --json`은 등록·동의
+변경·수집 없이 이 호환성을 확인합니다. TrueNAS 앱의 버전 표기만으로 API 제품
+버전이나 실제 저장 상태를 판단하지 않습니다.
+
+등록키는 API의 `GROUNDLINE_ENROLLMENT_TOKEN`(생성한 secrets의
+`ENROLLMENT_TOKEN`)이며 NAS 관리 키·Grafana 비밀번호와 다릅니다. 기존 identity·
+token과 지원하지 않는 상태는 검토를 위해 보존하고 등록을 강제하려고 삭제하지
+않습니다. [자격증명 역할](integrations.md#개인-운영-경계)을 확인하세요.
 
 설치된 플러그인의 `references/owner-profile.example.json`을 플러그인·저장소
-밖으로 복사하고 소유자만 읽을 수 있게 제한합니다. Unix는 `0600`, Windows는
-동등한 비공개 ACL을 사용합니다. endpoint와 enrollment placeholder를 채운 뒤
+밖으로 복사하고 소유자만 읽을 수 있게 `0600`으로 제한합니다.
+endpoint와 enrollment placeholder를 채운 뒤
 그 비공개 디렉터리에서 실행합니다.
 
 ```console
 groundline-insights worker configure --input owner-profile.json
+groundline-insights worker check-server --json
 groundline-insights worker enable
 groundline-insights worker run-once
 groundline-insights worker status
@@ -312,16 +189,7 @@ Codex가 shell `PATH`를 만들지 않았다면 설치된 plugin의 `bin/<target
 `groundline-insights`를 실행합니다. accepted upload, ClickHouse 반영, Grafana
 frame은 각각 따로 확인합니다.
 
-최초 수집은 최근 7일이며 이후에는 저장된 커서부터 이어갑니다. 소유 경계,
-읽기 실패, 누적값 오류로 불완전한 구간은 보존하고 자동 읽기는 3회 뒤 중단합니다.
-상태 변경이나 과거 구간 재시도 전 [문제 해결](../../plugins/groundline-insights/references/operations-troubleshooting.md)을
-확인하세요.
-
-## 실패 경계
-
-- plugin 설치 성공은 service 존재를 증명하지 않습니다.
-- API health는 Grafana provisioning이나 외부 HTTPS access를 증명하지 않습니다.
-- `docker compose config`는 문법만 검사합니다. 실제 runtime·semantic gate는
-  `verify-stack`입니다.
-- Tailnet 주소는 reachability만 제공하며 enrollment 권한은 별도입니다.
-- 생성된 Compose, secrets, dataset, 검증 receipt는 public Git 밖에 둡니다.
+최초 수집·제한된 재시도·운영자 보고서는
+[운영 안내](../insights-operations.md#collector-verification-and-retries)를 따릅니다.
+플러그인 설치, Compose 문법, API health, 인증된 Grafana query, 새 업로드와 DB
+반영은 별도 증거입니다. 생성한 설정·데이터·검증 영수증은 공개 Git 밖에 둡니다.

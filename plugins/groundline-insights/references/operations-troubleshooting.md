@@ -1,12 +1,8 @@
 # GroundLine Insights Operations Troubleshooting
 
-Diagnose from bounded evidence before reinstalling or changing state.
-Core is not an Insights dependency; an absent Core installation is not an
-Insights fault. Diagnose only the selected installation profile.
-
-Inference proxies and generated model catalogs are not dependencies either.
-Do not reinstall one or edit model/provider settings to repair collection.
-Keep native Codex startup problems separate from the Insights owner-service path.
+Use bounded evidence before changing state. Core, inference proxies, and model
+catalogs are not dependencies; do not install them or alter model/provider
+settings to repair collection. Native startup and owner-service faults are separate.
 
 ## Read-only sequence
 
@@ -19,18 +15,11 @@ groundline-insights worker status
 codex plugin list --json
 ```
 
-Interpret the lanes independently:
-
-- provider smoke proves the installed manifest, native target, hook manifest,
-  artifact size, and SHA-256;
-- hook list proves effective configuration/trust only when obtained from the
-  owning App runtime;
-- a lifecycle receipt proves actual dispatch;
-- Tailnet status proves only local Tailscale state;
-- `tailnet_connected: null` with a bounded probe reason means the local CLI result
-  is unverified; it must not be relabeled as disconnected;
-- outbox status proves local durability, not server acceptance;
-- an accepted upload proves API acknowledgement, not Grafana freshness.
+Keep evidence separate: provider smoke checks manifest/target/hooks/size/SHA-256;
+the owning App's hook list checks effective configuration/trust; a lifecycle
+receipt proves dispatch; outbox proves local durability; accepted upload proves
+API acknowledgement, not Grafana freshness. Tailnet status is local only, and
+`tailnet_connected: null` remains unverified rather than disconnected.
 
 ## Common actions
 
@@ -69,35 +58,29 @@ Interpret the lanes independently:
   cause, then explicitly run `worker run-once`; this does not reset history.
   Known native shared prefixes are an intentional scope exclusion, not a retry
   failure. Unknown ownership, malformed metrics, and read limits are blockers.
-- `api_upgrade_required`: update the owner API first and confirm `/healthz`
-  advertises Basic schema 5 and ingest contract revision 6 or newer. Then run
-  `worker run-once` explicitly. Cached credentials do not bypass this check;
-  pending aggregates remain local and are not silently downgraded.
-  Authenticated enrollment must return the active collection generation; reuse
-  the same collector identity and token rather than assuming generation zero.
+- `api_upgrade_required`: update the owner API first, then run the candidate's
+  read-only `worker check-server` against the [current capabilities](insights-contract.md#enrollment-and-authentication).
+  Retry `worker run-once` explicitly. Cached credentials bypass no check; pending
+  events stay local without downgrade. Enrollment must return the active
+  generation; reuse identity/token and never assume generation zero.
 - `invalid_owner_profile`: install the reviewed owner-local schema-7 input with
   `groundline-insights worker configure --input <profile.json>`; it must contain
   an enrollment credential, and neither the real endpoint nor credential belongs
   in the plugin. Start from `owner-profile.example.json`; its short placeholder
   token is intentionally invalid until replaced in an owner-private copy.
-- `runtime_binary_missing`: Refresh the moving public marketplace; do not
-  build or download from the hook.
-- `invalid_artifact_checksum`: stop using that cache and reinstall from a
-  verified release.
+- `runtime_binary_missing` / `invalid_artifact_checksum`: stop using the bad
+  cache and follow [native upgrade](native-upgrade.md). Hooks never build/download;
+  refresh of a pinned source does not select a new release.
 - Tailnet disconnected: connect Tailscale, then run an explicitly authorized
   `groundline-insights worker run-once`.
 - delayed/overdue outbox: preserve the outbox, restore Tailnet/API availability,
   and retry once. Automatic hooks honor `delivery_next_attempt_utc`; permanent
   rejection sets `delivery_operator_required`. Do not delete evidence.
-- `unsupported_local_state`: a consent, policy, or status file does not match
-  the current contract. No import, downgrade, or automatic conversion exists.
-  Inspect the complete field contract: a former policy can still declare
-  schema 1 while lacking `updated_at_utc` and carrying unsupported fields.
-  Matching schema numbers alone do not establish compatibility. Inventory each
-  runtime partition separately, including its collection cursor and pending data.
-  Stop collection, preserve the state and outbox, and obtain explicit approval
-  before a fresh setup. Do not delete files or replay old pending events to
-  bypass the error. `worker disable` can still explicitly revoke collection.
+- `unsupported_local_state`: compare the complete [state contract](insights-contract.md#activation-and-local-state),
+  not just schema numbers: an old schema-1 policy may lack `updated_at_utc` and
+  contain forbidden fields. Inventory each runtime partition/cursor/pending data.
+  `worker disable` still revokes collection. Stop, preserve state/outbox, and obtain
+  approval before fresh setup; never delete or replay data to bypass this error.
 - `reconsent_required`: review the current owner-service destination. If consent
   is missing, explicit `worker enable` creates it and quarantines unconsented
   pending events. An invalid existing receipt is not repaired by enable; preserve

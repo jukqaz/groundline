@@ -38,7 +38,18 @@ impl Fixture {
         }
     }
     fn run(&self, apply: bool) -> (i32, Value) {
-        self.run_options(apply, &["--preset", "astra", "--restore-native-context"])
+        self.run_options(
+            apply,
+            &[
+                "--model",
+                "gpt-6-astra",
+                "--effort",
+                "xhigh",
+                "--service-tier",
+                "default",
+                "--restore-native-context",
+            ],
+        )
     }
 
     fn run_options(&self, apply: bool, options: &[&str]) -> (i32, Value) {
@@ -87,8 +98,27 @@ fn default_setup_preserves_sol_choices_and_native_defaults_without_writes() {
     assert_eq!(f.bytes(), original.as_bytes());
     assert_eq!(report["mutation_performed"], false);
     assert_eq!(fs::read_dir(&f.home).unwrap().count(), 1);
-    assert_eq!(f.run_options(true, &["--preset", "astra"]).0, 1);
     assert_eq!(f.bytes(), original.as_bytes());
+}
+
+#[test]
+fn retired_presets_are_rejected_without_changing_existing_choices() {
+    let original = "model='gpt-6-astra'\nmodel_reasoning_effort='low'\nservice_tier='fast'\n";
+    let f = Fixture::new(Some(original));
+    for preset in ["astra", "preserve"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_groundline"))
+            .env("CODEX_HOME", &f.home)
+            .args(["setup", "--catalog"])
+            .arg(&f.catalog)
+            .args(["--preset", preset, "--apply"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("unexpected argument '--preset'"));
+        assert!(output.stdout.is_empty());
+        assert_eq!(f.bytes(), original.as_bytes());
+        assert_eq!(fs::read_dir(&f.home).unwrap().count(), 1);
+    }
 }
 
 #[test]
@@ -112,12 +142,6 @@ fn explicit_model_selection_is_catalog_checked_and_context_is_opt_in() {
     assert_eq!(report["file_verified"], true);
     let before = f.bytes();
     assert_eq!(f.run_options(true, &["--model", "unavailable"]).0, 1);
-    assert_eq!(f.bytes(), before);
-    assert_eq!(
-        f.run_options(true, &["--preset", "astra", "--effort", "low"])
-            .0,
-        1
-    );
     assert_eq!(f.bytes(), before);
 }
 
@@ -171,7 +195,7 @@ proptest! {
 }
 
 #[test]
-fn fresh_home_installs_requested_defaults_and_repeat_writes_nothing() {
+fn fresh_home_applies_explicit_settings_and_repeat_writes_nothing() {
     let f = Fixture::new(None);
     let (_, preview) = f.run(false);
     assert_eq!(preview["status"], "READY");
@@ -203,7 +227,7 @@ fn quoted_model_key_keeps_its_leading_comment_and_crlf() {
 }
 
 #[test]
-fn existing_pc_repairs_baseline_context_and_only_known_retired_core_trust() {
+fn explicit_settings_restore_context_and_only_known_retired_core_trust() {
     let original = format!(
         "# user comment\r\nmodel = 'older-model' # keep inline comment\r\nmodel_reasoning_effort='ultra'\r\nservice_tier='fast'\r\nmodel_context_window=999\r\nmodel_auto_compact_token_limit=0\r\napproval_policy='on-request'\r\n[features]\r\nchronicle=true\r\n[hooks.state.\"groundline@groundline:hooks/hooks.json:stop:0:0\"]\r\nenabled=true\r\ntrusted_hash='{}'\r\n[hooks.state.\"groundline-insights@groundline:hooks/hooks.json:stop:0:0\"]\r\nenabled=true\r\n[private]\r\nsecret='PRIVATE_SENTINEL'\r\n",
         format_args!("sha256:{}", "a".repeat(64))

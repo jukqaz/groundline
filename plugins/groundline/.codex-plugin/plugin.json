@@ -1,7 +1,7 @@
 {
   "name": "groundline",
-  "version": "0.28.0",
-  "description": "Local-first Codex guidance, project audits, and evidence contracts.",
+  "version": "2026.929.1",
+  "description": "Local Codex usage evidence and GPT-6 outcome comparisons.",
   "author": {
     "name": "GroundLine contributors",
     "url": "https://github.com/jukqaz/groundline"
@@ -15,8 +15,6 @@
     "codex-app",
     "model-guidance",
     "usage-efficiency",
-    "goals",
-    "chronicle",
     "agent-history",
     "verification",
     "context",
@@ -26,8 +24,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "GroundLine",
-    "shortDescription": "Local-first Codex evidence and project audits.",
-    "longDescription": "GroundLine is a compact, local-first operating layer for Codex. Seven focused skills coordinate task boundaries, live proof, redacted evidence, current model guidance, personal workflow trials, and App-first surface alignment. The optional Rust CLI validates bounded local evidence and can evaluate or restore an authorized private guidance trial. This Core plugin installs independently and never installs or activates GroundLine Insights. It installs no lifecycle hooks, performs no network requests, creates no background process, and stores no collector identity. Codex continues to own execution, worktrees, review, permissions, agents, compaction, settings, and upgrades.",
+    "shortDescription": "Compare Codex work quality, usage, and model choices.",
+    "longDescription": "GroundLine connects bounded Codex usage observations with private delivery outcomes and GPT-6 model/effort comparisons. Three focused skills cover installation, history evidence, and task-scoped optimization. Core stays offline; optional Insights owns consented collection and network delivery. Native Codex owns execution, agents, worktrees, permissions, settings, and upgrades. Missing measurements remain unknown, and historical personal trials have status and recovery commands only.",
     "developerName": "GroundLine",
     "category": "Coding",
     "capabilities": [
@@ -36,9 +34,9 @@
       "Write"
     ],
     "defaultPrompt": [
-      "Use $groundline:align-agent-home to apply GroundLine and repair evidenced mistakes in existing Codex settings and guidance with backups and focused verification.",
-      "Use $groundline:close-live-work to close source, package, installed App runtime, and live evidence.",
-      "Use $groundline:audit-agent-history to simulate efficiency from Codex counters and redacted Chronicle signals."
+      "Use $groundline:align-agent-home to install and verify GroundLine while preserving my settings.",
+      "Use $groundline:audit-agent-history to inspect bounded usage evidence.",
+      "Use $groundline:optimize-codex-workflow to choose GPT-6 models, effort and delegation using delivered outcomes."
     ],
     "websiteURL": "https://github.com/jukqaz/groundline",
     "privacyPolicyURL": "https://github.com/jukqaz/groundline/blob/main/docs/privacy.md",

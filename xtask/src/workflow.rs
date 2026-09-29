@@ -86,6 +86,91 @@ fn public_build_metadata_is_bounded(workflow: &str) -> bool {
     builds > 0
 }
 
+fn native_delivery_command_is_complete(line: &str) -> bool {
+    let Some(args) = shlex::split(line) else {
+        return false;
+    };
+    let args: Vec<_> = args.iter().map(String::as_str).collect();
+    if !args.starts_with(&[
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "groundline-cli",
+        "--target",
+        "${{ matrix.target }}",
+    ]) {
+        return false;
+    }
+    let mut rest = args[7..].iter().copied();
+    let (mut delivery, mut routing) = (false, false);
+    while let Some(arg) = rest.next() {
+        match arg {
+            "--lib" => {}
+            "--test" => match rest.next() {
+                Some("delivery_cli") => delivery = true,
+                Some("routing_cli") => routing = true,
+                Some("setup_cli" | "config_repair_cli" | "install_cli") => {}
+                _ => return false,
+            },
+            // Only output options may follow the test-runner separator. Filters,
+            // listing, and compilation-only modes do not execute the full suites.
+            "--" => {
+                return delivery
+                    && routing
+                    && rest.all(|arg| matches!(arg, "--show-output" | "--nocapture"));
+            }
+            _ => return false,
+        }
+    }
+    delivery && routing
+}
+
+fn native_delivery_checks_are_required(workflow: &str) -> bool {
+    let Ok(document) = serde_saphyr::from_str::<serde_json::Value>(workflow) else {
+        return false;
+    };
+    ["native-setup", "artifacts"].into_iter().all(|job| {
+        document["jobs"][job]["steps"]
+            .as_array()
+            .is_some_and(|steps| {
+                steps.iter().any(|step| {
+                    if step.get("if").is_some() || step.get("continue-on-error").is_some() {
+                        return false;
+                    }
+                    step["run"]
+                        .as_str()
+                        .is_some_and(|run| run.lines().any(native_delivery_command_is_complete))
+                })
+            })
+    })
+}
+
+const SCHEMA_RESET_ENV: &str = "GROUNDLINE_CLICKHOUSE_TEST_ALLOW_SCHEMA_RESET";
+
+fn clickhouse_schema_reset_is_scoped(workflow: &str) -> bool {
+    // Exactly one occurrence also rejects shell exports or an extra workflow,
+    // job, or unrelated step environment that would widen this permission.
+    if workflow.matches(SCHEMA_RESET_ENV).count() != 1 {
+        return false;
+    }
+    let Ok(document) = serde_saphyr::from_str::<serde_json::Value>(workflow) else {
+        return false;
+    };
+    document["jobs"]["qualification"]["steps"]
+        .as_array()
+        .is_some_and(|steps| {
+            steps.iter().any(|step| {
+                step["name"] == "Exercise the isolated ClickHouse and Grafana integration lane"
+                    && step.get("if").is_none()
+                    && step.get("continue-on-error").is_none()
+                    && step["env"][SCHEMA_RESET_ENV] == "true"
+                    && step["env"]["GROUNDLINE_CLICKHOUSE_TEST_ALLOW_MUTATION"] == "true"
+                    && step["env"]["GROUNDLINE_CLICKHOUSE_TEST_URL"] == "http://127.0.0.1:8123"
+            })
+        })
+}
+
 pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
     let workflows = root.join(".github/workflows");
     let entries = std::fs::read_dir(&workflows)
@@ -127,6 +212,8 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
         "cancel-in-progress: true",
         "Reject an invalid or version-mismatched release tag before expensive work",
         "release tag must be strict vMAJOR.MINOR.PATCH",
+        "cargo run --quiet --locked -p xtask -- release-name --version \"${RELEASE_TAG#v}\"",
+        "--title \"GroundLine ${release_name}\"",
         "name: fast source checks",
         "Select native setup checks for relevant PR changes",
         "if: github.event_name == 'pull_request' && needs.fast.outputs.native_setup == 'true'",
@@ -225,6 +312,8 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
         || !stable_promotion_cleans_staging
         || !actions_are_pinned(&rust)
         || !public_build_metadata_is_bounded(&rust)
+        || !native_delivery_checks_are_required(&rust)
+        || !clickhouse_schema_reset_is_scoped(&rust)
         || !setup.contains("using: composite")
         || !setup.contains("rustup toolchain install")
         || setup.contains("curl ")
@@ -261,9 +350,92 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        actions_are_pinned, external_action_is_pinned, public_build_metadata_is_bounded,
-        verify_ci_cost_contract,
+        SCHEMA_RESET_ENV, actions_are_pinned, clickhouse_schema_reset_is_scoped,
+        external_action_is_pinned, native_delivery_checks_are_required,
+        public_build_metadata_is_bounded, verify_ci_cost_contract,
     };
+
+    #[test]
+    fn schema_reset_requires_the_disposable_clickhouse_step_only() {
+        let workflow = include_str!("../../.github/workflows/rust.yml");
+        assert!(clickhouse_schema_reset_is_scoped(workflow));
+        for replacement in ["", "false"] {
+            let changed = workflow.replace(
+                &format!("{SCHEMA_RESET_ENV}: \"true\""),
+                &format!("{SCHEMA_RESET_ENV}: \"{replacement}\""),
+            );
+            assert!(!clickhouse_schema_reset_is_scoped(&changed));
+        }
+        assert!(!clickhouse_schema_reset_is_scoped(&workflow.replace(
+            &format!("          {SCHEMA_RESET_ENV}: \"true\"\n"),
+            ""
+        )));
+        for path in ["/env", "/jobs/qualification/env", "/jobs/fast/steps/0/env"] {
+            for relocate in [false, true] {
+                let mut document: serde_json::Value = serde_saphyr::from_str(workflow).unwrap();
+                if relocate {
+                    for step in document["jobs"]["qualification"]["steps"]
+                        .as_array_mut()
+                        .unwrap()
+                    {
+                        if let Some(env) = step["env"].as_object_mut() {
+                            env.remove(SCHEMA_RESET_ENV);
+                        }
+                    }
+                }
+                let env = document.pointer_mut(path);
+                if let Some(env) = env {
+                    env.as_object_mut()
+                        .unwrap()
+                        .insert(SCHEMA_RESET_ENV.to_owned(), "true".into());
+                } else {
+                    let (parent, _) = path.rsplit_once('/').unwrap();
+                    let parent = if parent.is_empty() {
+                        &mut document
+                    } else {
+                        document.pointer_mut(parent).unwrap()
+                    };
+                    parent["env"] = serde_json::json!({SCHEMA_RESET_ENV: "true"});
+                }
+                assert!(!clickhouse_schema_reset_is_scoped(&document.to_string()));
+            }
+        }
+        assert!(!clickhouse_schema_reset_is_scoped(&workflow.replace(
+            "GROUNDLINE_CLICKHOUSE_TEST_URL: http://127.0.0.1:8123",
+            "GROUNDLINE_CLICKHOUSE_TEST_URL: https://clickhouse.example.invalid"
+        )));
+    }
+
+    #[test]
+    fn delivery_checks_cannot_disappear_from_either_native_job() {
+        let workflow = include_str!("../../.github/workflows/rust.yml");
+        assert!(native_delivery_checks_are_required(workflow));
+        for job in ["native-setup", "artifacts"] {
+            for removed in [" --test delivery_cli", " --test routing_cli"] {
+                let mut document: serde_json::Value = serde_saphyr::from_str(workflow).unwrap();
+                for step in document["jobs"][job]["steps"].as_array_mut().unwrap() {
+                    if let Some(run) = step["run"].as_str() {
+                        step["run"] = run.replace(removed, "").into();
+                    }
+                }
+                assert!(!native_delivery_checks_are_required(&document.to_string()));
+            }
+        }
+        for extra in [
+            " --no-run",
+            " -- --skip receipt",
+            " -- --list",
+            " -- --exact",
+            " -- --ignored",
+            " nonexistent_filter",
+            " || true",
+        ] {
+            assert!(!native_delivery_checks_are_required(&workflow.replace(
+                "--test routing_cli",
+                &format!("--test routing_cli{extra}")
+            )));
+        }
+    }
 
     #[test]
     fn public_builds_exclude_raw_events_without_dropping_attestations() {

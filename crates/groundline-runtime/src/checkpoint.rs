@@ -161,15 +161,6 @@ pub fn spawn_worker(
     if let Some(home) = codex_home {
         command.arg("--codex-home").arg(home);
     }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        use windows_sys::Win32::System::Threading::{
-            CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW, DETACHED_PROCESS,
-        };
-
-        command.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW | DETACHED_PROCESS);
-    }
     command.spawn().map_err(|_| CheckpointError::SpawnFailed)?;
     Ok(())
 }

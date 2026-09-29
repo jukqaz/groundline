@@ -41,6 +41,11 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Derive the human release name from a canonical year.MMDD.ordinal version.
+    ReleaseName {
+        #[arg(long)]
+        version: String,
+    },
     /// Check an already-built release binary before uploading it.
     VerifyBinaryPrivacy {
         #[arg(long)]
@@ -57,7 +62,7 @@ enum Command {
         #[arg(long)]
         output: PathBuf,
     },
-    /// Verify the exact six-target package set before release promotion.
+    /// Verify the exact four-target package set before release promotion.
     VerifyPackageSet {
         #[arg(long, value_enum)]
         product: Product,
@@ -319,24 +324,18 @@ fn directory_names(path: &Path) -> Result<BTreeSet<String>, XtaskError> {
         .collect()
 }
 
-#[cfg(unix)]
-fn executable_contract(path: &Path, target: &str) -> bool {
+fn executable_contract(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
 
-    target.contains("-windows-")
-        || path
-            .metadata()
-            .map(|metadata| metadata.permissions().mode() & 0o111 != 0)
-            .unwrap_or(false)
-}
-
-#[cfg(not(unix))]
-fn executable_contract(_path: &Path, _target: &str) -> bool {
-    true
+    path.metadata()
+        .map(|metadata| metadata.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
 }
 
 fn verify_package_set(root: &Path, version: &str, product: Product) -> Result<(), XtaskError> {
-    if version != env!("CARGO_PKG_VERSION") {
+    if version != env!("CARGO_PKG_VERSION")
+        || groundline_contracts::version::release_display_name(version).is_err()
+    {
         return Err(XtaskError::InvalidPackageSet);
     }
     let expected_targets = SUPPORTED_TARGETS
@@ -374,7 +373,7 @@ fn verify_package_set(root: &Path, version: &str, product: Product) -> Result<()
         }
 
         let binary = target_root.join(&executable);
-        if !executable_contract(&binary, target) {
+        if !executable_contract(&binary) {
             return Err(XtaskError::InvalidPackageSet);
         }
         let binary_bytes = read_bounded(&binary, 1, MAX_BINARY_BYTES)?;
@@ -398,7 +397,6 @@ fn verify_package_set(root: &Path, version: &str, product: Product) -> Result<()
     Ok(())
 }
 
-#[cfg(unix)]
 fn mark_executable(path: &Path) -> Result<(), XtaskError> {
     use std::os::unix::fs::PermissionsExt;
 
@@ -406,19 +404,8 @@ fn mark_executable(path: &Path) -> Result<(), XtaskError> {
     Ok(())
 }
 
-#[cfg(not(unix))]
-fn mark_executable(_path: &Path) -> Result<(), XtaskError> {
-    Ok(())
-}
-
-#[cfg(unix)]
 fn sync_parent_directory(path: &Path) -> Result<(), XtaskError> {
     File::open(path)?.sync_all()?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn sync_parent_directory(_path: &Path) -> Result<(), XtaskError> {
     Ok(())
 }
 
@@ -486,6 +473,12 @@ fn verify_binary_privacy(binary: &Path) -> Result<(), XtaskError> {
 
 fn run(cli: Cli) -> Result<(), XtaskError> {
     match cli.command {
+        Command::ReleaseName { version } => {
+            let name = groundline_contracts::version::release_display_name(&version)
+                .map_err(|_| XtaskError::InvalidReleaseChannel)?;
+            println!("{name}");
+            Ok(())
+        }
         Command::VerifyBinaryPrivacy { binary } => verify_binary_privacy(&binary),
         Command::PackageBinary {
             product,
@@ -700,11 +693,7 @@ mod tests {
         for target in SUPPORTED_TARGETS {
             let output = root.path().join("dist").join(target);
             package_binary(Product::Insights, target, &binary, &output).expect("packaged target");
-            let executable = if target.ends_with("windows-msvc") {
-                "groundline-insights.exe"
-            } else {
-                "groundline-insights"
-            };
+            let executable = "groundline-insights";
             assert_eq!(
                 fs::read(output.join(executable)).unwrap(),
                 b"bounded-test-binary"
@@ -715,12 +704,34 @@ mod tests {
                 serde_json::from_slice(&fs::read(output.join("manifest.json")).unwrap()).unwrap();
             assert_eq!(manifest["target"], *target);
             assert_eq!(manifest["executable"], executable);
+            assert_eq!(manifest["groundline_version"], env!("CARGO_PKG_VERSION"));
+            assert!(
+                groundline_contracts::version::strict_version(
+                    manifest["groundline_version"].as_str().unwrap()
+                )
+                .is_ok()
+            );
             assert_eq!(manifest["size_bytes"], 19);
             let mut digest = Sha256::new();
             digest.update(fs::read(output.join(executable)).unwrap());
             let expected = format!("{:x}", digest.finalize());
             assert_eq!(manifest["sha256"], expected);
             assert_eq!(checksum, format!("{expected}  {executable}\n"));
+        }
+    }
+
+    #[test]
+    fn package_rejects_retired_windows_targets_before_creating_output() {
+        let root = tempdir().unwrap();
+        let binary = root.path().join("input-binary");
+        fs::write(&binary, b"bounded-test-binary").unwrap();
+        for target in ["aarch64-pc-windows-msvc", "x86_64-pc-windows-msvc"] {
+            let output = root.path().join(target);
+            assert!(matches!(
+                package_binary(Product::Core, target, &binary, &output),
+                Err(XtaskError::UnsupportedTarget)
+            ));
+            assert!(!output.exists());
         }
     }
 
@@ -792,7 +803,7 @@ mod tests {
             fs::write(&path, checksum.replace('\n', "\r\n")).unwrap();
         }
         verify_package_set(&dist, env!("CARGO_PKG_VERSION"), Product::Core)
-            .expect("Git for Windows checksum line endings");
+            .expect("portable CRLF checksum line endings");
         assert!(matches!(
             verify_package_set(&dist, "9.9.9", Product::Core),
             Err(XtaskError::InvalidPackageSet)

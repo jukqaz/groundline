@@ -31,6 +31,61 @@ fn path_argument(path: &Path) -> &str {
 }
 
 #[test]
+fn server_check_is_read_only_and_unconfigured_is_a_nonblocking_skip() {
+    let home = tempdir().unwrap();
+    let result = run(&[
+        "worker",
+        "check-server",
+        "--codex-home",
+        path_argument(home.path()),
+        "--json",
+    ]);
+    assert_eq!(result.status.code(), Some(0));
+    let report = parse_stdout(&result);
+    assert_eq!(report["status"], "NOT_CONFIGURED");
+    assert_eq!(report["result_code"], "owner_profile_not_configured");
+    assert_eq!(report["network_attempted"], false);
+    assert_eq!(report["mutation_performed"], false);
+    assert_eq!(fs::read_dir(home.path()).unwrap().count(), 0);
+
+    let profile = home.path().join("groundline/insights/owner-profile.json");
+    groundline_runtime::local_file::atomic_write_private(&profile, b"PRIVATE_INVALID_PROFILE")
+        .unwrap();
+    let before = (
+        fs::read(&profile).unwrap(),
+        fs::metadata(&profile).unwrap().modified().unwrap(),
+    );
+    let result = run(&[
+        "worker",
+        "check-server",
+        "--codex-home",
+        path_argument(home.path()),
+        "--json",
+    ]);
+    assert_eq!(result.status.code(), Some(1));
+    let report = parse_stdout(&result);
+    assert_eq!(report["status"], "FAIL");
+    assert_eq!(report["result_code"], "invalid_owner_profile");
+    assert_eq!(report["network_attempted"], false);
+    assert_eq!(report["mutation_performed"], false);
+    assert_eq!(
+        (
+            fs::read(&profile).unwrap(),
+            fs::metadata(&profile).unwrap().modified().unwrap()
+        ),
+        before
+    );
+    assert_eq!(fs::read_dir(profile.parent().unwrap()).unwrap().count(), 1);
+    let emitted = format!(
+        "{}{}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(!emitted.contains("PRIVATE_INVALID_PROFILE"));
+    assert!(!emitted.contains(path_argument(home.path())));
+}
+
+#[test]
 fn setup_reports_missing_actions_and_never_enables_collection_implicitly() {
     let home = tempdir().unwrap();
     let result = run(&["setup", "--codex-home", path_argument(home.path())]);
@@ -205,8 +260,6 @@ fn doctor_uses_native_store_discovery_without_model_configuration_or_executables
     let config = b"INVALID TOML [ PRIVATE_CONFIG_SENTINEL";
     fs::write(home.path().join("config.toml"), config).unwrap();
     // Doctor proves presence only, not SQLite schema validity or live delivery.
-    // Elevated Windows runners otherwise assign Administrators as the owner,
-    // which correctly fails the collector's user-owned-store requirement.
     let database = home.path().join("state_42.sqlite");
     groundline_runtime::local_file::atomic_write_private(&database, b"presence-fixture").unwrap();
     assert!(groundline_runtime::local_file::owned_by_current_user(

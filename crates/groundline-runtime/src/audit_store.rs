@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -11,6 +11,11 @@ use serde_json::{Value, json};
 use thiserror::Error;
 
 use crate::local_file::{open_bounded_regular_file, owned_by_current_user};
+
+mod inventory;
+pub use inventory::inspect_store;
+#[cfg(test)]
+use inventory::store_inventory;
 
 const MAX_STATE_DATABASE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 const MAX_THREAD_ROWS: usize = 100_000;
@@ -45,6 +50,7 @@ struct ThreadRow {
     source: String,
     kind: ThreadKind,
     visible: bool,
+    archived: Option<bool>,
     recency_ms: i64,
 }
 
@@ -163,8 +169,13 @@ fn thread_rows(database: &Path) -> Result<Vec<ThreadRow>, AuditStoreError> {
     if row_count < 0 || row_count as usize > MAX_THREAD_ROWS || oversized_count != 0 {
         return Err(AuditStoreError::UnsupportedDatabase);
     }
+    let archived = if columns.contains("archived") {
+        "archived"
+    } else {
+        "NULL"
+    };
     let query = format!(
-        "SELECT rollout_path, source, {visible}, {recency} FROM threads ORDER BY {recency} DESC, rollout_path ASC LIMIT {}",
+        "SELECT rollout_path, source, {visible}, {recency}, {archived} FROM threads ORDER BY {recency} DESC, rollout_path ASC LIMIT {}",
         MAX_THREAD_ROWS + 1
     );
     let mut statement = connection
@@ -179,6 +190,7 @@ fn thread_rows(database: &Path) -> Result<Vec<ThreadRow>, AuditStoreError> {
                 source,
                 visible: row.get::<_, i64>(2)? != 0,
                 recency_ms: row.get::<_, i64>(3).unwrap_or(0),
+                archived: row.get::<_, Option<i64>>(4)?.map(|value| value != 0),
             })
         })
         .map_err(|_| AuditStoreError::DatabaseUnavailable)?
@@ -346,6 +358,10 @@ pub fn collect_audit(
     let mut total_bytes = 0_u64;
     let mut retained_bytes = 0_u64;
     let mut component_bytes = [0_u64; 3];
+    let mut selected = Vec::new();
+    let mut identities = BTreeMap::<String, usize>::new();
+    let mut identity_unavailable = 0_u64;
+    let mut duplicate_identity_excluded = 0_u64;
     for row in rows {
         if (row.recency_ms > 0 && row.recency_ms <= start_ms)
             || (row.kind == ThreadKind::Root && !row.visible)
@@ -354,7 +370,7 @@ pub fn collect_audit(
         }
         let normalized =
             crate::rollout::logical_path(&row.rollout).unwrap_or_else(|_| row.rollout.clone());
-        if !seen.insert(normalized) {
+        if !seen.insert(normalized.clone()) {
             duplicates = duplicates.saturating_add(1);
             continue;
         }
@@ -362,12 +378,18 @@ pub fn collect_audit(
         let mut originator_missing = false;
         let mut non_codex = false;
         let mut classified = None;
+        let mut identity = None;
         let contents = match crate::rollout::read_audit_rollout(
             &row.rollout,
             &allowed_roots,
             &mut total_bytes,
             &mut retained_bytes,
             |metadata| {
+                identity = metadata
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .filter(|id| !id.is_empty() && id.len() <= MAX_ROLLOUT_PATH_BYTES)
+                    .map(str::to_owned);
                 let originator = metadata.get("originator").and_then(Value::as_str);
                 originator_missing = originator.is_none();
                 non_codex = is_non_codex_originator(originator);
@@ -407,17 +429,33 @@ pub fn collect_audit(
         if originator_missing {
             source_fallback = source_fallback.saturating_add(1);
         }
-        match row.kind {
+        if completed_only {
+            let Some(id) = identity.as_ref() else {
+                identity_unavailable += 1;
+                continue;
+            };
+            *identities.entry(id.clone()).or_default() += 1;
+        }
+        selected.push((row.kind, contents, total_bytes - before_read, identity));
+    }
+    // Exclude all ambiguous owners in the selected window, rather than keeping
+    // whichever duplicate was encountered first. Unindexed history is not read.
+    for (kind, contents, bytes, identity) in selected {
+        if completed_only && identity.as_ref().is_some_and(|id| identities[id] > 1) {
+            duplicate_identity_excluded += 1;
+            continue;
+        }
+        match kind {
             ThreadKind::Root => {
-                component_bytes[0] += total_bytes - before_read;
+                component_bytes[0] += bytes;
                 root.push(contents);
             }
             ThreadKind::Delegated => {
-                component_bytes[1] += total_bytes - before_read;
+                component_bytes[1] += bytes;
                 delegated.push(contents);
             }
             ThreadKind::Guardian => {
-                component_bytes[2] += total_bytes - before_read;
+                component_bytes[2] += bytes;
                 guardian.push(contents);
             }
         }
@@ -440,8 +478,12 @@ pub fn collect_audit(
     }
     let guardian_audit = guardian_from_session(guardian_session, guardian.len());
     let sample = root.len() as u64;
-    let selection_incomplete =
-        unreadable > 0 || unclassified > 0 || unreadable_delegated > 0 || unreadable_guardian > 0;
+    let selection_incomplete = unreadable > 0
+        || unclassified > 0
+        || unreadable_delegated > 0
+        || unreadable_guardian > 0
+        || duplicate_identity_excluded > 0
+        || identity_unavailable > 0;
     // Small samples affect statistical confidence, not collection completeness.
     let collection_complete = !selection_incomplete
         && [&root_audit, &delegated_audit, &guardian_audit]
@@ -479,12 +521,12 @@ pub fn collect_audit(
     } else {
         "activity_window"
     };
-    let selection_coverage = if sample == 0 {
+    let selection_coverage = if sample == 0 || completed_only {
         Value::Null
     } else {
         Value::from(1.0)
     };
-    Ok(json!({
+    let mut result = json!({
         "schema":1,"kind":kind,"status":status,"errors":[],"collection_complete":collection_complete,
         "scope":{
             "generated_at":end.to_rfc3339(),"requested_days":((end-start).num_seconds().max(1) as u64).div_ceil(86_400),
@@ -504,7 +546,26 @@ pub fn collect_audit(
         "root":root_audit,"delegated":delegated_audit,"guardian":guardian_audit,
         "usage_source_contract":{"cumulative_total_preferred_per_rollout":true,"last_usage_sum_is_fallback_only":true,"window_delta_prevents_double_counting":true,"billing_inference_performed":false},
         "mutation_performed":false,"raw_content_emitted":false,"private_paths_emitted":false,"thread_ids_emitted":false,"rollout_paths_emitted":false,"secret_value_printed":false,
-    }))
+    });
+    if completed_only {
+        // The native index defines this observation sample. Without a separate
+        // whole-store reconciliation, the population denominator is unknown.
+        result["scope"]["eligible_root_count"] = Value::Null;
+        result["coverage"] = json!({
+            "scope":"indexed_window_sample", "store_integrity_checked":false,
+            "denominator_complete":false,
+            "confirmed_eligible_root_count":sample,
+            "eligible_root_count":null,
+            "selected_root_count":sample,
+            "selection_coverage":null,
+            "duplicate_thread_id_excluded_rollout_count":duplicate_identity_excluded,
+            "thread_identity_unavailable_rollout_count":identity_unavailable,
+            "recommendation_evidence_complete":collection_complete,
+            "window_impact_of_store_discrepancies":"not_assessed",
+            "recommendation_limit":if collection_complete {"observed_sample_only"} else {"incomplete_observed_sample_only"},
+        });
+    }
+    Ok(result)
 }
 
 pub fn contract_error(error: AuditStoreError) -> ContractError {
@@ -870,7 +931,7 @@ mod tests {
         fs::create_dir(&sessions).unwrap();
         let plain = sessions.join("completed.jsonl");
         let database = fixture_database(home.path(), &plain, "cli");
-        let completed = "{\"timestamp\":\"1970-01-01T00:00:01Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\"}}\n";
+        let completed = completed_fixture("compressed-owner");
         fs::write(
             plain.with_extension("jsonl.zst"),
             zstd::encode_all(completed.as_bytes(), 1).unwrap(),
@@ -914,6 +975,315 @@ mod tests {
         assert_eq!(result["status"], "PARTIAL");
         assert_eq!(result["root"]["status"], "PARTIAL");
         assert!(!plain.exists());
+    }
+
+    fn completed_fixture(id: &str) -> String {
+        format!(
+            "{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"{id}\",\"originator\":\"codex_cli\"}}}}\n{{\"timestamp\":\"1970-01-01T00:00:01Z\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"task_complete\"}}}}\n"
+        )
+    }
+
+    #[test]
+    fn weekly_inventory_exposes_unindexed_stale_and_duplicate_history_without_mutation() {
+        let home = codex_home();
+        let sessions = home.path().join("sessions");
+        let archived = home.path().join("archived_sessions");
+        fs::create_dir(&sessions).unwrap();
+        fs::create_dir(&archived).unwrap();
+        let first = sessions.join("indexed-0.jsonl");
+        let database = fixture_database(home.path(), &first, "cli");
+        let connection = Connection::open(&database).unwrap();
+        for index in 0..5 {
+            let path = sessions.join(format!("indexed-{index}.jsonl"));
+            fs::write(&path, completed_fixture(&format!("private-owner-{index}"))).unwrap();
+            if index > 0 {
+                connection
+                    .execute(
+                        "INSERT INTO threads VALUES (?1, 'cli', 0, 1, 1)",
+                        params![path.to_string_lossy()],
+                    )
+                    .unwrap();
+            }
+        }
+        // Three different logical paths duplicate three indexed thread IDs.
+        // They must be visible even though none of these files has a DB row.
+        for (directory, id) in [(&sessions, 0), (&archived, 1), (&archived, 2)] {
+            fs::write(
+                directory.join(format!("unindexed-{id}.jsonl")),
+                completed_fixture(&format!("private-owner-{id}")),
+            )
+            .unwrap();
+        }
+        for index in 0..3 {
+            connection
+                .execute(
+                    "INSERT INTO threads VALUES (?1, 'cli', ?2, 1, 1)",
+                    params![
+                        archived
+                            .join(format!("stale-{index}.jsonl"))
+                            .to_string_lossy(),
+                        i64::from(index > 0)
+                    ],
+                )
+                .unwrap();
+        }
+        drop(connection);
+        let before = fs::read(&database).unwrap();
+        let first_before = fs::read(&first).unwrap();
+        let time = |n| chrono::DateTime::from_timestamp(n, 0).unwrap();
+        let audit = collect_audit(home.path(), time(0), time(2), None, true).unwrap();
+        let diagnostic = super::inspect_store(home.path()).unwrap();
+        let inventory = &diagnostic["store_integrity"];
+        assert_eq!(inventory["active"]["unindexed_rollout_file_count"], 1);
+        assert_eq!(inventory["archived"]["unindexed_rollout_file_count"], 2);
+        assert_eq!(inventory["stale_rollout_path_row_count"], 3);
+        assert_eq!(inventory["duplicate_thread_id_count"], 3);
+        assert_eq!(inventory["duplicate_thread_id_rollout_count"], 6);
+        assert_eq!(
+            audit["coverage"]["duplicate_thread_id_excluded_rollout_count"],
+            0
+        );
+        assert_eq!(audit["scope"]["selected_root_count"], 5);
+        assert_eq!(audit["scope"]["eligible_root_count"], Value::Null);
+        assert_eq!(audit["scope"]["selection_coverage"], Value::Null);
+        assert_eq!(audit["coverage"]["recommendation_evidence_complete"], false);
+        assert_eq!(audit["collection_complete"], false);
+        assert_eq!(audit["status"], "PARTIAL");
+        let serialized = audit.to_string();
+        for private in [
+            home.path().to_str().unwrap(),
+            "private-owner",
+            "indexed-0",
+            "stale-0",
+        ] {
+            assert!(!serialized.contains(private));
+        }
+        assert_eq!(fs::read(&database).unwrap(), before);
+        assert_eq!(fs::read(&first).unwrap(), first_before);
+        // Existing activity collection and Insights projection keep their contract.
+        let activity = collect_audit(home.path(), time(0), time(2), None, false).unwrap();
+        assert!(activity.get("coverage").is_none());
+        assert_eq!(activity["scope"]["selected_root_count"], 5);
+    }
+
+    #[test]
+    fn complete_weekly_inventory_counts_compressed_siblings_once() {
+        let home = codex_home();
+        let sessions = home.path().join("sessions");
+        fs::create_dir(&sessions).unwrap();
+        let plain = sessions.join("owned.jsonl");
+        let contents = completed_fixture("private-complete-owner");
+        fs::write(&plain, &contents).unwrap();
+        fs::write(
+            plain.with_extension("jsonl.zst"),
+            zstd::encode_all(contents.as_bytes(), 1).unwrap(),
+        )
+        .unwrap();
+        fixture_database(home.path(), &plain.with_extension("jsonl.zst"), "cli");
+        let time = |n| chrono::DateTime::from_timestamp(n, 0).unwrap();
+        let audit = collect_audit(home.path(), time(0), time(2), None, true).unwrap();
+        let diagnostic = super::inspect_store(home.path()).unwrap();
+        assert_eq!(
+            diagnostic["store_integrity"]["logical_rollout_file_count"],
+            1
+        );
+        assert_eq!(
+            diagnostic["store_integrity"]["duplicate_thread_id_count"],
+            0
+        );
+        assert_eq!(audit["coverage"]["denominator_complete"], false);
+        assert_eq!(audit["scope"]["selection_coverage"], Value::Null);
+        assert_eq!(audit["collection_complete"], true);
+    }
+
+    #[test]
+    fn unrelated_old_missing_history_does_not_gate_the_current_sample() {
+        let home = codex_home();
+        let sessions = home.path().join("sessions");
+        fs::create_dir(&sessions).unwrap();
+        let first = sessions.join("indexed-0.jsonl");
+        let db = fixture_database(home.path(), &first, "cli");
+        let connection = Connection::open(&db).unwrap();
+        let start = chrono::DateTime::parse_from_rfc3339("1970-07-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let end = start + chrono::Duration::days(7);
+        for index in 0..5 {
+            let path = sessions.join(format!("indexed-{index}.jsonl"));
+            let content = completed_fixture(&format!("owner-{index}"))
+                .replace("1970-01-01T00:00:01Z", "1970-07-01T00:00:01Z");
+            fs::write(&path, content).unwrap();
+            if index > 0 {
+                connection
+                    .execute(
+                        "INSERT INTO threads VALUES (?1, 'cli', 0, 1, 1)",
+                        params![path.to_string_lossy()],
+                    )
+                    .unwrap();
+            }
+        }
+        connection
+            .execute(
+                "UPDATE threads SET updated_at=?1",
+                params![start.timestamp() + 1],
+            )
+            .unwrap();
+        let before = collect_audit(home.path(), start, end, None, true).unwrap();
+        connection
+            .execute(
+                "INSERT INTO threads VALUES (?1, 'cli', 1, 1, 1)",
+                params![sessions.join("old-missing.jsonl").to_string_lossy()],
+            )
+            .unwrap();
+        let after = collect_audit(home.path(), start, end, None, true).unwrap();
+        assert_eq!(
+            before, after,
+            "out-of-window storage damage is a separate diagnostic"
+        );
+        assert_eq!(after["status"], "PASS");
+        assert_eq!(after["coverage"]["recommendation_evidence_complete"], true);
+        assert_eq!(after["coverage"]["denominator_complete"], false);
+        assert_eq!(after["scope"]["eligible_root_count"], Value::Null);
+        let diagnostic = super::inspect_store(home.path()).unwrap();
+        assert_eq!(diagnostic["status"], "PARTIAL");
+        assert_eq!(
+            diagnostic["store_integrity"]["stale_rollout_path_row_count"],
+            1
+        );
+        // Moving that same missing row into the requested window must still
+        // invalidate collection completeness rather than merely hiding it.
+        connection
+            .execute(
+                "UPDATE threads SET updated_at=?1 WHERE archived=1",
+                params![start.timestamp() + 1],
+            )
+            .unwrap();
+        let affected = collect_audit(home.path(), start, end, None, true).unwrap();
+        assert_eq!(
+            affected["coverage"]["recommendation_evidence_complete"],
+            false
+        );
+        assert_eq!(affected["status"], "PARTIAL");
+    }
+
+    #[test]
+    fn weekly_excludes_every_duplicate_identity_in_the_selected_window() {
+        let home = codex_home();
+        let sessions = home.path().join("sessions");
+        fs::create_dir(&sessions).unwrap();
+        let first = sessions.join("first.jsonl");
+        let second = sessions.join("second.jsonl");
+        let db = fixture_database(home.path(), &first, "cli");
+        fs::write(&first, completed_fixture("same-owner")).unwrap();
+        fs::write(&second, completed_fixture("same-owner")).unwrap();
+        Connection::open(db)
+            .unwrap()
+            .execute(
+                "INSERT INTO threads VALUES (?1, 'cli', 0, 1, 1)",
+                params![second.to_string_lossy()],
+            )
+            .unwrap();
+        let time = |n| chrono::DateTime::from_timestamp(n, 0).unwrap();
+        let audit = collect_audit(home.path(), time(0), time(2), None, true).unwrap();
+        assert_eq!(audit["scope"]["selected_root_count"], 0);
+        assert_eq!(
+            audit["coverage"]["duplicate_thread_id_excluded_rollout_count"],
+            2
+        );
+        assert_eq!(audit["collection_complete"], false);
+        assert_eq!(audit["status"], "PARTIAL");
+    }
+
+    #[test]
+    fn inventory_limit_reports_unknown_stale_count_and_shared_read_budget() {
+        let home = codex_home();
+        let sessions = home.path().join("sessions");
+        fs::create_dir(&sessions).unwrap();
+        let path = sessions.join("one.jsonl");
+        fs::write(&path, completed_fixture("owner-one")).unwrap();
+        fs::write(sessions.join("two.jsonl"), completed_fixture("owner-two")).unwrap();
+        let database = fixture_database(home.path(), &path, "cli");
+        let rows = thread_rows(&database).unwrap();
+        let roots = rollout_roots(home.path()).unwrap();
+        let mut scanned = 0;
+        let inventory = super::store_inventory(&rows, &roots, &mut scanned, &mut 0, 1);
+        assert!(!inventory.complete);
+        assert_eq!(inventory.report["traversal_complete"], false);
+        assert_eq!(
+            inventory.report["stale_rollout_path_row_count"],
+            Value::Null
+        );
+        assert_eq!(inventory.report["counts_are_lower_bounds"], true);
+        assert!(scanned > 0);
+        let mut scanned = crate::rollout::MAX_AUDIT_SCAN_BYTES;
+        let exhausted = super::store_inventory(&rows, &roots, &mut scanned, &mut 0, 100);
+        assert!(!exhausted.complete);
+        assert_eq!(
+            exhausted.report["thread_identity_unavailable_file_count"],
+            2
+        );
+        assert_eq!(exhausted.report["identity_counts_complete"], false);
+        assert_eq!(exhausted.report["counts_are_lower_bounds"], true);
+        assert_eq!(scanned, crate::rollout::MAX_AUDIT_SCAN_BYTES);
+    }
+
+    #[test]
+    fn inventory_keeps_unknown_database_partition_incomplete() {
+        let home = codex_home();
+        let sessions = home.path().join("sessions");
+        fs::create_dir(&sessions).unwrap();
+        let path = sessions.join("owned.jsonl");
+        fs::write(&path, completed_fixture("private-partition-owner")).unwrap();
+        let database = fixture_database(home.path(), &path, "cli");
+        Connection::open(&database)
+            .unwrap()
+            .execute_batch("ALTER TABLE threads DROP COLUMN archived")
+            .unwrap();
+        let inventory = super::store_inventory(
+            &thread_rows(&database).unwrap(),
+            &rollout_roots(home.path()).unwrap(),
+            &mut 0,
+            &mut 0,
+            100,
+        );
+        assert!(!inventory.complete);
+        assert_eq!(
+            inventory.report["database_archived_state_unknown_row_count"],
+            1
+        );
+        assert_eq!(inventory.report["identity_counts_complete"], true);
+        assert_eq!(inventory.report["counts_are_lower_bounds"], false);
+        assert_eq!(inventory.report["unindexed_rollout_file_count"], 0);
+        assert_eq!(inventory.report["stale_rollout_path_row_count"], 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn inventory_does_not_follow_nested_symlinks_or_claim_complete_coverage() {
+        use std::os::unix::fs::symlink;
+        let home = codex_home();
+        let outside = tempdir().unwrap();
+        let sessions = home.path().join("sessions");
+        fs::create_dir(&sessions).unwrap();
+        let path = sessions.join("safe.jsonl");
+        fs::write(&path, completed_fixture("safe-owner")).unwrap();
+        fs::write(
+            outside.path().join("outside.jsonl"),
+            completed_fixture("outside-owner"),
+        )
+        .unwrap();
+        symlink(outside.path(), sessions.join("linked-directory")).unwrap();
+        let database = fixture_database(home.path(), &path, "cli");
+        let inventory = super::store_inventory(
+            &thread_rows(&database).unwrap(),
+            &rollout_roots(home.path()).unwrap(),
+            &mut 0,
+            &mut 0,
+            100,
+        );
+        assert_eq!(inventory.report["logical_rollout_file_count"], 1);
+        assert_eq!(inventory.report["rejected_entry_count"], 1);
+        assert!(!inventory.complete);
     }
 
     #[cfg(feature = "insights-client")]
@@ -965,7 +1335,7 @@ mod tests {
         );
         assert_eq!(
             event["metrics"]["root"]["model_effort"][0]["model_family"],
-            "astra"
+            "gpt-6-astra"
         );
     }
 

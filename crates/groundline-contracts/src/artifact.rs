@@ -16,12 +16,12 @@ mod tests {
     #[test]
     fn native_endings_preserve_exact_checksum_validation() {
         let hash = "a".repeat(64);
-        let record = format!("{hash}  groundline.exe");
+        let record = format!("{hash}  groundline");
         for ending in ["\n", "\r\n"] {
             assert!(checksum_matches(
                 format!("{record}{ending}").as_bytes(),
                 &hash,
-                "groundline.exe"
+                "groundline"
             ));
         }
         for invalid in [
@@ -31,16 +31,12 @@ mod tests {
             format!("{record}\r\nextra\r\n"),
             format!("{record} \r\n"),
             format!(" {record}\r\n"),
-            format!("{hash} groundline.exe\r\n"),
-            format!("{hash}  another.exe\r\n"),
-            format!("{}  groundline.exe\r\n", "b".repeat(64)),
+            format!("{hash} groundline\r\n"),
+            format!("{hash}  another\r\n"),
+            format!("{}  groundline\r\n", "b".repeat(64)),
             format!("\u{feff}{record}\r\n"),
         ] {
-            assert!(!checksum_matches(
-                invalid.as_bytes(),
-                &hash,
-                "groundline.exe"
-            ));
+            assert!(!checksum_matches(invalid.as_bytes(), &hash, "groundline"));
         }
     }
 }

@@ -9,6 +9,16 @@
    bounded retries/diagnostics, and real loopback capability preflight tests.
    Confirm owner APIs advertise the new ingest contract before collector
    upgrades; public stable promotion alone cannot prove private API readiness.
+   Both native PR and artifact jobs must execute `delivery_cli` and `routing_cli`
+   on every supported target. Listing tests or applying a test-name filter does
+   not qualify these suites.
+   Before promoting revised routing or skill behavior as the default, compare
+   candidate and current guidance on representative matched work with the same
+   inputs and acceptance criteria. Protect completion quality and rework before
+   optimizing owned tokens or elapsed time; include child, approval, failure,
+   and retry resources. Unknown outcomes do not pass this gate. Deterministic
+   tests and GroundLine's 10-unit/5% selection policy are not proof of behavioral
+   non-regression. Retain the current baseline while that evidence is missing.
 3. In the isolated qualification ClickHouse, run the explicit mutation-enabled
    integration lane. It must exercise API-owned schema migration, enrollment,
    accepted upload, duplicate retry, weekly reporting, every Grafana query, and
@@ -16,9 +26,11 @@
    infrastructure compatibility profile first; never mix a partial candidate
    with the release-tested defaults implicitly.
 4. Validate both canonical manifests. Confirm Core has zero hooks and Insights
-   has exactly four fail-open hooks using `groundline-insights`. Confirm public
-   metadata and documentation describe Core-only, Insights-only, and combined
-   installation without implying an automatic sibling dependency.
+   has exactly four fail-open hooks using `groundline-insights`. Confirm starter
+   prompts contain at most three nonempty entries of at most 128 characters
+   each, and neither native CLI emits a manifest warning.
+   Confirm public metadata and documentation describe Core-only, Insights-only,
+   and combined installation without implying an automatic sibling dependency.
    Ship only Core, Insights, and the API; no separate GUI artifact or build job.
    Verify the installed native collector and a real Codex lifecycle hook,
    preserving existing settings and consent. Record an accepted receipt and
@@ -45,7 +57,7 @@
    profile fingerprint and pin status belong in the renderer receipt.
 7. Run the manual qualification workflow once if the release tag path has not
    already done so.
-8. Build both binaries for all six targets from the exact release commit. Verify
+8. Build both binaries for all four macOS/Linux targets from the exact release commit. Verify
    each product's target set, executable name, manifest, size, and SHA-256. Remap
    GitHub runner workspace and home paths before compiling release binaries.
 9. Publish one versioned GitHub release without replacing an existing release,

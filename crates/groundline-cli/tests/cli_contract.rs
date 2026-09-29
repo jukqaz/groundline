@@ -44,53 +44,91 @@ fn recommend_stdin(bytes: &[u8]) -> Output {
 }
 
 #[test]
-fn simulation_cli_requires_one_observed_audit_and_does_not_modify_its_input() {
-    let root = tempdir().unwrap();
-    let path = root.path().join("audit.json");
-    let mut fixture = json!({
-        "kind":"groundline-codex-session-audit","schema":1,
-        "provider_reported_usage":{
-            "source":"codex-cumulative-total-snapshots","rollout_count_with_usage":1,
-            "input_tokens":100,"cached_input_tokens":20,"output_tokens":10,
-            "reasoning_output_tokens":2,"total_tokens":110,
-            "token_field_availability":{"input_tokens":true,"cached_input_tokens":true,
-                "output_tokens":true,"reasoning_output_tokens":true,"total_tokens":true}
+fn retired_commands_are_rejected_before_reading_or_writing_state() {
+    let home = tempdir().unwrap();
+    let sentinel = home.path().join("private-state.json");
+    fs::write(&sentinel, b"private-state-must-survive").unwrap();
+    for arguments in [
+        vec!["efficiency", "simulate"],
+        vec!["efficiency", "fuse"],
+        vec!["efficiency", "batch"],
+        vec!["integrations", "status"],
+        vec!["project-audit"],
+        vec!["guidance", "audit"],
+        vec!["guidance", "snapshot"],
+        vec!["personal", "review"],
+        vec!["personal", "evaluate"],
+    ] {
+        let output = Command::new(groundline())
+            .args(&arguments)
+            .env("CODEX_HOME", home.path())
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2), "{arguments:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("unrecognized subcommand"),
+            "{arguments:?}: {:?}",
+            output.stderr
+        );
+        assert!(output.stdout.is_empty());
+        assert_eq!(fs::read(&sentinel).unwrap(), b"private-state-must-survive");
+        assert_eq!(fs::read_dir(home.path()).unwrap().count(), 1);
+    }
+}
+
+#[test]
+fn observed_comparison_runs_without_projecting_savings_or_mutating_input() {
+    let snapshot = json!({
+        "cohort": {
+            "schema_version":3, "groundline_version":"0.28.0", "os_family":"macos",
+            "runtime_family":"codex_app", "execution_mode":"desktop",
+            "model_family":"gpt-6-sol", "effort":"high"
         },
-        "tools":{"call_count":5,"failure_signals":{}},
-        "activity":{"compactions":0},"task_latency":{"long_turn_count":0}
+        "sample": {
+            "root_count":30, "installation_count":1, "sample_sufficient":true,
+            "unreadable_root_count":0, "fallback_rollout_count":0
+        },
+        "metrics": {
+            "tokens_per_completed_root":1000, "compactions_per_root":2.0,
+            "compactions_per_completed_turn":0.5, "long_turn_ratio":0.2,
+            "repeated_call_ratio":0.1, "failed_call_ratio":0.04,
+            "verification_success_ratio":0.8, "verification_outcome_coverage":1.0,
+            "broad_scope_ratio":0.3, "wall_turn_p90_ms":120000
+        }
     });
-    let bytes = serde_json::to_vec(&fixture).unwrap();
-    fs::write(&path, &bytes).unwrap();
-    let args = [
+    let mut candidate = snapshot.clone();
+    candidate["cohort"]["groundline_version"] = json!(env!("CARGO_PKG_VERSION"));
+    candidate["metrics"]["tokens_per_completed_root"] = json!(800);
+    let packet = json!({
+        "kind":"groundline-comparison-input", "schema":1,
+        "mode":"personal_longitudinal", "changed_dimension":"groundline_version",
+        "same_installation_confirmed":true, "baseline":snapshot, "candidate":candidate,
+        "privacy": {"aggregate_only":true, "installation_ids_included":false,
+            "raw_content_included":false, "private_paths_included":false}
+    });
+    let home = tempdir().unwrap();
+    let input = home.path().join("observed-comparison.json");
+    let bytes = serde_json::to_vec(&packet).unwrap();
+    fs::write(&input, &bytes).unwrap();
+    let output = run(&[
         "efficiency",
-        "simulate",
-        "--audit",
-        path_argument(&path),
-        "--json",
-    ];
-    let output = run(&args);
-    assert!(output.status.success());
-    let result = parse_stdout(&output);
-    assert_eq!(result["evidence_class"], "counterfactual_not_measured");
-    assert_eq!(result["mutation_performed"], false);
-    assert_eq!(fs::read(&path).unwrap(), bytes);
-    let duplicate = run(&[
-        "efficiency",
-        "simulate",
-        "--audit",
-        path_argument(&path),
-        "--audit",
-        path_argument(&path),
+        "compare",
+        "--input",
+        path_argument(&input),
         "--json",
     ]);
-    assert!(!duplicate.status.success());
-    fixture["provider_reported_usage"]["token_field_availability"]["cached_input_tokens"] =
-        json!(false);
-    let partial = serde_json::to_vec(&fixture).unwrap();
-    fs::write(&path, &partial).unwrap();
-    assert!(!run(&args).status.success());
-    assert_eq!(fs::read(&path).unwrap(), partial);
-    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
+    assert!(output.status.success(), "{output:?}");
+    let report = parse_stdout(&output);
+    assert_eq!(report["status"], "READY");
+    assert_eq!(
+        report["metric_deltas"]["tokens_per_completed_root"]["absolute_delta"],
+        -200.0
+    );
+    assert_eq!(report["statistical_confidence"], "not_estimated");
+    assert_eq!(report["causal_effect_estimated"], false);
+    assert_eq!(report["mutation_performed"], false);
+    assert_eq!(fs::read(&input).unwrap(), bytes);
+    assert_eq!(fs::read_dir(home.path()).unwrap().count(), 1);
 }
 
 #[test]
@@ -230,44 +268,6 @@ fn platform_command_reports_the_native_packaging_contract() {
 }
 
 #[test]
-fn efficiency_batch_runs_through_the_real_cli() {
-    let root = tempdir().expect("temporary directory");
-    let input = root.path().join("batch.json");
-    fs::write(
-        &input,
-        serde_json::to_vec(&json!({
-            "kind": "groundline-batch-input",
-            "schema": 1,
-            "phase": "freeze",
-            "goal": {
-                "status": "none",
-                "objective_present": true,
-                "user_requested": false
-            },
-            "signals": {"scope_locked": true, "new_observations": 2}
-        }))
-        .expect("fixture JSON"),
-    )
-    .expect("fixture file");
-
-    let output = run(&[
-        "efficiency",
-        "batch",
-        "--input",
-        path_argument(&input),
-        "--json",
-    ]);
-    assert!(output.status.success(), "stderr={:?}", output.stderr);
-    let result = parse_stdout(&output);
-
-    assert_eq!(result["kind"], "groundline-batch-assessment");
-    assert_eq!(result["recommended_phase"], "implement");
-    assert_eq!(result["new_observation_count"], 2);
-    assert_eq!(result["mutation_performed"], false);
-    assert!(!String::from_utf8_lossy(&output.stdout).contains(path_argument(&input)));
-}
-
-#[test]
 fn invalid_input_fails_without_emitting_paths_or_content() {
     let root = tempdir().expect("temporary directory");
     let input = root.path().join("invalid.json");
@@ -275,7 +275,7 @@ fn invalid_input_fails_without_emitting_paths_or_content() {
 
     let output = run(&[
         "efficiency",
-        "batch",
+        "compare",
         "--input",
         path_argument(&input),
         "--json",
@@ -289,56 +289,6 @@ fn invalid_input_fails_without_emitting_paths_or_content() {
     assert_eq!(result["raw_content_emitted"], false);
     assert!(!serialized.contains(path_argument(&input)));
     assert!(!serialized.contains("not-json-and-private"));
-}
-
-#[test]
-fn project_audit_reports_worktree_include_without_configuration_content() {
-    let root = tempdir().expect("temporary directory");
-    fs::write(root.path().join("AGENTS.md"), "do-not-emit-this").unwrap();
-    fs::write(root.path().join(".worktreeinclude"), ".env.local").unwrap();
-    let output = run(&[
-        "project-audit",
-        "--repo",
-        path_argument(root.path()),
-        "--json",
-    ]);
-    assert!(output.status.success());
-    let result = parse_stdout(&output);
-    let encoded = String::from_utf8_lossy(&output.stdout);
-    assert_eq!(result["worktree_include_present"], true);
-    assert_eq!(result["surface_counts"]["guidance"], 1);
-    assert!(!encoded.contains("do-not-emit-this"));
-    assert!(!encoded.contains(path_argument(root.path())));
-}
-
-#[test]
-fn integrations_status_is_privacy_bounded_and_provider_honest() {
-    let home = tempdir().expect("temporary directory");
-    let state = home.path().join("groundline/insights/codex_app-desktop");
-    fs::create_dir_all(state.join("outbox")).unwrap();
-    fs::write(state.join("identity.json"), "private-collector-id").unwrap();
-    fs::write(state.join("outbox/event.json"), "private-event").unwrap();
-
-    let output = run(&[
-        "integrations",
-        "status",
-        "insights",
-        "--codex-home",
-        path_argument(home.path()),
-        "--json",
-    ]);
-    assert!(output.status.success());
-    let result = parse_stdout(&output);
-    let encoded = String::from_utf8_lossy(&output.stdout);
-    assert_eq!(result["state_observed"], true);
-    assert_eq!(result["pending_event_count"], 1);
-    assert_eq!(
-        result["plugin_installation_status"],
-        "provider_check_required"
-    );
-    assert_eq!(result["hook_trust_status"], "provider_check_required");
-    assert!(!encoded.contains("private-"));
-    assert!(!encoded.contains(path_argument(home.path())));
 }
 
 #[test]
@@ -452,39 +402,4 @@ fn provider_smoke_rejects_an_owner_hook_manifest() {
     ]);
     assert!(!output.status.success());
     assert_eq!(parse_stdout(&output)["error"], "owner_hook_not_allowed");
-}
-
-#[test]
-fn personal_cli_rejects_private_invalid_input_without_exposure_or_state_writes() {
-    let root = tempdir().unwrap();
-    let input = root.path().join("model.json");
-    fs::write(&input, b"PRIVATE_INPUT_SENTINEL").unwrap();
-    let output = run(&[
-        "personal",
-        "review",
-        "--report",
-        path_argument(&input),
-        "--audit",
-        path_argument(&input),
-        "--model-evidence",
-        path_argument(&input),
-        "--catalog",
-        path_argument(&input),
-        "--state-dir",
-        path_argument(root.path()),
-        "--apply",
-        "--json",
-    ]);
-    assert!(!output.status.success());
-    let result = parse_stdout(&output);
-    assert_eq!(result["error"], "personal_invalid_input");
-    assert_eq!(result["raw_content_emitted"], false);
-    let rendered = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(!rendered.contains("PRIVATE_INPUT_SENTINEL"));
-    assert!(!rendered.contains(path_argument(root.path())));
-    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
 }

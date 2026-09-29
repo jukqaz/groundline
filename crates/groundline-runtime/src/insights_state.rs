@@ -36,6 +36,8 @@ mod collection_stop_tests;
 mod delivery_confirmation;
 mod onboarding;
 pub use onboarding::setup;
+mod server_check;
+pub use server_check::check_server;
 
 const PROFILE_PATH: &str = "groundline/insights/owner-profile.json";
 const ENROLLMENT_TOKEN_PATH: &str = "groundline/insights/enrollment-token";
@@ -415,7 +417,6 @@ pub fn configure_profile(codex_home: &Path, bytes: &[u8]) -> Result<Value, State
 fn environment() -> Result<(&'static str, String, String), StateError> {
     let os = match std::env::consts::OS {
         "macos" => "macos",
-        "windows" => "windows",
         "linux" => "linux",
         _ => "unknown",
     };
@@ -2712,6 +2713,7 @@ fn api_capability_matrix_requires_semantic_contract_without_version_pinning() {
         json!({"basic_schema_versions":[5],"basic_contract_revision":2}),
         json!({"basic_schema_versions":[5],"basic_contract_revision":4}),
         json!({"basic_schema_versions":[5],"basic_contract_revision":5}),
+        json!({"basic_schema_versions":[5],"basic_contract_revision":7}),
         json!({"basic_schema_versions":[6],"basic_contract_revision":99}),
     ] {
         let value = json!({"storage_ready":true,"ingest_capabilities":capabilities});

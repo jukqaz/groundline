@@ -1,99 +1,30 @@
 ---
 name: audit-agent-history
-description: Use when explicitly auditing agent histories, recovering context, or preparing a redacted evidence packet.
+description: Inspect bounded Codex usage history and prepare private, source-labeled observations for workflow analysis.
 ---
 
-# Audit Agent History
+# Inspect usage evidence
 
-## Purpose
+Start from the requested time, runtime and task scope. Search metadata before
+opening relevant content. Preserve original histories; ordinary audits are
+read-only. Do not emit prompts, credentials, commands, patches, account IDs,
+private paths or long transcript excerpts.
 
-Inspect Codex histories as storage and continuity surfaces, not prompt dumps.
-Inventory metadata and search narrowly before opening content. For assessment
-use `audit-agent-history -> evaluate-ai-usage-maturity`: this skill prepares a
-redacted Codex Evidence Packet or Usage Evidence Packet; the next skill scores
-it.
+Resolve [the installed command](../../references/platform-commands.md). For
+weekly analysis, read [weekly usage audit](../../references/weekly-usage-audit.md)
+and run `groundline audit weekly --days 7 --review --json` once. Reuse a fresh
+saved audit with `groundline audit review --input <snapshot.json> --json`;
+it recalculates the local recommendation without reading native history again.
 
-## Safety
+Weekly evidence covers the selected indexed window, not every conversation on
+the Mac. Missing rows and ambiguous owners in that sample remain visible.
+For an explicit whole-store integrity question use `groundline audit store --json`.
+Its diagnosis is separate from the sample and never repairs or deletes history.
 
-- Default read-only; delete, move, archive, or compress only on explicit request.
-- Never print secrets, credentials, raw prompts, long excerpts, commands, patches, or private paths.
-- Revalidate summary-derived claims against current files or live systems.
-
-## Workflow
-
-For CLI evidence, read
-[installed command resolution](../../references/platform-commands.md).
-Never assume the user's current repository contains the installed binary.
-
-1. Identify Codex/project storage roots and the requested time/task scope.
-2. Inventory counts, sizes, time range, layout, and trustworthy model/effort/compaction/verification metadata.
-3. Search paths and keywords with indexes, `rg`, `find`, or `jq`; open only the minimum matches.
-4. Report reusable patterns, duplication/retention candidates, capability candidates, and facts needing live proof.
-5. For cost or efficiency, retain the usage source and coverage, separate
-   Codex-reported usage from activity/storage proxies, and never infer billing
-   or convert storage bytes into tokens.
-6. For general usage evidence, run `groundline audit weekly --days 7 --json`
-   or a bounded `groundline audit activity --start <RFC3339> --json`. Both
-   include root, delegated-agent, and canonical Guardian aggregates without raw
-   content.
-7. For a scheduled weekly audit, read
-   [the weekly usage audit contract](../../references/weekly-usage-audit.md)
-   fully and run `groundline audit weekly --days 7 --review --json` once.
-   It runs one audit and one recommendation from the same in-memory result.
-   Preserve `report_ko` units and source labels; inspect the nested audit and
-   recommendation statuses separately. Do not run a second recommendation or
-   audit after this combined command. Its deterministic candidate is evidence
-   for the weekly improvement loop, not the whole product-improvement decision.
-   Reuse it with `$groundline:improve-personal-workflow` when usage-pattern and
-   current Codex research are requested. Never apply a change without scoped
-   authority. The separate raw audit and
-   `efficiency recommend --audit - --json` workflow remains available when needed.
-8. When the user explicitly permits Chronicle evidence, verify Chronicle is
-   running through its native skill and read only the minimum recent surface.
-   Create the numeric aggregate defined in
-   [the Chronicle contract](../../references/chronicle-evidence-contract.md), then fuse it with the Codex
-   audit using `groundline efficiency fuse --audit <weekly.json> --chronicle
-   <chronicle.json> --json`. Never use
-   Chronicle observation counts as tokens or change Chronicle state or its
-   experiment ledger.
-9. For an efficiency counterfactual, use
-   `groundline efficiency simulate --audit <weekly.json> --json`. Label the
-   result as fixed-assumption root-counter scenarios, not measured savings or
-   billing. Reuse supported existing JSON rather than running another audit.
-10. For a user-requested personal improvement trial, use
-    `$groundline:improve-personal-workflow`. Its explicit private state contains
-    only that trial and outcome evidence. Do not modify Chronicle records or
-    publish personal outcomes. Ordinary audits remain read-only.
-
-Repeated permission reviews may indicate a workspace-boundary mismatch. Inspect
-the active host and preserve its user-selected permissions; do not prescribe
-Auto-review, disable safeguards, or add broad allows. Existing approval applies
-within its stated scope, not to unrelated cleanup or external writes.
-
-## Candidate Test
-
-Rate repeatability, risk reduction, portability, non-obviousness, and whether the right form is a skill, script, hook, agent, or documentation.
-
-## Output Contract
-
-```text
-Codex inventory:
-- ...
-High-signal patterns:
-- ...
-Candidates:
-- ...
-Retention notes:
-- ...
-Revalidation needed:
-- ...
-Usage Evidence Packet, when requested:
-- Codex time window and coverage
-- exact usage source: Codex-reported|unavailable
-- context, retry, handoff, verification signals
-- storage/activity proxies
-- optional Chronicle behavior-boundary counts
-- raw content excluded: true
-```
-
-Omit unavailable behavior signals rather than guessing.
+Keep provider-reported tokens, completed turns, verified tool calls, and actual
+deliveries distinct. Storage bytes are not tokens. Counts cannot prove quality,
+model efficiency or account membership. For a requested outcome comparison use
+[delivery evidence](../../references/delivery-evidence.md) and
+[evidence routing](../../references/evidence-routing.md). Aggregate observations
+may inform native task judgment but do not supply missing delivery outcomes.
+Report observed patterns, source/coverage limits, and the next relevant check.

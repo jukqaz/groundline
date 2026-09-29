@@ -1,131 +1,92 @@
 # GroundLine
 
-GroundLine is a public, local-first Codex plugin for repeatable task setup,
-evidence-aware completion, project configuration audits, and aggregate usage
-analysis. It complements Codex; it does not replace Codex execution, settings,
-permissions, agents, worktrees, review, or upgrades.
+GroundLine uses local Codex activity and observed delivery outcomes to inform
+GPT-6 Astra, Sol, and Luna model, effort, and subagent choices. Codex owns
+execution, settings, permissions, agents, worktrees, review, and upgrades.
+Historical records remain intact.
 
-## Privacy boundary
+The workflow is **audit → delivery → route**: activity describes a sample;
+matched direct outcomes support comparison. A proposal or passing synthetic test
+does not prove better quality or savings. See the
+[optimization loop](references/codex-optimization-loop.md).
 
-The public plugin has a deliberately small capability surface:
+## Skills
 
-- no lifecycle hooks, background process, scheduler, or collector identity;
-- no network client, upload destination, authentication token, or remote storage;
-- no prompt, transcript, path, repository name, or configuration value emission;
-- local audit commands open bounded regular files read-only and return aggregate
-  counters or stable reason codes.
+| Skill | Scope |
+| --- | --- |
+| `align-agent-home` | Requested installation, configuration, and guidance alignment |
+| `audit-agent-history` | Explicit history inspection and redacted usage evidence |
+| `optimize-codex-workflow` | Task-scoped GPT-6 selection and workflow assessment |
 
-`groundline provider-smoke --plugin-root <path> --json` fails if an owner hook
-manifest is present. Repository qualification rejects personal or secret markers,
-Python runtime dependencies, duplicate package roots, and CI contract drift.
+Alignment and optimization are implicitly invocable; history inspection requires
+an explicit request. Planning, Goals, handoffs, and reviewed edits stay native.
 
 ## Install and upgrade
 
-Add `https://github.com/jukqaz/groundline.git` as a Codex marketplace and install
-the `groundline` plugin. This installs Core only; it does not install or activate
-`groundline-insights`. Codex owns refresh and upgrade. GroundLine does not
-self-update or change plugin trust.
-
-To apply GroundLine after installation, ask `$groundline:align-agent-home` to
-inspect and repair evidenced mistakes in existing settings and active guidance,
-with private backups and verification. Follow
-[installation alignment](references/installation-alignment.md). Native package
-installation alone does not execute this workflow or rewrite personal settings.
-
-The repository's reviewed stable distribution includes `install.sh` and
-`install.ps1` for installation and setup in one invocation. Its default preserves
-existing choices and native defaults. `groundline setup --catalog
-<native-models.json> --apply` uses the same policy; add `--preset astra` to select
-**gpt-6-astra / xhigh / Fast off**, or `--model` and `--effort` for another supported
-choice. Context restoration requires `--restore-native-context`. Changed files
-receive private backups. Without `--apply`, setup previews without writes.
-See [existing settings and migration](references/installation-alignment.md#existing-settings-and-migration).
+Use `install.sh` from the reviewed binary-bearing `stable` distribution for
+installation and application. Native package-only installation is also available:
 
 ```console
 codex plugin marketplace add https://github.com/jukqaz/groundline.git --ref stable --json
 codex plugin add groundline@groundline --json
 ```
 
-Use [native upgrade](references/native-upgrade.md) to refresh the installed
-package. Version tags contain source; use the binary-bearing `stable`
-distribution for installation.
+Core does not add or activate Insights. Package delivery alone does not repair
+personal settings. For requested application, use `$groundline:align-agent-home`
+and [installation alignment](references/installation-alignment.md). Setup preserves
+existing choices and native defaults; explicit settings, backups, previews, and
+context restoration follow [configuration review](references/codex-configuration.md).
 
-After an upgrade, verify the installed package and native artifact independently:
+Follow [native upgrade](references/native-upgrade.md) for candidate API checks,
+commit pinning, and recovery. Then verify the installed package separately from
+live behavior:
 
 ```console
 groundline provider-smoke --plugin-root /path/to/installed/groundline --require-installed --json
 groundline doctor --plugin-root /path/to/installed/groundline --json
 ```
 
-The package supports Apple Silicon and Intel macOS, ARM64 and x86_64 Linux, and
-ARM64 and x86_64 Windows. Release artifacts are built from the moving Rust
-`stable` channel and include a strict manifest plus SHA-256 checksum.
-Resolve the executable from the installed plugin's `bin/<target>` directory;
-plugin installation does not by itself promise a user-shell `PATH` entry.
+Packages support macOS/Linux on ARM64 and x86_64. Resolve the installed executable
+from `bin/<target>` using [platform commands](references/platform-commands.md);
+installation does not promise a shell `PATH` entry. Source tags contain no binaries.
 
-## Commands
+## Usage evidence and delivery comparison
+
+Run these examples in an owner-private directory outside the public repository:
 
 ```console
-groundline platform --json
-groundline project-audit --repo . --json
-groundline config-audit --config /private/config.toml --catalog /private/models.json --json
-groundline setup --catalog /private/models.json --apply
-groundline config-repair --config /private/config.toml --catalog /private/models.json
-groundline guidance audit --profile /private/review/profile.json --baseline /private/review/baseline.json --json
-groundline audit weekly --days 7 --json
-groundline efficiency batch --input batch.json --json
-groundline efficiency compare --input comparison.json --json
+groundline audit weekly --days 7 --review --json > weekly.json
+groundline audit review --input weekly.json --json
+groundline efficiency record-delivery --input manifest.json --output receipts/delivery.json --json
+groundline efficiency delivery-summary --deliveries receipts --json
+groundline efficiency route --input routing.json --catalog native-models.json --audit weekly.json --deliveries receipts --json
 ```
 
-`project-audit` counts Codex guidance, config, skills, agents, rules, plugins,
-and `.worktreeinclude` without reading or returning their values. Audit commands
-read the local Codex state store without modifying it. Efficiency commands accept
-explicit JSON files and never transmit them.
+[Weekly audit](references/weekly-usage-audit.md) covers the selected task-window
+sample, with full-population coverage unknown. Saved review scans no history and
+recomputes one recommendation. `groundline audit store --json` is a separate
+whole-store diagnostic.
 
-`config-repair` previews bounded context-limit repairs and writes only with a
-matching plan hash, `--apply`, and a new private backup. See
-[configuration review](references/codex-configuration.md) for scope and recovery.
-The existing `align-agent-home` skill handles installation alignment and
-requested imported-skill maintenance.
-`guidance snapshot` creates a new path-free private baseline without overwriting
-skills or existing files. `guidance audit` freshly inventories profile-selected
-roots, reports additions/removals, and optionally compares upstream checkouts.
-The host-local profile and portable baseline use strict GroundLine contracts;
-there is no personal-registry adapter or duplicate initialization command.
-See [skill maintenance](references/skill-maintenance.md) for source review,
-local-change preservation, and behavior-test routing. No language-specific SDK
-or user-home verification script is required by the native commands.
+The [delivery contract](references/delivery-evidence.md) records effective
+selections, quality, rework, resources, failures, and unknowns. For
+[routing](references/evidence-routing.md), use a dedicated receipt directory and
+an empty packet `outcomes` array. Aggregate reports are optional context; routing
+changes no settings and does not establish automatically learned improvement.
+Existing `personal status`/`rollback` are [recovery only](references/personal-recovery.md).
 
-The state database must be an owner-owned, non-symlinked regular file no larger
-than 8 GiB. Audits read at most 100,000 thread metadata rows and accept rollout
-files only below the canonical, non-symlinked `sessions` or `archived_sessions`
-root. Streaming input is bounded to 1 GiB per rollout and 8 GiB per audit, with
-at most 512 MiB of retained audit records. See [weekly audit](references/weekly-usage-audit.md)
-for event windows, independent native/UI baselines, and incomplete history.
+## Privacy boundary
+
+Core has no hooks, background process, scheduler, collector identity, or network
+client. Audit is bounded and read-only; delivery receipts are private local files.
+Neither exports raw prompts, transcripts, paths, or configuration values.
+Provider smoke rejects owner hook manifests. Optional Insights has separate
+installation and consent. See [Security](SECURITY.md) and
+[Privacy](https://github.com/jukqaz/groundline/blob/main/docs/privacy.md).
 
 ## Development
 
-```console
-cargo fmt --all -- --check
-cargo test --workspace --all-features --locked
-cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-cargo run --locked -p xtask -- verify-source --root . --json
-```
-
-Pull requests run only the fast lane. Full qualification and six-platform release
-artifacts run for release tags or explicit manual requests, with concurrency cancellation, timeouts,
-and short artifact retention.
-
-See the repository [integration profiles](https://github.com/jukqaz/groundline/blob/main/docs/integrations.md),
-[Privacy](https://github.com/jukqaz/groundline/blob/main/docs/privacy.md),
-[Security](SECURITY.md), and
-[release checklist](https://github.com/jukqaz/groundline/blob/main/docs/release-checklist.md).
-
-## Personal workflow improvement
-
-Use `$groundline:improve-personal-workflow` to review current model guidance and
-affected instructions. That route does not require Insights. For a requested
-usage-based trial, combine Insights reports, native audits, and private
-completion evidence. Core personal
-commands review, trial, evaluate, and restore dedicated guidance while preserving
-user edits. Missing evidence never authorizes a change. See [the contract](references/personal-improvement.md).
+Use [CONTRIBUTING](https://github.com/jukqaz/groundline/blob/main/CONTRIBUTING.md)
+for validation commands and CI lanes. See also
+[architecture](https://github.com/jukqaz/groundline/blob/main/docs/architecture.md),
+[integration profiles](https://github.com/jukqaz/groundline/blob/main/docs/integrations.md),
+and the [release checklist](https://github.com/jukqaz/groundline/blob/main/docs/release-checklist.md).

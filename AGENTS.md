@@ -11,12 +11,12 @@
   Reject unsupported state explicitly without rewriting or deleting it. Keep
   data-loss protections, bounded delivery retries, and current native input
   variants; these are not legacy support. A state reset needs separate approval.
-- Use `$groundline:reconcile-current-state` when stale evidence or uncertain
-  scope affects the next action, including broad or high-impact changes.
-  A resumed turn with current evidence and a clear next step needs no repeated
-  skill invocation. Use `$groundline:close-live-work` for requested live proof.
+- Reconcile the relevant checkout, authorization, and evidence before broad changes.
+  Verify the requested execution path without a separate generic workflow layer.
 - Treat Codex App and its bundled CLI as the primary runtime. Use PATH CLI for
   packaging, automation, and secondary-channel evidence.
+- Support macOS and Linux on ARM64 and x86-64 only. Keep historical Windows
+  observations readable without shipping a Windows runtime or installer.
 - GroundLine ships Core and Insights plugins/CLIs plus the Insights API. Keep
   connection and collection in the shared runtime; no separate Desktop GUI.
 - Use a light preflight for clear bounded work. Before writing for broader work,
@@ -31,16 +31,17 @@
   Ask for new authority only when scope or external effects materially change.
 - Use other GroundLine skills only when their explicit workflow matches the
   request; ordinary planning and implementation stay Codex-native.
-- Spawn subagents only when the user explicitly asks for delegation, parallel
-  work, or subagents. Give each agent one independent lane and a compact return
-  contract.
+- Optimize model guidance and outcome comparisons for GPT-6 Astra, Sol, and Luna
+  only; preserve older records without treating them as optimization targets.
+- A user request or applicable GPT-6 selection skill can authorize useful
+  independent subagents throughout that task. Follow the GPT-6 model/effort reference for per-lane
+  selection, compact handoffs, disjoint ownership, and integration checks.
+  Preserve explicit task-level selections and any no-delegation policy.
 - Use Codex built-in agents and any user-owned specialist agents directly;
   GroundLine does not install or override custom agents.
 - Leave model and reasoning effort unpinned unless the user explicitly requests
-  a setting. The documented `setup` preset is a separate opt-in configuration
-  operation, not a prerequisite for ordinary guidance review or repair.
-- Chronicle may provide redacted behavior-boundary counts when the user allows
-  it. Do not change Chronicle state, automation, or experiment ledgers.
+  a setting. Explicit `setup --model/--effort` is a configuration operation,
+  not a prerequisite for ordinary guidance review or repair.
 - Run the smallest credible verification and report source, package, install,
   and live state separately.
 - Repeat passed checks only after relevant changes or unresolved risk. Diagnose
@@ -51,7 +52,7 @@
   release qualification. Instruction semantics need separate behavioral evidence.
 - 문자열 파서를 새로 만들거나 수정할 때 현재 표준 라이브러리와 유지보수되는
   crate를 검토한다. 실제 결함·호환성·필요한 feature·보안 검증을 근거로 선택하고,
-  회귀 입력과 적용 이유를 남긴다. 기준은 `docs/research/string-processing-crates.ko.md`다.
+  회귀 입력과 적용 이유를 남긴다. 기준은 `docs/development.md`다.
 - Skill guidelines support user intent under higher-priority instructions and
   permissions. Name the exact skill instruction if it causes a pause or changes
   direction. Omit empty process fields from user-facing reports.

@@ -7,28 +7,90 @@ service connection and collection. There is no additional GUI or background daem
 
 ## Start
 
-Install Git and Codex first, then review and clone the binary-bearing `stable`
+Install Git and Codex first; the Bash installer also requires `jq`. Review and clone the binary-bearing `stable`
 distribution. Source tags and `main` do not contain installable native binaries.
 
 ```console
 git clone --branch stable --single-branch https://github.com/jukqaz/groundline.git groundline-install
-bash groundline-install/install.sh
+bash groundline-install/install.sh --profile core
 ```
 
-Windows:
+Supported hosts are macOS and Linux on ARM64 and x86-64. macOS prefers the
+App-bundled executable when present; Linux uses the resolved Codex executable.
+Use `--codex /absolute/path/to/codex` for an explicit runtime. Preflight checks
+required native commands before package changes. Keep the same intended `CODEX_HOME`.
+Use `--profile insights` for the collector alone or `--profile both` for both.
 
-```powershell
-powershell -File groundline-install/install.ps1
-```
-
-macOS prefers the App-bundled executable when present. Windows inspects installed
-OpenAI App packages and then PATH. Use `--codex /absolute/path/to/codex` or
-`-Codex C:\path\to\codex.exe` for an explicit runtime. Preflight checks required
-native commands before package changes. Keep the same intended `CODEX_HOME`.
+On macOS, a current App bundle may expose
+`/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex`; the installer
+also recognizes the older `Contents/Resources/codex` layout and checks the bundle
+identity. Verify the actual path and `--version`, independently of `codex --version` on PATH. A version string alone is not installation or live-task evidence.
 
 Installing through Codex's plugin UI or `plugin add` delivers the package only.
 Finish through this installer, or invoke the installed setup commands with the
 documented inputs. Do not assume a plugin post-install callback ran.
+
+## Package-only installation
+
+For a new marketplace registration, native commands deliver only the selected
+package. Run either `plugin add` line, or both when deliberately choosing both:
+
+```console
+CODEX="/absolute/path/to/codex"
+"$CODEX" plugin marketplace add https://github.com/jukqaz/groundline.git --ref stable --json
+"$CODEX" plugin add groundline@groundline --json
+"$CODEX" plugin add groundline-insights@groundline --json
+```
+
+For an existing registration, use the reviewed installer update below; do not
+remove the source or re-add disabled plugins manually. Finish package-only
+installation with the installer, or first save the complete output of a
+**successfully completed** `"$CODEX" debug models` to an owner-private file.
+Do not pipe a still-running producer into settings application: partial valid
+JSON does not establish that catalog generation succeeded. Then run:
+
+```console
+groundline setup --catalog /owner-private/native-models.json --apply
+"$CODEX" --strict-config doctor --summary --no-color --ascii
+```
+
+The Core command requires Core to be installed. Resolve `groundline` and
+`groundline-insights` from the native plugin cache's `bin/<target>/` if they are
+not on PATH. Targets are `aarch64-apple-darwin`, `x86_64-apple-darwin`,
+`aarch64-unknown-linux-musl`, and `x86_64-unknown-linux-musl`. See
+[Insights setup](#add-insights-in-the-same-flow) for collection activation.
+
+## Update an existing installation
+
+Obtain the current complete `stable` distribution and run the same installer with
+the same intended Codex executable and `CODEX_HOME`. It refreshes the native
+marketplace at that distribution's exact clean Git commit, verifies installed artifacts,
+then rechecks setup and strict doctor. Existing installed/enabled states are retained;
+only newly selected products use `plugin add`. Disabled plugins stay disabled.
+No separate updater runs in the background.
+
+The installer changes an existing official HTTPS/SSH registration through native
+remove/add commands, retaining its transport. It accepts only an owned, clean
+native Git snapshot aligned with the installed versions; Codex's validated
+`.codex-marketplace-install.json` bookkeeping file is the sole untracked exception.
+Unsupported sources or partial state stop before changes. The reviewed distribution
+itself must be clean and contain committed binaries, checksums, and manifests.
+App Refresh now stays on the pinned commit. To adopt another release, obtain and
+review its complete current `stable` distribution and rerun its installer.
+
+Profiles select explicit installation and setup steps. Native marketplace refresh
+can also update another already-installed product from this shared channel:
+`--profile core` does not keep an installed Insights collector on its old version.
+Check the owner API's compatibility before updating a home with enabled Insights.
+See the [native upgrade boundary](../plugins/groundline/references/native-upgrade.md).
+
+When Insights state exists, the installer first verifies the candidate Insights
+artifact and runs `worker check-server` before any native marketplace write.
+This reads the existing profile and checks the API's ingest capabilities. A
+malformed profile or incompatible/unreachable API stops the update without
+changing collection state. No profile means no network request; a fresh Core
+installation remains offline apart from native package delivery. This check
+does not enroll, grant consent, run collection, or prove successful delivery.
 
 ## Settings policy
 
@@ -37,16 +99,15 @@ and context choices. A fresh config uses native Codex defaults. Known retired
 Core hook approval records can be removed with a private backup. Native strict
 doctor checks effective configuration separately from the bounded file review.
 
-| Explicit choice | Shell option | PowerShell option |
-| --- | --- | --- |
-| Astra / xhigh / Fast off | `--preset astra` | `-Preset astra` |
-| A supported model | `--model <id>` | `-Model <id>` |
-| Supported effort | `--effort <level>` | `-Effort <level>` |
-| Service tier | `--service-tier default` or `fast` | `-ServiceTier default` or `fast` |
-| Restore native context sizing | `--restore-native-context` | `-RestoreNativeContext` |
+| Explicit choice | Shell option |
+| --- | --- |
+| A supported model | `--model <id>` |
+| Supported effort | `--effort <level>` |
+| Service tier | `--service-tier default` or `fast` |
+| Restore native context sizing | `--restore-native-context` |
 
-Do not combine the Astra preset with individual model, effort, or tier overrides.
-An unsupported selection stops settings changes without substitution. Resolve
+There is no fixed model preset. An unsupported explicit selection stops settings
+changes without substitution. Resolve
 profile/provider/catalog overrides in their owning layer. See
 [existing settings and migration](../plugins/groundline/references/installation-alignment.md#existing-settings-and-migration).
 Personal guidance repair remains an explicit `groundline:align-agent-home` task.
@@ -61,16 +122,11 @@ the token itself in command arguments, shell history, or the repository.
 bash groundline-install/install.sh --profile both --insights-endpoint https://insights.example.com --enrollment-token-file /private/enrollment-token --enable-insights
 ```
 
-```powershell
-powershell -File groundline-install/install.ps1 -Profile both -InsightsEndpoint https://insights.example.com -EnrollmentTokenFile C:\private\enrollment-token -EnableInsights
-```
-
-Alternatively supply `--insights-profile /private/profile.json` or
-`-InsightsProfile C:\private\profile.json` using the existing schema-7 owner
-profile. Input files must have owner-private permissions. Endpoint/token inputs
+Alternatively supply `--insights-profile /private/profile.json` using the existing
+schema-7 owner profile. Input files must have owner-private permissions. Endpoint/token inputs
 cannot be combined with a profile file.
 
-`--enable-insights` / `-EnableInsights` is explicit consent to aggregate uploads.
+`--enable-insights` is explicit consent to aggregate uploads.
 Without it, an existing active consent is retained and a fresh installation stays
 disabled. Connection verification runs only with active consent. Existing
 matching profiles are reused without replacement; a different endpoint or token
@@ -100,7 +156,7 @@ fields. A historical acknowledgement does not prove a fresh upload in this run.
 
 ## Finish and resume
 
-Both installers print a final `groundline-installation` JSON receipt after command
+The installer prints a final `groundline-installation` JSON receipt after command
 diagnostics. Stage names and exit semantics are identical on all supported OSes:
 
 - Exit 0 / `PASS`: selected installation stages passed.
@@ -112,11 +168,17 @@ diagnostics. Stage names and exit semantics are identical on all supported OSes:
 Native doctor failure is reported separately from settings application. It does
 not erase completed steps or trigger automatic rollback. The same installer
 rechecks current state on every retry; it never trusts an old completion flag.
-Repeated unchanged setup creates no additional config backup. If stable changed
-between download and installation, obtain the complete new distribution instead
-of running a mismatched cached binary.
+Repeated unchanged setup creates no additional config backup. Moving `stable`
+after review cannot change the installer's selected commit.
 
-For release qualification, verify all six native targets plus real Codex package
-installation, existing 5.6 preservation, explicit Astra selection, partial-failure
-recovery, and a real hook-to-server receipt. Synthetic provider tests prove the
-installer contract, not authenticated Codex behavior or private server delivery.
+If source replacement or artifact verification fails, the installer attempts
+native recovery before setup. It removes only newly added products, reinstates
+the previous actual commit, and compares prior versions, enabled states, and
+artifact bytes. The receipt reports `source_commit`, `previous_commit`, and
+`rollback`; `previous_commit_pinned` means recovery to that immutable revision,
+not restoration of the old symbolic ref. A failed recovery requires review before
+retrying. These native commands are not atomic across process kill or power loss.
+
+Release-wide platform and live checks are listed in the
+[release checklist](release-checklist.md). Synthetic installer tests do not prove
+authenticated Codex behavior or private server delivery.

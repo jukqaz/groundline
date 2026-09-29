@@ -13,26 +13,13 @@ use serde_json::{Value, json};
 const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_STATUS_BYTES: u64 = 1024 * 1024;
 const MAX_DIAGNOSTIC_BYTES: u64 = 64 * 1024;
-const PROBE_ENV_ALLOWLIST: &[&str] = &[
-    "APPDATA",
-    "HOME",
-    "LOCALAPPDATA",
-    "PROGRAMFILES",
-    "PROGRAMW6432",
-    "SYSTEMROOT",
-    "TEMP",
-    "TMP",
-    "TMPDIR",
-    "USERPROFILE",
-    "WINDIR",
-    "XDG_RUNTIME_DIR",
-];
+const PROBE_ENV_ALLOWLIST: &[&str] = &["HOME", "TEMP", "TMP", "TMPDIR", "XDG_RUNTIME_DIR"];
 
 pub fn checked_at_utc() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::AutoSi, true)
 }
 
-fn candidates(os: &str, environment: &BTreeMap<String, String>) -> Vec<PathBuf> {
+fn candidates(os: &str) -> Vec<PathBuf> {
     match os {
         "macos" => [
             "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
@@ -50,11 +37,6 @@ fn candidates(os: &str, environment: &BTreeMap<String, String>) -> Vec<PathBuf> 
         .into_iter()
         .map(PathBuf::from)
         .collect(),
-        "windows" => ["PROGRAMW6432", "PROGRAMFILES"]
-            .into_iter()
-            .filter_map(|name| environment.get(name))
-            .map(|root| PathBuf::from(root).join("Tailscale").join("tailscale.exe"))
-            .collect(),
         _ => Vec::new(),
     }
 }
@@ -70,8 +52,7 @@ where
 }
 
 pub fn resolve_tailscale_cli() -> Option<PathBuf> {
-    let environment = normalized_environment(std::env::vars());
-    candidates(std::env::consts::OS, &environment)
+    candidates(std::env::consts::OS)
         .into_iter()
         .find(|path| path.is_absolute() && path.is_file())
 }
@@ -307,20 +288,12 @@ mod tests {
 
     #[test]
     fn resolver_candidates_never_use_path_or_the_working_directory() {
-        let environment = BTreeMap::from([
-            ("PATH".to_owned(), ".:/private/bin".to_owned()),
-            ("PROGRAMFILES".to_owned(), "C:\\Program Files".to_owned()),
-        ]);
-        let windows = candidates("windows", &environment);
-        assert_eq!(windows.len(), 1);
-        let windows_path = windows[0].to_string_lossy().replace('\\', "/");
-        assert!(windows_path.starts_with("C:/Program Files"));
-        assert!(windows_path.ends_with("Tailscale/tailscale.exe"));
-        assert!(
-            candidates("linux", &environment)
-                .iter()
-                .all(|path| path.to_string_lossy().starts_with('/'))
-        );
+        for os in ["macos", "linux"] {
+            let paths = candidates(os);
+            assert!(!paths.is_empty());
+            assert!(paths.iter().all(|path| path.is_absolute()));
+        }
+        assert!(candidates("windows").is_empty());
     }
 
     #[test]

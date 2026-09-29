@@ -1367,8 +1367,6 @@ mod tests {
                 result["provider_reported_usage"]["token_field_availability"]["reasoning_output_tokens"],
                 false
             );
-            #[cfg(feature = "efficiency")]
-            assert!(crate::efficiency::simulate(&[result]).is_err());
         }
         let empty = audit_rollouts(&[], 0, 20, AuditWindow::default()).unwrap();
         assert_eq!(
@@ -1419,6 +1417,87 @@ mod tests {
         assert_eq!(audit["tools"]["verification_success_count"], 1);
         assert_eq!(audit["tools"]["verification_failure_count"], 0);
         assert_eq!(audit["tools"]["verification_unresolved_count"], 0);
+    }
+
+    #[test]
+    fn cargo_environment_outcomes_match_in_raw_and_projected_history() {
+        let records = lines(&[
+            json!({"type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"test","arguments":json!({"cmd":"CARGO_HOME=/private/tmp/cargo cargo test --locked"}).to_string()}}),
+            json!({"type":"response_item","payload":{"type":"function_call_output","call_id":"test","output":{"exit_code":0}}}),
+            json!({"type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"check","arguments":json!({"cmd":"CARGO_TARGET_DIR=/tmp/build cargo check"}).to_string()}}),
+            json!({"type":"response_item","payload":{"type":"function_call_output","call_id":"check","output":{"exit_code":101}}}),
+            json!({"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"wrapper","input":"text(await tools.exec_command({cmd:'CARGO_HOME=/private/tmp/cargo CARGO_TARGET_DIR=/tmp/build cargo clippy'}));"}}),
+            json!({"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"wrapper","output":[{"type":"text","text":"Script completed\nWall time 1 seconds\nOutput:"},{"type":"text","text":"{\"exit_code\":0}"}]}}),
+        ]);
+        let projected = records
+            .lines()
+            .map(|line| {
+                Record::parse(line)
+                    .unwrap()
+                    .unwrap()
+                    .audit_projection()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        for input in [&records, &projected] {
+            let audit = audit_rollouts(&[input], 0, 20, AuditWindow::default()).unwrap();
+            assert_eq!(audit["tools"]["by_category"]["verification"], 3);
+            assert_eq!(audit["tools"]["verification_success_count"], 2);
+            assert_eq!(audit["tools"]["verification_failure_count"], 1);
+            assert_eq!(audit["tools"]["verification_unresolved_count"], 0);
+            assert_eq!(audit["tools"]["unclassified_command_call_count"], 0);
+        }
+    }
+
+    #[test]
+    fn unsupported_cargo_environment_shapes_do_not_borrow_success() {
+        for (command, expected) in [
+            ("CARGO_HOME='/tmp/cargo' cargo test", "other_command"),
+            ("'CARGO_HOME=/tmp/cargo' cargo test", "other_command"),
+            ("CARGO_HOME=$HOME/cargo cargo test", "other_command"),
+            ("env CARGO_HOME=/tmp/cargo cargo test", "other_command"),
+            ("sh -c 'CARGO_HOME=/tmp/cargo cargo test'", "other_command"),
+            (
+                "CARGO_HOME=/tmp/cargo cargo test && cargo clippy",
+                "other_command",
+            ),
+            ("CARGO_HOME=/tmp/cargo cargo test --help", "inspection"),
+            ("CARGO_HOME=/tmp/cargo cargo fmt", "mutation"),
+        ] {
+            let records = lines(&[
+                json!({"type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"command","arguments":json!({"cmd":command}).to_string()}}),
+                json!({"type":"response_item","payload":{"type":"function_call_output","call_id":"command","output":{"exit_code":0}}}),
+                json!({"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"wrapper","input":"const results = await Promise.allSettled([tools.exec_command({cmd:'CARGO_HOME=/tmp/cargo cargo test'})]); text(results);"}}),
+                json!({"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"wrapper","output":{"exit_code":0}}}),
+            ]);
+            let projected = records
+                .lines()
+                .map(|line| {
+                    Record::parse(line)
+                        .unwrap()
+                        .unwrap()
+                        .audit_projection()
+                        .unwrap()
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            for input in [&records, &projected] {
+                let audit = audit_rollouts(&[input], 0, 20, AuditWindow::default()).unwrap();
+                for metric in [
+                    "verification_success_count",
+                    "verification_failure_count",
+                    "verification_unresolved_count",
+                ] {
+                    assert_eq!(audit["tools"][metric], 0, "{command}: {metric}");
+                }
+                assert_eq!(
+                    audit["tools"]["by_category"][expected],
+                    if expected == "other_command" { 2 } else { 1 },
+                    "{command}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -1521,7 +1600,7 @@ mod tests {
         let result = audit_rollouts(&[&data], 0, 20, AuditWindow::default()).unwrap();
         assert_eq!(
             result["model_effort"]["counts"],
-            json!({"astra|high":1,"other|unknown":1})
+            json!({"gpt-6-astra|high":1,"other|unknown":1})
         );
         assert_eq!(result["model_effort"]["transition_count"], 1);
         assert!(!result.to_string().contains("secret-custom"));
@@ -1669,7 +1748,7 @@ mod tests {
             result["provider_reported_usage"]["fallback_rollout_count"],
             1
         );
-        assert_eq!(result["model_effort"]["counts"]["astra|high"], 1);
+        assert_eq!(result["model_effort"]["counts"]["gpt-6-astra|high"], 1);
         assert!(!result.to_string().contains("private-child"));
     }
 

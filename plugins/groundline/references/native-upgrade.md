@@ -1,40 +1,49 @@
 # Native upgrade boundary
 
-Codex owns marketplace refresh, plugin installation, and plugin upgrade. A
-GroundLine release publishes checksummed, attested target artifacts and advances the moving
-`stable` branch only after qualification.
+Codex owns marketplace and plugin changes. Source tags contain no binaries;
+qualified `stable` commits add both checksummed, attested native binary trees.
+Core and Insights install separately, but refreshing their shared marketplace
+can update both **already installed** products. `--profile core` does not isolate
+an installed Insights collector.
 
-Version tags contain source; the generated `stable` commit adds both native
-binary trees. A source tag alone is not an installable binary distribution.
+## Checked upgrade
 
-Core and Insights share that marketplace channel but remain independent plugin
-installations. Refreshing Core never installs or activates Insights, and an
-Insights-only installation does not require Core.
+Use the latest reviewed, complete `stable` distribution's `install.sh` for each
+release. It validates candidate artifacts and, when Insights is installed or
+has local state, runs the candidate's read-only `worker check-server` before
+native writes. No profile means no request; malformed profiles, incompatible
+APIs, and transport failures block the update. Upgrade the owner API before
+collectors whose accepted event dimensions change.
 
-After refresh or upgrade, verify four distinct lanes:
+The installer uses native marketplace remove/add at the reviewed commit, then
+native upgrade. It preserves the official HTTPS/SSH transport, installed products,
+and enabled flags. Only newly selected products use `plugin add`; re-adding an
+existing disabled plugin would enable it. It neither edits caches nor resolves
+versions through a separate updater.
 
-1. source revision and tag;
-2. packaged plugin manifest and file fingerprint;
-3. installed plugin manifest and native artifact checksum;
-4. a new-task runtime smoke result.
+App Refresh and `codex plugin marketplace upgrade groundline --json` stay on
+that immutable commit. A new release requires its reviewed distribution and
+installer. Direct native commands bypass the candidate preflight. Numeric
+versions identify manifests and cache directories; date-and-letter titles are
+display names. Repeating an unchanged version rechecks artifacts and setup
+without resetting owner state.
 
-A result from one lane does not prove the others.
+## Evidence and recovery
 
-Use Codex App Refresh or `codex plugin marketplace upgrade groundline --json`.
-Inspect `codex plugin list --json`; if Core remains on the old version, install
-the same ID again with `codex plugin add groundline@groundline --json` and verify
-its checksum. A remote marketplace and GroundLine's Git `stable` channel are
-different sources. Inspect the actual installed source before troubleshooting.
-GroundLine does not maintain a parallel updater or rewrite Codex plugin state.
+Verify separately: source revision/tag, packaged manifest/fingerprint, installed
+manifest/checksum, and a fresh-task runtime result. One lane does not prove another.
+For requested settings or guidance repair, continue with
+[installation alignment](installation-alignment.md); refresh alone proves no repair.
 
-When the request includes applying GroundLine or repairing the existing setup,
-continue with [installation alignment](installation-alignment.md) after package
-verification. Complete evidenced configuration/guidance repairs in the same
-authorized task; package refresh alone does not prove the old setup was fixed.
-The reviewed stable distribution's `install.sh`/`install.ps1` joins those native
-commands to artifact verification, preserving setup, and strict
-doctor. It does not independently resolve versions or modify cached packages.
+Caught source-transition or verification failures attempt native recovery and
+check the previous artifact bytes and installed flags. `previous_commit_pinned`
+means recovery pinned the previous actual SHA: native JSON does not expose the
+old symbolic ref. Unsupported sources or inconsistent snapshots fail before
+writes. Termination or power loss can interrupt this multi-command transition;
+failed recovery requires review, not a state reset.
 
-For an Insights release that expands a validated event dimension, update the
-owner API before enabling updated collectors. A previous API can reject a new
-family label even though Core itself remains usable offline.
+The isolated native regression checks an older manifest, stable moving beyond
+the reviewed commit, exact-commit installation, source-add/upgrade failure
+recovery, repeated installation, and preserved settings, disabled flags, and
+consent. Both fixture versions use the current binary. Old-runtime behavior,
+authenticated tasks, and owner-API delivery remain unverified by this fixture.

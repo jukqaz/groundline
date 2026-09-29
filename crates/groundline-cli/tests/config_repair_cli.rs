@@ -213,33 +213,6 @@ fn existing_backup_and_busy_repair_preserve_config() {
     assert!(!fixture.backup.exists());
 }
 
-#[cfg(windows)]
-#[test]
-fn native_default_owner_is_checked_without_weakening_user_ownership() {
-    let mut fixture = Fixture::new("model_context_window=0");
-    fixture.config = fixture.root.path().join("native-default-owner.toml");
-    fs::write(&fixture.config, "model_context_window=0").unwrap();
-    let file =
-        groundline_runtime::local_file::open_bounded_regular_file(&fixture.config, 0, 512).unwrap();
-    let user_owned = groundline_runtime::local_file::owned_by_current_user(&file);
-    drop(file);
-    let (code, report) = fixture.run(&[]);
-    println!("native_default_owner_matches_process_user={user_owned}");
-    if user_owned {
-        assert_eq!(code, 0, "{report}");
-        assert_eq!(report["status"], "READY");
-    } else {
-        assert_eq!(code, 1, "{report}");
-        assert_eq!(report["error"], "config_repair_config_owner_mismatch");
-    }
-    assert_eq!(report["mutation_performed"], false);
-    assert_eq!(
-        fs::read_to_string(&fixture.config).unwrap(),
-        "model_context_window=0"
-    );
-    assert!(!fixture.backup.exists());
-}
-
 #[cfg(unix)]
 #[test]
 fn linked_files_are_rejected_and_linked_backup_is_preserved() {

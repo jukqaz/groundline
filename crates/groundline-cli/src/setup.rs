@@ -3,7 +3,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use clap::{Args, ValueEnum};
+use clap::Args;
 use groundline_contracts::ContractError;
 use groundline_runtime::local_file::{create_private_new, open_or_create_private_lock};
 use serde_json::{Value, json};
@@ -12,20 +12,12 @@ use toml_edit::{DocumentMut, Item};
 use crate::config_audit::{inspect, load_catalog};
 use crate::config_repair::{canonical_target, read_config};
 
-const DEFAULTS: &str = include_str!("../../../plugins/groundline/config/setup-defaults.toml");
 const RETIRED_HOOKS: [&str; 4] = [
     "groundline@groundline:hooks/hooks.json:session_start:0:0",
     "groundline@groundline:hooks/hooks.json:session_end:0:0",
     "groundline@groundline:hooks/hooks.json:post_compact:0:0",
     "groundline@groundline:hooks/hooks.json:stop:0:0",
 ];
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
-enum Preset {
-    #[default]
-    Preserve,
-    Astra,
-}
 
 #[derive(Debug, Args)]
 pub struct Options {
@@ -35,9 +27,6 @@ pub struct Options {
     /// Native debug models JSON, or - for bounded stdin. No model fallback.
     #[arg(long)]
     catalog: PathBuf,
-    /// Preserve existing choices and native defaults, or explicitly select Astra / xhigh / Fast off.
-    #[arg(long, value_enum, default_value = "preserve")]
-    preset: Preset,
     /// Explicitly select a model from the supplied native catalog.
     #[arg(long)]
     model: Option<String>,
@@ -60,7 +49,7 @@ fn error(code: &str) -> ContractError {
 
 fn candidate(
     config: &str,
-    defaults: &toml::Table,
+    selections: &toml::Table,
     restore_context: bool,
 ) -> Result<(String, Vec<String>), ContractError> {
     let mut doc: DocumentMut = config.parse().map_err(|_| error("invalid_config"))?;
@@ -76,7 +65,7 @@ fn candidate(
         return Err(error("effective_layer_requires_review"));
     }
     let mut changes = Vec::new();
-    for (key, value) in defaults {
+    for (key, value) in selections {
         if expected.get(key) == Some(value) {
             continue;
         }
@@ -207,34 +196,24 @@ pub fn run(options: Options) -> Result<Value, ContractError> {
         Vec::new()
     };
     let config = std::str::from_utf8(&original).map_err(|_| error("invalid_config"))?;
-    if options.preset == Preset::Astra
-        && (options.model.is_some() || options.effort.is_some() || options.service_tier.is_some())
-    {
-        return Err(error("conflicting_policy"));
-    }
-    let mut defaults: toml::Table = if options.preset == Preset::Astra {
-        toml::from_str(DEFAULTS).map_err(|_| error("invalid_policy"))?
-    } else {
-        toml::Table::new()
-    };
+    let mut selections = toml::Table::new();
     for (key, value) in [
         ("model", options.model),
         ("model_reasoning_effort", options.effort),
         ("service_tier", options.service_tier),
     ] {
         if let Some(value) = value {
-            defaults.insert(key.to_owned(), toml::Value::String(value));
+            selections.insert(key.to_owned(), toml::Value::String(value));
         }
     }
-    let (updated, changes) = candidate(config, &defaults, options.restore_native_context)?;
+    let (updated, changes) = candidate(config, &selections, options.restore_native_context)?;
     let after = inspect(&updated, &load_catalog(&options.catalog)?)?;
     let blocked = after["status"] == "FAIL";
     let mut report = json!({
         "kind":"groundline-setup", "schema":2,
         "status":if blocked { "FAIL" } else if changes.is_empty() { after["status"].as_str().unwrap_or("FAIL") } else { "READY" },
         "mode":if options.apply { "apply" } else { "preview" },
-        "preset":if options.preset == Preset::Astra { "astra" } else { "preserve" },
-        "model_policy":if defaults.contains_key("model") { "explicit_selection" } else { "existing_or_native_default" },
+        "model_policy":if selections.contains_key("model") { "explicit_selection" } else { "existing_or_native_default" },
         "migration_review":{
             "guide":"references/installation-alignment.md#existing-settings-and-migration",
             "native_schema_check_required":true,

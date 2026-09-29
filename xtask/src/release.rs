@@ -3,6 +3,8 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::OnceLock;
 
+use groundline_contracts::version::{release_display_name, strict_version};
+use groundline_runtime::platform::SUPPORTED_TARGETS;
 use regex::Regex;
 use semver::Version;
 use serde_json::{Value, json};
@@ -13,14 +15,6 @@ const CHANNEL: &str = "stable";
 const MANIFEST_PATHS: &[&str] = &[
     "plugins/groundline/.codex-plugin/plugin.json",
     "plugins/groundline-insights/.codex-plugin/plugin.json",
-];
-const RUST_TARGETS: &[&str] = &[
-    "aarch64-apple-darwin",
-    "x86_64-apple-darwin",
-    "aarch64-unknown-linux-musl",
-    "x86_64-unknown-linux-musl",
-    "aarch64-pc-windows-msvc",
-    "x86_64-pc-windows-msvc",
 ];
 
 pub struct PromotionOptions<'a> {
@@ -78,10 +72,7 @@ fn version_at(repo: &Path, revision: &str) -> Result<Version, XtaskError> {
             .get("version")
             .and_then(Value::as_str)
             .ok_or(XtaskError::InvalidReleaseChannel)?;
-        let parsed = Version::parse(version).map_err(|_| XtaskError::InvalidReleaseChannel)?;
-        if parsed.to_string() != version || !parsed.pre.is_empty() || !parsed.build.is_empty() {
-            return Err(XtaskError::InvalidReleaseChannel);
-        }
+        let parsed = strict_version(version).map_err(|_| XtaskError::InvalidReleaseChannel)?;
         versions.insert(parsed);
     }
     (versions.len() == 1)
@@ -95,14 +86,9 @@ fn expected_artifacts() -> BTreeSet<String> {
         ("groundline", "groundline"),
         ("groundline-insights", "groundline-insights"),
     ] {
-        for target in RUST_TARGETS {
-            let executable = if target.contains("windows") {
-                format!("{executable}.exe")
-            } else {
-                executable.to_owned()
-            };
+        for target in SUPPORTED_TARGETS {
             for name in [
-                executable.clone(),
+                executable.to_owned(),
                 format!("{executable}.sha256"),
                 "manifest.json".to_owned(),
             ] {
@@ -157,14 +143,10 @@ pub fn promote_stable(options: PromotionOptions<'_>) -> Result<Value, XtaskError
     {
         return Err(XtaskError::InvalidReleaseChannel);
     }
-    let release_version =
-        Version::parse(&options.release_tag[1..]).map_err(|_| XtaskError::InvalidReleaseChannel)?;
-    if release_version.to_string() != options.release_tag[1..]
-        || !release_version.pre.is_empty()
-        || !release_version.build.is_empty()
-    {
-        return Err(XtaskError::InvalidReleaseChannel);
-    }
+    let version = &options.release_tag[1..];
+    let release_version = strict_version(version).map_err(|_| XtaskError::InvalidReleaseChannel)?;
+    let release_name =
+        release_display_name(version).map_err(|_| XtaskError::InvalidReleaseChannel)?;
     let candidate = commit(&repo, options.candidate_sha)?;
     let source = commit(&repo, options.source_sha.unwrap_or(&candidate))?;
     if commit(&repo, &format!("refs/tags/{}", options.release_tag))? != source {
@@ -230,6 +212,7 @@ pub fn promote_stable(options: PromotionOptions<'_>) -> Result<Value, XtaskError
         "channel":CHANNEL,
         "action":action,
         "candidate_version":candidate_version.to_string(),
+        "release_name":release_name,
         "mutation_required":action != "noop",
         "mutation_performed":mutation_performed,
         "race_guard":"force_with_lease",
@@ -246,10 +229,10 @@ mod tests {
     use super::expected_artifacts;
 
     #[test]
-    fn stable_release_requires_exactly_two_six_target_artifact_sets() {
+    fn stable_release_requires_exactly_two_four_target_artifact_sets() {
         let expected = expected_artifacts();
-        assert_eq!(expected.len(), 36);
-        assert!(expected.contains("plugins/groundline/bin/aarch64-pc-windows-msvc/groundline.exe"));
+        assert_eq!(expected.len(), 24);
+        assert!(expected.contains("plugins/groundline/bin/aarch64-unknown-linux-musl/groundline"));
         assert!(expected.contains(
             "plugins/groundline-insights/bin/x86_64-apple-darwin/groundline-insights.sha256"
         ));

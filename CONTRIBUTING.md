@@ -19,9 +19,14 @@ structured JSON keys and reason codes remain English.
 
 ## Change Rules
 
+Use [architecture](docs/architecture.md) for ownership and
+[development contracts](docs/development.md) for parsing, configuration safety,
+and performance evidence. Keep one current procedure per topic; link to it from
+READMEs instead of copying it. Preserve Korean/English command parity.
+
 - Keep dependencies minimal and justify every new network or platform surface.
 - Keep Codex as the only supported runtime.
-- Preserve ARM64 and x86_64 support on macOS, Linux, and Windows.
+- Preserve ARM64 and x86_64 support on macOS and Linux.
 - Keep Core read-only and offline by default. Keep Insights opt-in,
   authenticated, and privacy-bounded over HTTPS with optional Tailnet access.
 - Do not commit provider auth files, sessions, shell snapshots, logs, caches,

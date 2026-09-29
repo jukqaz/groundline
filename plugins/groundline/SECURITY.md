@@ -2,26 +2,24 @@
 
 ## Supported version
 
-Security fixes target the latest stable GroundLine release.
+Security fixes target the latest stable release.
 
 ## Public security boundary
 
-GroundLine is local-first. The public plugin installs no lifecycle hook, starts
-no background process, performs no network request, keeps no collector identity,
-and contains no remote endpoint or credential field. Its CLI accepts explicit
-paths, rejects symlinks for bounded inputs, opens the local Codex state store
-read-only with SQLite `NOFOLLOW`, owner, 8 GiB, and 100,000-row ceilings, and
-accepts rollout files only from canonical non-symlinked Codex session roots. It
-emits aggregates or reason codes instead of raw records and paths.
+Core installs no lifecycle hook or background process, makes no network request,
+and stores no collector identity, endpoint, or credential. Bounded input readers
+reject symlinks. Codex SQLite is read-only with `NOFOLLOW`, owner checks, an 8 GiB
+limit, and a 100,000-row ceiling. Rollouts must belong to canonical non-symlinked
+session roots. Output contains aggregates or reason codes, not raw records or paths.
+See [audit scope](references/weekly-usage-audit.md) and
+[private delivery receipts](references/delivery-evidence.md).
 
-Source qualification checks both canonical plugin packages, the Core zero-hook
-and Insights four-hook invariants, pinned external CI actions, and private
-markers. Release qualification separately builds and verifies all six native
-targets. Neither source validation nor package integrity proves live dispatch.
+Source qualification checks package boundaries, Core's zero hooks, Insights'
+four hooks, pinned CI actions, and private markers. Release qualification also
+verifies all four native targets. Neither proves live dispatch.
 
 ## Reporting
 
-Please use GitHub's private vulnerability reporting for security issues. Do not
-include credentials, private paths, raw prompts, transcripts, or personal data in
-an issue. Include the GroundLine version, platform target, minimal reproduction,
-and redacted output when possible.
+Use GitHub private vulnerability reporting. Include the version, platform,
+minimal reproduction, and redacted output; omit credentials, private paths,
+raw prompts, transcripts, and personal data from public issues.

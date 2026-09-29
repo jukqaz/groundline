@@ -1,5 +1,6 @@
 //! SQL projections for optional, explicitly sourced analysis observations.
 use groundline_contracts::insights::analysis::TOKEN_FIELDS;
+use groundline_contracts::model::{EFFORTS, MAX_MODEL_CONTEXTS, MODEL_FAMILIES};
 
 fn keys(expression: &str, fields: &[&str]) -> String {
     let mut fields = fields.to_vec();
@@ -26,7 +27,7 @@ fn tokens(expression: &str) -> String {
     )
 }
 
-pub(super) fn predicate() -> String {
+fn predicate_for_catalog(models: &[&str], max_buckets: usize) -> String {
     let valid = ["root", "delegated"].map(|component| {
         let at = format!("JSONExtractRaw(payload_json,'analysis','{component}')");
         let buckets = format!("JSONExtractArrayRaw({at},'buckets')");
@@ -34,12 +35,12 @@ pub(super) fn predicate() -> String {
         let bucket_keys=keys("b",&["model_family","effort","tokens"]);
         let known_tokens=tokens("JSONExtractRaw(b,'tokens')");
         let unknown_tokens=tokens(&format!("JSONExtractRaw({at},'unattributed')"));
-        let models=groundline_contracts::model::MODEL_FAMILIES.iter().filter(|v|**v!="unknown").map(|v|format!("'{v}'")).collect::<Vec<_>>().join(",");
-        let efforts=groundline_contracts::model::EFFORTS.iter().filter(|v|**v!="unknown").map(|v|format!("'{v}'")).collect::<Vec<_>>().join(",");
+        let models=models.iter().filter(|v|**v!="unknown").map(|v|format!("'{v}'")).collect::<Vec<_>>().join(",");
+        let efforts=EFFORTS.iter().filter(|v|**v!="unknown").map(|v|format!("'{v}'")).collect::<Vec<_>>().join(",");
         let fields = TOKEN_FIELDS.iter().map(|field| format!(
             "arraySum(arrayMap(b -> toUInt128(JSONExtractUInt(b,'tokens','{field}')), {buckets})) + toUInt128(JSONExtractUInt({at},'unattributed','{field}')) = toUInt128(JSONExtractUInt(payload_json,'metrics','{component}','usage','{field}'))"
         )).collect::<Vec<_>>().join(" AND ");
-        format!("{component_keys} AND {unknown_tokens} AND JSONType({at},'buckets') = 'Array' AND arrayAll(b -> {bucket_keys} AND {known_tokens} AND JSONExtractString(b,'model_family') IN ({models}) AND JSONExtractString(b,'effort') IN ({efforts}), {buckets}) AND JSONExtractString({at},'basis') = 'owned_response_turn_link' AND length({buckets}) <= 80 AND length(arrayDistinct(arrayMap(b -> tuple(JSONExtractString(b,'model_family'),JSONExtractString(b,'effort')), {buckets}))) = length({buckets}) AND ({fields})")
+        format!("{component_keys} AND {unknown_tokens} AND JSONType({at},'buckets') = 'Array' AND arrayAll(b -> {bucket_keys} AND {known_tokens} AND JSONExtractString(b,'model_family') IN ({models}) AND JSONExtractString(b,'effort') IN ({efforts}), {buckets}) AND JSONExtractString({at},'basis') = 'owned_response_turn_link' AND length({buckets}) <= {max_buckets} AND length(arrayDistinct(arrayMap(b -> tuple(JSONExtractString(b,'model_family'),JSONExtractString(b,'effort')), {buckets}))) = length({buckets}) AND ({fields})")
     }).join(" AND ");
     let shape = keys(
         "JSONExtractRaw(payload_json,'analysis')",
@@ -48,6 +49,19 @@ pub(super) fn predicate() -> String {
     format!(
         "(NOT JSONHas(payload_json,'analysis') OR ({shape} AND JSONExtractString(payload_json,'analysis','purpose') IN ('production','verification','unclassified') AND {valid}))"
     )
+}
+
+pub(super) fn predicate() -> String {
+    predicate_for_catalog(MODEL_FAMILIES, MAX_MODEL_CONTEXTS)
+}
+
+// Only used to recognize and migrate the last released storage definition.
+// It is not an ingest adapter or a supported older wire contract.
+pub(super) fn previous_storage_predicate() -> String {
+    const PREVIOUS_MODELS: &[&str] = &[
+        "astra", "gpt-5", "gpt-6", "luna", "other", "sol", "terra", "unknown",
+    ];
+    predicate_for_catalog(PREVIOUS_MODELS, PREVIOUS_MODELS.len() * EFFORTS.len())
 }
 
 pub(super) fn usage_view() -> String {

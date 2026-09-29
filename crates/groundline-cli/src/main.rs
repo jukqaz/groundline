@@ -6,16 +6,18 @@ use std::process::ExitCode;
 
 use chrono::{Duration as ChronoDuration, Utc};
 use clap::{Parser, Subcommand};
-use groundline_contracts::{ContractError, batch, efficiency};
+use groundline_contracts::{ContractError, efficiency};
 use groundline_runtime::local_file::open_bounded_regular_file;
 use groundline_runtime::{audit_store, platform};
 use serde_json::{Value, json};
 
+mod audit_review;
 mod config_audit;
 mod config_repair;
-mod guidance;
+mod delivery;
 mod operations;
 mod personal;
+mod routing;
 mod setup;
 
 #[derive(Debug, Parser)]
@@ -31,7 +33,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Review, trial, and evaluate bounded personal guidance from explicit evidence.
+    /// Inspect or roll back an existing private personal-guidance trial.
     Personal {
         #[command(subcommand)]
         command: personal::Command,
@@ -48,26 +50,14 @@ enum Command {
     },
     /// Preview or apply a backed-up repair of invalid context limits; emits JSON.
     ConfigRepair(config_repair::Options),
-    /// Preserve Codex choices or apply an explicit preset with private backups.
+    /// Preserve Codex choices or apply explicit settings with private backups.
     Setup(setup::Options),
-    /// Inspect and track user-owned skill sources without executing or uploading them.
-    Guidance {
-        #[command(subcommand)]
-        command: GuidanceCommand,
-    },
     /// Run a bounded, read-only installation and local-state diagnostic.
     Doctor {
         #[arg(long)]
         plugin_root: Option<PathBuf>,
         #[arg(long)]
         codex_home: Option<PathBuf>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Inventory Codex project surfaces without reading configuration values.
-    ProjectAudit {
-        #[arg(long, default_value = ".")]
-        repo: PathBuf,
         #[arg(long)]
         json: bool,
     },
@@ -85,15 +75,10 @@ enum Command {
         #[command(subcommand)]
         command: AuditCommand,
     },
-    /// Run deterministic Goal-boundary and efficiency contracts.
+    /// Compare observed usage and delivery outcomes for bounded recommendations.
     Efficiency {
         #[command(subcommand)]
         command: EfficiencyCommand,
-    },
-    /// Inspect privacy-safe local evidence for optional GroundLine integrations.
-    Integrations {
-        #[command(subcommand)]
-        command: IntegrationCommand,
     },
     /// Report the binary-distribution target for this host.
     Platform {
@@ -103,46 +88,24 @@ enum Command {
 }
 
 #[derive(Debug, Subcommand)]
-enum GuidanceCommand {
-    /// Compare installed files and optionally already-fetched upstream checkouts.
-    Audit {
-        #[arg(long)]
-        profile: PathBuf,
-        #[arg(long)]
-        baseline: Option<PathBuf>,
-        #[arg(long)]
-        with_upstream: bool,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Save current fingerprints to a NEW receipt after review; never install or overwrite.
-    Snapshot {
-        #[arg(long)]
-        profile: PathBuf,
-        #[arg(long)]
-        output: PathBuf,
-        #[arg(long)]
-        with_upstream: bool,
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-enum IntegrationCommand {
-    /// Inspect one integration without reading or emitting endpoint or identity values.
-    Status {
-        #[arg(default_value = "insights")]
-        integration: String,
+enum AuditCommand {
+    /// Inspect native store metadata separately from task-window evidence.
+    Store {
         #[arg(long)]
         codex_home: Option<PathBuf>,
         #[arg(long)]
         json: bool,
     },
-}
-
-#[derive(Debug, Subcommand)]
-enum AuditCommand {
+    /// Summarize saved recent evidence without scanning native history again.
+    Review {
+        #[arg(long)]
+        input: PathBuf,
+        /// Maximum age of the saved observation window, in hours.
+        #[arg(long, default_value_t = 24, value_parser = clap::value_parser!(u16).range(1..=24))]
+        max_age_hours: u16,
+        #[arg(long)]
+        json: bool,
+    },
     /// Audit completed root tasks in a bounded UTC window.
     Weekly {
         #[arg(long, default_value_t = 7, value_parser = clap::value_parser!(u16).range(1..=365))]
@@ -174,26 +137,37 @@ enum AuditCommand {
 
 #[derive(Debug, Subcommand)]
 enum EfficiencyCommand {
-    /// Assess a Goal batch without changing Codex or GroundLine state.
-    Batch {
+    /// Compare private GPT-6 outcomes with a native catalog and optional aggregate context.
+    Route {
         #[arg(long)]
         input: PathBuf,
         #[arg(long)]
-        json: bool,
-    },
-    /// Simulate fixed-assumption scenarios from one observed Codex audit.
-    Simulate {
-        #[arg(long, required = true)]
-        audit: PathBuf,
+        catalog: PathBuf,
+        /// Optional native weekly audit or combined weekly review; - accepts stdin.
+        #[arg(long)]
+        audit: Option<PathBuf>,
+        /// Strict owner Insights report from ClickHouse; absence stays explicit.
+        #[arg(long)]
+        report: Option<PathBuf>,
+        /// Private completed-delivery receipts; input outcomes must be empty.
+        #[arg(long)]
+        deliveries: Option<PathBuf>,
         #[arg(long)]
         json: bool,
     },
-    /// Fuse exact Codex usage with user-provided redacted boundary counts.
-    Fuse {
+    /// Record one delivery with local evidence in a NEW private receipt.
+    RecordDelivery {
         #[arg(long)]
-        audit: PathBuf,
+        input: PathBuf,
         #[arg(long)]
-        chronicle: PathBuf,
+        output: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Summarize observed delivery outcomes and all owned resources, offline.
+    DeliverySummary {
+        #[arg(long)]
+        deliveries: PathBuf,
         #[arg(long)]
         json: bool,
     },
@@ -313,7 +287,9 @@ fn emit(value: &Value, json_output: bool) {
 }
 
 fn failure(error: ContractError) -> Value {
-    let mutation = if error.0.starts_with("personal_") {
+    let mutation = if error.0.starts_with("delivery_summary_") {
+        json!(false)
+    } else if error.0.starts_with("personal_") || error.0.starts_with("delivery_") {
         Value::Null
     } else {
         json!(false)
@@ -357,21 +333,6 @@ fn run(cli: Cli) -> Result<(), ExitCode> {
             catalog,
             json,
         } => config_audit::audit(&config, &catalog).map(|value| (value, json)),
-        Command::Guidance { command } => match command {
-            GuidanceCommand::Audit {
-                profile,
-                baseline,
-                with_upstream,
-                json,
-            } => guidance::audit(&profile, baseline.as_deref(), with_upstream)
-                .map(|value| (value, json)),
-            GuidanceCommand::Snapshot {
-                profile,
-                output,
-                with_upstream,
-                json,
-            } => guidance::snapshot(&profile, &output, with_upstream).map(|value| (value, json)),
-        },
         Command::Doctor {
             plugin_root,
             codex_home,
@@ -382,9 +343,6 @@ fn run(cli: Cli) -> Result<(), ExitCode> {
             home.and_then(|home| operations::doctor(root.as_deref(), &home))
                 .map(|value| (value, json))
         }
-        Command::ProjectAudit { repo, json } => {
-            operations::project_audit(&repo).map(|value| (value, json))
-        }
         Command::ProviderSmoke {
             plugin_root,
             require_installed,
@@ -394,6 +352,21 @@ fn run(cli: Cli) -> Result<(), ExitCode> {
             .unwrap_or_else(discover_plugin_root)
             .and_then(|root| operations::provider_smoke(&root, require_installed))
             .map(|value| (value, json)),
+        Command::Audit {
+            command: AuditCommand::Store { codex_home, json },
+        } => codex_home
+            .map(Ok)
+            .unwrap_or_else(default_codex_home)
+            .and_then(|home| audit_store::inspect_store(&home).map_err(audit_store::contract_error))
+            .map(|value| (value, json)),
+        Command::Audit {
+            command:
+                AuditCommand::Review {
+                    input,
+                    max_age_hours,
+                    json,
+                },
+        } => audit_review::reuse(&input, max_age_hours).map(|value| (value, json)),
         Command::Audit {
             command:
                 AuditCommand::Weekly {
@@ -467,27 +440,34 @@ fn run(cli: Cli) -> Result<(), ExitCode> {
                 .map(|value| (value, json))
         }
         Command::Efficiency {
-            command: EfficiencyCommand::Batch { input, json },
-        } => load_object(&input)
-            .and_then(|packet| batch::assess(&packet))
-            .map(|value| (value, json)),
-        Command::Efficiency {
-            command: EfficiencyCommand::Simulate { audit, json },
-        } => load_object(&audit)
-            .and_then(|audit| efficiency::simulate(&[audit]))
-            .map(|value| (value, json)),
-        Command::Efficiency {
             command:
-                EfficiencyCommand::Fuse {
+                EfficiencyCommand::Route {
+                    input,
+                    catalog,
                     audit,
-                    chronicle,
+                    report,
+                    deliveries,
                     json,
                 },
-        } => load_object(&audit)
-            .and_then(|audit| {
-                load_object(&chronicle).and_then(|chronicle| efficiency::fuse(&audit, &chronicle))
-            })
-            .map(|value| (value, json)),
+        } => routing::run(
+            &input,
+            &catalog,
+            audit.as_deref(),
+            report.as_deref(),
+            deliveries.as_deref(),
+        )
+        .map(|value| (value, json)),
+        Command::Efficiency {
+            command:
+                EfficiencyCommand::RecordDelivery {
+                    input,
+                    output,
+                    json,
+                },
+        } => delivery::record(&input, &output).map(|value| (value, json)),
+        Command::Efficiency {
+            command: EfficiencyCommand::DeliverySummary { deliveries, json },
+        } => delivery::summarize(&deliveries).map(|value| (value, json)),
         Command::Efficiency {
             command: EfficiencyCommand::Recommend { audit, json },
         } => load_audit(&audit)
@@ -497,18 +477,6 @@ fn run(cli: Cli) -> Result<(), ExitCode> {
             command: EfficiencyCommand::Compare { input, json },
         } => load_object(&input)
             .and_then(|packet| efficiency::compare_aggregate_periods(&packet))
-            .map(|value| (value, json)),
-        Command::Integrations {
-            command:
-                IntegrationCommand::Status {
-                    integration,
-                    codex_home,
-                    json,
-                },
-        } => codex_home
-            .map(Ok)
-            .unwrap_or_else(default_codex_home)
-            .and_then(|home| operations::integration_status(&home, &integration))
             .map(|value| (value, json)),
         Command::Platform { json } => platform::current_target()
             .and_then(|target| platform::packaged_binary_path(target).map(|path| (target, path)))
@@ -533,12 +501,7 @@ fn run(cli: Cli) -> Result<(), ExitCode> {
             emit(&value, json_output);
             if matches!(
                 value.get("kind").and_then(Value::as_str),
-                Some(
-                    "groundline-guidance"
-                        | "groundline-config-audit"
-                        | "groundline-config-repair"
-                        | "groundline-setup"
-                )
+                Some("groundline-config-audit" | "groundline-config-repair" | "groundline-setup")
             ) && value.get("status").and_then(Value::as_str) == Some("FAIL")
             {
                 Err(ExitCode::FAILURE)

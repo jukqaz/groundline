@@ -1,6 +1,4 @@
 use std::fs::File;
-#[cfg(not(unix))]
-use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -35,64 +33,6 @@ fn open_no_follow_read_write(path: &Path) -> io::Result<File> {
     .map_err(io::Error::from)
 }
 
-#[cfg(windows)]
-fn open_no_follow(path: &Path) -> io::Result<File> {
-    use std::os::windows::fs::OpenOptionsExt;
-    use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
-
-    OpenOptions::new()
-        .read(true)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(path)
-}
-
-#[cfg(windows)]
-fn open_no_follow_read_write(path: &Path) -> io::Result<File> {
-    use std::os::windows::fs::OpenOptionsExt;
-    use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
-
-    OpenOptions::new()
-        .read(true)
-        .write(true)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(path)
-}
-
-#[cfg(not(any(unix, windows)))]
-fn open_no_follow(path: &Path) -> io::Result<File> {
-    if std::fs::symlink_metadata(path)?.file_type().is_symlink() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "symbolic links are not allowed",
-        ));
-    }
-    OpenOptions::new().read(true).open(path)
-}
-
-#[cfg(not(any(unix, windows)))]
-fn open_no_follow_read_write(path: &Path) -> io::Result<File> {
-    if std::fs::symlink_metadata(path)?.file_type().is_symlink() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "symbolic links are not allowed",
-        ));
-    }
-    OpenOptions::new().read(true).write(true).open(path)
-}
-
-#[cfg(windows)]
-fn is_reparse_point(metadata: &std::fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
-
-    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-}
-
-#[cfg(not(windows))]
-fn is_reparse_point(_metadata: &std::fs::Metadata) -> bool {
-    false
-}
-
 pub fn open_bounded_regular_file(path: &Path, minimum: u64, maximum: u64) -> io::Result<File> {
     if minimum > maximum {
         return Err(io::Error::new(
@@ -102,11 +42,7 @@ pub fn open_bounded_regular_file(path: &Path, minimum: u64, maximum: u64) -> io:
     }
     let file = open_no_follow(path)?;
     let metadata = file.metadata()?;
-    if !metadata.file_type().is_file()
-        || is_reparse_point(&metadata)
-        || metadata.len() < minimum
-        || metadata.len() > maximum
-    {
+    if !metadata.file_type().is_file() || metadata.len() < minimum || metadata.len() > maximum {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "file contract rejected",
@@ -115,23 +51,11 @@ pub fn open_bounded_regular_file(path: &Path, minimum: u64, maximum: u64) -> io:
     Ok(file)
 }
 
-/// Open an owner-private directory without following its final link or reparse point.
+/// Open an owner-private directory without following its final symbolic link.
 pub fn open_private_directory(path: &Path) -> io::Result<File> {
-    #[cfg(windows)]
-    let file = {
-        use std::os::windows::fs::OpenOptionsExt;
-        use windows_sys::Win32::Storage::FileSystem::{
-            FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-        };
-        OpenOptions::new()
-            .read(true)
-            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
-            .open(path)?
-    };
-    #[cfg(not(windows))]
     let file = open_no_follow(path)?;
     let metadata = file.metadata()?;
-    if !metadata.is_dir() || is_reparse_point(&metadata) || !private_for_current_user(&file) {
+    if !metadata.is_dir() || !private_for_current_user(&file) {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "private directory required",
@@ -189,61 +113,13 @@ pub fn open_or_create_private_lock(path: &Path) -> io::Result<File> {
         Err(error) => return Err(error),
     };
     let metadata = file.metadata()?;
-    if !metadata.file_type().is_file()
-        || is_reparse_point(&metadata)
-        || !private_for_current_user(&file)
-    {
+    if !metadata.file_type().is_file() || !private_for_current_user(&file) {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "private lock file rejected",
         ));
     }
     Ok(file)
-}
-
-#[cfg(windows)]
-fn create_private_file(path: &Path) -> io::Result<File> {
-    use std::os::windows::fs::OpenOptionsExt;
-    use windows_permissions::constants::{SeObjectType, SecurityInformation};
-    use windows_permissions::utilities::current_process_sid;
-    use windows_permissions::{LocalBox, SecurityDescriptor};
-    use windows_sys::Win32::Storage::FileSystem::{FILE_GENERIC_WRITE, WRITE_DAC, WRITE_OWNER};
-
-    let mut file = std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .access_mode(FILE_GENERIC_WRITE | WRITE_DAC | WRITE_OWNER)
-        .open(path)?;
-    let current_user = current_process_sid()?;
-    let descriptor: LocalBox<SecurityDescriptor> = format!(
-        "O:{0}D:P(A;;FA;;;{0})(A;;FA;;;SY)(A;;FA;;;BA)",
-        current_user
-    )
-    .parse()?;
-    let dacl = descriptor.dacl().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            "private security descriptor is missing a DACL",
-        )
-    })?;
-    windows_permissions::wrappers::SetSecurityInfo(
-        &mut file,
-        SeObjectType::SE_FILE_OBJECT,
-        SecurityInformation::Owner | SecurityInformation::Dacl | SecurityInformation::ProtectedDacl,
-        Some(current_user.as_ref()),
-        None,
-        Some(dacl),
-        None,
-    )?;
-    Ok(file)
-}
-
-#[cfg(not(any(unix, windows)))]
-fn create_private_file(path: &Path) -> io::Result<File> {
-    std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(path)
 }
 
 /// Atomically replace one local state file with owner-private contents.
@@ -270,8 +146,6 @@ pub fn atomic_write_private(path: &Path, contents: &[u8]) -> io::Result<()> {
             ));
         }
         drop(file);
-        // std uses FileRenameInfoEx when Windows cannot replace an open reader
-        // with MoveFileExW. Keep the private file's ACL and the atomic replacement.
         std::fs::rename(&temporary, path)?;
         #[cfg(unix)]
         File::open(parent)?.sync_all()?;
@@ -292,33 +166,6 @@ pub fn owned_by_current_user(file: &File) -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(windows)]
-pub fn owned_by_current_user(file: &File) -> bool {
-    use windows_permissions::constants::{SeObjectType, SecurityInformation};
-    use windows_permissions::utilities::current_process_sid;
-
-    let Ok(current_user) = current_process_sid() else {
-        return false;
-    };
-    windows_permissions::wrappers::GetSecurityInfo(
-        file,
-        SeObjectType::SE_FILE_OBJECT,
-        SecurityInformation::Owner,
-    )
-    .ok()
-    .and_then(|descriptor| {
-        descriptor
-            .owner()
-            .map(|owner| owner == current_user.as_ref())
-    })
-    .unwrap_or(false)
-}
-
-#[cfg(not(any(unix, windows)))]
-pub fn owned_by_current_user(_file: &File) -> bool {
-    false
-}
-
 #[cfg(unix)]
 pub fn private_for_current_user(file: &File) -> bool {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -329,73 +176,6 @@ pub fn private_for_current_user(file: &File) -> bool {
             metadata.uid() == effective_user && metadata.permissions().mode() & 0o077 == 0
         })
         .unwrap_or(false)
-}
-
-#[cfg(windows)]
-pub fn private_for_current_user(file: &File) -> bool {
-    use windows_permissions::LocalBox;
-    use windows_permissions::constants::{AceType, SeObjectType, SecurityInformation};
-    use windows_permissions::structures::{Sid, Trustee};
-    use windows_permissions::utilities::current_process_sid;
-
-    let Ok(current_user) = current_process_sid() else {
-        return false;
-    };
-    let Ok(descriptor) = windows_permissions::wrappers::GetSecurityInfo(
-        file,
-        SeObjectType::SE_FILE_OBJECT,
-        SecurityInformation::Owner | SecurityInformation::Dacl,
-    ) else {
-        return false;
-    };
-    if descriptor.owner() != Some(current_user.as_ref()) {
-        return false;
-    }
-    let Some(dacl) = descriptor.dacl() else {
-        return false;
-    };
-    let Ok(system) = "SY".parse::<LocalBox<Sid>>() else {
-        return false;
-    };
-    let Ok(administrators) = "BA".parse::<LocalBox<Sid>>() else {
-        return false;
-    };
-    let allowed = [
-        current_user.as_ref(),
-        system.as_ref(),
-        administrators.as_ref(),
-    ];
-    for index in 0..dacl.len() {
-        let Some(ace) = dacl.get_ace(index) else {
-            return false;
-        };
-        if !matches!(
-            ace.ace_type(),
-            AceType::ACCESS_ALLOWED_ACE_TYPE
-                | AceType::ACCESS_ALLOWED_CALLBACK_ACE_TYPE
-                | AceType::ACCESS_ALLOWED_CALLBACK_OBJECT_ACE_TYPE
-                | AceType::ACCESS_ALLOWED_OBJECT_ACE_TYPE
-        ) {
-            continue;
-        }
-        let Some(sid) = ace.sid() else {
-            return false;
-        };
-        if allowed.contains(&sid) {
-            continue;
-        }
-        let trustee: Trustee<'_> = sid.into();
-        match dacl.effective_rights(&trustee) {
-            Ok(rights) if rights.is_empty() => {}
-            _ => return false,
-        }
-    }
-    true
-}
-
-#[cfg(not(any(unix, windows)))]
-pub fn private_for_current_user(_file: &File) -> bool {
-    false
 }
 
 #[cfg(test)]
@@ -497,23 +277,6 @@ mod tests {
         fs::write(path.join("existing"), b"preserve").unwrap();
         assert!(atomic_write_private(&path, b"replacement").is_err());
         assert_eq!(fs::read(path.join("existing")).unwrap(), b"preserve");
-        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn readonly_destination_remains_protected() {
-        let root = tempdir().unwrap();
-        let path = root.path().join("state.json");
-        atomic_write_private(&path, b"preserve").unwrap();
-        let original = fs::metadata(&path).unwrap().permissions();
-        let mut readonly = original.clone();
-        readonly.set_readonly(true);
-        fs::set_permissions(&path, readonly).unwrap();
-        let result = atomic_write_private(&path, b"replacement");
-        fs::set_permissions(&path, original).unwrap();
-        assert!(result.is_err());
-        assert_eq!(fs::read(&path).unwrap(), b"preserve");
         assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
     }
 

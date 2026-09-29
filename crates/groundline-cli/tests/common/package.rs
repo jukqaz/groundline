@@ -40,11 +40,7 @@ pub fn stage(root: &Path, binary: &Path, product: &str, target: &str) -> PathBuf
             fs::copy(entry.path(), destination).unwrap();
         }
     }
-    let executable = if cfg!(windows) {
-        format!("{product}.exe")
-    } else {
-        product.to_owned()
-    };
+    let executable = product.to_owned();
     let bin = root.join("bin").join(target);
     fs::create_dir_all(&bin).unwrap();
     let installed = bin.join(&executable);

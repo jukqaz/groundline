@@ -15,6 +15,18 @@ The execution fields distinguish an audit that ran with partial data from a
 recommendation failure. Do not run a second audit or recommendation after this
 combined command. `groundline audit weekly --days 7 --json` remains the raw audit
 interface for callers that explicitly need separate stages.
+For a saved full result from the same observation window, use
+`groundline audit review --input <private-result.json> --json`.
+This reads the saved evidence once, scans no native history, and calculates one
+current offline recommendation from its audit. Saved recommendation text/status
+is not reused as a current policy decision. The summary includes the freshly
+computed `recommendation`, so its action and limits need no second command.
+The distinct summary kind is not a full audit: retain its original saved input
+and source hash. Reuse preserves the window and unknowns; it does not establish
+that current history is unchanged. The window end must be within 24 hours
+(`--max-age-hours` may tighten this). Changed scope or a request for current
+history requires fresh collection. Execution counters measure this command,
+not surrounding agent work, model tokens, or end-to-end savings.
 Check the command exit status, `execution.audit_runs`,
 `execution.recommendation_runs`, and the nested audit/recommendation statuses
 independently. Retain the audit if recommendation fails. Review counts, coverage,
@@ -23,7 +35,8 @@ validation, installed runtime validation, and user-visible behavior as separate
 evidence lanes.
 
 Use the actual App runtime first. On macOS inspect bundle metadata and the
-`Contents/Resources/codex` executable in standard Applications locations;
+`Contents/Resources/codex-cli/bin/codex` executable in standard Applications
+locations (or `Contents/Resources/codex` in an older verified bundle);
 product display names do not determine bundle paths, and Codex may ship inside
 ChatGPT.app. Only fall back to PATH CLI when the App runtime cannot be verified,
 and label that evidence scope. Do not treat a CLI feature flag as active App
@@ -40,11 +53,17 @@ server receipt. Resolve one active root and read this reference and its audit
 skill from that same installation. Missing required files or commands are
 UNVERIFIED, not grounds to substitute a different cache or unpublished binary.
 
-When using the separate-stage interface, run the weekly audit once. Retain its redacted JSON in process memory and pass
-those same bytes to `groundline efficiency recommend --audit - --json` through
+Before execution, choose how the full redacted result will survive tool return:
+retain it in a persistent runner or, within an authorized analysis artifact scope,
+save it once to a new owner-private file outside the repository. Capture the
+result before printing a bounded projection. An exit code or top-level key list
+cannot replace the audit's status, coverage and missing-data reasons.
+
+When using the separate-stage interface, run the weekly audit once. Retain its
+redacted JSON and pass those same bytes to `groundline efficiency recommend --audit - --json` through
 standard input (maximum 2 MiB). Check both commands' exit status independently.
-Do not use `/dev/stdin`, write an unapproved temporary report, or repeat the
-expensive audit because its output was discarded. If recommendation fails,
+Do not use `/dev/stdin`, write outside the authorized artifact scope, or repeat
+the expensive audit merely because a projection discarded its evidence. If recommendation fails,
 report the captured audit and the recommendation failure separately. A regular
 JSON file remains supported when saving it is authorized.
 
@@ -65,8 +84,8 @@ The command is read-only, performs no network request, and does not emit raw
 task content or private paths. The surrounding research is native Codex work,
 not functionality hidden inside this command. Reuse the same in-memory audit
 for that research; extract its nested `audit` value for raw-audit consumers
-without running collection again. Do not create temporary report files or use
-`/dev/stdin` to bridge stages. Save a redacted report only when authorized.
+without running collection again. A saved result follows the same authorized
+private-artifact scope; it is not a new collector, ledger or uploaded transcript.
 
 For the final weekly report, preserve `report_ko` task samples, completed turns,
 usage source, observed/selected rollouts, and unresolved reasons; cross-check
@@ -87,8 +106,19 @@ A weekly sample requires the latest lifecycle event to complete the turn.
 Previous completed turns do not make a resumed or interrupted task complete.
 Activity audits include ongoing work, with `completed_root_coverage=false` on
 export. Unreadable or unclassified inputs make the result `PARTIAL` and remain
-visible as aggregate counts. `selection_coverage` describes selection among
-known eligible roots; it does not mean every stored task was readable.
+visible as aggregate counts. Weekly analysis reads only the relevant indexed
+window, validates native identities, and excludes every ambiguous duplicate in
+that selected sample. `coverage.recommendation_evidence_complete` describes
+that sample; missing or false values cannot qualify a change recommendation.
+
+Whole-store metadata reconciliation is explicit: `groundline audit store --json`.
+It reports unindexed files, stale paths, duplicate identities, unknown archive
+states and traversal limits without changing data. It does not decide the
+requested window's eligibility or certify an atomic population snapshot.
+Weekly `eligible_root_count` and `selection_coverage` remain null because the
+full-history denominator was not measured. A known unrelated old missing row
+does not invalidate current observations; a missing selected row still does.
+Neither sample evidence nor storage diagnostics authorize history resets.
 
 The readout separates parsed-root `collection_issue_count` from store-level
 unreadable root/delegated/Guardian counts and unclassified origins. A zero parser
@@ -104,7 +134,9 @@ histories without a known ownership boundary remain excluded. Do not claim full
 fork or subagent coverage. Response records count as fallback rollouts and have
 an explicit bounded provenance label, separate from last-usage-only evidence.
 
-Model contexts use bounded family and effort labels, including Astra. They do
+Model contexts use bounded family and effort labels. New GPT-6 observations
+use gpt-6-astra, gpt-6-sol, and gpt-6-luna; historical unversioned labels remain
+descriptive and outside optimization scope. They do
 not attribute token totals to individual models or estimate billing.
 
 Report completed root tasks and completed turns separately. `task_latency` counts
@@ -119,9 +151,8 @@ remain unavailable unless their explicit availability fields establish otherwise
 `provider_reported_usage.token_field_availability` distinguishes source-observed
 components from partial numeric accumulators. A missing/null/invalid source field
 stays unavailable through selected-rollout sums and both endpoints of a window
-delta. Numeric zero alone does not establish an observed split. Simulation needs
-one audit with a known usage source, positive observed-rollout count, and explicit
-availability of every required token component; absent metadata is not backfilled.
+delta. Numeric zero alone does not establish an observed split; absent metadata
+is not backfilled.
 
 Verification outcomes use native exit/status metadata. Test names or stdout words
 such as `timeout` and `rejected` are not failures. Running, missing, and unrecognized

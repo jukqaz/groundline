@@ -1,12 +1,12 @@
-//! Offline personal guidance trials. No inference, scheduling, or native config writes.
+//! Inspect and safely restore existing personal guidance; no new trials or policy engine.
 use chrono::{DateTime, Duration, Utc};
 use clap::Subcommand;
-use groundline_contracts::{ContractError, insights::WeeklyReport};
+use groundline_contracts::ContractError;
 use groundline_runtime::local_file::{
     atomic_write_private, open_bounded_regular_file, open_or_create_private_lock,
     open_private_directory, private_for_current_user,
 };
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -20,44 +20,17 @@ const MAX_STATE_FILES: usize = 128;
 // them private and bounded, and preserve them for explicit owner inspection.
 const MAX_INTERRUPTED_WRITES: usize = 8;
 const MAX_DIRECTORY_ENTRIES: usize = MAX_STATE_FILES + MAX_INTERRUPTED_WRITES;
-const MIN_UNITS: usize = 10;
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Inspect fresh model evidence, Insights and native audit; optionally trial one rule.
-    Review {
-        #[arg(long)]
-        report: PathBuf,
-        #[arg(long)]
-        audit: PathBuf,
-        #[arg(long)]
-        model_evidence: PathBuf,
-        #[arg(long)]
-        catalog: PathBuf,
-        #[arg(long)]
-        outcomes: Option<PathBuf>,
-        #[arg(long)]
-        state_dir: Option<PathBuf>,
-        /// Change only the generated personal-guidance.md in the explicit private directory.
-        #[arg(long, requires = "state_dir")]
-        apply: bool,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Compare disjoint, comparable outcomes and retain or restore the trial guidance.
-    Evaluate {
+    /// Inspect an existing private trial without creating files or changing state.
+    Status {
         #[arg(long)]
         state_dir: PathBuf,
         #[arg(long)]
-        outcomes: PathBuf,
-        #[arg(long)]
-        model_evidence: PathBuf,
-        #[arg(long)]
-        catalog: PathBuf,
-        #[arg(long)]
         json: bool,
     },
-    /// Restore only unchanged GroundLine-generated guidance, including interrupted trials.
+    /// Restore only unchanged generated guidance, including interrupted restores.
     Rollback {
         #[arg(long)]
         state_dir: PathBuf,
@@ -66,6 +39,8 @@ pub enum Command {
     },
 }
 
+// These fixed instruction bytes identify existing generated guidance. They are
+// recovery data, not active recommendations; edits would strand existing trials.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 enum Rule {
@@ -83,41 +58,6 @@ impl Rule {
         Self::JustInTimeContext,
         Self::BoundedParallelReads,
     ];
-
-    fn primary_metric(self) -> &'static str {
-        match self {
-            Self::ApprovalContinuity => "redundant_approvals_per_unit",
-            Self::DiagnoseBeforeRetry => "repeated_calls_per_unit",
-            Self::EvidenceReuse | Self::JustInTimeContext => "owned_tokens_per_verified_delivery",
-            Self::BoundedParallelReads => "wall_duration_ms_per_verified_delivery",
-        }
-    }
-
-    fn opportunity(self) -> Option<OpportunityKind> {
-        match self {
-            Self::EvidenceReuse => Some(OpportunityKind::EvidenceReuse),
-            Self::JustInTimeContext => Some(OpportunityKind::JustInTimeContext),
-            Self::BoundedParallelReads => Some(OpportunityKind::BoundedParallelReads),
-            _ => None,
-        }
-    }
-
-    fn observed_in(self, unit: &Unit) -> bool {
-        match self {
-            Self::ApprovalContinuity => {
-                unit.redundant_approval_count > 0 || unit.continuation_prompt_count > 0
-            }
-            Self::DiagnoseBeforeRetry => unit.repeated_call_count > 0,
-            _ => unit
-                .optimization_opportunities
-                .as_ref()
-                .is_some_and(|items| {
-                    items
-                        .iter()
-                        .any(|item| Some(item.kind) == self.opportunity())
-                }),
-        }
-    }
 
     fn instruction(self) -> &'static str {
         match self {
@@ -165,42 +105,6 @@ struct ActivationEvidence {
     behavior_check_sha256: String,
     guidance_sha256: String,
     observed_at_utc: String,
-}
-#[derive(Clone, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct Source {
-    applies_to_model: String,
-    url: String,
-    sha256: String,
-    checked_at_utc: String,
-}
-#[derive(Clone, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct ModelEvidence {
-    kind: String,
-    schema: u8,
-    checked_at_utc: String,
-    runtime_version: String,
-    runtime_family: String,
-    selected_model: String,
-    selected_effort: String,
-    latest_reference_model: String,
-    catalog_sha256: String,
-    official_sources: Vec<Source>,
-    behavior_focus: Vec<Rule>,
-}
-#[derive(Deserialize)]
-struct Catalog {
-    models: Vec<Model>,
-}
-#[derive(Deserialize)]
-struct Model {
-    slug: String,
-    supported_reasoning_levels: Vec<Effort>,
-}
-#[derive(Deserialize)]
-struct Effort {
-    effort: String,
 }
 #[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -271,132 +175,16 @@ fn valid_hash(s: &str) -> bool {
         && s.bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
-fn label(s: &str) -> bool {
-    !s.is_empty()
-        && s.len() <= 128
-        && s.bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
-}
 fn time(s: &str) -> Result<DateTime<Utc>, ContractError> {
     DateTime::parse_from_rfc3339(s)
         .map(|t| t.with_timezone(&Utc))
         .map_err(|_| error("invalid_timestamp"))
 }
-fn fresh(s: &str, now: DateTime<Utc>, age: Duration) -> Result<(), ContractError> {
-    let t = time(s)?;
-    if t > now + Duration::minutes(5) || now - t > age {
-        return Err(error("stale_evidence"));
-    }
-    Ok(())
-}
-fn bytes(path: &Path) -> Result<Vec<u8>, ContractError> {
-    let mut file =
-        open_bounded_regular_file(path, 1, MAX_BYTES).map_err(|_| error("invalid_input_file"))?;
-    let mut out = Vec::new();
-    Read::by_ref(&mut file)
-        .take(MAX_BYTES + 1)
-        .read_to_end(&mut out)
-        .map_err(|_| error("input_unavailable"))?;
-    if out.len() as u64 > MAX_BYTES {
-        return Err(error("input_too_large"));
-    }
-    Ok(out)
-}
-fn read<T: DeserializeOwned>(path: &Path) -> Result<T, ContractError> {
-    serde_json::from_slice(&bytes(path)?).map_err(|_| error("invalid_input"))
-}
 fn output(operation: &str) -> Value {
-    json!({"kind":"groundline-personal-improvement","schema":1,"operation":operation,"status":"PASS",
+    json!({"kind":"groundline-personal-recovery","schema":1,"operation":operation,
         "network_performed":false,"mutation_performed":false,"raw_content_emitted":false,
         "private_paths_emitted":false,"model_changed":false,"permissions_changed":false,
-        "evidence_origin":"operator_supplied","causal_improvement_claimed":false})
-}
-fn model_context(
-    e: &ModelEvidence,
-    catalog_bytes: &[u8],
-    now: DateTime<Utc>,
-) -> Result<String, ContractError> {
-    if e.kind != "groundline-model-evidence"
-        || e.schema != 1
-        || !["codex_app", "codex_cli"].contains(&e.runtime_family.as_str())
-        || ![
-            &e.runtime_version,
-            &e.selected_model,
-            &e.selected_effort,
-            &e.latest_reference_model,
-        ]
-        .iter()
-        .all(|s| label(s))
-        || e.catalog_sha256 != hash(catalog_bytes)
-        || e.official_sources.is_empty()
-        || e.official_sources.len() > 4
-        || e.behavior_focus.len() > Rule::ALL.len()
-        || e.behavior_focus.iter().collect::<BTreeSet<_>>().len() != e.behavior_focus.len()
-    {
-        return Err(error("invalid_model_evidence"));
-    }
-    fresh(&e.checked_at_utc, now, Duration::hours(24))?;
-    let catalog: Catalog =
-        serde_json::from_slice(catalog_bytes).map_err(|_| error("invalid_catalog"))?;
-    if catalog.models.is_empty()
-        || catalog.models.len() > 512
-        || catalog
-            .models
-            .iter()
-            .map(|m| &m.slug)
-            .collect::<BTreeSet<_>>()
-            .len()
-            != catalog.models.len()
-        || !catalog.models.iter().any(|m| {
-            m.slug == e.selected_model
-                && m.supported_reasoning_levels
-                    .iter()
-                    .any(|r| r.effort == e.selected_effort)
-        })
-    {
-        return Err(error("model_effort_not_available"));
-    }
-    let mut sources = BTreeSet::new();
-    for source in &e.official_sources {
-        let url = url::Url::parse(&source.url).map_err(|_| error("unofficial_source"))?;
-        if url.scheme() != "https"
-            || ![
-                "developers.openai.com",
-                "platform.openai.com",
-                "learn.chatgpt.com",
-            ]
-            .contains(&url.host_str().unwrap_or(""))
-            || !url.username().is_empty()
-            || url.password().is_some()
-            || url.query().is_some()
-            || url.port().is_some()
-            || !label(&source.applies_to_model)
-            || !valid_hash(&source.sha256)
-            || !sources.insert(&source.url)
-        {
-            return Err(error("unofficial_source"));
-        }
-        fresh(&source.checked_at_utc, now, Duration::days(7))?;
-    }
-    if ![&e.selected_model, &e.latest_reference_model]
-        .iter()
-        .all(|model| {
-            e.official_sources
-                .iter()
-                .any(|source| &source.applies_to_model == *model)
-        })
-    {
-        return Err(error("model_guidance_missing"));
-    }
-    // Fetch dates and unselected models do not change the selected execution cohort.
-    Ok(hash(
-        serde_json::to_string(
-            &json!({"runtime":e.runtime_version,"family":e.runtime_family,
-        "model":e.selected_model,"effort":e.selected_effort}),
-        )
-        .unwrap()
-        .as_bytes(),
-    ))
+        "native_activation":"UNVERIFIED"})
 }
 fn validate_sample(s: &Sample, context: &str, now: DateTime<Utc>) -> Result<(), ContractError> {
     let start = time(&s.period_start_utc)?;
@@ -458,81 +246,6 @@ fn validate_sample(s: &Sample, context: &str, now: DateTime<Utc>) -> Result<(), 
     }
     Ok(())
 }
-fn sufficient(s: &Sample) -> bool {
-    s.units.len() >= MIN_UNITS && s.units.iter().all(|u| u.outcome != Outcome::Unknown)
-}
-fn metrics(s: &Sample) -> Value {
-    let n = s.units.len() as f64;
-    let rate = |v: u64| {
-        if n == 0.0 {
-            Value::Null
-        } else {
-            json!(v as f64 / n)
-        }
-    };
-    let sum = |f: fn(&Unit) -> u64| s.units.iter().map(f).sum::<u64>();
-    let verified = sum(|u| u64::from(u.outcome == Outcome::Verified));
-    let per_verified = |value: u64| {
-        if verified == 0 {
-            Value::Null
-        } else {
-            json!(value as f64 / verified as f64)
-        }
-    };
-    // Failed deliveries consume resources too. Missing ownership is not zero.
-    let tokens = s
-        .units
-        .iter()
-        .map(|u| u.total_tokens)
-        .collect::<Option<Vec<_>>>()
-        .map(|values| values.iter().sum::<u64>());
-    let wall_ms = sum(|u| {
-        (time(&u.completed_at_utc).unwrap() - time(&u.started_at_utc).unwrap()).num_milliseconds()
-            as u64
-    });
-    json!({"unit_count":s.units.len(),"verified_rate":rate(sum(|u| u64::from(u.outcome==Outcome::Verified))),
-        "verified_delivery_count":verified,
-        "unknown_count":sum(|u| u64::from(u.outcome==Outcome::Unknown)),"rework_rate":rate(sum(|u| u64::from(u.rework))),
-        "redundant_approvals_per_unit":rate(sum(|u| u64::from(u.redundant_approval_count))),
-        "continuation_prompts_per_unit":rate(sum(|u| u64::from(u.continuation_prompt_count))),
-        "repeated_calls_per_unit":rate(sum(|u| u64::from(u.repeated_call_count))),
-        "tool_calls_per_unit":rate(sum(|u| u64::from(u.tool_call_count))),
-        "owned_token_coverage":{"observed_unit_count":s.units.iter().filter(|u|u.total_tokens.is_some()).count(),"unobserved_unit_count":s.units.iter().filter(|u|u.total_tokens.is_none()).count()},
-        "tokens_per_unit":tokens.map(rate).unwrap_or(Value::Null),
-        "owned_tokens_per_verified_delivery":tokens.map(per_verified).unwrap_or(Value::Null),
-        "wall_duration_ms_per_unit":rate(wall_ms),
-        "wall_duration_ms_per_verified_delivery":per_verified(wall_ms),
-        "resource_numerator_includes_failed_deliveries":true,
-        "wall_duration_is_model_latency":false})
-}
-
-fn strategy_eligibility(rule: Rule, sample: Option<&Sample>) -> Value {
-    let Some(kind) = rule.opportunity() else {
-        return json!({"rule":rule,"primary_metric":rule.primary_metric(),
-            "direct_signal_observed":sample.is_some_and(|s|s.units.iter().any(|u|rule.observed_in(u)))});
-    };
-    let observed = sample.map(|s| {
-        s.units
-            .iter()
-            .filter(|u| u.optimization_opportunities.is_some())
-            .count()
-    });
-    let opportunities = sample.filter(|_| observed.is_some_and(|n| n > 0)).map(|s| {
-        s.units
-            .iter()
-            .filter_map(|u| u.optimization_opportunities.as_ref())
-            .flatten()
-            .filter(|item| item.kind == kind)
-            .map(|item| u64::from(item.eligible_count))
-            .sum::<u64>()
-    });
-    json!({"rule":rule,"primary_metric":rule.primary_metric(),
-        "evidence_origin":"operator_supplied_direct_observation",
-        "observed_unit_count":observed,
-        "unobserved_unit_count":sample.map(|s|s.units.len()-observed.unwrap_or(0)),
-        "observed_eligible_opportunity_count":opportunities,
-        "direct_signal_observed":opportunities.is_some_and(|n|n > 0)})
-}
 fn render(rules: &[Rule]) -> String {
     if rules.is_empty() {
         return String::new();
@@ -544,39 +257,6 @@ fn render(rules: &[Rule]) -> String {
         out.push('\n');
     }
     out
-}
-fn select_rule(e: &ModelEvidence, s: Option<&Sample>, audit: &Value) -> Option<Rule> {
-    let mut candidates = Vec::new();
-    if let Some(s) = s {
-        candidates.extend(
-            Rule::ALL
-                .into_iter()
-                .filter(|rule| s.units.iter().any(|u| rule.observed_in(u))),
-        );
-    }
-    let calls = audit
-        .get("root")
-        .and_then(|root| root.pointer("/tools/call_count"))
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let repeated = audit
-        .get("root")
-        .and_then(|root| root.pointer("/tools/calls_in_exact_repeated_groups"))
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let failures = audit
-        .get("root")
-        .and_then(|root| root.pointer("/tools/failure_signals/nonzero_exit"))
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    if calls > 0
-        && (repeated as f64 / calls as f64 >= 0.10 || failures as f64 / calls as f64 >= 0.04)
-    {
-        candidates.push(Rule::DiagnoseBeforeRetry);
-    }
-    candidates
-        .into_iter()
-        .find(|r| e.behavior_focus.contains(r))
 }
 fn state_root(path: &Path) -> Result<PathBuf, ContractError> {
     let meta = fs::symlink_metadata(path).map_err(|_| error("state_directory_required"))?;
@@ -717,6 +397,7 @@ fn current_rules(root: &Path) -> Result<Vec<Rule>, ContractError> {
     }
     Err(error("user_edited_guidance_preserved"))
 }
+#[cfg(test)]
 fn save_trial(root: &Path, t: &Trial) -> Result<(), ContractError> {
     atomic_write_private(
         &root.join("trial.json"),
@@ -771,333 +452,6 @@ fn parse_trial(data: &[u8]) -> Result<Trial, ContractError> {
     }
     Ok(t)
 }
-fn check_baseline_reuse(
-    trial: &Trial,
-    rule: Rule,
-    ids: &BTreeSet<&str>,
-) -> Result<(), ContractError> {
-    if trial.rule == rule
-        && trial
-            .baseline
-            .units
-            .iter()
-            .any(|u| ids.contains(u.unit_hash.as_str()))
-    {
-        return Err(error("candidate_already_reviewed"));
-    }
-    Ok(())
-}
-fn check_archived_baselines(
-    root: &Path,
-    rule: Rule,
-    ids: &BTreeSet<&str>,
-) -> Result<(), ContractError> {
-    for (index, entry) in fs::read_dir(root)
-        .map_err(|_| error("state_unavailable"))?
-        .take(MAX_DIRECTORY_ENTRIES + 1)
-        .enumerate()
-    {
-        if index == MAX_DIRECTORY_ENTRIES {
-            return Err(error("state_archive_limit"));
-        }
-        let entry = entry.map_err(|_| error("state_unavailable"))?;
-        let name = entry.file_name();
-        if !name.to_string_lossy().starts_with("trial-") {
-            continue;
-        }
-        let data = private_bytes(&entry.path())?;
-        if name != format!("trial-{}.json", hash(&data)).as_str() {
-            return Err(error("archive_mismatch"));
-        }
-        let trial = parse_trial(&data)?;
-        if !matches!(trial.status.as_str(), "retained" | "rolled_back") {
-            return Err(error("invalid_trial"));
-        }
-        check_baseline_reuse(&trial, rule, ids)?;
-    }
-    Ok(())
-}
-fn archive(root: &Path, name: &str, data: &[u8]) -> Result<(), ContractError> {
-    let path = root.join(format!("{name}-{}.json", hash(data)));
-    match fs::symlink_metadata(&path) {
-        Ok(_) => {
-            if private_bytes(&path)? != data {
-                return Err(error("archive_mismatch"));
-            }
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            ensure_capacity(root, std::slice::from_ref(&path))?;
-            atomic_write_private(&path, data).map_err(|_| error("archive_failed"))?;
-        }
-        Err(_) => return Err(error("archive_failed")),
-    }
-    Ok(())
-}
-struct ApplyPlan {
-    before: Vec<Rule>,
-    previous: Option<Vec<u8>>,
-}
-// Shared by read-only review and locked application. A READY snapshot is not a
-// reservation: apply always repeats these checks after acquiring the lock.
-fn prepare_apply(root: &Path, rule: Rule, s: &Sample) -> Result<ApplyPlan, ContractError> {
-    let ids: BTreeSet<_> = s.units.iter().map(|u| u.unit_hash.as_str()).collect();
-    let previous = match fs::symlink_metadata(root.join("trial.json")) {
-        Ok(_) => {
-            let data = private_bytes(&root.join("trial.json"))?;
-            let old = parse_trial(&data)?;
-            if matches!(old.status.as_str(), "prepared" | "pending" | "restoring") {
-                return Err(error("trial_already_active"));
-            }
-            check_baseline_reuse(&old, rule, &ids)?;
-            Some(data)
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(_) => return Err(error("state_unavailable")),
-    };
-    check_archived_baselines(root, rule, &ids)?;
-    let before = current_rules(root)?;
-    if before.contains(&rule) {
-        return Err(error("candidate_already_applied"));
-    }
-    if s.guidance_sha256 != hash(render(&before).as_bytes()) {
-        return Err(error("baseline_guidance_mismatch"));
-    }
-    let mut additions = vec![
-        root.join(".lock"),
-        root.join("trial.json"),
-        root.join("personal-guidance.md"),
-    ];
-    if let Some(data) = &previous {
-        additions.push(root.join(format!("trial-{}.json", hash(data))));
-    }
-    ensure_capacity(root, &additions)?;
-    Ok(ApplyPlan { before, previous })
-}
-fn apply(
-    root: &Path,
-    rule: Rule,
-    s: &Sample,
-    context: &str,
-    now: DateTime<Utc>,
-) -> Result<Value, ContractError> {
-    let root = state_root(root)?;
-    let _lock = lock(&root)?;
-    let ApplyPlan { before, previous } = prepare_apply(&root, rule, s)?;
-    if let Some(data) = previous {
-        archive(&root, "trial", &data)?;
-    }
-    let mut after = before.clone();
-    after.push(rule);
-    after.sort();
-    let mut trial = Trial {
-        kind: "groundline-personal-trial".into(),
-        schema: 2,
-        status: "prepared".into(),
-        applied_at_utc: now.to_rfc3339(),
-        rule,
-        before_rules: before.clone(),
-        after_rules: after.clone(),
-        baseline: s.clone(),
-        model_context_sha256: context.into(),
-    };
-    save_trial(&root, &trial)?;
-    if current_rules(&root)? != before {
-        return Err(error("user_edited_guidance_preserved"));
-    }
-    atomic_write_private(
-        &root.join("personal-guidance.md"),
-        render(&after).as_bytes(),
-    )
-    .map_err(|_| error("guidance_write_failed"))?;
-    trial.status = "pending".into();
-    save_trial(&root, &trial)?;
-    Ok(
-        json!({"state":"pending","guidance_sha256":hash(render(&after).as_bytes()),"native_activation":"UNVERIFIED"}),
-    )
-}
-struct ReviewInputs<'a> {
-    report: &'a Path,
-    audit: &'a Path,
-    outcomes: Option<&'a Path>,
-    state_dir: Option<&'a Path>,
-    apply: bool,
-}
-fn eligibility_reason(error: &ContractError) -> Option<&'static str> {
-    match error.0.as_str() {
-        "personal_trial_already_active" => Some("trial_already_active"),
-        "personal_candidate_already_applied" => Some("candidate_already_applied"),
-        "personal_candidate_already_reviewed" => Some("candidate_already_reviewed"),
-        "personal_baseline_guidance_mismatch" => Some("baseline_guidance_mismatch"),
-        "personal_state_archive_limit" => Some("state_archive_limit"),
-        _ => None,
-    }
-}
-fn review(
-    input: ReviewInputs<'_>,
-    e: &ModelEvidence,
-    catalog: &[u8],
-) -> Result<Value, ContractError> {
-    let now = Utc::now();
-    let context = model_context(e, catalog, now)?;
-    let report = WeeklyReport::from_slice(&bytes(input.report)?)
-        .map_err(|_| error("invalid_insights_report"))?;
-    let audit: Value = read(input.audit)?;
-    groundline_contracts::efficiency::recommend_weekly_optimization(&audit)?;
-    let sample: Option<Sample> = input.outcomes.map(read).transpose()?;
-    if let Some(s) = &sample {
-        validate_sample(s, &context, now)?;
-    }
-    let root = input.state_dir.map(state_root).transpose()?;
-    let mut remaining = e.clone();
-    let mut state_reasons = Vec::new();
-    let mut state_checked = false;
-    let rule = loop {
-        let candidate = select_rule(&remaining, sample.as_ref(), &audit).or_else(|| {
-            let workflow = &report.weekly_metrics.workflow;
-            ((workflow.repeated_call_rate.is_some_and(|rate| rate >= 0.10)
-                || workflow
-                    .failure_signal_rate
-                    .is_some_and(|rate| rate >= 0.04))
-                && remaining
-                    .behavior_focus
-                    .contains(&Rule::DiagnoseBeforeRetry))
-            .then_some(Rule::DiagnoseBeforeRetry)
-        });
-        if let (Some(root), Some(s), Some(rule)) = (&root, &sample, candidate) {
-            state_checked = true;
-            if let Err(err) = prepare_apply(root, rule, s) {
-                let reason = eligibility_reason(&err).ok_or(err)?;
-                if !state_reasons.contains(&reason) {
-                    state_reasons.push(reason);
-                }
-                remaining
-                    .behavior_focus
-                    .retain(|candidate| *candidate != rule);
-                continue;
-            }
-        }
-        break candidate;
-    };
-    let mut reasons = Vec::new();
-    if report.data_quality.status != "PASS" || report.collection_health.freshness_status != "FRESH"
-    {
-        reasons.push("insights_quality_or_freshness");
-    }
-    fresh(&report.generated_at_utc, now, Duration::hours(24))?;
-    if audit["status"] != "PASS" {
-        reasons.push("native_audit_not_complete");
-    }
-    fresh(
-        audit
-            .pointer("/scope/generated_at")
-            .and_then(Value::as_str)
-            .ok_or_else(|| error("audit_timestamp_required"))?,
-        now,
-        Duration::hours(24),
-    )?;
-    if sample.as_ref().is_none_or(|s| !sufficient(s)) {
-        reasons.push("verified_outcomes_required");
-    }
-    if let Some(s) = &sample {
-        fresh(&s.period_end_utc, now, Duration::days(7))?;
-        if s.guidance_sha256 != hash(b"") && s.activation_evidence.is_none() {
-            reasons.push("baseline_activation_unverified");
-        }
-        if rule.is_some_and(|r| !s.units.iter().any(|u| r.observed_in(u))) {
-            reasons.push("candidate_signal_missing_in_outcomes");
-        }
-        if rule.is_some_and(|r| r.opportunity().is_some()) {
-            if s.units.iter().any(|u| u.total_tokens.is_none()) {
-                reasons.push("owned_token_baseline_incomplete");
-            }
-            if !s.units.iter().any(|u| u.outcome == Outcome::Verified) {
-                reasons.push("verified_delivery_denominator_required");
-            }
-        }
-    }
-    if rule.is_none() {
-        reasons.extend(state_reasons);
-        reasons.push("no_supported_candidate");
-    }
-    if input.state_dir.is_none() {
-        reasons.push("state_directory_required");
-    }
-    let mut out = output("review");
-    out["status"] = json!(if reasons.is_empty() {
-        "READY"
-    } else {
-        "OBSERVE"
-    });
-    out["reason_codes"] = json!(reasons);
-    out["model_context_sha256"] = json!(context);
-    out["model_evidence_fresh"] = json!(true);
-    out["latest_model_independently_verified"] = json!(false);
-    out["insights"] = json!({
-        "requested_days": report.requested_days,
-        "event_count": report.coverage.event_count,
-        "root_observations": report.coverage.observed_root_count,
-        "unique_task_count_available": false,
-        "quality": report.data_quality.status,
-        "data_quality": report.data_quality,
-        "coverage": report.coverage,
-        "quarantined_event_count": report.collection_health.quarantined_event_count,
-        "freshness_status": report.collection_health.freshness_status,
-        "groundline_versions": report.cohorts.event_distributions.groundline_version,
-        "model_effort_context_distribution": report.cohorts.model_effort_context_distribution,
-        "workflow": report.weekly_metrics.workflow,
-        "tokens": report.weekly_metrics.tokens,
-        "verification": report.weekly_metrics.verification,
-        "model_effort_tokens_available": report.cohorts.model_token_distribution.as_ref().is_some_and(|rows|rows.iter().any(|r|r.model_family!="unknown" && r.total_tokens>0)),
-        "model_token_distribution": report.cohorts.model_token_distribution,
-        "model_performance_attribution_available": false,
-    });
-    out["outcomes"] = sample.as_ref().map(metrics).unwrap_or(Value::Null);
-    out["strategy_eligibility"] = json!(
-        e.behavior_focus
-            .iter()
-            .map(|rule| strategy_eligibility(*rule, sample.as_ref()))
-            .collect::<Vec<_>>()
-    );
-    out["native_activation"] = json!(if sample
-        .as_ref()
-        .is_some_and(|s| s.activation_evidence.is_some())
-    {
-        "OPERATOR_EVIDENCED"
-    } else {
-        "UNVERIFIED"
-    });
-    out["activation_independently_verified"] = json!(false);
-    out["candidate"] = rule
-        .map(|r| json!({
-            "rule": r,
-            "instruction": r.instruction(),
-            "primary_metric": r.primary_metric(),
-            "evidence_class": "review_candidate_not_measured_improvement",
-            "review_note": match r {
-                Rule::DiagnoseBeforeRetry => "Classify expected nonzero results, legitimate polling, and environment failures before treating aggregate signals as wasted work. Confirm avoidable retries in direct outcomes before applying a trial.",
-                Rule::ApprovalContinuity => "Distinguish redundant approval pauses from material missing choices or new authority.",
-                Rule::EvidenceReuse => "Require direct evidence of repeated verification or retrieval with unchanged relevant inputs and risk. Preserve fresh live checks and include failed-delivery resources in the comparison.",
-                Rule::JustInTimeContext => "Require direct evidence of unnecessary eager context loading. Do not classify required instructions or decision-critical evidence as waste.",
-                Rule::BoundedParallelReads => "Require directly observed independent read-only operations and an available native parallel mechanism. Do not infer eligibility from tool count or long duration.",
-            },
-        }))
-        .unwrap_or(Value::Null);
-    out["automatic_application_eligible"] = json!(reasons.is_empty());
-    out["state_preflight_checked"] = json!(state_checked);
-    if input.apply && reasons.is_empty() {
-        out["trial"] = apply(
-            input
-                .state_dir
-                .ok_or_else(|| error("state_directory_required"))?,
-            rule.unwrap(),
-            sample.as_ref().unwrap(),
-            &context,
-            now,
-        )?;
-        out["mutation_performed"] = json!(true);
-    }
-    Ok(out)
-}
 fn restore(root: &Path, t: &mut Trial) -> Result<(), ContractError> {
     restore_with_writer(root, t, |path, contents| {
         atomic_write_private(path, contents).map_err(|_| error("restore_write_failed"))
@@ -1136,166 +490,48 @@ fn restore_with_writer(
         &serde_json::to_vec_pretty(t).map_err(|_| error("serialization_failed"))?,
     )
 }
-fn evaluate(
-    root: &Path,
-    s: Sample,
-    e: &ModelEvidence,
-    catalog: &[u8],
-) -> Result<Value, ContractError> {
-    let now = Utc::now();
-    let context = model_context(e, catalog, now)?;
-    validate_sample(&s, &context, now)?;
-    fresh(&s.period_end_utc, now, Duration::days(7))?;
+fn status(root: &Path) -> Result<Value, ContractError> {
     let root = state_root(root)?;
-    let _lock = lock(&root)?;
-    let mut t = load_trial(&root)?;
-    if t.status != "pending" {
-        return Err(error("pending_trial_required"));
+    let original = private_bytes(&root.join("trial.json"))?;
+    let trial = parse_trial(&original)?;
+    let (guidance_state, rollback_available) = match current_rules(&root) {
+        Ok(current) if current == trial.before_rules => (
+            "before_trial",
+            matches!(
+                trial.status.as_str(),
+                "prepared" | "restoring" | "rolled_back"
+            ),
+        ),
+        Ok(current) if current == trial.after_rules => {
+            ("trial_guidance", trial.status != "rolled_back")
+        }
+        Ok(_) => ("other_generated_guidance", false),
+        Err(err) if err.0 == "personal_user_edited_guidance_preserved" => ("user_edited", false),
+        Err(err) => return Err(err),
+    };
+    // Read-only status does not create a lock. Detect a journal change and never
+    // present a mixed observation as a stable snapshot; rollback rechecks locked.
+    if private_bytes(&root.join("trial.json"))? != original {
+        return Err(error("state_changed_during_read"));
     }
-    if current_rules(&root)? != t.after_rules {
-        return Err(error("user_edited_guidance_preserved"));
-    }
-    let mut out = output("evaluate");
-    let mut reasons = Vec::new();
-    if context != t.model_context_sha256
-        || s.task_kind != t.baseline.task_kind
-        || s.scope_size != t.baseline.scope_size
-        || s.comparison_context_sha256 != t.baseline.comparison_context_sha256
-    {
-        reasons.push("cohort_mismatch");
-    }
-    if time(&s.period_start_utc)? < time(&t.applied_at_utc)?
-        || time(&s.period_start_utc)? < time(&t.baseline.period_end_utc)?
-    {
-        reasons.push("overlapping_or_pretrial_period");
-    }
-    let ids: BTreeSet<_> = t.baseline.units.iter().map(|u| &u.unit_hash).collect();
-    if s.units.iter().any(|u| ids.contains(&u.unit_hash)) {
-        reasons.push("reused_outcome_units");
-    }
-    if s.guidance_sha256 != hash(render(&t.after_rules).as_bytes())
-        || s.activation_evidence.as_ref().is_none_or(|activation| {
-            time(&activation.observed_at_utc)
-                .is_ok_and(|observed| observed <= time(&t.applied_at_utc).unwrap())
-        })
-    {
-        reasons.push("native_activation_unverified");
-    }
-    if !sufficient(&s) || !sufficient(&t.baseline) {
-        reasons.push("verified_outcomes_required");
-    }
-    if t.baseline.guidance_sha256 != hash(b"") && t.baseline.activation_evidence.is_none() {
-        reasons.push("baseline_activation_unverified");
-    }
-    if t.rule.opportunity().is_some()
-        && !t.baseline.units.iter().any(|unit| t.rule.observed_in(unit))
-    {
-        reasons.push("baseline_candidate_signal_missing");
-    }
-    let before = metrics(&t.baseline);
-    let after = metrics(&s);
-    let primary = t.rule.primary_metric();
-    if before[primary].is_null() || after[primary].is_null() {
-        reasons.push("primary_metric_unavailable");
-    }
-    if before["tokens_per_unit"].is_null() || after["tokens_per_unit"].is_null() {
-        reasons.push("owned_token_comparison_incomplete");
-    }
-    out["rule"] = json!(t.rule);
-    out["primary_metric"] = json!(primary);
-    out["primary_metric_comparison"] = json!({"baseline":before[primary],"candidate":after[primary],
-        "direction":"lower_is_better"});
-    out["native_activation"] = json!(if reasons.contains(&"native_activation_unverified") {
-        "UNVERIFIED"
+    let mut out = output("status");
+    out["status"] = json!(if rollback_available {
+        "AVAILABLE"
     } else {
-        "OPERATOR_EVIDENCED"
+        "BLOCKED"
     });
-    out["activation_independently_verified"] = json!(false);
-    out["baseline"] = before.clone();
-    out["candidate"] = after.clone();
-    if !reasons.is_empty() {
-        out["status"] = json!("INCONCLUSIVE");
-        out["reason_codes"] = json!(reasons);
-        return Ok(out);
-    }
-    let v = |m: &Value, k: &str| m[k].as_f64().unwrap();
-    let quality_regression = v(&after, "verified_rate") < v(&before, "verified_rate")
-        || v(&after, "rework_rate") > v(&before, "rework_rate");
-    let intervention_regression = v(&after, "redundant_approvals_per_unit")
-        > v(&before, "redundant_approvals_per_unit")
-        || v(&after, "continuation_prompts_per_unit") > v(&before, "continuation_prompts_per_unit");
-    let resource_regression = v(&after, "wall_duration_ms_per_unit")
-        > v(&before, "wall_duration_ms_per_unit")
-        || after["tokens_per_unit"]
-            .as_f64()
-            .zip(before["tokens_per_unit"].as_f64())
-            .is_some_and(|(a, b)| a > b);
-    let improves = v(&after, primary) < v(&before, primary)
-        || (t.rule == Rule::ApprovalContinuity
-            && v(&after, "continuation_prompts_per_unit")
-                < v(&before, "continuation_prompts_per_unit"));
-    archive(
-        &root,
-        "evaluation",
-        &serde_json::to_vec(&json!({"sample":s,"baseline":before,"candidate":after,
-            "primary_metric":primary}))
-        .unwrap(),
-    )?;
-    if quality_regression || intervention_regression || resource_regression || !improves {
-        restore(&root, &mut t)?;
-        out["status"] = json!("ROLLED_BACK");
-        out["reason_codes"] = json!([if quality_regression {
-            "quality_regression"
-        } else if intervention_regression {
-            "user_intervention_regression"
-        } else if resource_regression {
-            "resource_regression"
-        } else {
-            "no_observed_benefit"
-        }]);
-    } else {
-        t.status = "retained".into();
-        save_trial(&root, &t)?;
-        out["status"] = json!("RETAINED");
-        out["reason_codes"] = json!(["observed_association_not_causation"]);
-    }
-    out["mutation_performed"] = json!(true);
+    out["trial_state"] = json!(trial.status);
+    out["rule"] = json!(trial.rule);
+    out["guidance_state"] = json!(guidance_state);
+    out["rollback_available"] = json!(rollback_available);
+    out["rollback_needed"] = json!(trial.status != "rolled_back");
+    out["snapshot_atomic"] = json!(false);
     Ok(out)
 }
+
 pub fn run(command: Command) -> Result<Value, ContractError> {
     match command {
-        Command::Review {
-            report,
-            audit,
-            model_evidence,
-            catalog,
-            outcomes,
-            state_dir,
-            apply,
-            ..
-        } => review(
-            ReviewInputs {
-                report: &report,
-                audit: &audit,
-                outcomes: outcomes.as_deref(),
-                state_dir: state_dir.as_deref(),
-                apply,
-            },
-            &read(&model_evidence)?,
-            &bytes(&catalog)?,
-        ),
-        Command::Evaluate {
-            state_dir,
-            outcomes,
-            model_evidence,
-            catalog,
-            ..
-        } => evaluate(
-            &state_dir,
-            read(&outcomes)?,
-            &read(&model_evidence)?,
-            &bytes(&catalog)?,
-        ),
+        Command::Status { state_dir, .. } => status(&state_dir),
         Command::Rollback { state_dir, .. } => {
             let root = state_root(&state_dir)?;
             let _lock = lock(&root)?;
