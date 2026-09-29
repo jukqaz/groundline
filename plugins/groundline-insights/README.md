@@ -1,89 +1,50 @@
 # GroundLine Insights
 
-GroundLine Insights is the optional self-hosted data companion shipped from the
-same public monorepo as GroundLine Core. It is independently installable and
-does not require Core. It owns only the networked surface:
+Insights is an optional, independently installable companion to Core. Four
+fail-open Codex hooks collect bounded native App/CLI activity into a private
+aggregate outbox for an owner-operated HTTPS API, ClickHouse, and Grafana.
+Tailnet restriction is optional. Core, inference proxies, model catalogs, and
+provider credentials are not dependencies.
 
-- four fail-open Codex lifecycle hooks;
-- owner-private identity, consent, checkpoint, credential, and outbox state;
-- HTTPS collection and owner reports, with optional Tailnet restriction;
-- a Rust/Axum API, ClickHouse schema, Grafana dashboards, and generic deployment
-  tooling.
-
-It does not package GroundLine skills, alter global Codex configuration, install
-a daemon or scheduler, or replace Codex permissions and execution.
-
-Native Codex App/CLI is the collection source. No inference proxy, generated
-model catalog, custom provider configuration, or Core installation is required.
-Insights reads native activity into a private aggregate outbox and sends it
-directly to the owner API over HTTPS or an optional Tailnet connection; ClickHouse and Grafana remain downstream
-of that API. It does not read model configuration or inference credentials.
+Insights installs no skills, daemon, or scheduler and changes no global Codex
+settings. [Security](SECURITY.md) and the
+[contract](references/insights-contract.md) define private state, consent,
+authentication, collection limits, and excluded raw content.
 
 ## Install and upgrade
 
-For installation, connection, consent, and verification in one flow, use the
-reviewed distribution installer with the `insights` or `both` profile. See
-[complete installation](https://github.com/jukqaz/groundline/blob/main/docs/installation.md).
-After package-only installation, `groundline-insights setup` reports what remains;
-use `--endpoint <https-origin> --enrollment-token-file <private-file> --enable
---verify` to complete an explicitly selected connection. `--input <private-profile>`
-is also supported. Matching existing inputs are reused; conflicting connections
-are rejected without resetting identity or history. Exit 2 means action or first
-activity is pending. Setup never grants hook trust or fabricates a delivery receipt.
-
-Register the monorepo once and install the Insights plugin. This does not install
-Core; install `groundline@groundline` separately only when Core skills and local
-audits are also wanted.
+For package installation, connection, consent, and verification together, use the
+reviewed distribution's `install.sh --profile insights` (or `both`). For package-only
+installation:
 
 ```console
 codex plugin marketplace add https://github.com/jukqaz/groundline.git --ref stable --json
 codex plugin add groundline-insights@groundline --json
 ```
 
-Refresh with `codex plugin marketplace upgrade groundline --json`, then verify
-the installed version with `codex plugin list --json`. If necessary, install
-the same Insights ID again. Source tags do not contain native binary trees;
-the [native upgrade guide](references/native-upgrade.md) describes the verified
-distribution and API-first sequence.
+This does not install Core. Source tags contain no binaries. Follow
+[native upgrade](references/native-upgrade.md) for API-first checks, commit
+pinning, and recovery; do not re-add a disabled plugin to refresh it.
 
-An upgrade that changes `hooks/hooks.json` requires a fresh Codex review of the
-new hook hash. GroundLine never grants trust to itself. `codex plugin list`
-proves installation and enablement, not that a changed hook was reviewed or
-dispatched; verify a new-task lifecycle receipt separately.
+After package-only installation, `groundline-insights setup` reports remaining
+steps. For an explicitly selected connection, use `--endpoint <https-origin>
+--enrollment-token-file <private-file> --enable --verify`, or
+`--input <private-profile>`. Matching inputs are reused; conflicting connections
+are rejected without resetting identity/history. Exit 2 means action or first
+activity is pending. Setup grants no hook trust and fabricates no delivery receipt.
 
-See [integrations and installation profiles](https://github.com/jukqaz/groundline/blob/main/docs/integrations.md) for the
-Core-only, Insights-only, and combined choices.
-
-The packaged executable is `groundline-insights`. macOS and Linux are supported
-on ARM64 and x86-64. Resolve
-the executable from the installed plugin's `bin/<target>` directory; a Codex
-plugin installation does not by itself promise a user-shell `PATH` entry.
-
-```console
-groundline-insights provider-smoke --require-installed --json
-groundline-insights worker status
-groundline-insights worker run-once
-groundline-insights insights fetch-report \
-  --admin-token-file /owner-private/admin-report-token \
-  --days 7 --json
-```
+A changed hook hash requires Codex review. GroundLine never trusts itself, and
+`plugin list` proves neither hook trust nor dispatch. Resolve `groundline-insights`
+from the installed `bin/<target>` directory: macOS/Linux ARM64 and x86_64 are
+supported, but shell `PATH` registration is not promised.
 
 ## Owner configuration
 
-Installation does not activate collection. `worker configure` accepts a reviewed
-schema-7 input containing an HTTPS endpoint (or optional Tailnet endpoint) and an owner-issued
-`enrollment_token`. It writes a sanitized profile and the credential to separate
-owner-private files under `~/.codex/groundline/insights`; the secret is never
-printed or copied into the plugin. First-contact enrollment requires both
-server reachability and that credential. Each collector then uses its own token.
-The fleet-wide CLI report is an administrative operation: it requires an
-explicit owner-private file containing only the separate admin token. Collector
-tokens cannot fetch it. Keep that file off collector-only hosts and never commit
-or print it.
-
-Copy the installed `references/owner-profile.example.json` to an owner-private
-directory outside the plugin and repository. Restrict it to the owner before
-filling in the endpoint and credential, then use that absolute path:
+Copy [owner-profile.example.json](references/owner-profile.example.json) outside
+the plugin/repository, restrict it to its owner, and replace the endpoint and
+intentionally invalid short token. `worker configure` accepts that schema-7 input
+and stores the sanitized profile and enrollment credential separately below
+`~/.codex/groundline/insights`. It never prints or copies secrets into the plugin.
 
 ```console
 groundline-insights worker configure --input /owner-private/owner-profile.json
@@ -92,77 +53,44 @@ groundline-insights worker run-once
 groundline-insights worker status
 ```
 
-`worker enable` is the explicit owner-service upload consent boundary. Only the
-current consent, policy, and status formats are supported. Older or unknown
-formats return `unsupported_local_state` without conversion or deletion;
-`worker enable` does not migrate them. Preserve that state and pending events,
-stop collection, and obtain explicit approval before a fresh setup. When no
-consent exists, explicit enable creates a receipt and quarantines unconsented
-pending events. An existing valid receipt is preserved on re-enable.
+Installation is inert; `worker enable` explicitly consents to owner-service upload.
+First enrollment requires connectivity and the owner-issued credential; later
+requests use a per-collector token. Missing consent is created on explicit enable,
+with unconsented pending events quarantined. Valid consent survives re-enable.
+Unsupported state is preserved and rejected, not migrated by enable: stop
+collection, retain state/outbox, and obtain approval before a fresh setup.
 
-New collection starts with a seven-day lookback. Later runs preserve the cursor
-and freeze any incomplete window; automatic reading stops after three failures.
-Historical-gap recovery requires an owner decision and preserved evidence. See
+Collection starts with seven days, preserves subsequent cursors, and freezes
+incomplete windows. Three failed read attempts require operator retry. For status,
+source discovery, gaps, and safe recovery use
 [operations troubleshooting](references/operations-troubleshooting.md).
 
-`worker status` reports the operational lane separately: `collection_state`,
-`ready_to_collect`, and bounded `blocking_reason_codes` distinguish an intentional
-disabled state, missing or invalid configuration, an unverified/disconnected
-Tailnet, a pending first collection, a seven-day stale collector, clock skew, and
-an active collector. A Tailnet probe with `tailnet_connected: null` is unverified,
-not proof of disconnection.
+Fleet reporting is a separate administrative operation:
 
-Native source discovery is shared by `doctor` and the collector and follows the
-highest numeric `state_<n>.sqlite`. `codex_state_store_present` is a presence
-check, not schema or delivery proof. Without a usable source, status reports
-`native_activity_unavailable` and readiness is false; existing pending-delivery
-or operator-action reasons retain priority. Keep the source home, identity,
-consent, and outbox when removing an inference wrapper; do not copy proxy state
-or silently initialize another collector.
+```console
+groundline-insights insights fetch-report \
+  --admin-token-file /owner-private/admin-report-token \
+  --days 7 --json
+```
 
-The input file is owner-private operational material and must not be committed.
-The checked-in example deliberately contains an invalid short token and cannot
-activate collection unchanged.
-Collection uses bounded aggregate counters from Codex's read-only state database.
-The wire contract excludes raw prompts, responses, transcripts, commands, patches,
-paths, hostnames, repository names, task IDs, rollout IDs, account identifiers,
-and IP addresses.
-
-The supported collector runtimes are Codex App and Codex CLI. The worker accepts
-an HTTPS origin or optional Tailnet endpoint, and every operator supplies their own
-private service and credentials. The official service path is the Rust/Axum API,
-ClickHouse storage, strict 7/30/90-day CLI JSON reports, and the provisioned
-Grafana dashboard. Docker Compose is the public self-hosting preview; TrueNAS is
-an optional operator overlay, not a requirement for the plugin. A production
-deployment still needs fresh-host, immutable-image, and external TLS evidence.
-
-The API is the canonical ClickHouse schema migrator. Collection tables use
-`ReplacingMergeTree`; report and Grafana queries read the `basic_active` view,
-which uses `FINAL` for logically deduplicated results. A retry is idempotent at
-the API boundary, while the storage report keeps any physical duplicate rows
-observable instead of hiding data-quality drift.
-The default service contract retains 365 days, caps each collector at 4,096
-retained events and 256 MiB of logical payload, and stops ingest at 90% of the
-configured dataset row or byte ceiling so administrative operations retain
-capacity. Operators may change only the documented bounded environment values.
-Local delivery is independently bounded to 256 queued events, 16 MiB, and
-16-event upload batches. Retryable failures use durable capped backoff; permanent
-remote rejection requires operator action. Grafana's TTL cleanup panel reports
-rows whose retention deadline passed but which still await ClickHouse's
-background merge. It never runs `OPTIMIZE` or deletes data.
+Fleet reports require an explicit private file containing the separate admin
+token; a collector token cannot authorize them. Keep it off collector-only hosts,
+Git, and logs.
 
 ## Evidence lanes
 
-Marketplace refresh, package checksum, four effective hooks, lifecycle dispatch,
-accepted upload, ClickHouse visibility, Grafana query frames, image publication,
-deployment, and stable promotion must be proven independently. Operational
-endpoints, credentials, dataset paths, and receipts remain outside public Git and
-public CI never receives production credentials.
+Package integrity, four effective hooks, lifecycle dispatch, accepted upload,
+ClickHouse visibility, Grafana query frames, image publication, deployment, and
+stable promotion are separate evidence. Unobserved lanes remain `UNVERIFIED`.
+Operational endpoints, credentials, dataset paths, and receipts stay outside
+public Git and CI.
 
-See [operations troubleshooting](references/operations-troubleshooting.md),
-[native upgrade](references/native-upgrade.md), and the repository
-[self-hosting guide](https://github.com/jukqaz/groundline/blob/main/docs/self-hosting.md) and
-[privacy policy](https://github.com/jukqaz/groundline/blob/main/docs/privacy.md). Unsupported sinks and future adapter
-requirements are listed in the [integration matrix](https://github.com/jukqaz/groundline/blob/main/docs/integrations.md).
+The [contract](references/insights-contract.md) owns storage/delivery bounds,
+retention, deduplication, and 7/30/90-day reports. Docker Compose is the public
+self-hosting preview; TrueNAS is an optional overlay. Production still requires
+fresh-host, immutable-image, and external TLS evidence. See the
+[self-hosting guide](https://github.com/jukqaz/groundline/blob/main/docs/self-hosting.md),
+[privacy policy](https://github.com/jukqaz/groundline/blob/main/docs/privacy.md),
+and [integration profiles](https://github.com/jukqaz/groundline/blob/main/docs/integrations.md).
 
 License: MIT.

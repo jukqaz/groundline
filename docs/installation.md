@@ -12,17 +12,53 @@ distribution. Source tags and `main` do not contain installable native binaries.
 
 ```console
 git clone --branch stable --single-branch https://github.com/jukqaz/groundline.git groundline-install
-bash groundline-install/install.sh
+bash groundline-install/install.sh --profile core
 ```
 
 Supported hosts are macOS and Linux on ARM64 and x86-64. macOS prefers the
 App-bundled executable when present; Linux uses the resolved Codex executable.
 Use `--codex /absolute/path/to/codex` for an explicit runtime. Preflight checks
 required native commands before package changes. Keep the same intended `CODEX_HOME`.
+Use `--profile insights` for the collector alone or `--profile both` for both.
+
+On macOS, a current App bundle may expose
+`/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex`; the installer
+also recognizes the older `Contents/Resources/codex` layout and checks the bundle
+identity. Verify the actual path and `--version`, independently of `codex --version` on PATH. A version string alone is not installation or live-task evidence.
 
 Installing through Codex's plugin UI or `plugin add` delivers the package only.
 Finish through this installer, or invoke the installed setup commands with the
 documented inputs. Do not assume a plugin post-install callback ran.
+
+## Package-only installation
+
+For a new marketplace registration, native commands deliver only the selected
+package. Run either `plugin add` line, or both when deliberately choosing both:
+
+```console
+CODEX="/absolute/path/to/codex"
+"$CODEX" plugin marketplace add https://github.com/jukqaz/groundline.git --ref stable --json
+"$CODEX" plugin add groundline@groundline --json
+"$CODEX" plugin add groundline-insights@groundline --json
+```
+
+For an existing registration, use the reviewed installer update below; do not
+remove the source or re-add disabled plugins manually. Finish package-only
+installation with the installer, or first save the complete output of a
+**successfully completed** `"$CODEX" debug models` to an owner-private file.
+Do not pipe a still-running producer into settings application: partial valid
+JSON does not establish that catalog generation succeeded. Then run:
+
+```console
+groundline setup --catalog /owner-private/native-models.json --apply
+"$CODEX" --strict-config doctor --summary --no-color --ascii
+```
+
+The Core command requires Core to be installed. Resolve `groundline` and
+`groundline-insights` from the native plugin cache's `bin/<target>/` if they are
+not on PATH. Targets are `aarch64-apple-darwin`, `x86_64-apple-darwin`,
+`aarch64-unknown-linux-musl`, and `x86_64-unknown-linux-musl`. See
+[Insights setup](#add-insights-in-the-same-flow) for collection activation.
 
 ## Update an existing installation
 
@@ -143,7 +179,6 @@ artifact bytes. The receipt reports `source_commit`, `previous_commit`, and
 not restoration of the old symbolic ref. A failed recovery requires review before
 retrying. These native commands are not atomic across process kill or power loss.
 
-For release qualification, verify all six native targets plus real Codex package
-installation, preservation of existing model choices, explicit supported
-model/effort selection, partial-failure recovery, and a real hook-to-server receipt. Synthetic provider tests prove the
-installer contract, not authenticated Codex behavior or private server delivery.
+Release-wide platform and live checks are listed in the
+[release checklist](release-checklist.md). Synthetic installer tests do not prove
+authenticated Codex behavior or private server delivery.

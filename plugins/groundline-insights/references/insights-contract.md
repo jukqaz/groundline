@@ -1,28 +1,23 @@
 # GroundLine Insights Contract
 
-This document describes the current v0.20 contract. Historical schemas and
-provider compatibility are not part of the active interface.
+The current contract rejects unsupported formats without converting or deleting
+state. Historical records remain readable where explicitly stated below.
 
 ## Ownership
 
-GroundLine Core owns offline guidance and local analysis. GroundLine Insights
-owns the optional networked path: four Codex hooks, collector state, HTTPS
-transport, the API, ClickHouse, Grafana, and generic self-hosting tools. It does
-not require or install Core, install skills, change global Codex configuration,
-or route models. Core-only, Insights-only, and combined installations are all
-valid profiles.
+Core owns offline guidance and analysis. Insights independently owns four Codex
+hooks, private collector state, HTTPS transport, the Rust/Axum API, ClickHouse,
+Grafana, and self-hosting tools. It installs no Core dependency or skills,
+changes no global Codex settings, and routes no models.
 
 Supported runtime families are `codex_app` and `codex_cli`. Supported execution
 modes are `desktop`, `local_headless`, and `remote_headless`. Supported platforms
 are macOS and Linux on ARM64 and x86-64.
 
-The current integration contract is deliberately narrow: Codex App/CLI are the
-only collector sources, HTTPS is the default remote transport, with optional Tailnet access, the Rust/Axum API
-is the ingestion service, ClickHouse is the storage and report backend, and
-Grafana is the first-party dashboard. Docker Compose is the generic self-hosting
-path and TrueNAS is one supported owner-run deployment path. Generic webhooks,
-third-party observability exporters, alternative
-databases, and hosted GroundLine accounts are outside the current contract.
+Codex App/CLI are the only sources. HTTPS is the default transport; Tailnet is
+optional. Docker Compose is the generic self-hosting path and TrueNAS an optional
+owner-run path. Webhooks, third-party exporters, alternative databases, and
+hosted GroundLine accounts are unsupported.
 
 ## Activation and local state
 
@@ -35,18 +30,16 @@ Installation is inert. An owner explicitly supplies a schema-7
   `native_hook_checkpoints`;
 - an `enrollment_token` between 32 and 4096 bytes.
 
-A missing policy means disabled. The complete policy is validated as a strict
-private file, and enablement is rejected until both the sanitized profile and
-enrollment credential are valid. Disabled lifecycle checkpoints exit without
-spawning a detached worker. Worker status reports readiness and bounded blockers;
-it never converts an unobservable Tailnet probe into a false disconnected state.
-For ordinary HTTPS endpoints, tailnet_required is false and the probe is skipped;
-not_required is a bounded Tailnet status. Only explicit Tailnet endpoints gate readiness on that probe.
-Only the current compact policy schema 1, status schema 4, and consent schema 2
-are accepted. The former private policy shape and status schema 3 are not
-imported. Unsupported versions, kinds, or shapes fail closed with
-`unsupported_local_state`; reading or enabling never converts them or discards
-their watermarks. Explicit disable remains available to revoke collection.
+Missing policy means disabled; disabled checkpoints spawn no worker. Enable
+validates existing policy/status and requires a valid sanitized profile and
+enrollment credential before creating consent/policy.
+Only compact policy schema 1, status schema 4, and consent schema 2 are accepted.
+Unsupported kinds, versions, or shapes return `unsupported_local_state` without
+conversion or lost watermarks, including on enable. Explicit disable still works.
+
+Status returns readiness and bounded blockers. Ordinary HTTPS skips Tailnet
+probing with `tailnet_required: false` and `not_required`; only Tailnet endpoints
+gate readiness on it. An unobservable probe stays unknown, never disconnected.
 
 Configuration writes a sanitized profile without the token and a separate
 private enrollment-credential file. Identity, consent, policy, status,
@@ -55,17 +48,13 @@ bounded private files below `~/.codex/groundline/insights`. Status and error
 receipts return booleans and reason codes, never paths, endpoints, IDs, or
 secret values.
 
-Consent schema 2 states the network boundary directly: upload to the configured
-owner service is enabled only while the separate owner policy is active, and
-third-party upload remains disabled. Consent schema 1 is unsupported and is not
-converted or archived automatically, including by `worker enable`. With no
-existing consent, explicit enable creates a receipt and quarantines unconsented
-pending events. Re-enabling an existing valid receipt preserves it. Invalid
-current consent requires operator review and is never silently broadened.
-Before replacing unsupported state, stop collection, preserve the original
-state/outbox, and obtain explicit approval for a fresh setup. Do not restore old
-pending events into a newly consented outbox or reset collection watermarks
-without a separate data-authorization decision.
+Consent permits upload only to the configured owner service while separate
+policy is active; third-party upload remains disabled. Explicit enable creates
+missing consent and quarantines unconsented pending events, but preserves a valid
+receipt. Invalid or older consent is neither broadened, converted, nor archived.
+Before replacing unsupported state, stop collection, preserve state/outbox, and
+obtain approval for a fresh setup. Replaying old events into a newly consented
+outbox or resetting watermarks needs separate data authorization.
 
 Stop revokes policy immediately and waits for any active bounded request or
 collection read before reporting success. Each subsequent phase/request checks
@@ -75,23 +64,20 @@ the updated executable on every collector process, including detached hooks.
 
 ## Enrollment and authentication
 
-Every due worker cycle checks `/healthz` before enrollment or upload, even when
-a collector token is already cached. The API advertises Basic envelope schema
-versions and a semantic allowlist revision in `ingest_capabilities`. Collectors
-require schema 5 and revision 8 or newer, not an exact package version. Revision 8
-includes exact GPT-6 model labels. Revision 6 introduced support that
-accepts independent output-signal counts, including overlapping labels and results
-from calls in an earlier window. These fixed-key, bounded counts are output
-proxies, not counts of failed calls. Canonical cache ratios, bounded and disjoint
-ingestion windows, coherent usage totals, and provenance checks remain required.
-Enrollment includes the
-authoritative `current_generation`.
-Re-enroll once per due cycle with the existing identity and token, and use that
-generation when staging new events. Never infer zero from a cached credential
-or overwrite a prepared event after a generation changes. Missing
-or incompatible capabilities require an API upgrade and explicit operator retry;
-unready storage remains a retryable service failure. Credentials are not sent
-by this preflight, and the existing bounded readiness cache and rate limit apply.
+Every due cycle checks `/healthz` before enrollment/upload, including with a
+cached collector token. `ingest_capabilities` must advertise Basic schema 5 and
+revision 8 or newer, not an exact package version. Revision 8 includes exact
+GPT-6 labels. Output signals may overlap or refer to earlier-window calls;
+they are bounded output proxies, not failed-call counts. Cache ratios, disjoint
+windows, coherent usage totals, and provenance remain validated.
+
+Re-enroll once per due cycle with the existing identity/token and use the returned
+`current_generation` for new events. Never infer generation zero from credentials
+or overwrite a prepared event after generation changes. Missing/incompatible
+capabilities require API upgrade and operator retry; unready storage is retryable.
+Health preflight sends no credentials and uses bounded readiness caching/rates.
+`worker check-server` exposes that read-only check for installation: no profile
+means `NOT_CONFIGURED`, no network, and no writes; configured failures exit nonzero.
 
 ## Collection transactions
 
@@ -151,20 +137,16 @@ is never emitted. These permanent failures still require an operator retry.
 
 ## Collection and transport
 
-Hooks ignore hook input, persist one bounded private marker per lifecycle event,
-and detach one fail-open checkpoint process. The worker atomically claims the
-current marker generation, coalesces concurrent work, and acknowledges only the
-claimed generation after it has durably handled the cycle; a later capture stays
-pending. Accepted delivery advances durable collection state before its outbox
-file is removed.
-Collection cadence and delivery retry cadence are independent. The outbox is
-limited to 256 events and 16 MiB, uploads at most 16 events per cycle, and uses
-capped exponential backoff. Permanent remote rejection pauses automatic retry
-for operator action.
-It opens Codex SQLite read-only and produces schema-5
-`groundline-insights-basic-weekly` events. The event contract contains aggregate
-usage, lifecycle, latency, verification, and boundary counters plus
-low-cardinality platform/runtime fields.
+Hooks ignore input, persist bounded private lifecycle markers, and detach a
+fail-open checkpoint process. The worker coalesces work and acknowledges only its
+atomically claimed marker generation after durable handling; later captures stay
+pending. Collection and delivery retries have independent cadence. The outbox
+caps at 256 events/16 MiB and 16 uploads per cycle with capped exponential backoff;
+permanent rejection requires operator action.
+
+Read-only Codex SQLite produces schema-5 `groundline-insights-basic-weekly` events:
+aggregate usage, lifecycle, latency, verification, boundary counters, and bounded
+platform/runtime dimensions.
 
 Model/effort dimensions are shared Rust allowlists used by normalization,
 ingestion, weekly reports, and comparisons. GPT-6 Astra/Sol/Luna have separate
@@ -187,10 +169,9 @@ baseline. Read failures and
 unread shared-history prefixes remain partial evidence, never a
 claim that all provider history was collected.
 
-The contract rejects raw prompts, responses, transcripts, commands, patches,
-paths, repository names, task IDs, rollout IDs, account identifiers, hostnames,
-and IP addresses. The client disables ambient HTTP proxy discovery, rejects
-redirects, applies a fixed timeout, and contacts only the validated endpoint.
+The strict raw-content exclusions are listed in [Security](../SECURITY.md).
+Clients reject redirects and ambient proxies, apply a fixed timeout, and contact
+only the validated endpoint.
 
 ## Storage and reporting
 
@@ -242,9 +223,9 @@ Quarantined receipts expire seven days after receipt. A single conditional TTL
 expression implements both deadlines; the `basic_retention` view exposes the
 same expression for reports and Grafana. Quarantine is bounded diagnostic
 storage, not a permanent archive of unusable measurements.
-The service also applies retained per-collector
-event and logical-payload quotas, and dataset row/byte watermarks. Ingest stops at
-90% of the configured dataset ceilings to reserve capacity for administration.
+Default per-collector retention is capped at 4,096 events and 256 MiB of logical
+payload. Dataset row/byte watermarks stop ingest at 90% of configured ceilings
+to reserve administrative capacity. Operators may change documented bounded values.
 Duplicate retries do not consume quota, and quota check plus insert is serialized
 within the supported single API instance.
 TTL cleanup is eventual because ClickHouse removes expired rows during

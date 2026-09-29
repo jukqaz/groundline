@@ -1,238 +1,63 @@
 # GroundLine
 
-GroundLine uses everyday Codex activity and observed delivery outcomes to inform
-GPT-6 Astra, Sol, and Luna model, effort, and subagent choices. Codex owns
-execution, settings, permissions, agents, worktrees, review, and upgrades.
-Historical generations remain readable but are not optimization targets.
+GroundLine uses Codex activity and actual delivery outcomes to inform GPT-6
+Astra, Sol, and Luna model, effort, and subagent choices. Codex owns execution,
+permissions, settings, and agents. Earlier generations remain readable as history.
 
-The evidence loop is **audit → delivery → route**: inspect a bounded activity
-sample, record actual results, then compare matched outcomes. Task judgments and
-aggregate usage do not establish a measured optimum or automatic improvement.
-See the [architecture](docs/architecture.md) and
-[evidence contract](plugins/groundline/references/evidence-routing.md).
+[한국어](README.ko.md) · [Documentation](docs/index.md)
 
-[한국어](README.ko.md)
-
-The Rust monorepo ships two independently installable plugins:
-
-| Plugin | Purpose | Default network behavior |
+| Product | Purpose | Default |
 | --- | --- | --- |
-| `groundline` | Local usage evidence, delivery records, and bounded workflow recommendations | Offline; no hooks or collector identity |
-| `groundline-insights` | Optional aggregate collection plus a public self-hosting preview for ClickHouse and Grafana | Disabled until an owner profile and enrollment credential are configured |
+| [Core](plugins/groundline/README.md) | Local audits, delivery evidence, and workflow recommendations | Offline; no hooks |
+| [Insights](plugins/groundline-insights/README.md) | Optional aggregate collection, ClickHouse, and Grafana | Collection off until configured and consented |
 
-The plugin packages are canonical under `plugins/`. Shared Rust contracts and
-runtime code live under `crates/`; generic self-hosting assets live under
-`infrastructure/` and `services/`. Real endpoints, credentials, dataset paths,
-deployment receipts, and infrastructure inventories must remain outside Git.
-The Compose template has no baked-in infrastructure versions: a strict
-compatibility profile selects a release-tested or newer candidate dependency
-set, and the newer set must pass the same live stack verifier.
+The plugins install independently. Insights connects to the owner's service;
+installing it does not enroll anyone in the maintainer's infrastructure.
+Supported hosts: **macOS and Linux, ARM64 and x86_64**.
 
-Insights is bring-your-own service: independent owners use separate private
-instances, storage, and credentials. Public installation does not enroll a user
-in the maintainer's service. See the [private-owner boundary](docs/integrations.md#private-owner-deployment-boundary).
+## Install and update
 
-## Token cost and value
-
-Core skill descriptions and loaded guidance add model input. Model-led audits,
-verification, and report analysis can also consume additional tokens. Automatic
-Insights collection runs native code to aggregate existing activity and send it
-to the owner's service; it does not call a language model.
-
-Evaluate comparable requested deliveries, including failed work, using verified outcomes, rework, user
-intervention, elapsed time, and measured tokens. Additional tokens can be a
-reasonable cost when the resulting quality or reliability justifies them. Net
-token savings are not guaranteed, and successful installation or delivery checks
-do not establish an efficiency benefit. Keep guidance compact, scale verification
-to the task's risk, and reuse valid evidence. The
-[delivery contract](plugins/groundline/references/delivery-evidence.md) keeps
-requested and observed selections, failed work, missing resources, and
-acceptance evidence separate.
-
-## Install and upgrade
-
-Releases use a date and daily sequence, such as `2026.09.29-a`. Installation
-and update comparisons use the corresponding numeric version `2026.929.1`.
-The [versioning contract](docs/versioning.md) keeps ordering monotonic across
-same-day releases and date changes.
-
-Use the **install and configure** entry point from a reviewed binary-bearing
-`stable` distribution. It preserves existing Codex choices by default and reports
-each completed or pending stage. Install Git and Codex first; Bash also requires `jq`.
+With Git, Codex, Bash, and `jq` installed, review a complete binary-bearing
+`stable` distribution and run its installer:
 
 ```console
 git clone --branch stable --single-branch https://github.com/jukqaz/groundline.git groundline-install
 bash groundline-install/install.sh
 ```
 
-Supported hosts are macOS and Linux on ARM64 and x86-64. Select
-`--profile both` to include Insights, or `insights` for Insights
-alone. See [complete installation and recovery](docs/installation.md) for model
-selection, private connection inputs, consent, first collection, and retrying a
-partial installation. Existing disabled plugins remain disabled. The installer
-pins the reviewed commit; App Refresh stays there. For a newer release, obtain
-its current complete `stable` distribution and rerun that installer.
-Package-only installation is also available below.
+The default is Core. Use `--profile insights` or `--profile both` as needed.
+Existing model, effort, permissions, and disabled plugins are preserved unless
+explicitly changed. Insights needs a compatible owner API before collector upgrades.
 
-**GroundLine runs as Codex plugins and native CLIs.** Codex App and CLI use the
-same plugins. Package-only native commands require Git and Codex. These native
-commands preserve personal model, reasoning, and permission settings. Insights
-collection starts only after connection setup and explicit consent, on Codex hooks.
+The installer pins the reviewed commit, so App Refresh stays there. For a newer
+release, review its complete `stable` distribution and rerun that installer.
+`main` and version tags contain source, not the generated binary trees.
+See [installation and recovery](docs/installation.md) for App/CLI selection,
+package-only commands, private connection inputs, consent, and partial retries.
+Release names use a date and daily sequence; see [versioning](docs/versioning.md).
 
-Here, `codex` means the CLI belonging to the Codex installation you use. On macOS
-with only Codex App installed, replace it with the full executable path
-`/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex`. The installer
-finds a verified Codex App bundle in system or user Applications, including
-older bundles with `Contents/Resources/codex`. Keep the same `CODEX_HOME`
-when sharing configuration between App and CLI.
+## Use and evaluate
 
-Register this repository once on the moving `stable` branch, then choose a
-profile. The plugin IDs are independent; installing one never installs or
-activates the other.
+- `$groundline:align-agent-home`: requested installation and configuration alignment.
+- `$groundline:audit-agent-history`: explicit history inspection.
+- `$groundline:optimize-codex-workflow`: task-scoped model/effort choices and workflow review.
 
-```console
-codex plugin marketplace add https://github.com/jukqaz/groundline.git --ref stable --json
-```
+The evidence loop is **audit → delivery → route**. Start with the
+[CLI examples](docs/examples.md); record failed and incomplete work as well as
+successes. Weekly samples do not establish whole-history coverage, and aggregate
+usage alone cannot identify the best model or prove improvement.
 
-Core only (the offline default):
+Core guidance and model-led analysis consume input tokens. Insights' native
+collector does not call a language model. Compare quality, rework, user effort,
+time, and total observed resources on matched tasks; token savings are not
+guaranteed. See [behavioral validation](docs/guidance-validation.md).
 
-```console
-codex plugin add groundline@groundline --json
-```
+## Develop and operate
 
-Insights only (for an owner-operated collector or operations node):
+[Contributing](CONTRIBUTING.md) owns development checks;
+[architecture](docs/architecture.md) defines code responsibilities;
+[self-hosting](docs/self-hosting.md) covers the public-preview server;
+[operations](docs/insights-operations.md) covers diagnosis and live evidence.
+Keep credentials, raw history, private endpoints, and deployment receipts outside Git.
 
-```console
-codex plugin add groundline-insights@groundline --json
-```
-
-Run both `plugin add` commands only when the combined profile is desired.
-
-Refresh the registered snapshot (a pinned registration stays on the same commit):
-
-```console
-codex plugin marketplace upgrade groundline --json
-codex plugin list --json
-```
-
-`main` and version tags contain source; `stable` includes the verified native
-`bin` trees required for plugin installation. Do not substitute a source tag for
-the binary distribution. A frozen installation needs a verified packaged
-revision. Direct native commands skip installer compatibility checks. Use the
-reviewed installer for updates; re-adding a disabled plugin explicitly enables it.
-
-Marketplace refresh, installed package checksums, hook
-trust, collector upload, ClickHouse visibility, Grafana frames, image
-publication, deployment, and stable promotion are separate evidence lanes.
-
-### Insights connection and reports
-
-Use the Insights CLI to configure, enable, inspect, or stop collection. Codex
-lifecycle hooks invoke that same executable. Read aggregate reports through the
-CLI or the owner's Grafana dashboard. See the [Insights commands](plugins/groundline-insights/README.md).
-
-The separate GroundLine Desktop app is retired. Removing an old copy preserves
-the plugins, server profile, consent, credentials, cursor, and pending events.
-
-### Existing settings and migration
-
-Installation validates existing choices and removes only four recognized retired
-Core hook approval entries. Model, effort, and service tier change only through
-explicit options; there is no fixed model preset. Use `--restore-native-context`
-(`-RestoreNativeContext`) only when intentionally restoring native context sizing.
-Changed configuration receives a private backup. An unchanged retry writes no
-extra backup. The [migration guide](plugins/groundline/references/installation-alignment.md#existing-settings-and-migration)
-covers old native options, profiles, conflicting instructions, and recovery.
-
-## Core skills and configuration
-
-| Skill | Scope |
-| --- | --- |
-| `align-agent-home` | Requested installation, configuration, and guidance alignment |
-| `audit-agent-history` | Explicit history inspection and redacted usage evidence |
-| `optimize-codex-workflow` | Task-scoped GPT-6 choices and review of observed workflow outcomes |
-
-Only alignment and optimization are implicitly invocable. Ordinary planning,
-Goals, handoffs, and execution stay native to Codex. Imported skill maintenance
-uses native file review rather than a separate GroundLine inventory or baseline.
-
-`groundline setup --catalog <native-models.json> --apply` preserves existing
-choices and native defaults. Omit `--apply` for a write-free preview; supply
-`--model <id> --effort <level>` only for an explicit supported choice. Configuration
-review and bounded repairs remain available through `config-audit` and
-`config-repair`. See [installation alignment](plugins/groundline/references/installation-alignment.md)
-and [configuration review](plugins/groundline/references/codex-configuration.md)
-for native catalog checks, private backups, and repair-plan binding.
-
-## Privacy and security
-
-Core never installs lifecycle hooks or performs network requests. Insights owns
-exactly four fail-open Codex lifecycle hooks. It reads bounded aggregate counters
-from Codex's SQLite state in read-only mode and rejects raw prompts, responses,
-transcripts, commands, patches, paths, repository names, task IDs, rollout IDs,
-account identifiers, hostnames, and IP addresses from its wire contract.
-
-Tailnet reachability is not authorization. First-contact enrollment additionally
-requires an owner-issued credential stored in a private file outside the plugin.
-Each collector then uses a distinct token. The public repository contains only
-placeholders and generic deployment templates.
-
-## Development
-
-Use the fast lane while editing:
-
-```console
-cargo fmt --all -- --check
-cargo test --locked -p xtask --all-targets
-cargo test --locked -p groundline-contracts -p groundline-runtime --lib --all-features
-cargo test --locked -p groundline-cli --test cli_contract
-cargo test --locked -p groundline-insights-cli --test cli_contract
-actionlint
-```
-
-Run the complete gate once after the change is frozen:
-
-```console
-cargo test --workspace --all-features --locked
-cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-cargo run --locked -p xtask -- verify-source --root . --json
-cargo run --locked -p xtask -- verify-history --root . --json
-cargo run --locked -p xtask -- verify-compatibility-profile --json
-git diff --check
-```
-
-The GitHub workflow uses one fast pull-request lane. Full qualification and the
-six-platform two-product artifact matrix run only for a manual request or a
-release tag, with cancellation, timeouts, and bounded retention. No self-hosted
-runner or production credential is required by public CI.
-
-For an opt-in parsing/statistics benchmark, run
-`cargo run --locked -p groundline-contracts --example audit_benchmark`.
-It generates synthetic records, runs five measurements, and emits timing plus
-an aggregate fingerprint without reading private data or using the network.
-Compare the same build profile and machine, and require an identical fingerprint
-before accepting a speedup. This benchmark is not run automatically by CI and
-does not measure provider tokens, billing, or installed-plugin latency.
-
-See [integrations and installation profiles](docs/integrations.md),
-[Codex compatibility and update boundaries](docs/codex-compatibility.md),
-[Insights self-hosting](docs/self-hosting.md), [Privacy](docs/privacy.md),
-[Security](SECURITY.md), [changes](CHANGELOG.md), and the
-[release checklist](docs/release-checklist.md).
-
-## Workflow evidence
-
-Use `$groundline:optimize-codex-workflow` for task selection or a requested
-workflow review. Follow [the optimization loop](plugins/groundline/references/codex-optimization-loop.md)
-and [CLI examples](docs/examples.md); Insights is optional.
-
-Weekly audits describe a selected task-window sample. Full-population coverage
-stays unknown; `audit store` is a separate whole-store metadata diagnostic.
-`audit review --input <saved-audit.json>` reuses saved evidence without scanning
-history and recomputes one recommendation under the current code.
-
-Record actual deliveries, including failed and incomplete work, before claiming
-an empirical model/effort improvement. `route` compares matched direct outcomes;
-it does not learn gains automatically or apply settings. Existing private
-personal-trial state can only be inspected with `personal status` or recovered
-with `personal rollback`; see [personal recovery](plugins/groundline/references/personal-recovery.md).
+[Privacy](docs/privacy.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)

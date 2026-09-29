@@ -151,9 +151,8 @@ remain unavailable unless their explicit availability fields establish otherwise
 `provider_reported_usage.token_field_availability` distinguishes source-observed
 components from partial numeric accumulators. A missing/null/invalid source field
 stays unavailable through selected-rollout sums and both endpoints of a window
-delta. Numeric zero alone does not establish an observed split. Simulation needs
-one audit with a known usage source, positive observed-rollout count, and explicit
-availability of every required token component; absent metadata is not backfilled.
+delta. Numeric zero alone does not establish an observed split; absent metadata
+is not backfilled.
 
 Verification outcomes use native exit/status metadata. Test names or stdout words
 such as `timeout` and `rejected` are not failures. Running, missing, and unrecognized

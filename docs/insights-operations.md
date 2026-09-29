@@ -5,6 +5,45 @@ inspection. Core performs no network collection. App and CLI are runtime
 dimensions, not physical device identities. No hostname, account, IP address,
 prompt, or transcript is needed for these dashboards.
 
+## Collector verification and retries
+
+After [installation](installation.md), select the intended
+[runtime and Codex home](integrations.md#runtime-and-source-selection). These
+commands inspect state and server compatibility; neither grants consent:
+
+```console
+groundline-insights worker status
+groundline-insights worker check-server --json
+```
+
+Current collectors require Basic schema 5 and ingest contract revision 8 or
+newer. Deploy the API first. A missing profile returns `NOT_CONFIGURED` without
+network access; malformed profiles or incompatible/unreachable APIs fail without
+changing local state. A compatible health response does not prove authentication,
+accepted delivery, or hook trust. After explicit enablement and a real Codex
+task, verify a fresh acknowledgement, matching ClickHouse row, and Grafana result.
+An old acknowledgement does not establish a fresh upload.
+
+The privacy contract fixes aggregate-only collection, native checkpoints with a
+900-second minimum interval, disabled diagnostics, no ambient proxy discovery,
+and no redirects. These are not user-selectable relaxations.
+
+The first collection covers seven days; subsequent runs use the saved cursor.
+An incomplete window stays frozen and stops automatic reads after three
+attempts. Fix the reported cause before explicit `worker run-once`.
+`worker backfill-history --confirm-rebuild` uses that same path: it does not rewind
+the cursor or replace historical events. Preserve gap evidence and get an
+explicit owner decision before changing a collection boundary. Disabling with
+`worker disable` preserves evidence and pending data; reinstalling is not a reset.
+Detailed failure codes are in [troubleshooting](../plugins/groundline-insights/references/operations-troubleshooting.md).
+
+For a 7, 30, or 90-day owner report, use a private file containing only the
+administrative report token; collector tokens are rejected:
+
+```console
+groundline-insights insights fetch-report --days 7 --admin-token-file /private/admin-token --json
+```
+
 ## Dashboard contract
 
 The overview shows the entire enrolled fleet, including installations with no
@@ -126,7 +165,61 @@ partitions, await mutation completion, and repeat source-row and view checks.
 Never mount production storage into a rehearsal. An image rollback alone does
 not undo schema or TTL changes.
 
+## Dependency upgrades and recovery
+
+Use a complete compatibility JSON for ClickHouse, Nginx, Grafana, and the
+ClickHouse datasource plugin. Images need exact digests and the plugin an exact
+stable version. Validate before rendering with the same profile:
+
+```console
+cargo run --locked -p xtask -- verify-compatibility-profile --profile /private/compatibility.json --json
+```
+
+For discovery only, explicit moving image tags and the bare plugin ID
+`grafana-clickhouse-datasource` require `--allow-unpinned-dependencies` on both
+validation and rendering. After all stack/dashboard/variable/semantic queries
+pass, record resolved digests and plugin version, rerender pinned, and repeat.
+The manual CI workflow's four candidate inputs are all-or-none; passing does not
+promote the default profile, publish artifacts, or deploy an owner service.
+
+Before a production change:
+
+1. Record image/plugin versions, configuration fingerprint, and application
+   table counts. API-only updates do not update the other services.
+2. Test the exact image on the actual CPU **before mounting storage**:
+   `docker run --rm --network none --entrypoint clickhouse <image> --version`.
+   CI on another CPU does not prove compatibility; qualify a supported profile
+   or change hardware rather than silently substituting an image.
+3. Pause ingestion and Grafana; preserve a consistent backup of ClickHouse data,
+   Grafana DB/plugins, and private configuration. Rehearse on an isolated copy,
+   never a production data mount, and compare every application table.
+4. Before a stricter event contract or quarantine TTL, inventory stored events
+   with `groundline-insights insights validate-event --input /private/event.json --json`.
+   Preserve original data; do not fabricate measurements to repair invalid
+   history. Deletion requires owner approval of the exact scope. Keep ingestion
+   stopped between inventory and replacement.
+5. Repeat [stack and external access checks](self-hosting.md#4-start-and-verify-the-real-stack),
+   verify the installed datasource version, and match a fresh accepted upload to
+   storage and dashboard output. Preserve credentials, consent, network policy,
+   and retention. Restore a matching backup before restarting an older database
+   image; an image-only rollback does not undo schema or TTL changes.
+
+A complete lifecycle event may arrive before usage. Keep its observed lifecycle
+counts for normal retention; unavailable usage is unmeasured, not zero cost.
+Incomplete reads/incoherent provenance remain quarantined. Classification does
+not rewrite event IDs, payloads, counters, or collection periods.
+
 ## Diagnostic logging
+
+Defaults retain events for 365 days, cap each collector at 4,096 events and
+256 MiB logical payload, and reserve 10% of the two-million-row/64 GiB dataset
+ceiling for administration. Change `GROUNDLINE_RETENTION_DAYS`,
+`GROUNDLINE_COLLECTOR_MAX_EVENTS`, `GROUNDLINE_COLLECTOR_MAX_PAYLOAD_BYTES`,
+`GROUNDLINE_DATASET_MAX_ROWS`, or `GROUNDLINE_DATASET_MAX_BYTES` only in private
+server configuration and within API bounds. Diagnostic TTL is separate from
+event retention; template changes require actual configuration/TTL verification.
+
+
 
 The 4 GiB ClickHouse container permits the server to use half its allocation,
 leaving the other half for untracked/runtime overhead. A quarter-allocation
@@ -210,16 +303,11 @@ remain unattributed. No event's total is spread over context frequencies.
 
 ## Verification and remaining contracts
 
-TrueNAS deployment transports the two dashboards as gzip/base64 inline configs
-to fit its 64 KiB authenticated WebSocket request limit. The public Compose
-template remains readable. The deploy operator uses `flate2` with its Rust
-backend because the standard library does not provide gzip, and validates
-decoded size, checksum, trailing bytes, JSON, and the mounted target before
-query verification. Dashboard JSON and Compose dollar escaping are preserved.
-Grafana decodes these files into its container-local temporary directory before
-its original `/run.sh`; startup stops if decoding fails. An owner-defined
-command or entrypoint is rejected rather than overwritten. Preflight checks
-both the candidate and rollback request sizes without increasing server limits.
+The optional TrueNAS controller sends compressed dashboard configs within its
+64 KiB request limit and checks decoded size, checksum, JSON, mount targets, and
+candidate/rollback request sizes. It refuses owner command/entrypoint overrides.
+The public Compose template stays readable; this transport does not change
+Grafana queries or prove deployment success.
 
 Source checks execute both dashboards, annotations, and all six variable queries against
 ClickHouse. Deployment verification executes them through the authenticated
@@ -228,7 +316,6 @@ Browser verification must also cover All, single/multiple selections, empty
 results, and a roster-to-analysis link with its time range preserved.
 Health responses alone do not prove this path.
 
-Deploy the API advertising contract revision 8 before upgrading collectors.
 Revision 8 adds generation-specific GPT-6 tier labels. Historical labels and
 events are preserved; older, mixed, and unversioned cohorts are not optimization
 targets. This change does not require rewriting existing ClickHouse rows.

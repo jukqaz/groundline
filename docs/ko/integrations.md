@@ -1,31 +1,10 @@
 # 연동과 설치 프로필
 
-GroundLine은 하나의 marketplace에서 서로 독립적인 Codex 플러그인 두 개를
-제공합니다. 하나를 설치해도 다른 플러그인이 자동으로 설치되거나 활성화되지
-않습니다.
-
-**모든 설치 프로필은 Codex 플러그인과 네이티브 CLI로 동작합니다.**
-`groundline-insights worker`로 연결을 관리하고 CLI 또는 Grafana에서 보고서를 확인합니다.
-별도 GroundLine Desktop 앱은 제공을 종료했습니다. 기존 앱을 제거해도
-플러그인·수집 동의·서버 설정은 유지됩니다.
-Codex의 훅이 설치된 Insights 실행 파일을 직접 호출합니다. 훅이 발생하지 않는 동안의 주기적
-전송은 없으며, 컴퓨터가 깨어 있고 선택한 서버에 연결할 수 있어야 합니다.
+GroundLine은 macOS·Linux의 ARM64·x86-64에서 독립적인 Codex 플러그인 두 개를
+제공합니다. [설치 안내](../installation.md)에 설치·업데이트·복구 명령을 모았습니다.
+별도 GroundLine Desktop 앱은 없습니다.
 
 ## 설치 프로필 선택
-
-Insights 연결 경로는 네이티브 Codex App/CLI의 hook·읽기 전용 활동 데이터에서
-비공개 집계 outbox, 운영자 HTTPS Insights API, ClickHouse, Grafana/JSON report로
-이어집니다. 추론 프록시, 생성된 모델 카탈로그, custom provider, Core 설치는
-필요하지 않습니다. Insights는 Codex `config.toml`이나 추론 인증 정보를 읽거나
-고치지 않습니다. 프록시 제거 후 남은 Codex provider 설정은 네이티브 Codex
-시작 문제로 별도 처리하고 Insights의 identity·동의·cursor·outbox는 보존합니다.
-
-동일한 네이티브 `CODEX_HOME`을 유지합니다. 다른 홈은 자동 마이그레이션 대상이
-아닙니다. `doctor`와 `worker status`는 수집기와 같은 규칙으로 가장 높은 번호의
-`state_<n>.sqlite`를 찾습니다. 데이터 원본이 없거나 안전하게 열리지 않으면
-`native_activity_unavailable`, `ready_to_collect: false`로 표시합니다. 파일 존재는
-스키마·서버 저장·Grafana 검증이 아닙니다. 기존 전송 대기나 운영 조치 사유가 있으면
-그 사유가 우선하며, 원본 누락 때문에 pending event를 삭제하거나 전송을 막지 않습니다.
 
 | 프로필 | 설치 대상 | 외부 서비스 | 용도 |
 | --- | --- | --- | --- |
@@ -33,16 +12,9 @@ Insights 연결 경로는 네이티브 Codex App/CLI의 hook·읽기 전용 활�
 | Insights만 | `groundline-insights` | 사용자 소유 Insights 서비스 | Core skill이 필요 없는 collector·운영 노드 |
 | Core + Insights | 플러그인 둘 다 | 사용자 소유 Insights 서비스 | 로컬 GroundLine 작업과 비공개 집계 분석을 함께 사용 |
 
-marketplace는 한 번만 등록하고 선택한 플러그인 ID만 설치합니다.
-
-```console
-codex plugin marketplace add https://github.com/jukqaz/groundline.git --ref stable --json
-codex plugin add groundline@groundline --json
-codex plugin add groundline-insights@groundline --json
-```
-
-두 `plugin add` 명령은 결합 프로필을 선택한 경우에만 모두 실행합니다. 공유
-marketplace를 갱신해도 설치하지 않은 형제 플러그인이 자동 설치되지는 않습니다.
+하나를 설치해도 다른 플러그인이 자동 설치되거나 활성화되지 않습니다. 다만 공유
+marketplace 업데이트는 **이미 설치된 두 플러그인을 함께 갱신**할 수 있습니다.
+설치기는 기존 활성·비활성 상태를 보존하고 Insights API 호환성을 먼저 확인합니다.
 
 ## 현재 Insights 연동
 
@@ -59,18 +31,31 @@ marketplace를 갱신해도 설치하지 않은 형제 플러그인이 자동 �
 | Docker Compose | 공개 self-hosting preview | placeholder만 포함한 범용 topology, 인증 필수 Grafana, 비공개 secret 렌더링 |
 | TrueNAS | 선택형 운영 overlay | 범용 배포 계약 위에서 owner가 실행하는 preflight/apply controller, private inventory는 미포함 |
 
-버전이 지정된 소스 checkout, 비공개 설정 렌더링, 실제 stack, Grafana semantic 검증,
-collector enrollment 순서는 [GroundLine Insights 셀프호스팅](self-hosting.md)을
-참조합니다. 서버 배포는 source checkout에서 실행하며 Codex 플러그인만 설치해도
-Docker service가 설치되지는 않습니다.
+[셀프호스팅](self-hosting.md)은 서버 배포·인증·실제 stack 검증을 다룹니다.
+플러그인 설치가 Docker 서비스를 만들거나 maintainer 서버에 연결하지 않습니다.
+운영 증거에는 선택한 image digest와 실제 호스트·저장소·대시보드·외부 접근
+검증이 필요합니다.
 
-collector와 API 계약은 공개 Compose preview와 분리해 release qualification합니다.
-운영 준비 완료를 주장하려면 정확한 release image digest, fresh-host stack 검증,
-해당 운영 배포의 외부 TLS/Tailnet 인증 검증이 추가로 필요합니다.
+## 런타임과 데이터 원본
 
-각 사용자는 자신의 HTTPS 또는 선택형 Tailnet endpoint, enrollment credential, 저장소, retention,
-접근 제어를 제공합니다. 공개 플러그인을 설치해도 maintainer의 ClickHouse,
-Grafana, Tailnet에 연결되지 않습니다.
+Codex App/CLI의 신뢰한 hook과 읽기 전용 활동 데이터가 비공개 집계 outbox,
+운영자 API, ClickHouse, Grafana/JSON 보고서로 이어집니다. Core·추론 프록시·
+custom provider는 필요하지 않습니다. 훅이 없는 동안의 주기적 전송은 없으며,
+컴퓨터가 깨어 있고 서버에 연결되어야 합니다.
+
+원래 `CODEX_HOME`을 사용합니다. 다른 홈은 다른 원본이며 자동 이전하지 않습니다.
+같은 홈의 App·CLI는 연결 프로필을 공유하지만 수집 상태와 동의는 분리됩니다.
+훅은 원본을 전달하고 수동 작업은 명시적으로 선택합니다.
+
+```console
+GROUNDLINE_RUNTIME_FAMILY=codex_app GROUNDLINE_EXECUTION_MODE=desktop groundline-insights worker status
+GROUNDLINE_RUNTIME_FAMILY=codex_cli GROUNDLINE_EXECUTION_MODE=local_headless groundline-insights worker status
+```
+
+`remote_headless`도 지원합니다. 알 수 없는 환경·origin 지정은 상태 쓰기 전에
+거부합니다. 한 원본을 꺼도 다른 원본의 동의는 바뀌지 않습니다.
+[네이티브 데이터 호환성](codex-compatibility.md)을 확인하세요. 프록시나 예전 앱을
+제거할 때도 identity·동의·cursor·outbox를 초기화하지 않습니다.
 
 ## 개인 운영 경계
 
@@ -88,27 +73,9 @@ maintainer 기본 endpoint는 없습니다. 개인 배포 설정과 데이터는
 | collector별 token | 해당 수집기의 비공개 로컬 상태 | 해당 수집기 범위의 전송·작업 인증 |
 | Insights admin token과 Grafana 로그인 | 비공개 운영 도구와 dashboard 접근 | 운영자 전체 report와 dashboard 관리. 수집기 등록에는 사용하지 않음 |
 
-사람과 LLM 모두 문서의 `worker configure`, `enable`, `run-once`, `status`를
-사용합니다. 서비스 주소와 enrollment credential은 운영자가 제공해야 하며, 설치나
-설정만으로 수집에 동의한 것이 아닙니다. 수집 범위를 확인하고 명시적으로 활성화합니다.
-서버 배포는 별도 운영 단계이며 공개 플러그인 업그레이드가 개인 서비스를 자동으로
-업그레이드하거나 재설정하지 않습니다.
-
-## 사용자가 선택할 수 있는 것
-
-Insights 설치 여부, enable/disable 시점, 개인 HTTPS 또는 선택형 Tailnet endpoint, 수집 재시도
-시점, CLI JSON report와 Grafana dashboard 사용 여부를 선택할 수 있습니다.
-report 기간은 7일, 30일, 90일입니다.
-
-최초 수집은 최근 7일이며 이후에는 저장된 커서를 사용합니다.
-`worker backfill-history --confirm-rebuild`는 같은 수집 경로를 재시도합니다.
-커서를 되돌리거나 전체 과거 이력·기존 서버 집계를 다시 만드는 명령이 아닙니다.
-복구할 수 없는 과거 구간은 원본과 누락 구간 기록을 보존하고 운영자의 명시적
-결정이 있을 때만 수집 시작 경계를 바꿉니다.
-
-집계 데이터만 수집, native hook checkpoint, 최소 900초 간격, diagnostics 비활성,
-ambient proxy와 redirect 금지, ClickHouse 저장은 현재 개인정보·보안 불변식입니다.
-일반 설정 옵션으로 열지 않습니다.
+설치·설정은 수집 동의가 아닙니다. [Insights setup](../installation.md#add-insights-in-the-same-flow)으로
+명시적으로 활성화하세요. 플러그인 업데이트가 개인 서버를 업데이트하지 않습니다.
+수집 구간·재시도·운영자 보고서는 [운영 안내](../insights-operations.md#collector-verification-and-retries)에 있습니다.
 
 ## 현재 지원하지 않는 연동
 
@@ -117,7 +84,3 @@ ambient proxy와 redirect 금지, ClickHouse 저장은 현재 개인정보·보�
 - PostgreSQL, SQLite, S3 또는 교체 가능한 저장 backend
 - Grafana Cloud 계정 provisioning 또는 hosted GroundLine SaaS
 - raw prompt, response, transcript, command, patch, path, 저장소, task, account 전송
-
-새 연동은 versioned contract, 기본 비활성, 사용자 소유 credential, 제한된 payload,
-source·package·runtime·storage·dashboard별 검증을 갖춘 명시적 adapter로 추가해야
-합니다.
