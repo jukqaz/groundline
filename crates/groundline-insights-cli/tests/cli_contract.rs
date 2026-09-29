@@ -260,8 +260,6 @@ fn doctor_uses_native_store_discovery_without_model_configuration_or_executables
     let config = b"INVALID TOML [ PRIVATE_CONFIG_SENTINEL";
     fs::write(home.path().join("config.toml"), config).unwrap();
     // Doctor proves presence only, not SQLite schema validity or live delivery.
-    // Elevated Windows runners otherwise assign Administrators as the owner,
-    // which correctly fails the collector's user-owned-store requirement.
     let database = home.path().join("state_42.sqlite");
     groundline_runtime::local_file::atomic_write_private(&database, b"presence-fixture").unwrap();
     assert!(groundline_runtime::local_file::owned_by_current_user(

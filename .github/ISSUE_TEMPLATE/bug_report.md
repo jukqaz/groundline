@@ -30,7 +30,7 @@ Output summary:
 
 - GroundLine version or commit:
 - Runtime: Codex App / Codex CLI
-- Platform: macOS Apple Silicon / Windows / Linux
+- Platform: macOS / Linux (ARM64 or x86_64)
 
 ## Safety Check
 

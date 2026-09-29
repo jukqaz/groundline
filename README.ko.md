@@ -60,8 +60,8 @@ git clone --branch stable --single-branch https://github.com/jukqaz/groundline.g
 bash groundline-install/install.sh
 ```
 
-Windows에서는 `powershell -File groundline-install/install.ps1`을 실행합니다.
-Insights도 설치하려면 `--profile both` 또는 `-Profile both`, Insights만 설치하려면
+macOS와 Linux의 ARM64·x86-64를 지원합니다.
+Insights도 설치하려면 `--profile both`, Insights만 설치하려면
 `insights`를 선택합니다. 모델 선택, 비공개 연결 입력, 동의, 첫 수집과 재실행은
 [통합 설치 안내](docs/installation.md)를 참고하세요. 기존 비활성 플러그인은 그대로
 유지합니다. 설치기는 검토한 커밋으로 고정하므로 App Refresh도 그 커밋에 머뭅니다.
@@ -113,13 +113,6 @@ codex plugin list --json
 직접 실행하는 native 명령은 설치기의 API 호환성 검사를 거치지 않습니다.
 업데이트에는 검토한 설치기를 사용합니다. 비활성 플러그인을 `plugin add`로
 다시 추가하면 활성화됩니다.
-
-Windows의 `LF will be replaced by CRLF`는 Git 줄바꿈 변환 메시지입니다.
-`warning`만으로 설치 실패를 판정하지 말고 명령의 종료 코드와 마지막 오류를
-확인합니다. `fatal`과 함께 변환을 거부했다면 Git의 `core.safecrlf` 설정도
-확인합니다. 배포본은 `.gitattributes`로 텍스트를 LF로 유지하며, 체크섬 검증은
-LF·CRLF 한 줄을 모두 허용하고 실제 바이너리 해시·크기·파일명은 정확히 비교합니다.
-전역 Git 설정을 바꾸거나 체크섬 검증을 끄지 않습니다.
 
 marketplace 갱신, 설치 package checksum, hook 신뢰, collector upload,
 ClickHouse 반영, Grafana frame, image 게시, 운영 배포, stable 승격은 서로 다른
@@ -180,7 +173,7 @@ token을 사용합니다. 공개 저장소에는 placeholder와 범용 template�
 
 개발 중에는 변경 범위에 맞는 fast lane만 실행하고, 변경이 고정된 뒤 전체
 workspace test·Clippy·현재 source와 reachable Git history 검증을 한 번
-실행합니다. GitHub Actions의 전체 qualification과 6개 플랫폼·2개 제품 artifact
+실행합니다. GitHub Actions의 전체 qualification과 4개 대상·2개 제품 artifact
 matrix는 수동 실행 또는 release tag에서만 동작합니다. public CI는 self-hosted
 runner와 production credential을 요구하지 않습니다.
 

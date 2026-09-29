@@ -48,8 +48,8 @@ Tailnet 전용 접근을 유지합니다. 일반 HTTPS로 전환하려면 TLS �
   `infrastructure/compatibility.json`은 해당 release에서 검증한 기본 조합이며
   영구적인 최대 지원 버전이 아닙니다.
 
-Linux, macOS, Windows Docker host에서 절대 dataset path를 렌더링할 수 있습니다.
-Docker Desktop에서는 VM과 공유되는 경로를 사용합니다. collector 플러그인은 세
+Linux와 macOS Docker host에서 절대 dataset path를 렌더링할 수 있습니다.
+Docker Desktop에서는 VM과 공유되는 경로를 사용합니다. collector 플러그인은 두
 운영체제의 ARM64·x86-64 binary로 별도 배포됩니다.
 
 ## 1. 버전이 지정된 소스 checkout
@@ -77,19 +77,6 @@ reference로 복사합니다. 운영에는 moving image tag를 사용하지 않�
 배포본으로 별도 설치합니다. 태그·릴리스 이름만으로 GitHub의 변경 잠금이
 입증되지는 않으므로 정확한 커밋, 자산 체크섬, 서명된 빌드 출처를 확인합니다.
 
-PowerShell도 같은 소스 버전과 digest가 지정된 이미지를 사용합니다.
-
-```powershell
-$ReleaseTag = "vMAJOR.MINOR.PATCH"
-$InsightsImageDigest = "ghcr.io/jukqaz/groundline-insights-api@sha256:REPLACE_WITH_64_HEX_DIGEST"
-$InsightsAccessUrl = "https://grafana.example.com"
-$CompatibilityProfile = "infrastructure/compatibility.json"
-git clone https://github.com/jukqaz/groundline.git
-Set-Location groundline
-git fetch --tags
-git switch --detach $ReleaseTag
-```
-
 ## 2. Git 밖에 owner-private 경로 준비
 
 Unix shell 예시입니다.
@@ -105,19 +92,8 @@ mkdir -p "$DATASET_ROOT/clickhouse" "$DATASET_ROOT/grafana"
 chmod 0750 "$DATASET_ROOT/clickhouse" "$DATASET_ROOT/grafana"
 ```
 
-Windows PowerShell에서는 Docker와 공유되는 absolute path를 사용합니다.
-
-```powershell
-$DeployRoot = Join-Path $env:LOCALAPPDATA "GroundLine\Insights"
-$DatasetRoot = Join-Path $DeployRoot "data"
-$ComposeFile = Join-Path $DeployRoot "compose.yaml"
-$SecretsFile = Join-Path $DeployRoot "secrets.json"
-$BindIp = "127.0.0.1"
-New-Item -ItemType Directory -Force "$DatasetRoot\clickhouse", "$DatasetRoot\grafana"
-```
-
-owner 디렉터리는 저장소 안에 두지 않습니다. Unix·macOS volume·Windows drive의
-absolute path에 포함된 공백은 지원하지만 relative path, UNC share, traversal
+owner 디렉터리는 저장소 안에 두지 않습니다. Linux·macOS absolute path에
+포함된 공백은 지원하지만 relative path, Windows drive path, UNC share, traversal
 segment는 거부합니다.
 
 ## 3. 비밀값을 출력하지 않고 Compose 렌더링
@@ -135,23 +111,6 @@ cargo run --locked -p xtask -- render-compose \
   --access-url "$INSIGHTS_ACCESS_URL" \
   --json
 docker compose -f "$COMPOSE_FILE" config --quiet
-```
-
-PowerShell에서는 다음과 같습니다.
-
-```powershell
-cargo run --locked -p xtask -- render-compose `
-  --output $ComposeFile `
-  --secrets-file $SecretsFile `
-  --dataset-root $DatasetRoot `
-  --bind-ip $BindIp `
-  --dashboard-port 13000 `
-  --ingest-port 18080 `
-  --image $InsightsImageDigest `
-  --compatibility-profile $CompatibilityProfile `
-  --access-url $InsightsAccessUrl `
-  --json
-docker compose -f $ComposeFile config --quiet
 ```
 
 `INSIGHTS_IMAGE_DIGEST`는 immutable registry digest여야 합니다. compatibility
@@ -253,18 +212,6 @@ cargo run --locked -p xtask --bin groundline-deploy -- verify-stack \
   --json
 ```
 
-PowerShell에서는 다음과 같습니다.
-
-```powershell
-docker compose -f $ComposeFile up --detach --wait --wait-timeout 240
-cargo run --locked -p xtask --bin groundline-deploy -- verify-stack `
-  --api-url "http://${BindIp}:18080/healthz" `
-  --grafana-url "http://${BindIp}:13000/api/health" `
-  --access-url $InsightsAccessUrl `
-  --secrets-file $SecretsFile `
-  --json
-```
-
 verifier는 API storage readiness와 Grafana 자체 상태를 확인한 뒤 provision된 모든
 dashboard query를 ClickHouse datasource를 통해 실행하고 fleet·roster·storage
 quality frame 의미까지 검증합니다. 외부 HTTPS/Tailscale access gate는 이 명령의
@@ -297,8 +244,8 @@ schema 5와 ingest contract revision 6 이상을 제공해야 하며, 등록 응
 보존합니다.
 
 설치된 플러그인의 `references/owner-profile.example.json`을 플러그인·저장소
-밖으로 복사하고 소유자만 읽을 수 있게 제한합니다. Unix는 `0600`, Windows는
-동등한 비공개 ACL을 사용합니다. endpoint와 enrollment placeholder를 채운 뒤
+밖으로 복사하고 소유자만 읽을 수 있게 `0600`으로 제한합니다.
+endpoint와 enrollment placeholder를 채운 뒤
 그 비공개 디렉터리에서 실행합니다.
 
 ```console

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       build_release_artifacts:
-        description: Build both products for all six supported targets
+        description: Build both products for all four supported targets
         required: true
         default: false
         type: boolean
@@ -38,7 +38,6 @@ on:
       - "docs/**"
       - "infrastructure/**"
       - "install.sh"
-      - "install.ps1"
       - "plugins/**"
       - "rust-toolchain.toml"
       - "services/**"
@@ -75,7 +74,7 @@ jobs:
         if: github.event_name == 'pull_request'
         id: setup-changes
         run: |
-          if git diff --quiet HEAD^ HEAD -- .gitattributes Cargo.toml Cargo.lock crates/groundline-cli crates/groundline-contracts crates/groundline-insights-cli crates/groundline-runtime/src/local_file.rs crates/groundline-runtime/src/insights_state.rs crates/groundline-runtime/src/insights_state plugins/groundline/config install.sh install.ps1 .github/workflows/rust.yml .github/actions/setup-rust-stable; then
+          if git diff --quiet HEAD^ HEAD -- .gitattributes Cargo.toml Cargo.lock crates/groundline-cli crates/groundline-contracts crates/groundline-insights-cli crates/groundline-runtime/src/local_file.rs crates/groundline-runtime/src/insights_state.rs crates/groundline-runtime/src/insights_state plugins/groundline/config install.sh .github/workflows/rust.yml .github/actions/setup-rust-stable; then
             echo "needed=false" >> "$GITHUB_OUTPUT"
           else
             echo "needed=true" >> "$GITHUB_OUTPUT"
@@ -375,12 +374,6 @@ jobs:
           - runner: ubuntu-24.04
             target: x86_64-unknown-linux-musl
             codex_sha256: af9f5aa6e6662accf9d707cef0d9ca083880a173a9c2b6c22947edb7830e5778
-          - runner: windows-11-arm
-            target: aarch64-pc-windows-msvc
-            codex_sha256: dc3c5dfe7ec1ae7f7059bff16650d1340944a0c133506deabf4663331d10f0a9
-          - runner: windows-latest
-            target: x86_64-pc-windows-msvc
-            codex_sha256: d9013202bf3a88b14a0a33758f360a91848e09e997b7aa8f6e58a18347094131
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-rust-stable
@@ -418,25 +411,17 @@ jobs:
           TARGET: ${{ matrix.target }}
           CODEX_SHA256: ${{ matrix.codex_sha256 }}
         run: |
-          suffix=""
-          if [ "${{ runner.os }}" = "Windows" ]; then suffix=".exe"; fi
           runtime_dir="$RUNNER_TEMP/groundline-native-codex"
-          # Git Bash tar interprets a Windows drive colon as a remote host.
-          if [ "${{ runner.os }}" = "Windows" ]; then runtime_dir=$(cygpath -u "$runtime_dir"); fi
           mkdir -p "$runtime_dir"
           archive="$runtime_dir/codex.tar.gz"
           curl --fail --silent --show-error --location --retry 2 \
-            "https://github.com/openai/codex/releases/download/rust-v0.158.0/codex-${TARGET}${suffix}.tar.gz" -o "$archive"
+            "https://github.com/openai/codex/releases/download/rust-v0.158.0/codex-${TARGET}.tar.gz" -o "$archive"
           actual_sha=$(openssl dgst -sha256 "$archive")
           test "${actual_sha##* }" = "$CODEX_SHA256"
           tar -xzf "$archive" -C "$runtime_dir"
           cargo build --locked --bin groundline-insights --target "$TARGET"
-          native_codex="$runtime_dir/codex-${TARGET}${suffix}"
-          native_insights="$GITHUB_WORKSPACE/target/$TARGET/debug/groundline-insights${suffix}"
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            native_codex=$(cygpath -w "$native_codex")
-            native_insights=$(cygpath -w "$native_insights")
-          fi
+          native_codex="$runtime_dir/codex-${TARGET}"
+          native_insights="$GITHUB_WORKSPACE/target/$TARGET/debug/groundline-insights"
           GROUNDLINE_NATIVE_CODEX="$native_codex" GROUNDLINE_NATIVE_INSIGHTS_BINARY="$native_insights" \
             cargo test --locked -p groundline-cli --target "$TARGET" --test native_install -- --ignored --nocapture
 
@@ -462,11 +447,6 @@ jobs:
             target: aarch64-unknown-linux-musl
           - runner: ubuntu-24.04
             target: x86_64-unknown-linux-musl
-          - runner: windows-11-arm
-            target: aarch64-pc-windows-msvc
-          - runner: windows-latest
-            target: x86_64-pc-windows-msvc
-            runtime-tests: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Select the moving Rust stable channel
@@ -477,9 +457,6 @@ jobs:
         shell: bash
         run: |
           runner_home="$HOME"
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            runner_home="$USERPROFILE"
-          fi
           printf 'RUSTFLAGS=--remap-path-prefix=%s=/_groundline --remap-path-prefix=%s=/_cargo_home\n' \
             "$GITHUB_WORKSPACE" "$runner_home" >> "$GITHUB_ENV"
       - name: Install the musl linker
@@ -495,11 +472,6 @@ jobs:
           linker_key="${linker_key//-/_}"
           echo "${cc_key}=musl-gcc" >> "$GITHUB_ENV"
           echo "${linker_key}=musl-gcc" >> "$GITHUB_ENV"
-      - name: Run Windows file-security contracts once
-        if: matrix.runtime-tests
-        run: |
-          cargo test --locked -p groundline-runtime local_file
-          cargo test --locked -p xtask dataset_roots_are_portable_absolute_and_injection_safe
       - name: Verify setup and installer behavior on each native target
         run: |
           cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --lib --test setup_cli --test config_repair_cli --test install_cli --test delivery_cli --test routing_cli
@@ -516,17 +488,12 @@ jobs:
       - name: Package and smoke both artifacts
         shell: bash
         run: |
-          suffix=""
           xtask="target/debug/xtask"
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            suffix=".exe"
-            xtask="${xtask}.exe"
-          fi
           for product in core insights; do
             if [ "$product" = core ]; then
-              executable="groundline${suffix}"
+              executable="groundline"
             else
-              executable="groundline-insights${suffix}"
+              executable="groundline-insights"
             fi
             "$xtask" package-binary \
               --product "$product" \
@@ -599,7 +566,7 @@ jobs:
           cargo run --locked -p xtask -- verify-package-set --product core --root packages/core --version "${RELEASE_VERSION#v}" --json
           cargo run --locked -p xtask -- verify-package-set --product insights --root packages/insights --version "${RELEASE_VERSION#v}" --json
           mkdir release-assets
-          for target in aarch64-apple-darwin aarch64-pc-windows-msvc aarch64-unknown-linux-musl x86_64-apple-darwin x86_64-pc-windows-msvc x86_64-unknown-linux-musl; do
+          for target in aarch64-apple-darwin aarch64-unknown-linux-musl x86_64-apple-darwin x86_64-unknown-linux-musl; do
             tar -czf "release-assets/groundline-${target}.tar.gz" -C packages/core "$target"
             tar -czf "release-assets/groundline-insights-${target}.tar.gz" -C packages/insights "$target"
           done
@@ -766,7 +733,7 @@ jobs:
           fetch-depth: 0
       - name: Select the moving Rust stable channel
         uses: ./.github/actions/setup-rust-stable
-      - name: Assemble both exact six-target packages
+      - name: Assemble both exact four-target packages
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: groundline-*

@@ -27,9 +27,9 @@ network failure, or task-store warning does not prove a configuration defect.
 ## Decide and repair
 
 For the published install-and-apply flow, run the distribution's `install.sh`
-(macOS/Linux) or `install.ps1` (Windows). They verify the native artifact, use
-Codex's marketplace installer, run `setup --apply`, and finish with strict doctor.
-They require no additional chat request. Native GUI or bare `plugin add` still
+on macOS/Linux. It verifies the native artifact, uses
+Codex's marketplace installer, runs `setup --apply`, and finishes with strict doctor.
+It requires no additional chat request. Native GUI or bare `plugin add` still
 performs package delivery only; no post-install execution callback is assumed.
 
 For an already installed package, default `setup` preserves existing choices and

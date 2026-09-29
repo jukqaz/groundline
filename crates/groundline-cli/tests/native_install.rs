@@ -145,7 +145,7 @@ fn installed_versions(command: &mut Command) -> BTreeMap<String, (String, bool)>
 }
 
 #[test]
-#[ignore = "requires GROUNDLINE_NATIVE_CODEX and GROUNDLINE_NATIVE_INSIGHTS_BINARY; CI runs this on six native hosts"]
+#[ignore = "requires GROUNDLINE_NATIVE_CODEX and GROUNDLINE_NATIVE_INSIGHTS_BINARY; CI runs this on four native hosts"]
 fn real_codex_upgrades_metadata_repeats_and_preserves_settings_and_consent() {
     let codex =
         PathBuf::from(std::env::var_os("GROUNDLINE_NATIVE_CODEX").expect("real Codex path"));
@@ -185,7 +185,7 @@ fn real_codex_upgrades_metadata_repeats_and_preserves_settings_and_consent() {
         value["version"] = serde_json::json!("0.29.0");
         fs::write(manifest, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
     }
-    for file in ["install.sh", "install.ps1", ".gitattributes"] {
+    for file in ["install.sh", ".gitattributes"] {
         fs::copy(repo.join(file), market.join(file)).unwrap();
     }
     // Route only this fixture's Git transport to the reviewed local stable
@@ -377,34 +377,22 @@ fn real_codex_upgrades_metadata_repeats_and_preserves_settings_and_consent() {
             "move stable",
         );
     }
-    let wrapper = root.path().join(if cfg!(windows) {
-        "fail-once.cmd"
-    } else {
-        "fail-once.sh"
-    });
-    if cfg!(windows) {
-        fs::write(&wrapper, "@echo off\r\nif \"%~4\"==\"--help\" goto delegate\r\nif exist \"%GROUNDLINE_FAIL_MARKER%\" goto delegate\r\nif not \"%~1 %~2 %~3\"==\"plugin marketplace %GROUNDLINE_FAIL_STAGE%\" goto delegate\r\ntype nul > \"%GROUNDLINE_FAIL_MARKER%\"\r\nif \"%GROUNDLINE_FAIL_STAGE%\"==\"upgrade\" call \"%GROUNDLINE_REAL_CODEX%\" %*\r\nexit /b 19\r\n:delegate\r\ncall \"%GROUNDLINE_REAL_CODEX%\" %*\r\nexit /b %ERRORLEVEL%\r\n").unwrap();
-    } else {
-        fs::write(&wrapper, "#!/bin/sh\nif [ \"${4:-}\" != --help ] && [ ! -e \"$GROUNDLINE_FAIL_MARKER\" ] && [ \"$1 $2 ${3:-}\" = \"plugin marketplace $GROUNDLINE_FAIL_STAGE\" ]; then\n : > \"$GROUNDLINE_FAIL_MARKER\"\n if [ \"$GROUNDLINE_FAIL_STAGE\" = upgrade ]; then \"$GROUNDLINE_REAL_CODEX\" \"$@\" || exit $?; fi\n exit 19\nfi\nexec \"$GROUNDLINE_REAL_CODEX\" \"$@\"\n").unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o700)).unwrap();
-        }
+    let wrapper = root.path().join("fail-once.sh");
+    fs::write(&wrapper, "#!/bin/sh\nif [ \"${4:-}\" != --help ] && [ ! -e \"$GROUNDLINE_FAIL_MARKER\" ] && [ \"$1 $2 ${3:-}\" = \"plugin marketplace $GROUNDLINE_FAIL_STAGE\" ]; then\n : > \"$GROUNDLINE_FAIL_MARKER\"\n if [ \"$GROUNDLINE_FAIL_STAGE\" = upgrade ]; then \"$GROUNDLINE_REAL_CODEX\" \"$@\" || exit $?; fi\n exit 19\nfi\nexec \"$GROUNDLINE_REAL_CODEX\" \"$@\"\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o700)).unwrap();
     }
     let run_installer_with_failure = |profile: &str, fail_stage: Option<&str>| {
-        let mut installer = if cfg!(windows) {
-            let mut c = Command::new("powershell.exe");
-            c.args(["-NoProfile", "-File"])
-                .arg(reviewed.join("install.ps1"))
-                .args(["-Profile", profile, "-Codex"]);
-            c
+        let mut installer = Command::new(if cfg!(target_os = "macos") {
+            "/bin/bash"
         } else {
-            let mut c = Command::new("bash");
-            c.arg(reviewed.join("install.sh"))
-                .args(["--profile", profile, "--codex"]);
-            c
-        };
+            "bash"
+        });
+        installer
+            .arg(reviewed.join("install.sh"))
+            .args(["--profile", profile, "--codex"]);
         installer
             .arg(if fail_stage.is_some() {
                 &wrapper
@@ -439,11 +427,7 @@ fn real_codex_upgrades_metadata_repeats_and_preserves_settings_and_consent() {
         assert_eq!(installed_versions(&mut native()), previous_versions);
         assert_eq!(fs::read(&config).unwrap(), selected.as_bytes());
     };
-    let executable = if cfg!(windows) {
-        "groundline-insights.exe"
-    } else {
-        "groundline-insights"
-    };
+    let executable = "groundline-insights";
     let checksum = reviewed
         .join("plugins/groundline-insights/bin")
         .join(target)
@@ -492,11 +476,7 @@ fn real_codex_upgrades_metadata_repeats_and_preserves_settings_and_consent() {
         .unwrap();
         let source = Path::new(listing["marketplaces"][0]["root"].as_str().unwrap());
         for name in ["groundline", "groundline-insights"] {
-            let executable = if cfg!(windows) {
-                format!("{name}.exe")
-            } else {
-                name.to_owned()
-            };
+            let executable = name.to_owned();
             for file in [
                 format!("bin/{target}/{executable}"),
                 format!("bin/{target}/{executable}.sha256"),
@@ -595,11 +575,7 @@ fn real_codex_upgrades_metadata_repeats_and_preserves_settings_and_consent() {
     let cache = home.join("plugins/cache/groundline");
     for name in ["groundline", "groundline-insights"] {
         let root = cache.join(name).join(env!("CARGO_PKG_VERSION"));
-        let executable = if cfg!(windows) {
-            format!("{name}.exe")
-        } else {
-            name.to_owned()
-        };
+        let executable = name.to_owned();
         let installed = root.join("bin").join(target).join(executable);
         checked(
             Command::new(&installed)

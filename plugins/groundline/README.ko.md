@@ -33,7 +33,7 @@ Core에는 lifecycle hook, 백그라운드 프로세스, 스케줄러, 수집 �
 
 ## 설치와 업그레이드
 
-실행 파일이 포함된 검토한 `stable` 배포본의 `install.sh` 또는 `install.ps1`을
+실행 파일이 포함된 검토한 `stable` 배포본의 `install.sh`를
 사용하거나 네이티브 Codex로 패키지를 설치합니다.
 
 ```console
@@ -60,7 +60,7 @@ groundline provider-smoke --plugin-root /path/to/installed/groundline --require-
 groundline doctor --plugin-root /path/to/installed/groundline --json
 ```
 
-Apple Silicon/Intel macOS, ARM64/x86_64 Linux·Windows를 지원합니다. 실행 파일은
+Apple Silicon/Intel macOS, ARM64/x86_64 Linux를 지원합니다. 실행 파일은
 설치된 플러그인의 `bin/<target>`에서 찾습니다. 설치가 shell `PATH` 등록까지
 보장하지 않으며 소스 태그에는 설치용 실행 파일이 없습니다.
 

@@ -54,8 +54,8 @@ dispatched; verify a new-task lifecycle receipt separately.
 See [integrations and installation profiles](https://github.com/jukqaz/groundline/blob/main/docs/integrations.md) for the
 Core-only, Insights-only, and combined choices.
 
-The packaged executable is `groundline-insights` (`groundline-insights.exe` on
-Windows). macOS, Linux, and Windows are supported on ARM64 and x86-64. Resolve
+The packaged executable is `groundline-insights`. macOS and Linux are supported
+on ARM64 and x86-64. Resolve
 the executable from the installed plugin's `bin/<target>` directory; a Codex
 plugin installation does not by itself promise a user-shell `PATH` entry.
 

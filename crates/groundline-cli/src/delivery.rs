@@ -18,17 +18,6 @@ fn error(code: &str) -> ContractError {
     ContractError(format!("delivery_{code}"))
 }
 
-#[cfg(windows)]
-fn reparse(metadata: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-    metadata.file_attributes() & 0x400 != 0
-}
-
-#[cfg(not(windows))]
-fn reparse(_: &fs::Metadata) -> bool {
-    false
-}
-
 fn parent_or_current(path: &Path) -> &Path {
     path.parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -169,7 +158,7 @@ pub(crate) fn record(input: &Path, output: &Path) -> Result<Value, ContractError
     }
     let parent = parent_or_current(output);
     let meta = fs::symlink_metadata(parent).map_err(|_| error("invalid_output_directory"))?;
-    if !meta.is_dir() || meta.file_type().is_symlink() || reparse(&meta) {
+    if !meta.is_dir() || meta.file_type().is_symlink() {
         return Err(error("invalid_output_directory"));
     }
     let mut file = create_private_new(output).map_err(|_| error("output_exists_or_unavailable"))?;
@@ -204,7 +193,7 @@ fn read_error(code: &str) -> ContractError {
 pub(crate) fn read_receipts(directory: &Path) -> Result<Vec<Value>, ContractError> {
     let metadata =
         fs::symlink_metadata(directory).map_err(|_| read_error("directory_unavailable"))?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() || reparse(&metadata) {
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
         return Err(read_error("invalid_directory"));
     }
     let mut paths = Vec::new();

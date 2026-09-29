@@ -417,7 +417,6 @@ pub fn configure_profile(codex_home: &Path, bytes: &[u8]) -> Result<Value, State
 fn environment() -> Result<(&'static str, String, String), StateError> {
     let os = match std::env::consts::OS {
         "macos" => "macos",
-        "windows" => "windows",
         "linux" => "linux",
         _ => "unknown",
     };

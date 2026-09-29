@@ -2,6 +2,7 @@
 
 ## 2026.09.29-a (`2026.929.1`)
 
+- 지원 범위를 macOS·Linux의 ARM64·x86-64 네 가지 대상으로 정리했습니다. Windows 설치기·전용 런타임·빌드·훅을 제거하며 과거 Windows 관측 데이터는 보존합니다.
 - 릴리스 이름은 날짜와 당일 순번으로 표시합니다. CLI·태그·manifest·전송 값은 숫자 SemVer를 유지하며, 공용 변환에서 표시명을 만듭니다. [버전 규칙](../../docs/versioning.md)
 
 - GPT-6 Astra·Sol·Luna의 집계 라벨을 분리하고 ingest contract revision 8을 사용합니다. 업그레이드 전에 owner API가 새 계약을 광고하는지 확인해야 합니다.

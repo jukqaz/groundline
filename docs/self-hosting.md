@@ -49,9 +49,9 @@ the private server configuration. The update controller preserves explicit
   `infrastructure/compatibility.json` is the release-tested default, not a
   permanently supported maximum version.
 
-Linux, macOS, and Windows Docker hosts can render absolute dataset roots. Use a
+Linux and macOS Docker hosts can render absolute dataset roots. Use a
 path shared with the Docker VM on Docker Desktop. The collector plugin itself is
-released separately for ARM64 and x86-64 on all three operating systems.
+released separately for ARM64 and x86-64 on both operating systems.
 
 ## 1. Check out one source release
 
@@ -79,19 +79,6 @@ uses the verified `stable` distribution separately. A tag or release name alone
 does not prove GitHub release locking; verify the exact commit, asset checksums,
 and signed provenance before deployment.
 
-PowerShell uses the same versioned source and digest-pinned image:
-
-```powershell
-$ReleaseTag = "vMAJOR.MINOR.PATCH"
-$InsightsImageDigest = "ghcr.io/jukqaz/groundline-insights-api@sha256:REPLACE_WITH_64_HEX_DIGEST"
-$InsightsAccessUrl = "https://grafana.example.com"
-$CompatibilityProfile = "infrastructure/compatibility.json"
-git clone https://github.com/jukqaz/groundline.git
-Set-Location groundline
-git fetch --tags
-git switch --detach $ReleaseTag
-```
-
 ## 2. Prepare private owner paths
 
 The following Unix shell example keeps generated configuration outside Git:
@@ -107,19 +94,8 @@ mkdir -p "$DATASET_ROOT/clickhouse" "$DATASET_ROOT/grafana"
 chmod 0750 "$DATASET_ROOT/clickhouse" "$DATASET_ROOT/grafana"
 ```
 
-On Windows PowerShell, use resolved absolute paths under a Docker-shared folder:
-
-```powershell
-$DeployRoot = Join-Path $env:LOCALAPPDATA "GroundLine\Insights"
-$DatasetRoot = Join-Path $DeployRoot "data"
-$ComposeFile = Join-Path $DeployRoot "compose.yaml"
-$SecretsFile = Join-Path $DeployRoot "secrets.json"
-$BindIp = "127.0.0.1"
-New-Item -ItemType Directory -Force "$DatasetRoot\clickhouse", "$DatasetRoot\grafana"
-```
-
-Do not place the owner directory inside the repository. Spaces in absolute Unix,
-macOS volume, and Windows drive paths are supported; relative paths, UNC shares,
+Do not place the owner directory inside the repository. Spaces in absolute Linux and
+macOS paths are supported; relative paths, Windows drive paths, UNC shares,
 and traversal segments are rejected.
 
 ## 3. Render without printing secrets
@@ -137,23 +113,6 @@ cargo run --locked -p xtask -- render-compose \
   --access-url "$INSIGHTS_ACCESS_URL" \
   --json
 docker compose -f "$COMPOSE_FILE" config --quiet
-```
-
-PowerShell equivalent:
-
-```powershell
-cargo run --locked -p xtask -- render-compose `
-  --output $ComposeFile `
-  --secrets-file $SecretsFile `
-  --dataset-root $DatasetRoot `
-  --bind-ip $BindIp `
-  --dashboard-port 13000 `
-  --ingest-port 18080 `
-  --image $InsightsImageDigest `
-  --compatibility-profile $CompatibilityProfile `
-  --access-url $InsightsAccessUrl `
-  --json
-docker compose -f $ComposeFile config --quiet
 ```
 
 `INSIGHTS_IMAGE_DIGEST` must be an immutable registry digest. The compatibility
@@ -278,18 +237,6 @@ cargo run --locked -p xtask --bin groundline-deploy -- verify-stack \
   --json
 ```
 
-PowerShell equivalent:
-
-```powershell
-docker compose -f $ComposeFile up --detach --wait --wait-timeout 240
-cargo run --locked -p xtask --bin groundline-deploy -- verify-stack `
-  --api-url "http://${BindIp}:18080/healthz" `
-  --grafana-url "http://${BindIp}:13000/api/health" `
-  --access-url $InsightsAccessUrl `
-  --secrets-file $SecretsFile `
-  --json
-```
-
 The verifier waits for API storage readiness, checks Grafana itself, executes
 every provisioned dashboard query through the ClickHouse datasource, and
 validates fleet, roster, and storage-quality frame semantics. It does not prove
@@ -345,8 +292,7 @@ reused. Keep unsupported local state for explicit owner review instead of
 deleting it to force a fresh enrollment.
 
 Copy the installed plugin's `references/owner-profile.example.json` outside the
-plugin and repository, restrict it to the owner (`0600` on Unix or an equivalent
-private ACL on Windows), and replace its endpoint and enrollment placeholder.
+plugin and repository, restrict it to the owner (`0600`), and replace its endpoint and enrollment placeholder.
 From that private directory, run:
 
 ```console

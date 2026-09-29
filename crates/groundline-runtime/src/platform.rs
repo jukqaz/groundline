@@ -7,8 +7,6 @@ pub const SUPPORTED_TARGETS: &[&str] = &[
     "x86_64-apple-darwin",
     "aarch64-unknown-linux-musl",
     "x86_64-unknown-linux-musl",
-    "aarch64-pc-windows-msvc",
-    "x86_64-pc-windows-msvc",
 ];
 
 pub fn current_target() -> Result<&'static str, ContractError> {
@@ -17,8 +15,6 @@ pub fn current_target() -> Result<&'static str, ContractError> {
         ("macos", "x86_64") => Ok("x86_64-apple-darwin"),
         ("linux", "aarch64") => Ok("aarch64-unknown-linux-musl"),
         ("linux", "x86_64") => Ok("x86_64-unknown-linux-musl"),
-        ("windows", "aarch64") => Ok("aarch64-pc-windows-msvc"),
-        ("windows", "x86_64") => Ok("x86_64-pc-windows-msvc"),
         _ => Err(ContractError("unsupported_platform".to_owned())),
     }
 }
@@ -38,12 +34,7 @@ fn packaged_product_binary_path(
     if !SUPPORTED_TARGETS.contains(&target) {
         return Err(ContractError("unsupported_target".to_owned()));
     }
-    let executable = if target.ends_with("windows-msvc") {
-        format!("{executable_name}.exe")
-    } else {
-        executable_name.to_owned()
-    };
-    Ok(PathBuf::from("bin").join(target).join(executable))
+    Ok(PathBuf::from("bin").join(target).join(executable_name))
 }
 
 #[cfg(test)]
@@ -73,10 +64,21 @@ mod tests {
     }
 
     #[test]
-    fn arbitrary_target_is_rejected() {
-        assert_eq!(
-            packaged_binary_path("../../arbitrary").unwrap_err().0,
-            "unsupported_target"
-        );
+    fn unsupported_targets_are_rejected_for_both_products() {
+        for target in [
+            "../../arbitrary",
+            "aarch64-pc-windows-msvc",
+            "x86_64-pc-windows-msvc",
+        ] {
+            assert_eq!(
+                packaged_binary_path(target).unwrap_err().0,
+                "unsupported_target"
+            );
+            assert_eq!(
+                packaged_insights_binary_path(target).unwrap_err().0,
+                "unsupported_target"
+            );
+        }
+        assert_eq!(SUPPORTED_TARGETS.len(), 4);
     }
 }

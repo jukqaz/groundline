@@ -169,12 +169,6 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "bitflags"
-version = "1.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
-
-[[package]]
-name = "bitflags"
 version = "2.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b588b76d00fde79687d7646a9b5bdf3cc0f655e0bbd080335a95d7e96f3587da"
@@ -753,8 +747,6 @@ dependencies = [
  "tokio",
  "url",
  "uuid",
- "windows-permissions",
- "windows-sys 0.61.2",
  "zeroize",
  "zstd",
 ]
@@ -1271,7 +1263,7 @@ version = "0.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2eb04e9c688eff1c89d72b407f168cf79bb9e867a9d3323ed6c01519eb9cc053"
 dependencies = [
- "bitflags 2.13.1",
+ "bitflags",
  "cfg-if",
  "libc",
 ]
@@ -1352,7 +1344,7 @@ version = "0.149.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e9bdb56efa22b6eb5c213f512a838521a2433905d25da4e3021d3fac0bc7d1d"
 dependencies = [
- "bitflags 2.13.1",
+ "bitflags",
  "oxc_allocator",
  "oxc_ast_macros",
  "oxc_data_structures",
@@ -1438,7 +1430,7 @@ version = "0.149.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c6ac968fd0450309168e18c761dee4b68377bc0bbd4e1eb4e23d1c4d2e2cc825"
 dependencies = [
- "bitflags 2.13.1",
+ "bitflags",
  "cow-utils",
  "memchr",
  "num-bigint",
@@ -1461,7 +1453,7 @@ version = "0.149.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "18ef364ac0d7e5beda9e59a3fea4ba050da6e34720c10c7c0a16b3993373ba52"
 dependencies = [
- "bitflags 2.13.1",
+ "bitflags",
  "oxc_allocator",
  "oxc_ast_macros",
  "oxc_diagnostics",
@@ -1503,7 +1495,7 @@ version = "0.149.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c10f6276b8d5e3df514299a6a93241276531f2801853c3309a86805be278664"
 dependencies = [
- "bitflags 2.13.1",
+ "bitflags",
  "cow-utils",
  "dragonbox_ecma",
  "nonmax",
@@ -1613,7 +1605,7 @@ version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b45fcc2344c680f5025fe57779faef368840d0bd1f42f216291f0dc4ace4744"
 dependencies = [
- "bitflags 2.13.1",
+ "bitflags",
  "num-traits",
  "rand",
  "rand_chacha",
@@ -1628,7 +1620,7 @@ version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9f068eba8e7071c5f9511831b44f32c740d5adf574e990f946ddb53db2f314e"
 dependencies = [
- "bitflags 2.13.1",
+ "bitflags",
  "memchr",
  "unicase",
 ]
@@ -1802,7 +1794,7 @@ version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1c93dd1c9683b438c392c492109cb702b8090b2bfc8fed6f6e4eb4523f17af3"
 dependencies = [
- "bitflags 2.13.1",
+ "bitflags",
  "fallible-iterator",
  "fallible-streaming-iterator",
  "hashlink",
@@ -1832,7 +1824,7 @@ version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6fe4565b9518b83ef4f91bb47ce29620ca828bd32cb7e408f0062e9930ba190"
 dependencies = [
- "bitflags 2.13.1",
+ "bitflags",
  "errno",
  "libc",
  "linux-raw-sys",
@@ -1957,7 +1949,7 @@ version = "3.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b7f4bc775c73d9a02cde8bf7b2ec4c9d12743edf609006c7facc23998404cd1d"
 dependencies = [
- "bitflags 2.13.1",
+ "bitflags",
  "core-foundation",
  "core-foundation-sys",
  "libc",
@@ -2480,7 +2472,7 @@ version = "0.6.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4cfcf7e2740e6fc6d4d688b4ef00650406bb94adf4731e43c096c3a19fe40840"
 dependencies = [
- "bitflags 2.13.1",
+ "bitflags",
  "bytes",
  "futures-util",
  "http",
@@ -2873,16 +2865,6 @@ name = "windows-link"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
-
-[[package]]
-name = "windows-permissions"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e2ccdc3c6bf4d4a094e031b63fadd08d8e42abd259940eb8aa5fdc09d4bf9be"
-dependencies = [
- "bitflags 1.3.2",
- "winapi",
-]
 
 [[package]]
 name = "windows-result"

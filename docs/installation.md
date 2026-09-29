@@ -15,16 +15,10 @@ git clone --branch stable --single-branch https://github.com/jukqaz/groundline.g
 bash groundline-install/install.sh
 ```
 
-Windows:
-
-```powershell
-powershell -File groundline-install/install.ps1
-```
-
-macOS prefers the App-bundled executable when present. Windows inspects installed
-OpenAI App packages and then PATH. Use `--codex /absolute/path/to/codex` or
-`-Codex C:\path\to\codex.exe` for an explicit runtime. Preflight checks required
-native commands before package changes. Keep the same intended `CODEX_HOME`.
+Supported hosts are macOS and Linux on ARM64 and x86-64. macOS prefers the
+App-bundled executable when present; Linux uses the resolved Codex executable.
+Use `--codex /absolute/path/to/codex` for an explicit runtime. Preflight checks
+required native commands before package changes. Keep the same intended `CODEX_HOME`.
 
 Installing through Codex's plugin UI or `plugin add` delivers the package only.
 Finish through this installer, or invoke the installed setup commands with the
@@ -69,12 +63,12 @@ and context choices. A fresh config uses native Codex defaults. Known retired
 Core hook approval records can be removed with a private backup. Native strict
 doctor checks effective configuration separately from the bounded file review.
 
-| Explicit choice | Shell option | PowerShell option |
-| --- | --- | --- |
-| A supported model | `--model <id>` | `-Model <id>` |
-| Supported effort | `--effort <level>` | `-Effort <level>` |
-| Service tier | `--service-tier default` or `fast` | `-ServiceTier default` or `fast` |
-| Restore native context sizing | `--restore-native-context` | `-RestoreNativeContext` |
+| Explicit choice | Shell option |
+| --- | --- |
+| A supported model | `--model <id>` |
+| Supported effort | `--effort <level>` |
+| Service tier | `--service-tier default` or `fast` |
+| Restore native context sizing | `--restore-native-context` |
 
 There is no fixed model preset. An unsupported explicit selection stops settings
 changes without substitution. Resolve
@@ -92,16 +86,11 @@ the token itself in command arguments, shell history, or the repository.
 bash groundline-install/install.sh --profile both --insights-endpoint https://insights.example.com --enrollment-token-file /private/enrollment-token --enable-insights
 ```
 
-```powershell
-powershell -File groundline-install/install.ps1 -Profile both -InsightsEndpoint https://insights.example.com -EnrollmentTokenFile C:\private\enrollment-token -EnableInsights
-```
-
-Alternatively supply `--insights-profile /private/profile.json` or
-`-InsightsProfile C:\private\profile.json` using the existing schema-7 owner
-profile. Input files must have owner-private permissions. Endpoint/token inputs
+Alternatively supply `--insights-profile /private/profile.json` using the existing
+schema-7 owner profile. Input files must have owner-private permissions. Endpoint/token inputs
 cannot be combined with a profile file.
 
-`--enable-insights` / `-EnableInsights` is explicit consent to aggregate uploads.
+`--enable-insights` is explicit consent to aggregate uploads.
 Without it, an existing active consent is retained and a fresh installation stays
 disabled. Connection verification runs only with active consent. Existing
 matching profiles are reused without replacement; a different endpoint or token
@@ -131,7 +120,7 @@ fields. A historical acknowledgement does not prove a fresh upload in this run.
 
 ## Finish and resume
 
-Both installers print a final `groundline-installation` JSON receipt after command
+The installer prints a final `groundline-installation` JSON receipt after command
 diagnostics. Stage names and exit semantics are identical on all supported OSes:
 
 - Exit 0 / `PASS`: selected installation stages passed.

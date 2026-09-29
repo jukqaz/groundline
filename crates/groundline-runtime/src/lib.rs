@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+compile_error!("GroundLine supports only macOS and Linux");
+
 #[cfg(feature = "audit-store")]
 pub mod audit_store;
 #[cfg(feature = "insights-state")]

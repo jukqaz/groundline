@@ -46,7 +46,7 @@ When the request includes applying GroundLine or repairing the existing setup,
 continue with [installation alignment](installation-alignment.md) after package
 verification. Complete evidenced configuration/guidance repairs in the same
 authorized task; package refresh alone does not prove the old setup was fixed.
-The reviewed stable distribution's `install.sh`/`install.ps1` joins those native
+The reviewed stable distribution's `install.sh` joins those native
 commands to artifact verification, preserving setup, and strict
 doctor. It does not independently resolve versions or modify cached packages.
 Use the current complete `stable` distribution when updating, then rerun the same

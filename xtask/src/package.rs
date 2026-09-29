@@ -318,19 +318,15 @@ fn verify_insights(root: &Path) -> Result<(), XtaskError> {
             .get("command")
             .and_then(Value::as_str)
             .ok_or(XtaskError::InvalidSource)?;
-        let windows = command
-            .get("commandWindows")
-            .and_then(Value::as_str)
-            .ok_or(XtaskError::InvalidSource)?;
+        let fields = command.as_object().ok_or(XtaskError::InvalidSource)?;
         if command.get("type").and_then(Value::as_str) != Some("command")
             || command.get("timeout").and_then(Value::as_u64) != Some(3)
-            || command.get("async").is_some()
-            || ![unix, windows].iter().all(|value| {
-                value.contains("groundline-insights")
-                    && value.contains(" checkpoint ")
-                    && value.contains(trigger)
-                    && !value.contains("worker run-once")
-            })
+            || fields.keys().map(String::as_str).collect::<BTreeSet<_>>()
+                != ["command", "timeout", "type"].into_iter().collect()
+            || !unix.contains("groundline-insights")
+            || !unix.contains(" checkpoint ")
+            || !unix.contains(trigger)
+            || unix.contains("worker run-once")
         {
             return Err(XtaskError::InvalidSource);
         }
@@ -434,8 +430,32 @@ mod tests {
 
     use super::{
         contains_private_marker, contains_private_marker_outside_scanner_fixtures, manifest,
-        private_source_name, regular_bytes, source_scan_path,
+        private_source_name, regular_bytes, source_scan_path, verify_insights,
     };
+
+    #[test]
+    fn insights_source_accepts_four_unix_hooks_and_rejects_a_windows_command() {
+        let root = tempdir().unwrap();
+        let plugin = root.path().join("plugins/groundline-insights");
+        std::fs::create_dir_all(plugin.join(".codex-plugin")).unwrap();
+        std::fs::create_dir_all(plugin.join("hooks")).unwrap();
+        std::fs::write(
+            plugin.join(".codex-plugin/plugin.json"),
+            include_bytes!("../../plugins/groundline-insights/.codex-plugin/plugin.json"),
+        )
+        .unwrap();
+        let path = plugin.join("hooks/hooks.json");
+        let mut hooks: serde_json::Value = serde_json::from_slice(include_bytes!(
+            "../../plugins/groundline-insights/hooks/hooks.json"
+        ))
+        .unwrap();
+        std::fs::write(&path, serde_json::to_vec(&hooks).unwrap()).unwrap();
+        verify_insights(root.path()).unwrap();
+        hooks["hooks"]["SessionStart"][0]["hooks"][0]["commandWindows"] =
+            serde_json::json!("retired command");
+        std::fs::write(&path, serde_json::to_vec(&hooks).unwrap()).unwrap();
+        assert!(verify_insights(root.path()).is_err());
+    }
 
     #[test]
     fn starter_prompts_must_fit_native_codex_limits() {

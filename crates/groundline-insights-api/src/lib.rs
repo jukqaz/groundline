@@ -1,6 +1,9 @@
 #![forbid(unsafe_code)]
 #![recursion_limit = "512"]
 
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+compile_error!("GroundLine supports only macOS and Linux");
+
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex, OnceLock};

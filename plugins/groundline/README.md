@@ -36,7 +36,7 @@ manifest. Optional Insights is a separate plugin with its own consent contract.
 ## Install and upgrade
 
 Use the repository's reviewed binary-bearing `stable` distribution and its
-`install.sh` or `install.ps1`, or install the package through native Codex:
+`install.sh`, or install the package through native Codex:
 
 ```console
 codex plugin marketplace add https://github.com/jukqaz/groundline.git --ref stable --json
@@ -62,7 +62,7 @@ groundline provider-smoke --plugin-root /path/to/installed/groundline --require-
 groundline doctor --plugin-root /path/to/installed/groundline --json
 ```
 
-Native packages cover Apple Silicon/Intel macOS and ARM64/x86_64 Linux/Windows.
+Native packages cover Apple Silicon/Intel macOS and ARM64/x86_64 Linux.
 Resolve the installed executable from `bin/<target>`; installation does not
 promise a shell `PATH` entry. Source tags do not contain installable binaries.
 

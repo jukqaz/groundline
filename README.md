@@ -65,8 +65,8 @@ git clone --branch stable --single-branch https://github.com/jukqaz/groundline.g
 bash groundline-install/install.sh
 ```
 
-On Windows use `powershell -File groundline-install/install.ps1`. Select
-`--profile both` (`-Profile both`) to include Insights, or `insights` for Insights
+Supported hosts are macOS and Linux on ARM64 and x86-64. Select
+`--profile both` to include Insights, or `insights` for Insights
 alone. See [complete installation and recovery](docs/installation.md) for model
 selection, private connection inputs, consent, first collection, and retrying a
 partial installation. Existing disabled plugins remain disabled. The installer
@@ -120,14 +120,6 @@ codex plugin list --json
 the binary distribution. A frozen installation needs a verified packaged
 revision. Direct native commands skip installer compatibility checks. Use the
 reviewed installer for updates; re-adding a disabled plugin explicitly enables it.
-
-On Windows, `LF will be replaced by CRLF` describes Git line-ending conversion.
-Check the command exit code and final error; a warning alone does not prove an
-installation failure. A fatal conversion rejection can also involve
-`core.safecrlf`. The distribution pins text to LF through `.gitattributes`;
-checksum validation accepts one LF or CRLF record while comparing the actual
-binary digest, size, and filename exactly. Do not disable checksum validation
-or change global Git settings to silence the message.
 
 Marketplace refresh, installed package checksums, hook
 trust, collector upload, ClickHouse visibility, Grafana frames, image

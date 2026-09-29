@@ -62,10 +62,13 @@ serialization gate. Multiple API writers need a separate concurrency design.
 Already deleted IDs cannot be reconstructed from absent rows; use only a
 verified owner-held retirement inventory when migrating earlier cleanups.
 
+Windows is no longer a supported runtime. Historical Windows observations and
+OS labels remain readable; removing support does not rewrite or delete history.
+
 ### Returning to a retired device
 
 Retirement is scoped to the previous random installation ID, never an operating
-system, machine, or user. A fresh Windows, macOS, or Linux installation gets a
+system, machine, or user. A fresh macOS or Linux installation gets a
 new ID and can enroll normally. Its dashboard status starts at initial-report
 waiting and becomes normal after a current supported package reports.
 
@@ -229,7 +232,7 @@ Deploy the API advertising contract revision 8 before upgrading collectors.
 Revision 8 adds generation-specific GPT-6 tier labels. Historical labels and
 events are preserved; older, mixed, and unversioned cohorts are not optimization
 targets. This change does not require rewriting existing ClickHouse rows.
-Verify source, package, install, and a fresh receipt independently. A Windows
+Verify source, package, install, and a fresh receipt independently. A local
 build or server-reported version does not prove that device's installed files.
 Use a consistent temporary backup and an isolated restore for schema changes.
 Backup schedules, external copies, and Garage integration are separate owner

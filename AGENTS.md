@@ -15,6 +15,8 @@
   Verify the requested execution path without a separate generic workflow layer.
 - Treat Codex App and its bundled CLI as the primary runtime. Use PATH CLI for
   packaging, automation, and secondary-channel evidence.
+- Support macOS and Linux on ARM64 and x86-64 only. Keep historical Windows
+  observations readable without shipping a Windows runtime or installer.
 - GroundLine ships Core and Insights plugins/CLIs plus the Insights API. Keep
   connection and collection in the shared runtime; no separate Desktop GUI.
 - Use a light preflight for clear bounded work. Before writing for broader work,

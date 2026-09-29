@@ -4,6 +4,7 @@ use std::process::Command;
 use std::sync::OnceLock;
 
 use groundline_contracts::version::{release_display_name, strict_version};
+use groundline_runtime::platform::SUPPORTED_TARGETS;
 use regex::Regex;
 use semver::Version;
 use serde_json::{Value, json};
@@ -14,14 +15,6 @@ const CHANNEL: &str = "stable";
 const MANIFEST_PATHS: &[&str] = &[
     "plugins/groundline/.codex-plugin/plugin.json",
     "plugins/groundline-insights/.codex-plugin/plugin.json",
-];
-const RUST_TARGETS: &[&str] = &[
-    "aarch64-apple-darwin",
-    "x86_64-apple-darwin",
-    "aarch64-unknown-linux-musl",
-    "x86_64-unknown-linux-musl",
-    "aarch64-pc-windows-msvc",
-    "x86_64-pc-windows-msvc",
 ];
 
 pub struct PromotionOptions<'a> {
@@ -93,14 +86,9 @@ fn expected_artifacts() -> BTreeSet<String> {
         ("groundline", "groundline"),
         ("groundline-insights", "groundline-insights"),
     ] {
-        for target in RUST_TARGETS {
-            let executable = if target.contains("windows") {
-                format!("{executable}.exe")
-            } else {
-                executable.to_owned()
-            };
+        for target in SUPPORTED_TARGETS {
             for name in [
-                executable.clone(),
+                executable.to_owned(),
                 format!("{executable}.sha256"),
                 "manifest.json".to_owned(),
             ] {
@@ -241,10 +229,10 @@ mod tests {
     use super::expected_artifacts;
 
     #[test]
-    fn stable_release_requires_exactly_two_six_target_artifact_sets() {
+    fn stable_release_requires_exactly_two_four_target_artifact_sets() {
         let expected = expected_artifacts();
-        assert_eq!(expected.len(), 36);
-        assert!(expected.contains("plugins/groundline/bin/aarch64-pc-windows-msvc/groundline.exe"));
+        assert_eq!(expected.len(), 24);
+        assert!(expected.contains("plugins/groundline/bin/aarch64-unknown-linux-musl/groundline"));
         assert!(expected.contains(
             "plugins/groundline-insights/bin/x86_64-apple-darwin/groundline-insights.sha256"
         ));

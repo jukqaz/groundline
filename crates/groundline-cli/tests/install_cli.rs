@@ -38,20 +38,14 @@ impl Fixture {
         .unwrap();
         let target = platform["target"].as_str().unwrap();
         let version = env!("CARGO_PKG_VERSION");
-        let executable = if cfg!(windows) {
-            "groundline.exe"
-        } else {
-            "groundline"
-        };
+        let executable = "groundline";
         let source = root.join("plugins/groundline");
         let installed = home.join(format!("plugins/cache/groundline/groundline/{version}"));
         for package in [&source, &installed] {
             package::stage(package, binary, "groundline", target);
         }
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        for file in ["install.sh", "install.ps1"] {
-            fs::copy(repo.join(file), root.join(file)).unwrap();
-        }
+        fs::copy(repo.join("install.sh"), root.join("install.sh")).unwrap();
         let empty = temp.path().join("empty-market.json");
         fs::write(&empty, r#"{"marketplaces":[]}"#).unwrap();
         fs::write(temp.path().join("market.json"), fs::read(&empty).unwrap()).unwrap();
@@ -78,20 +72,12 @@ impl Fixture {
         let catalog = temp.path().join("models.json");
         fs::write(&catalog, r#"{"models":[{"slug":"gpt-6-astra","default_reasoning_level":"xhigh","supported_reasoning_levels":[{"effort":"xhigh"}]}]}"#).unwrap();
         let calls = temp.path().join("calls.txt");
-        let codex = temp.path().join(if cfg!(windows) {
-            "fake codex.cmd"
-        } else {
-            "fake codex.sh"
-        });
-        if cfg!(windows) {
-            fs::write(&codex, "@echo off\r\necho %*>>\"%GROUNDLINE_TEST_CALLS%\"\r\nif \"%~3\"==\"--help\" exit /b 0\r\nif \"%~4\"==\"--help\" exit /b 0\r\nif \"%~1 %~2 %~3\"==\"plugin marketplace list\" type \"%~dp0market.json\"\r\nif \"%~1 %~2\"==\"plugin list\" type \"%~dp0plugins.json\"\r\nif \"%~1 %~2 %~3\"==\"plugin marketplace add\" copy /y \"%~dp0market-after.json\" \"%~dp0market.json\" >nul\r\nif \"%~1 %~2 %~3\"==\"plugin marketplace remove\" copy /y \"%~dp0empty-market.json\" \"%~dp0market.json\" >nul\r\nif \"%~1 %~2 %~3\"==\"plugin add groundline@groundline\" copy /y \"%~dp0groundline-after.json\" \"%~dp0plugins.json\" >nul\r\nif \"%~1 %~2 %~3\"==\"plugin add groundline-insights@groundline\" copy /y \"%~dp0groundline-insights-after.json\" \"%~dp0plugins.json\" >nul\r\nif \"%~1 %~2\"==\"plugin remove\" copy /y \"%~dp0empty-plugins.json\" \"%~dp0plugins.json\" >nul\r\nif \"%~1 %~2\"==\"debug models\" (\r\n type \"%GROUNDLINE_TEST_CATALOG%\"\r\n if \"%GROUNDLINE_TEST_FAIL_CATALOG%\"==\"1\" exit /b 1\r\n)\r\nexit /b 0\r\n").unwrap();
-        } else {
-            fs::write(&codex, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$GROUNDLINE_TEST_CALLS\"\n[ \"${3:-}\" != --help ] && [ \"${4:-}\" != --help ] || exit 0\nfixture=$(dirname \"$GROUNDLINE_TEST_CALLS\")\ncase \"$1 $2 ${3:-}\" in\n 'plugin marketplace list') cat \"$fixture/market.json\" ;;\n 'plugin list --json') cat \"$fixture/plugins.json\" ;;\n 'plugin marketplace add') cp \"$fixture/market-after.json\" \"$fixture/market.json\" ;;\n 'plugin marketplace remove') cp \"$fixture/empty-market.json\" \"$fixture/market.json\" ;;\n 'plugin add groundline@groundline') cp \"$fixture/groundline-after.json\" \"$fixture/plugins.json\" ;;\n 'plugin add groundline-insights@groundline') cp \"$fixture/groundline-insights-after.json\" \"$fixture/plugins.json\" ;;\n plugin\\ remove\\ *) cp \"$fixture/empty-plugins.json\" \"$fixture/plugins.json\" ;;\nesac\nif [ \"$1 $2\" = 'debug models' ]; then\n cat \"$GROUNDLINE_TEST_CATALOG\"\n [ \"${GROUNDLINE_TEST_FAIL_CATALOG:-0}\" != 1 ] || exit 1\nfi\n").unwrap();
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(&codex, fs::Permissions::from_mode(0o700)).unwrap();
-            }
+        let codex = temp.path().join("fake codex.sh");
+        fs::write(&codex, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$GROUNDLINE_TEST_CALLS\"\n[ \"${3:-}\" != --help ] && [ \"${4:-}\" != --help ] || exit 0\nfixture=$(dirname \"$GROUNDLINE_TEST_CALLS\")\ncase \"$1 $2 ${3:-}\" in\n 'plugin marketplace list') cat \"$fixture/market.json\" ;;\n 'plugin list --json') cat \"$fixture/plugins.json\" ;;\n 'plugin marketplace add') cp \"$fixture/market-after.json\" \"$fixture/market.json\" ;;\n 'plugin marketplace remove') cp \"$fixture/empty-market.json\" \"$fixture/market.json\" ;;\n 'plugin add groundline@groundline') cp \"$fixture/groundline-after.json\" \"$fixture/plugins.json\" ;;\n 'plugin add groundline-insights@groundline') cp \"$fixture/groundline-insights-after.json\" \"$fixture/plugins.json\" ;;\n plugin\\ remove\\ *) cp \"$fixture/empty-plugins.json\" \"$fixture/plugins.json\" ;;\nesac\nif [ \"$1 $2\" = 'debug models' ]; then\n cat \"$GROUNDLINE_TEST_CATALOG\"\n [ \"${GROUNDLINE_TEST_FAIL_CATALOG:-0}\" != 1 ] || exit 1\nfi\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&codex, fs::Permissions::from_mode(0o700)).unwrap();
         }
         let result = Self {
             _temp: temp,
@@ -141,39 +127,17 @@ impl Fixture {
     }
 
     fn run_options(&self, fail_catalog: bool, options: &[&str]) -> Output {
-        let mut command = if cfg!(windows) {
-            let mut command = Command::new("powershell.exe");
-            command
-                .args(["-NoProfile", "-File"])
-                .arg(self.root.join("install.ps1"))
-                .arg("-Codex");
-            command
+        // Exercise the macOS system shell even when PATH contains newer Bash.
+        let mut command = Command::new(if cfg!(target_os = "macos") {
+            "/bin/bash"
         } else {
-            // Exercise the macOS system shell even when PATH contains newer Bash.
-            let mut command = Command::new(if cfg!(target_os = "macos") {
-                "/bin/bash"
-            } else {
-                "bash"
-            });
-            command.arg(self.root.join("install.sh")).arg("--codex");
-            command
-        };
-        command.arg(&self.codex);
-        for option in options {
-            let argument = if cfg!(windows) {
-                match *option {
-                    "--profile" => "-Profile",
-                    "--model" => "-Model",
-                    "--effort" => "-Effort",
-                    "--service-tier" => "-ServiceTier",
-                    "--restore-native-context" => "-RestoreNativeContext",
-                    other => other,
-                }
-            } else {
-                option
-            };
-            command.arg(argument);
-        }
+            "bash"
+        });
+        command
+            .arg(self.root.join("install.sh"))
+            .arg("--codex")
+            .arg(&self.codex)
+            .args(options);
         command
             .env("CODEX_HOME", &self.home)
             .env("GROUNDLINE_TEST_CATALOG", &self.catalog)
@@ -186,30 +150,7 @@ impl Fixture {
             .unwrap()
     }
     fn failure_diagnostics(&self) -> String {
-        let calls = fs::read_to_string(&self.calls).unwrap_or_default();
-        #[cfg(windows)]
-        {
-            let probe = Command::new("powershell.exe")
-                .args([
-                    "-NoProfile",
-                    "-Command",
-                    "& $env:GROUNDLINE_TEST_CODEX debug models",
-                ])
-                .env("GROUNDLINE_TEST_CODEX", &self.codex)
-                .env("GROUNDLINE_TEST_CATALOG", &self.catalog)
-                .env("GROUNDLINE_TEST_CALLS", &self.calls)
-                .output()
-                .unwrap();
-            return format!(
-                "calls={calls}; synthetic_catalog_exit={}; valid_json={}; byte_count={}; prefix={:x?}",
-                probe.status,
-                serde_json::from_slice::<Value>(&probe.stdout).is_ok(),
-                probe.stdout.len(),
-                &probe.stdout[..probe.stdout.len().min(16)]
-            );
-        }
-        #[cfg(not(windows))]
-        calls
+        fs::read_to_string(&self.calls).unwrap_or_default()
     }
 
     #[cfg(target_os = "macos")]
@@ -495,67 +436,12 @@ fn default_install_preserves_existing_choices_and_emits_stage_results() {
     assert_eq!(report["stages"]["insights_setup"]["status"], "NOT_SELECTED");
 }
 
-#[cfg(windows)]
-#[test]
-fn installer_uses_its_host_security_module_with_an_incompatible_module_path() {
-    let f = Fixture::new();
-    let modules = f.calls.parent().unwrap().join("incompatible modules");
-    let security = modules.join("Microsoft.PowerShell.Security");
-    fs::create_dir_all(&security).unwrap();
-    fs::write(
-        security.join("Microsoft.PowerShell.Security.psd1"),
-        "@{ ModuleVersion = '99.0.0'; PowerShellVersion = '99.0'; RootModule = 'Security.psm1'; FunctionsToExport = @('Get-Acl') }",
-    )
-    .unwrap();
-    fs::write(
-        security.join("Security.psm1"),
-        "function Get-Acl { throw 'incompatible module was selected' }",
-    )
-    .unwrap();
-    let run = |script: &str| {
-        Command::new("powershell.exe")
-            .args(["-NoProfile", "-Command", script])
-            .env("GROUNDLINE_TEST_MODULES", &modules)
-            .env("GROUNDLINE_TEST_INSTALLER", f.root.join("install.ps1"))
-            .env("GROUNDLINE_TEST_CODEX", &f.codex)
-            .env("GROUNDLINE_TEST_OWNER_ROOT", &f.root)
-            .env("CODEX_HOME", &f.home)
-            .env("GROUNDLINE_TEST_CATALOG", &f.catalog)
-            .env("GROUNDLINE_TEST_CALLS", &f.calls)
-            .output()
-            .unwrap()
-    };
-    // Assign after startup so the child cannot sanitize the incompatible search
-    // path. The original unqualified Get-Acl must fail under this exact input.
-    let probe = run(
-        "$ErrorActionPreference = 'Stop'; $env:PSModulePath = $env:GROUNDLINE_TEST_MODULES; Get-Acl -LiteralPath $env:GROUNDLINE_TEST_OWNER_ROOT | Out-Null",
-    );
-    assert!(!probe.status.success(), "{probe:?}");
-    let result = run(
-        "$env:PSModulePath = $env:GROUNDLINE_TEST_MODULES; & $env:GROUNDLINE_TEST_INSTALLER -Codex $env:GROUNDLINE_TEST_CODEX; exit $LASTEXITCODE",
-    );
-    assert!(result.status.success(), "{result:?}");
-    let report = receipt(&result);
-    assert_eq!(report["stages"]["distribution_revision"]["status"], "PASS");
-    assert_eq!(report["stages"]["installed_state"]["status"], "PASS");
-}
-
 #[test]
 fn doctor_failure_preserves_completed_settings_and_can_resume() {
     let f = Fixture::new();
     let original = fs::read_to_string(&f.codex).unwrap();
-    let failure = if cfg!(windows) {
-        "if \"%~1 %~2\"==\"--strict-config doctor\" exit /b 42\r\n"
-    } else {
-        "if [ \"$1 $2\" = '--strict-config doctor' ]; then exit 42; fi\n"
-    };
-    let changed = if cfg!(windows) {
-        original
-            .replacen("@echo off\n", &format!("@echo off\n{failure}"), 1)
-            .replacen("@echo off\r\n", &format!("@echo off\r\n{failure}"), 1)
-    } else {
-        original.replacen("#!/bin/sh\n", &format!("#!/bin/sh\n{failure}"), 1)
-    };
+    let failure = "if [ \"$1 $2\" = '--strict-config doctor' ]; then exit 42; fi\n";
+    let changed = original.replacen("#!/bin/sh\n", &format!("#!/bin/sh\n{failure}"), 1);
     fs::write(&f.codex, changed).unwrap();
     let result = f.run_options(false, &["--model", "gpt-6-astra"]);
     assert_eq!(result.status.code(), Some(2), "{result:?}");
@@ -667,15 +553,7 @@ fn uncommitted_distribution_stops_before_native_writes() {
 fn failed_new_plugin_add_does_not_block_source_rollback_with_remove_not_installed() {
     let f = Fixture::new();
     let original = fs::read_to_string(&f.codex).unwrap();
-    let script = if cfg!(windows) {
-        original.replacen(
-            "@echo off\r\n",
-            "@echo off\r\nif \"%~1 %~2 %~3\"==\"plugin add groundline@groundline\" exit /b 19\r\n",
-            1,
-        )
-    } else {
-        original.replacen("#!/bin/sh\n", "#!/bin/sh\nif [ \"$1 $2 ${3:-}\" = 'plugin add groundline@groundline' ]; then exit 19; fi\n", 1)
-    };
+    let script = original.replacen("#!/bin/sh\n", "#!/bin/sh\nif [ \"$1 $2 ${3:-}\" = 'plugin add groundline@groundline' ]; then exit 19; fi\n", 1);
     fs::write(&f.codex, script).unwrap();
     let result = f.run(false);
     let report = receipt(&result);

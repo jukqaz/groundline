@@ -48,8 +48,8 @@ codex plugin add groundline-insights@groundline --json
 Core만, Insights만, 둘 다 설치하는 선택 기준은
 [연동과 설치 프로필](https://github.com/jukqaz/groundline/blob/main/docs/ko/integrations.md)에 정리되어 있습니다.
 
-binary 이름은 macOS/Linux에서 `groundline-insights`, Windows에서
-`groundline-insights.exe`입니다. 세 운영체제의 ARM64·x86-64를 지원합니다.
+binary 이름은 `groundline-insights`입니다. macOS와 Linux의
+ARM64·x86-64를 지원합니다.
 실행 파일은 설치된 plugin의 `bin/<target>`에서 찾습니다. Codex plugin 설치가
 사용자 shell의 `PATH` 등록까지 보장하는 것은 아닙니다.
 

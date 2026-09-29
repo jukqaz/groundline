@@ -57,7 +57,7 @@
    profile fingerprint and pin status belong in the renderer receipt.
 7. Run the manual qualification workflow once if the release tag path has not
    already done so.
-8. Build both binaries for all six targets from the exact release commit. Verify
+8. Build both binaries for all four macOS/Linux targets from the exact release commit. Verify
    each product's target set, executable name, manifest, size, and SHA-256. Remap
    GitHub runner workspace and home paths before compiling release binaries.
 9. Publish one versioned GitHub release without replacing an existing release,

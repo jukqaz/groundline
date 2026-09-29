@@ -14,8 +14,6 @@ verified execution platform:
 | macOS | x86_64 | `bin/x86_64-apple-darwin/groundline` |
 | Linux | ARM64 | `bin/aarch64-unknown-linux-musl/groundline` |
 | Linux | x86_64 | `bin/x86_64-unknown-linux-musl/groundline` |
-| Windows | ARM64 | `bin/aarch64-pc-windows-msvc/groundline.exe` |
-| Windows | x86_64 | `bin/x86_64-pc-windows-msvc/groundline.exe` |
 
 Use the native host architecture, not an emulated shell's architecture. Check
 that the file exists and is executable before invoking it. If the installed
@@ -23,14 +21,13 @@ artifact is missing, report that lane unavailable; do not silently run a source
 build or an unrelated binary on `PATH`.
 
 In skill examples, replace the bare `groundline` name with this absolute path.
-Quote paths. POSIX shells can use `"$GROUNDLINE_BIN" <arguments>`; PowerShell
-uses `& $GROUNDLINE_BIN <arguments>`. The examples describe arguments, not a
-requirement to install a particular shell or language runtime.
+Quote paths. POSIX shells can use `"$GROUNDLINE_BIN" <arguments>`. The examples
+describe arguments; no additional language runtime is required.
 
 For Codex, inspect the actual App installation or active execution host to
 resolve `CODEX_BIN`. Use that same absolute executable for version, features,
 catalog, and doctor checks. An App installation path is OS-specific; do not
-assume a macOS path exists on Windows or Linux. On a CLI-only host, use the
+assume a macOS path exists on Linux. On a CLI-only host, use the
 resolved CLI and label App evidence unavailable. Inspect command help before
 using version-dependent options. Treat PATH CLI evidence separately when it
 differs from the App's bundled executable.
