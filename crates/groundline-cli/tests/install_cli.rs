@@ -149,7 +149,12 @@ impl Fixture {
                 .arg("-Codex");
             command
         } else {
-            let mut command = Command::new("bash");
+            // Exercise the macOS system shell even when PATH contains newer Bash.
+            let mut command = Command::new(if cfg!(target_os = "macos") {
+                "/bin/bash"
+            } else {
+                "bash"
+            });
             command.arg(self.root.join("install.sh")).arg("--codex");
             command
         };
@@ -160,6 +165,7 @@ impl Fixture {
                     "--profile" => "-Profile",
                     "--model" => "-Model",
                     "--effort" => "-Effort",
+                    "--service-tier" => "-ServiceTier",
                     "--restore-native-context" => "-RestoreNativeContext",
                     other => other,
                 }
@@ -301,7 +307,7 @@ impl Fixture {
         self.fake_codex(&path_dir.join("codex"), "PATH_CODEX");
         let mut paths = vec![path_dir];
         paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
-        let mut command = Command::new("bash");
+        let mut command = Command::new("/bin/bash");
         command.arg(script_path);
         if let Some(path) = explicit_codex {
             command.arg("--codex").arg(path);
@@ -636,4 +642,55 @@ fn failed_new_plugin_add_does_not_block_source_rollback_with_remove_not_installe
     assert!(!calls.contains("plugin remove groundline@groundline"));
     assert!(calls.contains("plugin marketplace remove groundline --json"));
     assert!(!f.home.join("config.toml").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn failed_refresh_before_any_plugin_add_restores_source_and_emits_receipt() {
+    for existing in [false, true] {
+        let f = Fixture::new();
+        if existing {
+            let installed = f.run(false);
+            assert!(
+                installed.status.success(),
+                "{}",
+                String::from_utf8_lossy(&installed.stderr)
+            );
+        }
+        let before_config = fs::read(f.home.join("config.toml")).ok();
+        let before_plugins = fs::read(f.calls.parent().unwrap().join("plugins.json")).unwrap();
+        let original = fs::read_to_string(&f.codex).unwrap();
+        let script = original.replacen(
+            "#!/bin/sh\n",
+            r#"#!/bin/sh
+marker="$GROUNDLINE_TEST_CALLS.refresh-failed"
+if [ "$1 $2 ${3:-} ${4:-}" = 'plugin marketplace upgrade groundline' ] && [ ! -e "$marker" ]; then
+ : > "$marker"
+ exit 19
+fi
+"#,
+            1,
+        );
+        fs::write(&f.codex, script).unwrap();
+        let result = f.run(false);
+        let report = receipt(&result);
+        assert_eq!(result.status.code(), Some(1), "{report}");
+        assert_eq!(report["stages"]["marketplace_refresh"]["exit_code"], 19);
+        assert_eq!(report["stages"]["source_rollback"]["status"], "PASS");
+        assert_eq!(
+            report["rollback"],
+            if existing {
+                "previous_commit_pinned"
+            } else {
+                "fresh_registration_removed"
+            }
+        );
+        assert!(report["stages"].get("install_groundline").is_none());
+        assert_eq!(fs::read(f.home.join("config.toml")).ok(), before_config);
+        assert_eq!(
+            fs::read(f.calls.parent().unwrap().join("plugins.json")).unwrap(),
+            before_plugins
+        );
+        assert!(!String::from_utf8_lossy(&result.stderr).contains("unbound variable"));
+    }
 }

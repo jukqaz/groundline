@@ -56,37 +56,52 @@ function Get-NormalPath([string]$Path) {
     return [System.IO.Path]::GetFullPath($Path).TrimEnd([char[]]"\/")
 }
 function Get-CleanCommit([string]$Root, [bool]$NativeSnapshot = $false) {
-    $directory = Get-Item -LiteralPath $Root -Force
-    $gitDirectory = Get-Item -LiteralPath (Join-Path $Root ".git") -Force
-    if (!$directory.PSIsContainer -or !$gitDirectory.PSIsContainer -or
-        ($directory.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or
-        ($gitDirectory.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
-        throw "Use a normal clean Git distribution."
-    }
-    $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+    $checkpoint = "inspect_paths"
     try {
-        # Elevated Windows tokens may create files owned by their default owner
-        # SID rather than the user SID; accept only these current-token owners.
-        $currentOwners = @($identity.User.Value, $identity.Owner.Value)
-        foreach ($path in @($directory.FullName, $gitDirectory.FullName)) {
-            $owner = (Get-Acl -LiteralPath $path).GetOwner([System.Security.Principal.SecurityIdentifier]).Value
-            if ($owner -notin $currentOwners) { throw "Git distribution ownership is unsupported." }
+        $directory = Get-Item -LiteralPath $Root -Force
+        $gitDirectory = Get-Item -LiteralPath (Join-Path $Root ".git") -Force
+        if (!$directory.PSIsContainer -or !$gitDirectory.PSIsContainer -or
+            ($directory.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or
+            ($gitDirectory.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+            throw "Use a normal clean Git distribution."
         }
-    } finally { $identity.Dispose() }
-    $top = Get-GitValue $Root @("rev-parse", "--show-toplevel")
-    if ((Get-NormalPath $top) -ne (Get-NormalPath $Root)) {
-        throw "Use the complete clean distribution at its repository root."
-    }
-    $changes = Get-GitValue $Root @("status", "--porcelain", "--untracked-files=all")
-    foreach ($change in @($changes -split "`n")) {
-        if (!$change) { continue }
-        if (!$NativeSnapshot -or $change -cne "?? .codex-marketplace-install.json") {
+        $checkpoint = "current_owner"
+        $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+        try {
+            # Elevated Windows tokens may create files owned by their default owner
+            # SID rather than the user SID; accept only these current-token owners.
+            $currentOwners = @($identity.User.Value, $identity.Owner.Value)
+            $checkpoint = "path_owner"
+            foreach ($path in @($directory.FullName, $gitDirectory.FullName)) {
+                $owner = (Get-Acl -LiteralPath $path).GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+                if ($owner -notin $currentOwners) { throw "Git distribution ownership is unsupported." }
+            }
+        } finally { $identity.Dispose() }
+        $checkpoint = "git_root"
+        $top = Get-GitValue $Root @("rev-parse", "--show-toplevel")
+        $checkpoint = "root_alignment"
+        if ((Get-NormalPath $top) -ne (Get-NormalPath $Root)) {
             throw "Use the complete clean distribution at its repository root."
         }
+        $checkpoint = "git_status"
+        $changes = Get-GitValue $Root @("status", "--porcelain", "--untracked-files=all")
+        $checkpoint = "clean_status"
+        foreach ($change in @($changes -split "`n")) {
+            if (!$change) { continue }
+            if (!$NativeSnapshot -or $change -cne "?? .codex-marketplace-install.json") {
+                throw "Use the complete clean distribution at its repository root."
+            }
+        }
+        $checkpoint = "git_revision"
+        $revision = Get-GitValue $Root @("rev-parse", "--verify", "HEAD^{commit}")
+        $checkpoint = "revision_format"
+        if ($revision -cnotmatch '^[0-9a-f]{40}$') { throw "Invalid distribution commit." }
+        return $revision
+    } catch {
+        # Emit only fixed checkpoints and exception types, never private paths or Git output.
+        Write-Warning ("Git distribution validation failed: {0} ({1})." -f $checkpoint, $_.Exception.GetType().Name)
+        throw
     }
-    $revision = Get-GitValue $Root @("rev-parse", "--verify", "HEAD^{commit}")
-    if ($revision -cnotmatch '^[0-9a-f]{40}$') { throw "Invalid distribution commit." }
-    return $revision
 }
 function Get-NativeJson([string[]]$Arguments) {
     $output = & $Codex @Arguments

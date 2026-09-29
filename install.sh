@@ -139,7 +139,8 @@ restore_source() {
      { [[ -z "$INSTALL_PREVIOUS_COMMIT" ]] || ! snapshot_matches "$INSTALL_PREVIOUS_COMMIT"; }; then return 1; fi
   # Remove only newly selected installations, never a pre-existing package.
   restored=$(installed_plugins) || return 1
-  for product in "${INSTALL_ADDED_PRODUCTS[@]}"; do
+  # Bash 3.2 treats an empty array as unset under nounset; expand zero arguments.
+  for product in ${INSTALL_ADDED_PRODUCTS[@]+"${INSTALL_ADDED_PRODUCTS[@]}"}; do
     if printf '%s' "$restored" | jq -e --arg name "$product" 'any(.[]; .name == $name)' >/dev/null; then
       "$INSTALL_CODEX" plugin remove "$product@groundline" --json || return 1
     fi
