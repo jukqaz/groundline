@@ -293,7 +293,10 @@ pub(crate) fn run(
         "application_mode": application_mode,
         "target": target,
         "baseline_selection": {
-            "model": packet["current"]["model"],
+            // Out-of-scope native IDs can be private custom names. Keep the
+            // exact value in the input; disclose only reviewed public IDs.
+            "model": packet["current"]["model"].as_str()
+                .filter(|model| groundline_contracts::model::optimization_model(model)),
             "effort": packet["current"]["effort"]
         },
         "root_self_switch_supported": false,

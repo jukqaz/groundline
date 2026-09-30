@@ -1,6 +1,7 @@
 # GPT-6 model, effort, and delegation
 
-GroundLine optimizes for `gpt-6-astra`, `gpt-6-sol`, and `gpt-6-luna` only.
+GroundLine optimizes for exact `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol`, and
+`gpt-6-luna` IDs only. 6.1 Sol and 6.0 Sol remain separate candidates.
 Do not recommend, tune, benchmark for adoption, or silently fall back to earlier
 generations. Preserve historical records and explicit user selections; an
 older selected model requires a separately authorized move to an available
@@ -17,15 +18,19 @@ If no suitable GPT-6 model is available, report that boundary instead of choosin
 an older generation. Preserve the user's explicit task-level model/effort and
 service tier; dynamic selection applies only within the delegated scope.
 
-The September 28 App and PATH bundled catalogs list low/medium/high/xhigh/max for all three
-models and ultra for Astra/Sol only. Max allocates more reasoning to one task;
-Ultra combines maximum reasoning with suitable parallel delegation. Choose by
-the work's shape, not an assumption that Ultra is always better than Max.
-Apply the host's delegation controls and user policy. Ultra is not required for
-explicitly authorized subagents with individually selected efforts.
+Record the actual CLI source/version, check time, catalog hash, and whether the
+catalog was bundled or refreshed in private local evidence. A supplied hash or
+timestamp binds the input; it does not authenticate a server refresh, execution
+host or account access. No unconfirmed snapshot suffix is an availability alias.
 
-API Sol/Luna also support none; this does not establish native none support.
-API context sizes and reasoning modes are not Codex defaults. The API's
+The September 30 refreshed App/PATH observations include 6.1 Sol with native
+default low and supported low through ultra. The API describes a different
+default, effort range and context limit. These observations are dated evidence,
+not product presets. Max allocates depth to a task; supported Ultra can use
+suitable parallel work under native controls and existing delegation authority.
+Do not infer delegation permission or a required number of agents from effort.
+
+API effort support, context sizes and reasoning modes are not Codex defaults. The API's
 configuration_update mechanism does not prove that a Codex agent can change its
 own running effort. Use only controls exposed by the active runtime.
 
@@ -33,9 +38,8 @@ own running effort. Use only controls exposed by the active runtime.
 
 Select model and effort independently using ambiguity, dependencies, verification
 difficulty, failure impact, context needs, and the user's time/quality preference.
-Official starting points are Sol/medium, Luna/high, and Astra/low; these are
-recommendations, not the catalog's default values or ceilings. The observed App/PATH bundled catalogs default to Astra/low and Sol/Luna/medium.
-These observations are versioned metadata, not verified live account defaults. Use the whole supported effort range
+Official model guides can inform a task judgment; they do not fix the native
+catalog's defaults or ceilings. Use the whole currently supported effort range
 when justified, without quotas or a fixed explorer/worker/reviewer ladder. Start
 from the actual phase and acceptance check, not task length or token history.
 Ordinary task selection needs no history audit or empirical sample. Preserve an
@@ -45,7 +49,8 @@ establish that a cheaper choice preserves its quality.
 | Model | Work fit | Effort choice |
 | --- | --- | --- |
 | Luna | Clear briefs, coordinated edits, context gathering across apps, and problems with explicit constraints and objective checks | Low for fine-grained work; medium/high for creation and reasoning; xhigh for constrained analysis and prioritization; max for greater depth when workload checks support it |
-| Sol | Implementation, research and ambiguous multi-step work | Low through max according to depth; do not cap demanding Sol work at high |
+| 6.1 Sol | Complex coding, implementation, research and multi-step work with concrete acceptance checks | Use the exact host-supported range; distinguish native support from API support and keep explicit effort |
+| 6.0 Sol | Existing supported implementation and research lanes | Preserve its exact identity and selections; do not silently replace it with 6.1 |
 | Astra | Nuanced work, broad projects, coupled reasoning and synthesis across tools | Low for a scoped task needing Astra capability; medium through max for increasing depth and uncertainty |
 
 | Effort | Select when | Example, not a mandatory role mapping |
@@ -58,7 +63,7 @@ establish that a cheaper choice preserves its quality.
 | ultra | A supported model has a complex task with useful independent lanes | Coordinated end-to-end work under the host's delegation policy |
 
 Max is a first-choice option for a known hard problem, not a last resort after
-every lower effort has failed. All three GPT-6 models may use Max when supported;
+every lower effort has failed. Each reviewed model may use Max when supported;
 Luna/Max is neither equivalent to nor guaranteed cheaper than Sol/medium. Choose
 a stronger model directly when the issue is capability or broad judgment.
 Use Ultra only when decomposition adds value; a hard serial bottleneck can use
@@ -74,9 +79,9 @@ Frequent high-effort use alone is not evidence of wasted work.
 ## Adaptive delegation
 
 When the user requests adaptive delegation, that request authorizes suitable
-subagents throughout the task; do not ask again for every spawn. The applicable
-optimize-codex-workflow skill also requests bounded delegation for independent
-implementation/research lanes. Respect higher-priority instructions and explicit
+subagents throughout the task; do not ask again for every spawn. Applicable
+project instructions can also authorize independent lanes. Workflow assessment
+or skill discovery alone does not request delegation. Respect higher-priority instructions and explicit
 user restrictions. An advisory review alone does not enable delegation or
 override a no-delegation policy.
 
@@ -140,11 +145,12 @@ tokens and elapsed time. Historical unversioned astra/sol/luna cohorts and mixed
 or unknown generations cannot establish GPT-6 improvement. Core validates evidence
 offline; it does not add a model proxy, scheduler, or automatic inference service.
 
-Sources checked 2026-09-28:
+Sources checked 2026-09-30:
 - [Reasoning effort and Max](https://developers.openai.com/api/docs/guides/reasoning)
 - [Current skill and prompt guidance](https://developers.openai.com/blog/rethinking-skills-and-prompts-for-gpt-6-astra)
 - [GPT-6 family guidance](https://developers.openai.com/api/docs/guides/latest-model)
 - [GPT-6 Sol](https://developers.openai.com/api/docs/models/gpt-6-sol)
+- [GPT-6.1 Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol)
 - [GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna)
 - [Task-specific model choice](https://developers.openai.com/api/docs/guides/model-selection)
 - [Codex model selection](https://learn.chatgpt.com/docs/models)

@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
-const MODELS: &[&str] = &["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"];
 const EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max", "ultra"];
 pub const MAX_RESOURCE_ENTRIES: usize = 1000;
 pub const PHASES: &[&str] = &[
@@ -29,7 +28,7 @@ fn digest(value: &str) -> bool {
             .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
 fn selection(model: &str, effort: &str) -> bool {
-    MODELS.contains(&model) && EFFORTS.contains(&effort)
+    crate::model::optimization_model(model) && EFFORTS.contains(&effort)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -636,6 +635,25 @@ mod tests {
         })
     }
 
+    #[test]
+    fn sol_61_receipts_preserve_exact_root_and_child_observations() {
+        let mut value = receipt();
+        for field in ["recommendation", "requested", "effective"] {
+            value[field]["model"] = json!("gpt-6.1-sol");
+        }
+        value["resources"]["entries"][1]["effective"] = json!({
+            "model":"gpt-6-sol","effort":"medium","evidence_sha256":h(10)});
+        validate_receipt(&value).unwrap();
+        assert_eq!(value["schema"], 1);
+        assert_eq!(
+            outcome_from_receipt(&value).unwrap().unwrap()["model"],
+            "gpt-6.1-sol"
+        );
+        let summary = summarize_receipts(&[value.clone()]).unwrap();
+        assert!(summary.to_string().contains("gpt-6.1-sol"));
+        value["effective"]["model"] = json!("gpt-6.1-sol-unconfirmed-snapshot");
+        assert!(validate_receipt(&value).is_err());
+    }
     #[test]
     fn projects_actual_selection_and_owned_tokens_without_summing_child_elapsed_time() {
         let mut value = receipt();

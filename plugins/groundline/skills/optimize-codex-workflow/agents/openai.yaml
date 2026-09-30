@@ -1,6 +1,6 @@
 interface:
   display_name: "Optimize Codex Workflow"
-  short_description: "Choose GPT-6 model, effort, and useful subagent work"
-  default_prompt: "Use $optimize-codex-workflow to distribute independent work across GPT-6 subagents with suitable effort and verify their results, preserving my explicit choices and global settings."
+  short_description: "Improve Codex workflows with relevant skills, tools and evidence"
+  default_prompt: "Use $optimize-codex-workflow to assess my workflow, select relevant skills, tools and native capabilities, and verify outcomes while preserving my explicit model, effort, permissions and settings."
 policy:
   allow_implicit_invocation: true

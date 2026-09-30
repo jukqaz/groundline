@@ -13,7 +13,6 @@ use comparison::{
     score,
 };
 
-const MODELS: &[&str] = &["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"];
 const MIN_UNITS: usize = 10;
 const ROUTING_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max", "ultra"];
 
@@ -93,7 +92,7 @@ struct CatalogEffort {
 }
 
 fn supported(catalog: &Catalog, model: &str, effort: &str) -> bool {
-    MODELS.contains(&model)
+    crate::model::optimization_model(model)
         && ROUTING_EFFORTS.contains(&effort)
         && catalog.models.iter().any(|m| {
             m.slug == model
@@ -107,7 +106,7 @@ fn validate(
     packet: &Packet,
     catalog: &Catalog,
     catalog_value: &Value,
-) -> Result<DateTime<Utc>, ContractError> {
+) -> Result<(DateTime<Utc>, DateTime<Utc>), ContractError> {
     let now = Utc::now();
     let generated = timestamp(&packet.generated_at_utc)?;
     let catalog_checked = timestamp(&packet.catalog_checked_at_utc)?;
@@ -135,12 +134,10 @@ fn validate(
         || !digest(&packet.task.evidence_sha256)
         || packet.catalog_sha256 != catalog_hash
         || catalog_checked > generated
-        || generated - catalog_checked > Duration::hours(24)
-        || !MODELS.contains(&packet.current.model.as_str())
+        || !crate::model::valid_id(&packet.current.model)
         || !ROUTING_EFFORTS.contains(&packet.current.effort.as_str())
         || packet.outcomes.len() > 1000
         || generated > now + Duration::minutes(5)
-        || now - generated > Duration::hours(24)
     {
         return Err(error("invalid_evidence"));
     }
@@ -150,7 +147,7 @@ fn validate(
             || !ids.insert(&row.unit_hash)
             || !digest(&row.evidence_sha256)
             || !digest(&row.cohort_sha256)
-            || !MODELS.contains(&row.model.as_str())
+            || !crate::model::valid_id(&row.model)
             || !ROUTING_EFFORTS.contains(&row.effort.as_str())
             || !["verified", "failed", "unknown"].contains(&row.outcome.as_str())
             || !["runtime_check", "user_acceptance", "unobserved"]
@@ -164,8 +161,12 @@ fn validate(
     }
     // Native catalog is an availability source, not an instruction. Reject ambiguous entries.
     let mut model_names = BTreeSet::new();
+    if catalog.models.len() > 512 {
+        return Err(error("invalid_catalog"));
+    }
     for model in &catalog.models {
-        if !model_names.insert(&model.slug)
+        if !crate::model::valid_id(&model.slug)
+            || !model_names.insert(&model.slug)
             || model.supported_reasoning_levels.len() > 16
             || model
                 .supported_reasoning_levels
@@ -178,7 +179,7 @@ fn validate(
             return Err(error("invalid_catalog"));
         }
     }
-    Ok(generated)
+    Ok((generated, catalog_checked))
 }
 
 /// Return a next-lane suggestion. This never writes Codex configuration.
@@ -190,7 +191,7 @@ pub fn propose(packet: &Value, catalog: &Value) -> Result<Value, ContractError> 
         serde_json::from_value(packet.clone()).map_err(|_| error("invalid_evidence"))?;
     let parsed_catalog: Catalog =
         serde_json::from_value(catalog.clone()).map_err(|_| error("invalid_catalog"))?;
-    validate(&packet, &parsed_catalog, catalog)?;
+    let (generated, catalog_checked) = validate(&packet, &parsed_catalog, catalog)?;
     let base = |status: &str, reasons: Vec<&str>, suggestion: Value| {
         json!({
             "kind":"groundline-routing-proposal","schema":2,"status":status,
@@ -204,30 +205,57 @@ pub fn propose(packet: &Value, catalog: &Value) -> Result<Value, ContractError> 
             "automatic_config_write":false,"causal_improvement_claimed":false,
             "optimality_claimed":false,"raw_content_emitted":false,
             "evidence_origin":"operator_supplied",
+            "catalog_evidence":{
+                "source":"operator_supplied_native_catalog",
+                "checked_at_utc":packet.catalog_checked_at_utc,
+                "sha256":packet.catalog_sha256,
+                "fresh":Utc::now() - catalog_checked <= Duration::hours(24),
+                "freshness_basis":"operator_timestamp_as_of_evaluation",
+                "host_identity":"unobserved","refresh_channel":"unobserved",
+                "source_authenticity_verified":false,"account_availability_verified":false
+            },
         })
     };
-    if !supported(
-        &parsed_catalog,
-        &packet.current.model,
-        &packet.current.effort,
-    ) {
-        return Ok(base(
-            "INCONCLUSIVE",
-            vec!["current_selection_not_in_native_catalog"],
-            Value::Null,
-        ));
+    let mut selection_limits = Vec::new();
+    if !crate::model::optimization_model(&packet.current.model) {
+        selection_limits.push("current_selection_outside_optimization_scope");
+    }
+    if Utc::now() - generated > Duration::hours(24) {
+        selection_limits.push("routing_evidence_stale");
+    }
+    if Utc::now() - catalog_checked > Duration::hours(24) {
+        selection_limits.push("native_catalog_stale");
+    }
+    if crate::model::optimization_model(&packet.current.model)
+        && !supported(
+            &parsed_catalog,
+            &packet.current.model,
+            &packet.current.effort,
+        )
+    {
+        selection_limits.push("current_selection_not_in_native_catalog");
     }
     if packet.current.explicit {
-        return Ok(base(
-            "PINNED",
-            vec!["explicit_selection_preserved"],
-            Value::Null,
-        ));
+        let mut reasons = vec!["explicit_selection_preserved"];
+        reasons.extend(selection_limits);
+        return Ok(base("PINNED", reasons, Value::Null));
+    }
+    if !selection_limits.is_empty() {
+        return Ok(base("INCONCLUSIVE", selection_limits, Value::Null));
     }
     if packet.quality_status == "FAIL" {
         return Ok(base(
             "INCONCLUSIVE",
             vec!["evidence_quality_failed"],
+            Value::Null,
+        ));
+    }
+    if packet.outcomes.iter().any(|row| {
+        row.cohort_sha256 == packet.cohort_sha256 && !crate::model::optimization_model(&row.model)
+    }) {
+        return Ok(base(
+            "INCONCLUSIVE",
+            vec!["matched_outcome_outside_optimization_scope"],
             Value::Null,
         ));
     }
@@ -377,6 +405,7 @@ mod tests {
     }
     fn catalog() -> Value {
         json!({"models":[
+            {"slug":"gpt-6.1-sol","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"ultra"}]},
             {"slug":"gpt-6-astra","supported_reasoning_levels":[{"effort":"high"},{"effort":"max"},{"effort":"ultra"}]},
             {"slug":"gpt-6-sol","supported_reasoning_levels":[{"effort":"medium"},{"effort":"max"}]},
             {"slug":"gpt-6-luna","supported_reasoning_levels":[{"effort":"low"},{"effort":"high"}]}
@@ -482,6 +511,74 @@ mod tests {
         p["current"]["effort"] = json!("ultra");
         assert_eq!(propose(&p, &c).unwrap()["status"], "INCONCLUSIVE");
         p["current"]["model"] = json!("gpt-5.6-sol");
+        let result = propose(&p, &c).unwrap();
+        assert_eq!(result["status"], "INCONCLUSIVE");
+        assert!(
+            result["reason_codes"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("current_selection_outside_optimization_scope"))
+        );
+    }
+    #[test]
+    fn sol_61_is_distinct_and_requires_current_native_support() {
+        let c = catalog();
+        let mut p = packet(&c);
+        p["current"]["model"] = json!("gpt-6.1-sol");
+        assert_eq!(
+            propose(&p, &c).unwrap()["reason_codes"],
+            json!(["native_task_judgment_required"])
+        );
+        p["current"]["explicit"] = json!(true);
+        assert_eq!(propose(&p, &c).unwrap()["status"], "PINNED");
+        p["current"]["effort"] = json!("max");
+        let pinned = propose(&p, &c).unwrap();
+        assert_eq!(pinned["status"], "PINNED");
+        assert!(
+            pinned["reason_codes"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("current_selection_not_in_native_catalog"))
+        );
+        assert!(pinned["suggestion"].is_null());
+        p["current"]["explicit"] = json!(false);
+        p["current"]["effort"] = json!("medium");
+        p["outcomes"] = json!(
+            (0..10)
+                .map(|i| row(i + 10, "gpt-6.1-sol", "medium", Some(100)))
+                .chain((0..10).map(|i| row(i + 30, "gpt-6-sol", "medium", Some(70))))
+                .collect::<Vec<_>>()
+        );
+        let result = propose(&p, &c).unwrap();
+        assert_eq!(result["status"], "EMPIRICAL");
+        assert_eq!(result["suggestion"]["model"], "gpt-6-sol");
+        assert_eq!(result["automatic_config_write"], false);
+    }
+    #[test]
+    fn valid_out_of_scope_ids_and_stale_catalog_are_not_malformed_packets() {
+        let c = catalog();
+        let mut p = packet(&c);
+        for model in [
+            "gpt-5.6-sol",
+            "gpt-6.2-sol",
+            "gpt-7-sol",
+            "gpt-6.1-sol-unconfirmed-snapshot",
+        ] {
+            p["current"]["model"] = json!(model);
+            let result = propose(&p, &c).unwrap();
+            assert_eq!(result["status"], "INCONCLUSIVE");
+            assert_eq!(
+                result["reason_codes"][0],
+                "current_selection_outside_optimization_scope"
+            );
+            assert!(result["suggestion"].is_null());
+        }
+        p["current"]["model"] = json!("gpt-6.1-sol");
+        p["catalog_checked_at_utc"] = json!((Utc::now() - Duration::days(2)).to_rfc3339());
+        let result = propose(&p, &c).unwrap();
+        assert_eq!(result["status"], "INCONCLUSIVE");
+        assert_eq!(result["reason_codes"], json!(["native_catalog_stale"]));
+        p["current"]["model"] = json!("invalid\nmodel");
         assert!(propose(&p, &c).is_err());
     }
     #[test]
@@ -518,7 +615,7 @@ mod tests {
     #[test]
     fn observed_sol_and_luna_max_are_not_replaced_by_task_shape_defaults() {
         let mut c = catalog();
-        c["models"][2]["supported_reasoning_levels"]
+        c["models"][3]["supported_reasoning_levels"]
             .as_array_mut()
             .unwrap()
             .push(json!({"effort":"max"}));
@@ -571,7 +668,10 @@ mod tests {
         assert!(propose(&p, &c).is_err());
         p["outcomes"] = json!([]);
         p["catalog_checked_at_utc"] = json!((Utc::now() - Duration::days(2)).to_rfc3339());
-        assert!(propose(&p, &c).is_err());
+        assert_eq!(
+            propose(&p, &c).unwrap()["reason_codes"],
+            json!(["native_catalog_stale"])
+        );
     }
     #[test]
     fn arbitrary_effort_and_retired_policy_fields_are_rejected() {

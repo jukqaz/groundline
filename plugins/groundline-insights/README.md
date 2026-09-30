@@ -1,10 +1,16 @@
 # GroundLine Insights
 
 Insights is an optional, independently installable companion to Core. Four
-fail-open Codex hooks collect bounded native App/CLI activity into a private
+fail-open Codex hooks collect bounded local native App/CLI activity into a private
 aggregate outbox for an owner-operated HTTPS API, ClickHouse, and Grafana.
 Tailnet restriction is optional. Core, inference proxies, model catalogs, and
 provider credentials are not dependencies.
+
+Collection covers supported state in the selected local Codex home. Cloud
+orchestration, automatic cloud reviews, dots and account-wide activity are not
+covered. Another machine requires its own supported reader and consented
+collector. `remote_headless` metadata does not establish cloud coverage, and a
+tool executing on a Mac does not establish where its task is orchestrated.
 
 Insights installs no skills, daemon, or scheduler and changes no global Codex
 settings. [Security](SECURITY.md) and the
@@ -64,6 +70,13 @@ Collection starts with seven days, preserves subsequent cursors, and freezes
 incomplete windows. Three failed read attempts require operator retry. For status,
 source discovery, gaps, and safe recovery use
 [operations troubleshooting](references/operations-troubleshooting.md).
+
+`worker status` separates `collection_scope` from `execution_evidence`. Local
+markers can be pending or claimed; worker handling, completed collection and
+recorded delivery acknowledgements have independent observations. Native plugin
+enablement, hook trust and dispatch stay unobserved until checked through Codex.
+Missing, stale and pre-activation records do not prove current success. Status
+does not recheck a server receipt or change consent, identity, cursors or markers.
 
 Fleet reporting is a separate administrative operation:
 

@@ -448,7 +448,7 @@ fn real_codex_upgrades_metadata_repeats_and_preserves_settings_and_consent() {
 
     assert_blocked(run_installer("core"), "insights_server_compatibility");
     assert_eq!(saved_files(&insights_state), saved_state);
-    health.revision.store(8, Ordering::Relaxed);
+    health.revision.store(9, Ordering::Relaxed);
     for failure in ["add", "upgrade"] {
         let output = run_installer_with_failure("core", Some(failure));
         let receipt = package::receipt(&output);

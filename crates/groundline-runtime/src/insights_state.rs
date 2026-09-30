@@ -546,17 +546,17 @@ fn read_owner_policy(path: &Path) -> Result<OwnerPolicy, StateError> {
     Ok(policy)
 }
 
-fn policy_enabled(directory: &Path) -> Result<bool, StateError> {
+fn current_policy(directory: &Path) -> Result<Option<OwnerPolicy>, StateError> {
     let path = directory.join(POLICY_FILE);
     if !path.exists() {
-        return Ok(false);
+        return Ok(None);
     }
     let policy = read_owner_policy(&path)?;
-    let enabled = match policy.status.as_str() {
-        "active" if policy.automatic_activity_checkpoints => true,
-        "revoked" if !policy.automatic_activity_checkpoints => false,
+    match policy.status.as_str() {
+        "active" if policy.automatic_activity_checkpoints => (),
+        "revoked" if !policy.automatic_activity_checkpoints => (),
         _ => return Err(StateError::LocalState),
-    };
+    }
     if policy.collection_scope != "all_activity"
         || policy.diagnostic_enabled
         || policy.trigger_mode != "native_hook_checkpoints"
@@ -564,7 +564,11 @@ fn policy_enabled(directory: &Path) -> Result<bool, StateError> {
     {
         return Err(StateError::LocalState);
     }
-    Ok(enabled)
+    Ok(Some(policy))
+}
+
+fn policy_enabled(directory: &Path) -> Result<bool, StateError> {
+    Ok(current_policy(directory)?.is_some_and(|policy| policy.status == "active"))
 }
 
 fn set_policy(directory: &Path, enabled: bool, now: DateTime<Utc>) -> Result<(), StateError> {
@@ -1381,11 +1385,13 @@ pub fn enable(codex_home: &Path) -> Result<Value, StateError> {
     let _control = collection_control_lock(&directory)?;
     _control.try_lock().map_err(|_| StateError::LocalState)?;
     // Refuse unsupported state before creating consent or replacing a policy.
-    policy_enabled(&directory)?;
+    let already_enabled = policy_enabled(&directory)?;
     current_status(&directory)?;
     grant_consent(&directory, now)?;
     initialize(&directory, now)?;
-    set_policy(&directory, true, now)?;
+    if !already_enabled {
+        set_policy(&directory, true, now)?;
+    }
     Ok(json!({
         "status":"PASS","enabled":true,"mutation_performed":true,
         "consent_status":"active",
@@ -1414,6 +1420,32 @@ fn current_status(directory: &Path) -> Result<Option<Status>, StateError> {
     read_stored_status(&path).map(Some)
 }
 
+fn observation_status(
+    at: Option<&str>,
+    active_since: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> &'static str {
+    let Some(at) = at else {
+        return "unobserved";
+    };
+    let Ok(at) = parse_timestamp(at) else {
+        return "unavailable";
+    };
+    if at - now > MAX_CLOCK_SKEW {
+        return "clock_skew";
+    }
+    let Some(active_since) = active_since else {
+        return "activation_unobserved";
+    };
+    if at < active_since {
+        return "before_current_activation";
+    }
+    if now - at > COLLECTION_STALE_AFTER {
+        return "stale";
+    }
+    "observed"
+}
+
 fn status_with_tailnet_at(
     codex_home: &Path,
     tailnet: Value,
@@ -1421,7 +1453,14 @@ fn status_with_tailnet_at(
 ) -> Result<Value, StateError> {
     let directory = state_directory(codex_home)?;
     let policy_configured = tailnet::is_regular_file(&directory.join(POLICY_FILE));
-    let enabled = policy_enabled(&directory)?;
+    let policy = current_policy(&directory)?;
+    let enabled = policy
+        .as_ref()
+        .is_some_and(|value| value.status == "active");
+    let active_since = policy
+        .as_ref()
+        .filter(|_| enabled)
+        .and_then(|value| parse_timestamp(&value.updated_at_utc).ok());
     let outbox = pending_events(&directory, 0)?;
     let pending = outbox.observed_count as u64;
     let retry = read_delivery_retry(&directory)?;
@@ -1522,7 +1561,11 @@ fn status_with_tailnet_at(
     } else if collection_stale {
         blocking_reason_codes.push("collection_stale");
         ("WARN", "stale")
-    } else if last_success_utc.is_none() {
+    } else if last_success_utc.is_none()
+        || last_success_at
+            .zip(active_since)
+            .is_some_and(|(last, active)| last < active)
+    {
         blocking_reason_codes.push("first_collection_pending");
         ("WARN", "awaiting_first_collection")
     } else if last_result_code != Some("pass") {
@@ -1532,6 +1575,27 @@ fn status_with_tailnet_at(
         ("PASS", "active")
     };
     let history = activity_history::read(&directory);
+    let captures = crate::checkpoint::capture_status(codex_home);
+    let confirmation = delivery_confirmation::read(&directory)?;
+    let hook_at = history
+        .as_ref()
+        .ok()
+        .and_then(|value| value.last_hook_at_utc.as_deref());
+    let delivery_at = confirmation
+        .as_ref()
+        .map(|value| value.confirmed_at_utc.as_str());
+    let execution_evidence = json!({
+        "plugin_installation":"unobserved","native_plugin_enabled":"unobserved",
+        "native_hook_trust":"unobserved","native_hook_dispatch":"unobserved",
+        "capture":captures.as_ref().ok(),"capture_status_unavailable":captures.is_err(),
+        "capture_observation":observation_status(captures.as_ref().ok()
+            .and_then(|value| value["latest_capture_at_utc"].as_str()), active_since, now),
+        "worker_hook_handling":observation_status(hook_at, active_since, now),
+        "collection_observation":observation_status(last_success_utc, active_since, now),
+        "delivery_observation":observation_status(delivery_at, active_since, now),
+        "delivery_state":if pending > 0 {"pending"} else if confirmation.is_some() {"acknowledgement_recorded"} else {"unobserved"},
+        "server_receipt_rechecked":false
+    });
     let mut result = json!({
         "kind":"groundline-insights-worker-status","schema":2,"status":overall_status,
         "collection_state":collection_state,"ready_to_collect":ready_to_collect,"collection_stale":collection_stale,"blocking_reason_codes":blocking_reason_codes,
@@ -1553,9 +1617,16 @@ fn status_with_tailnet_at(
         "last_check_result_code":last_result_code,
         "last_check_utc":previous.as_ref().map(|value| value.last_check_utc.as_str()),"last_success_utc":last_success_utc,
         "last_collected_through_utc":previous.as_ref().and_then(|value| value.last_collected_through_utc.as_deref()),
-        "delivery_confirmation":delivery_confirmation::read(&directory)?,
+        "delivery_confirmation":confirmation,
         "tailnet_required":tailnet_required,"tailnet":tailnet,"raw_content_emitted":false,"private_paths_emitted":false,"secret_value_printed":false,
     });
+    result["collection_scope"] = json!({
+        "source":"selected_local_codex_app_or_cli_state",
+        "orchestration_location":"unknown","account_wide_coverage":"unobserved",
+        "cloud_orchestration":"unsupported","other_machines":"unobserved",
+        "remote_headless_requires_local_state_and_consent":true
+    });
+    result["execution_evidence"] = execution_evidence;
     result["activity_history"] = json!(history.as_ref().ok());
     result["history_unavailable"] = json!(history.is_err());
     result["last_delivery_error_code"] =
@@ -1937,12 +2008,12 @@ mod tests {
     use super::{
         CONSENT_FILE, DeliveryRetry, ENROLLMENT_TOKEN_PATH, IDENTITY_FILE, MAX_OUTBOX_EVENTS,
         OUTBOX_DIR, POLICY_FILE, PROFILE_PATH, QUARANTINE_DIR, STATUS_FILE, StateError, Status,
-        active_consent, checkpoint_enabled, classify_response_status, collection_is_due,
-        configure_profile, current_status, delivery_is_due, disable, enable,
+        StatusUpdate, active_consent, checkpoint_enabled, classify_response_status,
+        collection_is_due, configure_profile, current_status, delivery_is_due, disable, enable,
         explicit_operator_retry, latest_timestamp, operator_retry_blocked, pending_events,
-        policy_enabled, read_json, record_delivery_retry, set_policy, state_directory,
-        status_with_tailnet, status_with_tailnet_at, validate_upload_response, write_json,
-        write_status,
+        persist_cycle_status, policy_enabled, read_json, record_delivery_retry, set_policy,
+        state_directory, status_with_tailnet, status_with_tailnet_at, validate_upload_response,
+        write_json, write_status,
     };
 
     pub(super) fn profile(extra: &str) -> Vec<u8> {
@@ -2120,9 +2191,112 @@ mod tests {
         assert_eq!(result["collection_state"], "awaiting_first_collection");
         assert_eq!(result["ready_to_collect"], true);
         assert_eq!(
+            result["collection_scope"]["cloud_orchestration"],
+            "unsupported"
+        );
+        assert_eq!(
+            result["collection_scope"]["orchestration_location"],
+            "unknown"
+        );
+        assert_eq!(
+            result["execution_evidence"]["native_hook_trust"],
+            "unobserved"
+        );
+        assert_eq!(
+            result["execution_evidence"]["worker_hook_handling"],
+            "unobserved"
+        );
+        assert_eq!(
+            result["execution_evidence"]["delivery_observation"],
+            "unobserved"
+        );
+        assert_eq!(
             result["blocking_reason_codes"],
             json!(["first_collection_pending"])
         );
+    }
+
+    #[test]
+    fn reenabled_status_preserves_history_without_claiming_current_execution() {
+        let home = tempdir().unwrap();
+        configure_profile(home.path(), &profile("")).unwrap();
+        enable(home.path()).unwrap();
+        native_store(home.path());
+        let directory = state_directory(home.path()).unwrap();
+        let now = DateTime::parse_from_rfc3339("2026-09-30T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let before_activation = now - chrono::Duration::hours(2);
+        set_policy(&directory, true, now - chrono::Duration::hours(1)).unwrap();
+        let update = |successful| StatusUpdate {
+            result_code: "pass",
+            collected_through_utc: Some(before_activation.to_rfc3339()),
+            uploaded_count: 0,
+            pending_event_count: 0,
+            tailnet_status: "connected".into(),
+            trigger: "session_end_hook",
+            successful,
+        };
+        persist_cycle_status(&directory, None, before_activation, update(true)).unwrap();
+        super::delivery_confirmation::record(&directory, 1, before_activation).unwrap();
+        let files = [
+            POLICY_FILE,
+            STATUS_FILE,
+            "activity-history.json",
+            "delivery-confirmation.json",
+            CONSENT_FILE,
+            IDENTITY_FILE,
+        ];
+        let before = files.map(|file| std::fs::read(directory.join(file)).unwrap());
+        let result =
+            status_with_tailnet_at(home.path(), json!({"tailnet_connected":true}), now).unwrap();
+        assert_eq!(result["status"], "WARN");
+        assert_eq!(result["collection_state"], "awaiting_first_collection");
+        for field in [
+            "worker_hook_handling",
+            "collection_observation",
+            "delivery_observation",
+        ] {
+            assert_eq!(
+                result["execution_evidence"][field],
+                "before_current_activation"
+            );
+        }
+        assert_eq!(
+            result["execution_evidence"]["native_hook_dispatch"],
+            "unobserved"
+        );
+        assert_eq!(
+            result["execution_evidence"]["server_receipt_rechecked"],
+            false
+        );
+        assert_eq!(
+            files.map(|file| std::fs::read(directory.join(file)).unwrap()),
+            before
+        );
+        assert!(!result.to_string().contains(home.path().to_str().unwrap()));
+
+        persist_cycle_status(
+            &directory,
+            None,
+            now - chrono::Duration::minutes(10),
+            update(true),
+        )
+        .unwrap();
+        let current =
+            status_with_tailnet_at(home.path(), json!({"tailnet_connected":true}), now).unwrap();
+        assert_eq!(current["collection_state"], "active");
+        assert_eq!(
+            current["execution_evidence"]["worker_hook_handling"],
+            "observed"
+        );
+        assert_eq!(
+            current["execution_evidence"]["delivery_observation"],
+            "before_current_activation"
+        );
+        let policy = std::fs::read(directory.join(POLICY_FILE)).unwrap();
+        enable(home.path()).unwrap();
+        assert_eq!(std::fs::read(directory.join(POLICY_FILE)).unwrap(), policy);
     }
 
     #[test]
@@ -2714,6 +2888,7 @@ fn api_capability_matrix_requires_semantic_contract_without_version_pinning() {
         json!({"basic_schema_versions":[5],"basic_contract_revision":4}),
         json!({"basic_schema_versions":[5],"basic_contract_revision":5}),
         json!({"basic_schema_versions":[5],"basic_contract_revision":7}),
+        json!({"basic_schema_versions":[5],"basic_contract_revision":8}),
         json!({"basic_schema_versions":[6],"basic_contract_revision":99}),
     ] {
         let value = json!({"storage_ready":true,"ingest_capabilities":capabilities});
@@ -2744,6 +2919,7 @@ async fn capability_preflight_handles_real_http_new_old_and_unready_servers() {
     for (status, body, expected) in [
         (200,json!({"storage_ready":true,"ingest_capabilities":groundline_contracts::insights::ingest_capabilities()}).to_string(),"ok"),
         (200,json!({"storage_ready":true}).to_string(),"api_upgrade_required"),
+        (200,json!({"storage_ready":true,"ingest_capabilities":{"basic_schema_versions":[5],"basic_contract_revision":8}}).to_string(),"api_upgrade_required"),
         (404,"old api html".to_owned(),"api_upgrade_required"),
         (503,json!({"storage_ready":false}).to_string(),"event_upload_failed"),
         (403,"not json".to_owned(),"remote_authentication_rejected"),

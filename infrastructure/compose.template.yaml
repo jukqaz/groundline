@@ -362,7 +362,7 @@ configs:
     content: |
       {
         "annotations": {"list": [{"name": "서버 시작 / 수집 버전 등록", "enable": true, "iconColor": "blue", "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"}, "target": {"refId": "A", "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"}, "rawSql": "SELECT occurred_at AS time,concat(kind,': ',version) AS text FROM groundline.lifecycle WHERE $$__timeFilter(occurred_at) AND (collector_id IS NULL OR ('__all' IN ($${install:sqlstring}) OR lower(hex(SHA256(toString(collector_id)))) IN ($${install:sqlstring}))) ORDER BY occurred_at", "format": 1, "editorType": "sql", "queryType": "sql"}}]},
-        "description": "선택한 설치와 버전의 관측 구간 집계입니다. 미측정 값은 실제 0과 다르며 혼합 모델의 토큰을 모델별로 배분하지 않습니다.",
+        "description": "선택한 로컬 Codex 설치와 버전의 관측 구간 집계입니다. 계정 전체·cloud orchestration 수집을 뜻하지 않습니다. 미측정 값은 실제 0과 다르며 혼합 모델의 토큰을 모델별로 배분하지 않습니다.",
         "editable": false,
         "fiscalYearStartMonth": 0,
         "graphTooltip": 1,
@@ -821,7 +821,7 @@ configs:
           },
           {
             "datasource": {"type": "grafana-clickhouse-datasource", "uid": "groundline-clickhouse"},
-            "description": "Install-weighted fleet coverage. Never-reported installations are split into a 24-hour initial grace window and overdue; observed installations outside the 7-day recent window are stale. current_package_claim is only the registry's latest-package claim; current_observed/reporting/recent require an accepted event at the policy latest version. Unknown and legacy metadata are not zero or a negative claim.",
+            "description": "Coverage of registered local Codex collectors, not account-wide or cloud activity. Package claims do not prove hook trust, dispatch or current delivery. Install-weighted fleet coverage. Never-reported installations are split into a 24-hour initial grace window and overdue; observed installations outside the 7-day recent window are stale. current_package_claim is only the registry's latest-package claim; current_observed/reporting/recent require an accepted event at the policy latest version. Unknown and legacy metadata are not zero or a negative claim.",
             "fieldConfig": {"defaults": {}, "overrides": []},
             "gridPos": {"h": 6, "w": 24, "x": 0, "y": 4},
             "id": 15,

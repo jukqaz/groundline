@@ -82,6 +82,7 @@ async fn health_checks_preserve_state_and_never_send_credentials_or_collect() {
     for (status, body, expected) in [
         (200, json!({"storage_ready":true,"ingest_capabilities":groundline_contracts::insights::ingest_capabilities()}).to_string(), "api_compatible"),
         (200, json!({"storage_ready":true,"ingest_capabilities":{"basic_schema_versions":[5],"basic_contract_revision":7}}).to_string(), "api_upgrade_required"),
+        (200, json!({"storage_ready":true,"ingest_capabilities":{"basic_schema_versions":[5],"basic_contract_revision":8}}).to_string(), "api_upgrade_required"),
         (404, "old api".to_owned(), "api_upgrade_required"),
         (503, json!({"storage_ready":false}).to_string(), "event_upload_failed"),
         (200, "PRIVATE_SERVER_BODY".to_owned(), "event_upload_failed"),
@@ -109,7 +110,7 @@ async fn health_checks_preserve_state_and_never_send_credentials_or_collect() {
         server.await.unwrap();
         assert_eq!(result["status"], if expected == "api_compatible" { "PASS" } else { "FAIL" });
         assert_eq!(result["result_code"], expected);
-        assert_eq!(result["required_basic_contract_revision"], 8);
+        assert_eq!(result["required_basic_contract_revision"], 9);
         assert_eq!(result["network_attempted"], true);
         assert_eq!(result["mutation_performed"], false);
         assert!(!result.to_string().contains(&endpoint));

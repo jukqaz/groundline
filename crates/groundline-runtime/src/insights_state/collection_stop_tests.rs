@@ -114,6 +114,86 @@ async fn onboarding_requires_consent_and_keeps_fresh_history_uncommitted() {
 }
 
 #[tokio::test]
+async fn revision_eight_api_preserves_prepared_window_cursor_identity_and_ack() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let home = setup(&format!("http://{}", listener.local_addr().unwrap()));
+    let directory = state_directory(home.path()).unwrap();
+    let now = Utc::now();
+    let start = (now - chrono::Duration::hours(2)).to_rfc3339();
+    let end = (now - chrono::Duration::hours(1)).to_rfc3339();
+    // A prepared empty window is valid and must survive an API incompatibility.
+    write_json(
+        &directory.join("collection-window.json"),
+        &json!({
+            "schema_version":1,"start_utc":start,"end_utc":end,
+            "attempts":1,"prepared":true,"event":null
+        }),
+    )
+    .unwrap();
+    persist_cycle_status(
+        &directory,
+        None,
+        now - chrono::Duration::hours(2),
+        StatusUpdate {
+            result_code: "pass",
+            collected_through_utc: Some(start.clone()),
+            uploaded_count: 1,
+            pending_event_count: 0,
+            tailnet_status: "not_required".into(),
+            trigger: "manual",
+            successful: true,
+        },
+    )
+    .unwrap();
+    delivery_confirmation::record(&directory, 1, now - chrono::Duration::hours(2)).unwrap();
+    let files = [
+        IDENTITY_FILE,
+        CONSENT_FILE,
+        POLICY_FILE,
+        "collection-window.json",
+        "delivery-confirmation.json",
+    ];
+    let before = files.map(|file| std::fs::read(directory.join(file)).unwrap());
+    let worker_home = home.path().to_owned();
+    let worker =
+        tokio::spawn(async move { run_once(Path::new("."), &worker_home, "manual").await });
+    let (health, _) = request(&listener, "get /healthz ").await;
+    respond(
+        health,
+        json!({"storage_ready":true,"ingest_capabilities":{
+            "basic_schema_versions":[5],"basic_contract_revision":8
+        }}),
+    )
+    .await;
+    assert!(matches!(
+        worker.await.unwrap(),
+        Err(StateError::ApiUpgradeRequired)
+    ));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), listener.accept())
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        files.map(|file| std::fs::read(directory.join(file)).unwrap()),
+        before
+    );
+    let status = current_status(&directory).unwrap().unwrap();
+    assert_eq!(
+        status.last_collected_through_utc.as_deref(),
+        Some(start.as_str())
+    );
+    assert_eq!(status.last_result_code, "api_upgrade_required");
+    assert!(
+        read_delivery_retry(&directory)
+            .unwrap()
+            .unwrap()
+            .operator_required
+    );
+    assert_eq!(pending_events(&directory, 0).unwrap().observed_count, 0);
+}
+
+#[tokio::test]
 async fn stop_during_health_or_enrollment_prevents_following_requests_and_collection() {
     for delayed_step in [0, 1] {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

@@ -100,6 +100,30 @@ credential is rejected before identity, consent, or policy state is created.
 Seven days without a successful collection becomes `collection_state: stale`;
 a success timestamp more than five minutes in the future becomes `clock_skew`.
 
+`collection_scope` describes supported local App/CLI state only. Account-wide
+activity and other machines are unobserved; cloud orchestration is unsupported.
+The declared `remote_headless` dimension does not establish cloud hook support.
+Orchestration location stays unknown without evidence from the native host.
+
+`execution_evidence` separates native installation/enablement/trust/dispatch,
+bounded capture markers, worker hook handling, collection and acknowledgement.
+The status command cannot authenticate native dispatch: manually invoked hook
+commands can create the same markers. Inspect Codex's effective hook support and
+trusted hash, then a fresh native event and its durable handling. A pending
+marker is not a processed capture; a historical `last_hook_at_utc` is not proof
+that all four events ran. Capture inspection is read-only and bounded to the
+existing eight slots; unreadable markers report unavailable without clearing them.
+
+Observations older than the current activation are `before_current_activation`,
+missing timestamps are `unobserved`, and old/future timestamps remain stale or
+clock-skew evidence. Repeated enable on an active policy preserves its activation
+time; an actual revoke/re-enable requires a fresh collection before active status.
+`ready_to_collect` means prerequisites are present, not that collection or
+delivery succeeded. `acknowledgement_recorded` retains the latest local batch
+receipt; pending events remain pending, and status never rechecks the server or
+proves ClickHouse/Grafana freshness. Keep consent, identity, outbox, cursors and
+ACKs intact while diagnosing each phase.
+
 `enrollment_credential_valid` checks only the local file and its token format;
 it does not make a network request or prove server acceptance. A reviewed API
 client can use `POST /v1/enroll/check` with the owner enrollment credential to

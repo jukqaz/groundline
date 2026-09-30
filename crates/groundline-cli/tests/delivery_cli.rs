@@ -13,7 +13,10 @@ fn artifact(dir: &TempDir, name: &str, value: &Value) -> Value {
 }
 
 fn manifest(dir: &TempDir) -> Value {
-    let model = "gpt-6-sol";
+    manifest_for_model(dir, "gpt-6-sol")
+}
+
+fn manifest_for_model(dir: &TempDir, model: &str) -> Value {
     let effort = "medium";
     let proposal = artifact(
         dir,
@@ -60,6 +63,26 @@ fn run(dir: &TempDir, manifest: &Value) -> std::process::Output {
         .arg("--json")
         .output()
         .unwrap()
+}
+
+#[test]
+fn sol_61_records_exact_selection_without_changing_receipt_schema() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = manifest_for_model(&dir, "gpt-6.1-sol");
+    let result = run(&dir, &fixture);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stdout)
+    );
+    let saved: Value =
+        serde_json::from_slice(&fs::read(dir.path().join("receipt.json")).unwrap()).unwrap();
+    assert_eq!(saved["schema"], 1);
+    for field in ["recommendation", "requested", "effective"] {
+        assert_eq!(saved[field]["model"], "gpt-6.1-sol");
+    }
+    assert_eq!(saved["activation_verified"], false);
+    assert_eq!(saved["observed_selection_matches_requested"], true);
 }
 
 #[test]

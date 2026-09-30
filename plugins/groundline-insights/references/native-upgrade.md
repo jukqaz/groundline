@@ -17,7 +17,7 @@ groundline-insights worker status
 
 Record version, target, checksum, hook count, and lifecycle receipt separately.
 A cache directory proves no dispatch. Upgrade the owner API first: the current
-collector requires Basic schema 5 and ingest contract revision 8 or newer.
+collector requires Basic schema 5 and ingest contract revision 9 or newer.
 
 Use that reviewed distribution's `install.sh`. Before native writes it checks
 the candidate artifacts and runs the candidate's read-only `worker check-server`

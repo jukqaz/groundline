@@ -2,6 +2,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use chrono::{SecondsFormat, Utc};
+use serde::Deserialize;
 use serde_json::json;
 use thiserror::Error;
 
@@ -65,6 +66,74 @@ pub fn capture_trigger(codex_home: &Path, trigger: &str) -> Result<(), Checkpoin
     .map_err(|_| CheckpointError::CaptureFailed)?;
     value.push(b'\n');
     atomic_write_private(&path, &value).map_err(|_| CheckpointError::CaptureFailed)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Capture {
+    schema_version: u8,
+    kind: String,
+    trigger: String,
+    captured_at_utc: String,
+}
+
+fn capture_time(path: &Path, trigger: &str) -> Result<Option<String>, CheckpointError> {
+    match std::fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err(CheckpointError::CaptureFailed),
+        Ok(_) => (),
+    }
+    let file = open_bounded_regular_file(path, 1, MAX_CAPTURE_BYTES)
+        .map_err(|_| CheckpointError::CaptureFailed)?;
+    if !private_for_current_user(&file) {
+        return Err(CheckpointError::CaptureFailed);
+    }
+    let value: Capture =
+        serde_json::from_reader(file).map_err(|_| CheckpointError::CaptureFailed)?;
+    if value.schema_version != 1
+        || value.kind != "groundline-insights-hook-capture"
+        || value.trigger != trigger
+        || chrono::DateTime::parse_from_rfc3339(&value.captured_at_utc).is_err()
+    {
+        return Err(CheckpointError::CaptureFailed);
+    }
+    Ok(Some(value.captured_at_utc))
+}
+
+/// Inspect the existing eight bounded capture/claim slots without creating,
+/// claiming or acknowledging anything. Markers do not authenticate native dispatch.
+pub fn capture_status(codex_home: &Path) -> Result<serde_json::Value, CheckpointError> {
+    let mut pending = 0;
+    let mut claimed = 0;
+    let mut latest = None;
+    for trigger in [
+        "session_start_hook",
+        "stop_hook",
+        "post_compact_hook",
+        "session_end_hook",
+    ] {
+        for (path, count) in [
+            (capture_path(codex_home, trigger)?, &mut pending),
+            (claim_path(codex_home, trigger)?, &mut claimed),
+        ] {
+            if let Some(time) = capture_time(&path, trigger)? {
+                *count += 1;
+                if latest.as_ref().is_none_or(|previous: &String| {
+                    chrono::DateTime::parse_from_rfc3339(&time).ok()
+                        > chrono::DateTime::parse_from_rfc3339(previous).ok()
+                }) {
+                    latest = Some(time);
+                }
+            }
+        }
+    }
+    Ok(json!({
+        "source":"bounded_local_markers",
+        "status":if pending > 0 {"pending"} else if claimed > 0 {"claimed"} else {"unobserved"},
+        "pending_trigger_count":pending,"claimed_trigger_count":claimed,
+        "latest_capture_at_utc":latest,"native_dispatch_verified":false,
+        "mutation_performed":false
+    }))
 }
 
 pub fn claim_triggers(codex_home: &Path) -> Result<(), CheckpointError> {
@@ -169,7 +238,9 @@ pub fn spawn_worker(
 mod tests {
     use tempfile::tempdir;
 
-    use super::{acknowledge_claimed_triggers, capture_path, capture_trigger, claim_triggers};
+    use super::{
+        acknowledge_claimed_triggers, capture_path, capture_status, capture_trigger, claim_triggers,
+    };
     use crate::local_file::{open_bounded_regular_file, private_for_current_user};
 
     #[test]
@@ -187,6 +258,49 @@ mod tests {
         acknowledge_claimed_triggers(home.path()).expect("acknowledge captures");
         assert!(!session_end.exists());
         assert!(!session_start.exists());
+    }
+
+    #[test]
+    fn capture_status_is_read_only_and_does_not_claim_native_dispatch() {
+        let home = tempdir().unwrap();
+        assert_eq!(capture_status(home.path()).unwrap()["status"], "unobserved");
+        assert!(!home.path().join("groundline").exists());
+        capture_trigger(home.path(), "stop_hook").unwrap();
+        claim_triggers(home.path()).unwrap();
+        capture_trigger(home.path(), "stop_hook").unwrap();
+        let pending = capture_path(home.path(), "stop_hook").unwrap();
+        let claimed = super::claim_path(home.path(), "stop_hook").unwrap();
+        let before = [
+            std::fs::read(&pending).unwrap(),
+            std::fs::read(&claimed).unwrap(),
+        ];
+        let status = capture_status(home.path()).unwrap();
+        assert_eq!(status["pending_trigger_count"], 1);
+        assert_eq!(status["claimed_trigger_count"], 1);
+        assert_eq!(status["native_dispatch_verified"], false);
+        assert_eq!(status["mutation_performed"], false);
+        assert!(!status.to_string().contains(home.path().to_str().unwrap()));
+        assert_eq!(
+            [
+                std::fs::read(&pending).unwrap(),
+                std::fs::read(&claimed).unwrap()
+            ],
+            before
+        );
+        let malformed = b"{\"private\":\"PRIVATE_SENTINEL\"}";
+        crate::local_file::atomic_write_private(&pending, malformed).unwrap();
+        assert_eq!(
+            capture_status(home.path()).unwrap_err().to_string(),
+            "checkpoint_capture_failed"
+        );
+        assert_eq!(std::fs::read(&pending).unwrap(), malformed);
+        #[cfg(unix)]
+        {
+            std::fs::remove_file(&pending).unwrap();
+            std::os::unix::fs::symlink(&claimed, &pending).unwrap();
+            assert!(capture_status(home.path()).is_err());
+            assert_eq!(std::fs::read(&claimed).unwrap(), before[1]);
+        }
     }
 
     #[test]

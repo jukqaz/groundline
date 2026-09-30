@@ -1,9 +1,14 @@
 # GroundLine Insights
 
 Insights는 Core와 독립적으로 설치하는 선택형 플러그인입니다. fail-open Codex
-hook 4개가 네이티브 App/CLI 활동을 제한된 집계로 읽어 비공개 outbox에 저장하고,
+hook 4개가 로컬 네이티브 App/CLI 활동을 제한된 집계로 읽어 비공개 outbox에 저장하고,
 운영자의 HTTPS API·ClickHouse·Grafana로 전송합니다. Tailnet 제한은 선택 사항이며,
 Core·추론 프록시·모델 카탈로그·추론 인증 정보는 필요하지 않습니다.
+
+수집 범위는 선택한 로컬 Codex home에서 지원되는 기록입니다. Cloud orchestration,
+cloud 자동 review·dots·계정 전체 활동은 포함하지 않습니다. 다른 머신은 그곳의
+지원 reader와 동의한 collector가 필요합니다. `remote_headless` 값이나 Mac에서
+도구가 실행됐다는 사실만으로 cloud 수집·로컬 orchestration을 판단하지 않습니다.
 
 스킬·daemon·scheduler를 설치하거나 global Codex 설정을 바꾸지 않습니다.
 [보안](SECURITY.md)과 [계약](references/insights-contract.md)에 비공개 상태,
@@ -59,6 +64,12 @@ groundline-insights worker status
 최초 수집은 최근 7일이며 이후 커서를 보존합니다. 불완전한 구간은 고정하고
 읽기 3회 실패 후에는 운영자의 재시도가 필요합니다. 상태 해석, 원본 발견과
 누락 구간 복구는 [문제 해결](references/operations-troubleshooting.md)을 따릅니다.
+
+`worker status`의 `collection_scope`와 `execution_evidence`로 범위와 실행 근거를
+구분합니다. marker의 pending·claimed, worker 처리, 완료한 수집과 전송 ACK는
+각각의 관측입니다. native 플러그인 활성·hook trust·dispatch는 Codex에서 별도로
+확인하며, 기록 없음·stale·재활성화 전 기록은 현재 성공을 뜻하지 않습니다.
+상태 조회는 서버 receipt를 재확인하거나 동의·identity·cursor·marker를 바꾸지 않습니다.
 
 fleet 보고서는 별도 관리 작업입니다. collector 토큰으로 조회할 수 없으며,
 admin 토큰만 든 비공개 파일을 명시해야 합니다.
