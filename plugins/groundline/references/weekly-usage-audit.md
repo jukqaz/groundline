@@ -135,7 +135,7 @@ fork or subagent coverage. Response records count as fallback rollouts and have
 an explicit bounded provenance label, separate from last-usage-only evidence.
 
 Model contexts use bounded family and effort labels. New GPT-6 observations
-use gpt-6-astra, gpt-6-sol, and gpt-6-luna; historical unversioned labels remain
+use gpt-6.1-sol, gpt-6-astra, gpt-6-sol, and gpt-6-luna; historical unversioned labels remain
 descriptive and outside optimization scope. They do
 not attribute token totals to individual models or estimate billing.
 

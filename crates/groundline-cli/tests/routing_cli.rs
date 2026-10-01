@@ -401,6 +401,53 @@ fn comparable_deliveries(dir: &TempDir, packet: &Value) {
 }
 
 #[test]
+fn sol_61_routes_with_native_catalog_and_preserves_existing_config() {
+    let (dir, mut packet, mut catalog, _) = fixture();
+    catalog["models"].as_array_mut().unwrap().push(json!({
+        "slug":"gpt-6.1-sol","default_reasoning_level":"low",
+        "supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"}]
+    }));
+    packet["catalog_sha256"] = json!(format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(&catalog).unwrap())
+    ));
+    packet["current"]["model"] = json!("gpt-6.1-sol");
+    let out = run_with_context(&dir, &packet, &catalog, None, None);
+    assert_eq!(out["schema"], 2);
+    assert_eq!(out["status"], "INCONCLUSIVE");
+    assert_eq!(
+        out["reason_codes"],
+        json!(["native_task_judgment_required"])
+    );
+    packet["current"]["explicit"] = json!(true);
+    assert_eq!(
+        run_with_context(&dir, &packet, &catalog, None, None)["status"],
+        "PINNED"
+    );
+}
+
+#[test]
+fn out_of_scope_native_selection_is_inconclusive_and_does_not_emit_private_id() {
+    let (dir, mut packet, mut catalog, _) = fixture();
+    catalog["models"].as_array_mut().unwrap().push(json!({
+        "slug":"PRIVATE_SENTINEL","default_reasoning_level":"medium",
+        "supported_reasoning_levels":[{"effort":"medium"}]
+    }));
+    packet["catalog_sha256"] = json!(format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(&catalog).unwrap())
+    ));
+    packet["current"]["model"] = json!("PRIVATE_SENTINEL");
+    let out = run_with_context(&dir, &packet, &catalog, None, None);
+    assert_eq!(out["status"], "INCONCLUSIVE");
+    assert_eq!(
+        out["reason_codes"],
+        json!(["current_selection_outside_optimization_scope"])
+    );
+    assert!(out["suggestion"].is_null());
+}
+
+#[test]
 fn recorded_deliveries_compare_without_aggregate_context_and_preserve_receipts() {
     let (dir, packet, catalog, _) = fixture();
     comparable_deliveries(&dir, &packet);

@@ -31,8 +31,9 @@
   Ask for new authority only when scope or external effects materially change.
 - Use other GroundLine skills only when their explicit workflow matches the
   request; ordinary planning and implementation stay Codex-native.
-- Optimize model guidance and outcome comparisons for GPT-6 Astra, Sol, and Luna
-  only; preserve older records without treating them as optimization targets.
+- Optimize model guidance and outcome comparisons for GPT-6.1 Sol and GPT-6
+  Astra, Sol, and Luna only; verify the exact native catalog on the execution
+  host and preserve older records without treating them as optimization targets.
 - A user request or applicable GPT-6 selection skill can authorize useful
   independent subagents throughout that task. Follow the GPT-6 model/effort reference for per-lane
   selection, compact handoffs, disjoint ownership, and integration checks.

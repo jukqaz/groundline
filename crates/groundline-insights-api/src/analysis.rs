@@ -55,11 +55,22 @@ pub(super) fn predicate() -> String {
     predicate_for_catalog(MODEL_FAMILIES, MAX_MODEL_CONTEXTS)
 }
 
-// Only used to recognize and migrate the last released storage definition.
+// Frozen revision-8 catalog from v2026.929.1. Only used to recognize and migrate
+// the last released storage definition, including its original bucket bound.
 // It is not an ingest adapter or a supported older wire contract.
 pub(super) fn previous_storage_predicate() -> String {
     const PREVIOUS_MODELS: &[&str] = &[
-        "astra", "gpt-5", "gpt-6", "luna", "other", "sol", "terra", "unknown",
+        "astra",
+        "gpt-5",
+        "gpt-6",
+        "gpt-6-astra",
+        "gpt-6-luna",
+        "gpt-6-sol",
+        "luna",
+        "other",
+        "sol",
+        "terra",
+        "unknown",
     ];
     predicate_for_catalog(PREVIOUS_MODELS, PREVIOUS_MODELS.len() * EFFORTS.len())
 }

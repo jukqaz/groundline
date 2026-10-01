@@ -85,12 +85,12 @@ are rejected. It contains:
 | Field | Contract |
 | --- | --- |
 | `kind`, `schema` | `groundline-routing-evidence`, `2` |
-| `generated_at_utc` | RFC3339, within 24 hours |
-| `catalog_checked_at_utc`, `catalog_sha256` | Checked before packet generation within 24 hours; SHA-256 of canonical `serde_json::to_vec(catalog)` bytes. Hashes bind inputs; they do not prove live availability. |
+| `generated_at_utc` | RFC3339; older than 24 hours returns INCONCLUSIVE with `routing_evidence_stale` |
+| `catalog_checked_at_utc`, `catalog_sha256` | Checked before packet generation; a check older than 24 hours returns INCONCLUSIVE with `native_catalog_stale`. SHA-256 of canonical `serde_json::to_vec(catalog)` bytes binds inputs, not live availability. Invalid timestamps, a future check after generation or a mismatching hash remain contract errors. |
 | `quality_status` | `PASS`, `PARTIAL`, or `FAIL`; never upgrade incomplete evidence |
 | `task` | `kind`: implementation/research/review/operations/documentation; `complexity`: routine/multi_step/deep_judgment; `evidence_sha256`: direct private task evidence; optional `phase` from the delivery phase enum, required with `--deliveries` |
 | `cohort_sha256` | Same work kind, phase, difficulty, acceptance criteria, runtime, tools, permissions, service tier, delegation policy, observed child model/effort and work allocation, and non-routing guidance; deliberately exclude the model/effort being compared |
-| `current` | Exact GPT-6 `model`, native `effort`, and `explicit` boolean. A task-level explicit selection is preserved; a stored default is not automatically a task-level pin. |
+| `current` | Exact bounded local `model` ID, native `effort`, and `explicit` boolean. A valid model outside the reviewed optimization scope is INCONCLUSIVE, not malformed evidence. A task-level explicit selection is PINNED, with availability limits reported separately; a stored default is not automatically a task-level pin. |
 | `objective` | `tokens`, `latency`, or `balanced`; balanced accepts only improvements with neither resource worse |
 | `outcomes` | Up to 1,000 directly classified, distinct deliveries from the last 30 days, including failures and unknowns |
 
@@ -125,7 +125,18 @@ selection is never substituted. No receipt is automatically uploaded.
 
 ## Select, execute, and check
 
-Only exact GPT-6 Astra/Sol/Luna models and actual supported efforts qualify.
+Only exact GPT-6.1 Sol and GPT-6 Astra/Sol/Luna models and actual supported
+native efforts qualify. An unconfirmed snapshot is not a replacement alias.
+`current_selection_outside_optimization_scope` and
+`matched_outcome_outside_optimization_scope` distinguish valid unsupported
+cohorts from malformed input; native model/effort conflicts are reported separately.
+`catalog_evidence` reports the supplied source, hash, check time and freshness.
+Host identity, refresh channel and source/account authenticity remain unobserved
+when the input cannot establish them. Current selection is operator supplied,
+suggestions are recommendations, and delivery receipts contain separately
+observed execution; none proves active configuration. Private custom IDs are
+not copied into CLI baseline output.
+
 Comparisons need at least ten distinct observations for both the current and
 candidate pair, directly verified outcomes, complete owned resources, and a
 matching cohort. Unknown results cannot be treated as success. Candidate success

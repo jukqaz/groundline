@@ -92,3 +92,10 @@ allocations and timing separately. These benchmarks do not measure provider toke
 billing, model quality, installed-plugin latency, or production deployment.
 Use [guidance validation](guidance-validation.md) for behavioral evidence and the
 [release checklist](release-checklist.md) only when qualifying a release.
+
+Model IDs use bounded standard-library byte checks for local selection syntax.
+Regression inputs include `gpt-6.1-sol`, unknown 6.x tiers, future-generation Sol,
+and unconfirmed snapshot suffixes. Generation checks precede historical tier
+checks so newly observed models cannot enter legacy Sol cohorts. The exact
+optimization allowlist is separate from syntax and native catalog availability;
+no snapshot suffix is removed to infer availability.

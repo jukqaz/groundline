@@ -16,7 +16,7 @@ groundline-insights worker status
 groundline-insights worker check-server --json
 ```
 
-Current collectors require Basic schema 5 and ingest contract revision 8 or
+Current collectors require Basic schema 5 and ingest contract revision 9 or
 newer. Deploy the API first. A missing profile returns `NOT_CONFIGURED` without
 network access; malformed profiles or incompatible/unreachable APIs fail without
 changing local state. A compatible health response does not prove authentication,
@@ -130,8 +130,9 @@ may print that expression with different spacing and parentheses; the API
 compares its `EXPLAIN AST` result with the source expression. A matching comment
 alone cannot authorize a changed definition. Unknown schema states fail closed.
 
-The one supported transition is from the previous released fingerprint
-`d653ba15120d6bdb9b5d0d4077c2dd6fd0eb7aeb00f225c996f82964871ae316`.
+The one supported transition is from Basic revision 8, released in v2026.929.1,
+with fingerprint
+`a230de5bd9799dbb85fc1b1806df95986e032d5cfd93511f6795246bfaa80092`.
 Startup first makes `basic_current` return no rows, which also guards its active
 and quarantined views. It switches TTL to the new predicate directly, then adds
 `trusted_event_v5_revalidated` with a pending marker. Existing parts calculate
@@ -163,7 +164,9 @@ lazily until an optional, separately planned materialization. For that later
 maintenance, scope `MATERIALIZE COLUMN trusted_event_v5` to inventoried
 partitions, await mutation completion, and repeat source-row and view checks.
 Never mount production storage into a rehearsal. An image rollback alone does
-not undo schema or TTL changes.
+not undo schema or TTL changes. After revision-9 events have been accepted, use
+a forward repair. An older API cannot safely accept or expose their 6.1 Sol
+dimensions; restoring an older image is not a data recovery procedure.
 
 ## Dependency upgrades and recovery
 
@@ -316,7 +319,7 @@ Browser verification must also cover All, single/multiple selections, empty
 results, and a roster-to-analysis link with its time range preserved.
 Health responses alone do not prove this path.
 
-Revision 8 adds generation-specific GPT-6 tier labels. Historical labels and
+Revision 9 adds generation-specific GPT-6 tier labels. Historical labels and
 events are preserved; older, mixed, and unversioned cohorts are not optimization
 targets. This change does not require rewriting existing ClickHouse rows.
 Verify source, package, install, and a fresh receipt independently. A local

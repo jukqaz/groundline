@@ -67,6 +67,10 @@ external writes merely to satisfy this document.
 | Prospective model/effort plan without a measured-replacement request | Use task judgment and the active catalog; label candidates as unmeasured rather than requiring an outcome quota |
 | Empirical comparison or an `efficiency route` packet | Apply the routing contract and protected quality/resource gates |
 | No matched outcomes | CLI comparison stays INCONCLUSIVE; ordinary authorized native work can continue |
+| Requested workflow improvement with no routing packet | Select relevant skills, tools and native capabilities through task judgment; verify actual results without a weekly scan, quota or automatic delegation |
+| Skill listed or plugin installed | Verify invocation policy, callable access, authentication and actual execution separately; an explicit-only audit skill remains discoverable |
+| Long-running operation already started | Resume its real handle, correlate the terminal result and inspect the requested output before repeating it |
+| Valid model outside optimization scope or stale native catalog | Distinct INCONCLUSIVE reasons; preserve an explicit pin and never guess a replacement alias |
 | Complete direct outcomes with absent/partial aggregate context | Compare direct outcomes and report aggregate limits separately |
 | Weekly sample is complete but whole-population coverage is unknown | Keep that distinction; do not generalize to all history or rerun whole-store inventory as a prerequisite |
 | Saved audit is reused | Scan no history; validate freshness and recompute one recommendation with current code |
@@ -80,6 +84,7 @@ external writes merely to satisfy this document.
 | Existing personal-trial state or user-edited generated guidance | Use status/rollback only; preserve user edits and unsupported state |
 | Core and consented Insights coexist | Apply each plugin's own hook and consent boundary |
 | Source differs from installed package | Report the difference; do not claim an installed update or fresh-task activation |
+| Local worker markers or historical acknowledgements exist | Report local scope and per-phase freshness; do not infer native trust/dispatch, current collection, cloud or account-wide coverage |
 | Secret-like input or private history | Exclude it from public reports and artifacts |
 | Live verification requested | Verify the requested runtime outcome separately from source tests and package checks |
 

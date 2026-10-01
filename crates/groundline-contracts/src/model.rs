@@ -8,6 +8,7 @@ pub const MODEL_FAMILIES: &[&str] = &[
     "gpt-6-astra",
     "gpt-6-luna",
     "gpt-6-sol",
+    "gpt-6.1-sol",
     "luna",
     "other",
     "sol",
@@ -16,10 +17,19 @@ pub const MODEL_FAMILIES: &[&str] = &[
 ];
 /// GroundLine's optimization scope, not an availability catalog. Native model
 /// and effort support must still be checked on the execution host.
-pub const OPTIMIZATION_MODELS: &[&str] = &["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"];
+pub const OPTIMIZATION_MODELS: &[&str] = &["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"];
 
 pub fn optimization_model(value: &str) -> bool {
     OPTIMIZATION_MODELS.contains(&value)
+}
+/// Syntax of a bounded local model ID, not proof of native availability or
+/// permission to emit it as an Insights dimension. Never strip snapshot suffixes.
+pub fn valid_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 256
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'/'))
 }
 pub const EFFORTS: &[&str] = &[
     "high", "low", "max", "medium", "minimal", "none", "ultra", "unknown", "unset", "xhigh",
@@ -48,22 +58,23 @@ pub fn family(value: &str) -> &'static str {
             _ => "gpt-6",
         };
     }
-    // Match provider model components, never substrings such as `console`.
+    // Resolve generation before historical tier names. Unknown 6.x and future
+    // generations must not fall into a legacy Sol/Astra/Luna cohort.
     if value.starts_with("gpt-") {
-        for part in value.split('-').skip(2) {
-            if let Some(family) = ["astra", "luna", "sol", "terra"]
-                .into_iter()
-                .find(|family| *family == part)
-            {
-                return family;
-            }
-        }
         let generation = value.split('-').nth(1).unwrap_or_default();
-        if generation == "5" || generation.starts_with("5.") {
-            return "gpt-5";
-        }
         if generation == "6" || generation.starts_with("6.") {
             return "gpt-6";
+        }
+        if generation == "5" || generation.starts_with("5.") {
+            for part in value.split('-').skip(2) {
+                if let Some(family) = ["astra", "luna", "sol", "terra"]
+                    .into_iter()
+                    .find(|family| *family == part)
+                {
+                    return family;
+                }
+            }
+            return "gpt-5";
         }
     }
     "other"
@@ -87,9 +98,14 @@ mod tests {
             ("gpt-6-astra", "gpt-6-astra"),
             ("gpt-6-sol", "gpt-6-sol"),
             ("gpt-6-luna", "gpt-6-luna"),
+            ("gpt-6.1-sol", "gpt-6.1-sol"),
             ("GPT-6-SOL-2026-09-22", "gpt-6-sol"),
             ("gpt-6-private-sol", "gpt-6"),
-            ("GPT-6.1-ASTRA-2026-09-05", "astra"),
+            ("GPT-6.1-ASTRA-2026-09-05", "gpt-6"),
+            ("gpt-6.1-sol-unconfirmed-snapshot", "gpt-6"),
+            ("gpt-6.1-private-sol", "gpt-6"),
+            ("gpt-6.2-sol", "gpt-6"),
+            ("gpt-7-sol", "other"),
             ("gpt-5.6-sol", "sol"),
             ("gpt-5.6-terra", "terra"),
             ("gpt-5.6-luna", "luna"),
@@ -111,6 +127,7 @@ mod tests {
 
     #[test]
     fn optimization_scope_excludes_older_and_ambiguous_cohorts() {
+        assert!(optimization_model("gpt-6.1-sol"));
         for model in OPTIMIZATION_MODELS {
             assert!(optimization_model(model));
             assert_eq!(family(model), *model);
@@ -124,6 +141,9 @@ mod tests {
             "astra",
             "gpt-6",
             "gpt-6-private-sol",
+            "gpt-6.1-sol-unconfirmed-snapshot",
+            "gpt-6.2-sol",
+            "gpt-7-sol",
             "future-model",
             "unknown",
         ] {

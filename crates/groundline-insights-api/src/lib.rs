@@ -3103,7 +3103,7 @@ mod tests {
         let previous_expression =
             trust_migration::expression(&analysis::previous_storage_predicate());
         db.request(
-            &format!("ALTER TABLE groundline.basic_weekly MODIFY COLUMN trusted_event_v5 UInt8 MATERIALIZED {previous_expression} COMMENT 'd653ba15120d6bdb9b5d0d4077c2dd6fd0eb7aeb00f225c996f82964871ae316'"),
+            &format!("ALTER TABLE groundline.basic_weekly MODIFY COLUMN trusted_event_v5 UInt8 MATERIALIZED {previous_expression} COMMENT 'a230de5bd9799dbb85fc1b1806df95986e032d5cfd93511f6795246bfaa80092'"),
             &[],
             None,
         )
@@ -3117,7 +3117,7 @@ mod tests {
         let mut newly_valid = integration_event(collector_id, 0);
         let zero_tokens = newly_valid["analysis"]["root"]["unattributed"].clone();
         newly_valid["analysis"]["root"]["buckets"] = json!([{
-            "model_family":"gpt-6-sol", "effort":"medium", "tokens":zero_tokens
+            "model_family":"gpt-6.1-sol", "effort":"medium", "tokens":zero_tokens
         }]);
         reseal_event(&mut newly_valid);
         let rows = [
@@ -3172,7 +3172,7 @@ mod tests {
             db.request_at(query, &[], None, index != 0).await.unwrap();
         }
         let old_expression = trust_migration::expression(&analysis::previous_storage_predicate());
-        let old_fingerprint = "d653ba15120d6bdb9b5d0d4077c2dd6fd0eb7aeb00f225c996f82964871ae316";
+        let old_fingerprint = "a230de5bd9799dbb85fc1b1806df95986e032d5cfd93511f6795246bfaa80092";
         db.request(
             &format!("ALTER TABLE groundline.basic_weekly ADD COLUMN trusted_event_v5 UInt8 MATERIALIZED {old_expression} COMMENT '{old_fingerprint}'"),
             &[], None,
@@ -3180,7 +3180,7 @@ mod tests {
         let mut event = integration_event(Uuid::new_v4(), 0);
         let zero_tokens = event["analysis"]["root"]["unattributed"].clone();
         event["analysis"]["root"]["buckets"] = json!([{
-            "model_family":"gpt-6-sol", "effort":"medium", "tokens":zero_tokens
+            "model_family":"gpt-6.1-sol", "effort":"medium", "tokens":zero_tokens
         }]);
         reseal_event(&mut event);
         let mut body = serde_json::to_vec(&event_row(&event, Utc::now()).unwrap()).unwrap();
@@ -3275,7 +3275,7 @@ mod tests {
         }
         let old_expression = trust_migration::expression(&analysis::previous_storage_predicate());
         db.request(
-            &format!("ALTER TABLE groundline.basic_weekly ADD COLUMN trusted_event_v5 UInt8 MATERIALIZED {old_expression} COMMENT 'd653ba15120d6bdb9b5d0d4077c2dd6fd0eb7aeb00f225c996f82964871ae316'"),
+            &format!("ALTER TABLE groundline.basic_weekly ADD COLUMN trusted_event_v5 UInt8 MATERIALIZED {old_expression} COMMENT 'a230de5bd9799dbb85fc1b1806df95986e032d5cfd93511f6795246bfaa80092'"),
             &[],
             None,
         )
@@ -3303,16 +3303,22 @@ mod tests {
         let mut newly_valid = integration_event(collector_id, 0);
         let zero_tokens = newly_valid["analysis"]["root"]["unattributed"].clone();
         newly_valid["analysis"]["root"]["buckets"] = json!([{
-            "model_family":"gpt-6-astra", "effort":"high", "tokens":zero_tokens
+            "model_family":"gpt-6.1-sol", "effort":"high", "tokens":zero_tokens
         }]);
         reseal_event(&mut newly_valid);
+        let mut legacy_sol = integration_event(collector_id, 0);
+        legacy_sol["analysis"]["root"]["buckets"] = json!([{
+            "model_family":"sol", "effort":"medium", "tokens":zero_tokens
+        }]);
+        reseal_event(&mut legacy_sol);
         let malformed = integration_event(collector_id, 0);
         let mut rows = vec![
             event_row(&old_valid, Utc::now()).unwrap(),
             event_row(&newly_valid, Utc::now()).unwrap(),
+            event_row(&legacy_sol, Utc::now()).unwrap(),
             event_row(&malformed, Utc::now()).unwrap(),
         ];
-        rows[2]["root_count"] = json!(999);
+        rows[3]["root_count"] = json!(999);
         for row in &rows {
             let mut body = serde_json::to_vec(row).unwrap();
             body.push(b'\n');
@@ -3339,7 +3345,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(old_trust.len(), 3);
+        assert_eq!(old_trust.len(), 4);
         assert_eq!(
             db.request(
                 "SELECT count() FROM groundline.basic_weekly WHERE trusted_event_v5 = 1 FORMAT TabSeparated",
@@ -3348,7 +3354,7 @@ mod tests {
             )
             .await
             .unwrap(),
-            b"1\n"
+            b"2\n"
         );
 
         // A stopped process can leave the fresh column staged and all reads
@@ -3356,7 +3362,7 @@ mod tests {
         let current_expression = trust_migration::expression(&analysis::predicate());
         let current_fingerprint = format!("{:x}", Sha256::digest(current_expression.as_bytes()));
         let pending_comment = format!(
-            "migration:d653ba15120d6bdb9b5d0d4077c2dd6fd0eb7aeb00f225c996f82964871ae316:{current_fingerprint}:pending"
+            "migration:a230de5bd9799dbb85fc1b1806df95986e032d5cfd93511f6795246bfaa80092:{current_fingerprint}:pending"
         );
         db.request(
             "CREATE OR REPLACE VIEW groundline.basic_current AS SELECT *, trusted_event_v5 FROM groundline.basic_weekly WHERE 0",
@@ -3430,10 +3436,15 @@ mod tests {
             )
             .await
             .unwrap(),
-            b"2\n",
-            "the previously hidden valid GPT-6 row must be rejudged"
+            b"3\n",
+            "the previously hidden valid 6.1 Sol row must be rejudged"
         );
-        for (event, trusted) in [(&old_valid, 1), (&newly_valid, 1), (&malformed, 0)] {
+        for (event, trusted) in [
+            (&old_valid, 1),
+            (&newly_valid, 1),
+            (&legacy_sol, 1),
+            (&malformed, 0),
+        ] {
             let observed = db
                 .json_row(
                     "SELECT trusted_event_v5 FROM groundline.basic_weekly WHERE event_id={id:UUID} FORMAT JSONEachRow",
@@ -3489,9 +3500,9 @@ mod tests {
                     .map(move |effort| (*model, *effort))
             })
             .collect::<Vec<_>>();
-        assert_eq!(labels.len(), 90);
+        assert_eq!(labels.len(), 99);
         let mut boundary_collectors = Vec::new();
-        for bucket_count in [81, 89, 90] {
+        for bucket_count in [91, 98, 99] {
             let collector_id = Uuid::new_v4();
             boundary_collectors.push(collector_id);
             let enrollment = json!({
@@ -3568,7 +3579,7 @@ mod tests {
             let mut bad = valid.clone();
             match malformed_case {
                 "duplicate" => {
-                    bad["analysis"]["root"]["buckets"][89] =
+                    bad["analysis"]["root"]["buckets"][98] =
                         bad["analysis"]["root"]["buckets"][0].clone()
                 }
                 "unknown_model" => {
@@ -3623,6 +3634,20 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let report = response_json(response).await;
         assert!(report["coverage"]["event_count"].as_u64().unwrap_or(0) >= 3);
+        // Migration fixtures bypass ingest and share synthetic windows. Keep
+        // them outside the report cohort above, then expose their preserved
+        // model attribution through the normal registered-collector view.
+        db.request(
+            "INSERT INTO groundline.collectors (collector_id,token_hash,enrollment_schema_version,created_at,updated_at,revoked,os_family,runtime_family,execution_mode,groundline_version) VALUES ({id:UUID},repeat('0',64),2,now(),now(),0,'linux','codex_cli','local_headless',{version:String})",
+            &[("id", collector_id.to_string()), ("version", env!("CARGO_PKG_VERSION").to_owned())],
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(db.request(
+            "SELECT count() FROM groundline.model_usage WHERE event_id={id:UUID} AND model_family='sol' AND attributed=1 FORMAT TabSeparated",
+            &[("id",legacy_sol["event_id"].as_str().unwrap().to_owned())],None
+        ).await.unwrap(), b"1\n", "legacy Sol must not be reclassified into 6.1");
     }
 
     #[tokio::test]
@@ -3812,14 +3837,19 @@ mod tests {
             .unwrap();
         assert_eq!(conflict.status(), StatusCode::CONFLICT);
         let mut event = integration_event(ids[0], 0);
-        event["metrics"]["root"]["usage"]["total_tokens"] = json!(10);
+        event["metrics"]["root"]["usage"]["total_tokens"] = json!(22);
         let zero = event["analysis"]["root"]["unattributed"].clone();
         let bucket = |model: &str, n: u64| {
             let mut t = zero.clone();
             t["total_tokens"] = json!(n);
             json!({"model_family":model,"effort":"high","tokens":t})
         };
-        event["analysis"]["root"]["buckets"] = json!([bucket("astra", 6), bucket("sol", 3)]);
+        event["analysis"]["root"]["buckets"] = json!([
+            bucket("astra", 6),
+            bucket("sol", 3),
+            bucket("gpt-6-sol", 5),
+            bucket("gpt-6.1-sol", 7)
+        ]);
         event["analysis"]["root"]["unattributed"]["total_tokens"] = json!(1);
         event["analysis"]["purpose"] = json!("verification");
         reseal_event(&mut event);
@@ -3858,6 +3888,8 @@ mod tests {
             rows,
             vec![
                 json!({"model_family":"astra","tokens":6}),
+                json!({"model_family":"gpt-6-sol","tokens":5}),
+                json!({"model_family":"gpt-6.1-sol","tokens":7}),
                 json!({"model_family":"sol","tokens":3}),
                 json!({"model_family":"unknown","tokens":1})
             ]
@@ -3879,6 +3911,16 @@ mod tests {
             report["cohorts"]["model_effort_token_efficiency"]["status"],
             "DESCRIPTIVE"
         );
+        let models = report["cohorts"]["model_token_distribution"]
+            .as_array()
+            .unwrap();
+        for (family, tokens) in [("gpt-6.1-sol", 7), ("gpt-6-sol", 5), ("sol", 3)] {
+            assert!(
+                models
+                    .iter()
+                    .any(|row| row["model_family"] == family && row["total_tokens"] == tokens)
+            );
+        }
         let rows=db.json_rows("SELECT retry_attempts,previous_cycle_pending FROM groundline.collector_diagnostics FINAL WHERE collector_id={id:UUID} FORMAT JSONEachRow",&[("id",ids[0].to_string())]).await.unwrap();
         assert_eq!(
             rows,

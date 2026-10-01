@@ -163,7 +163,7 @@ case "$http_status" in 302|401) ;; *) echo "unexpected unauthenticated status: $
 ## 5. collector별 설정
 
 새 수집기보다 API를 먼저 업데이트합니다. 현재 요구 사항은 Basic schema 5와
-ingest contract revision 8 이상입니다. `worker check-server --json`은 등록·동의
+ingest contract revision 9 이상입니다. `worker check-server --json`은 등록·동의
 변경·수집 없이 이 호환성을 확인합니다. TrueNAS 앱의 버전 표기만으로 API 제품
 버전이나 실제 저장 상태를 판단하지 않습니다.
 

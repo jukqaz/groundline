@@ -66,8 +66,8 @@ the updated executable on every collector process, including detached hooks.
 
 Every due cycle checks `/healthz` before enrollment/upload, including with a
 cached collector token. `ingest_capabilities` must advertise Basic schema 5 and
-revision 8 or newer, not an exact package version. Revision 8 includes exact
-GPT-6 labels. Output signals may overlap or refer to earlier-window calls;
+revision 9 or newer, not an exact package version. Revision 9 includes exact
+GPT-6 and separate 6.1 Sol labels. Output signals may overlap or refer to earlier-window calls;
 they are bounded output proxies, not failed-call counts. Cache ratios, disjoint
 windows, coherent usage totals, and provenance remain validated.
 
@@ -144,17 +144,24 @@ pending. Collection and delivery retries have independent cadence. The outbox
 caps at 256 events/16 MiB and 16 uploads per cycle with capped exponential backoff;
 permanent rejection requires operator action.
 
+Worker status computes local scope and separate capture, worker, collection and
+delivery observations from existing state. It does not infer native installation,
+trust or dispatch from markers, and it cannot establish cloud or account-wide
+coverage. Old records and unknown phases remain visible. These labels do not
+change profile, policy, consent, status or receipt schemas, nor claim a server
+receipt was rechecked. Core remains hook-free and offline.
+
 Read-only Codex SQLite produces schema-5 `groundline-insights-basic-weekly` events:
 aggregate usage, lifecycle, latency, verification, boundary counters, and bounded
 platform/runtime dimensions.
 
 Model/effort dimensions are shared Rust allowlists used by normalization,
-ingestion, weekly reports, and comparisons. GPT-6 Astra/Sol/Luna have separate
+ingestion, weekly reports, and comparisons. GPT-6.1 Sol and GPT-6 Astra/Sol/Luna have separate
 versioned labels. Historical astra/sol/luna labels remain unchanged and cannot
 qualify GPT-6 optimization. Unknown model IDs remain `other`. These labels do not route models or prove
 account availability. Usage provenance is also a shared bounded allowlist;
 native response-only usage and mixed-source aggregates have distinct labels.
-Contract revision 8 requires API support for these labels before updated
+Contract revision 9 requires API support for these labels before updated
 collectors are enabled; rejected events stay operator-visible. Event envelope
 schema 5 and existing stored events remain unchanged.
 

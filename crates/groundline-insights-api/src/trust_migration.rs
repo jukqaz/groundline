@@ -6,8 +6,10 @@ use super::{ApiError, ClickHouse, TRUSTED_EVENT_PREDICATE, analysis, projection}
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-const PREVIOUS_FINGERPRINT: &str =
-    "d653ba15120d6bdb9b5d0d4077c2dd6fd0eb7aeb00f225c996f82964871ae316";
+// Exact revision-8 expression from the v2026.929.1 source tree, not the older
+// migration's previous expression. The frozen catalog is checked below.
+pub(super) const PREVIOUS_FINGERPRINT: &str =
+    "a230de5bd9799dbb85fc1b1806df95986e032d5cfd93511f6795246bfaa80092";
 const TRUST_COLUMN: &str = "trusted_event_v5";
 const STAGED_COLUMN: &str = "trusted_event_v5_revalidated";
 // A scan that does not finish promptly leaves the guarded views in place and
@@ -320,6 +322,7 @@ mod tests {
         assert_eq!(fingerprint(&old), PREVIOUS_FINGERPRINT);
         let new = expression(&analysis::predicate());
         let hash = fingerprint(&new);
+        assert_ne!(hash, PREVIOUS_FINGERPRINT);
         let prior = column(TRUST_COLUMN, &old, PREVIOUS_FINGERPRINT);
         let next = column(STAGED_COLUMN, &new, &marker(&hash));
         assert_eq!(classify(&[], &new, &hash, &old).unwrap(), State::Fresh);

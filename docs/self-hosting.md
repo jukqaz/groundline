@@ -174,7 +174,7 @@ alternate login method merely to make a verifier pass.
 ## 5. Configure each collector
 
 Upgrade the API before collectors. The current collector requires Basic schema
-5 and ingest contract revision 8 or newer. `worker check-server --json` verifies
+5 and ingest contract revision 9 or newer. `worker check-server --json` verifies
 that contract without enrollment, consent changes, or collection. A TrueNAS app
 label is not API product-version or storage evidence.
 
