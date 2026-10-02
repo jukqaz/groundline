@@ -4,6 +4,12 @@ GroundLine connects observations to a comparison; native Codex owns execution.
 The objective is accepted work with less rework and appropriate total resource
 use. More features, more agents or higher effort are not independent objectives.
 
+Use the observation/comparison steps for a requested empirical assessment.
+A prospective workflow improvement can start from the task's goal, constraints
+and completion check without an audit or sample quota. Use
+[task continuity](task-continuity.md) only when delegation, recovery or large
+output needs it; this loop is not a prerequisite for ordinary implementation.
+
 1. **Observe the relevant sample.** Reuse bounded native history and an authorized
    Insights report when they answer the question. Keep collection health and
    population coverage separate from the observed task sample. See

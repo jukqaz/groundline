@@ -55,6 +55,13 @@ workspace with the target model and installed skills. Inspect actual actions and
 accepted outcomes. Do not create extra tasks, run paid evaluations, or perform
 external writes merely to satisfy this document.
 
+Include relevant positive and negative trigger cases. For example, a request to
+improve the Codex workflow or compare delivery quality/resources may select
+`optimize-codex-workflow`; an ordinary typo fix or isolated feature does not
+implicitly require it. A requested GroundLine installation check follows
+`align-agent-home`. Preserve explicit invocation and existing policy. Confirm
+actions and accepted output, not just which skill name was selected.
+
 | User request / evidence | Required observable behavior |
 | --- | --- |
 | Review only | Read-only inspection; no configuration or source write |
@@ -75,6 +82,9 @@ external writes merely to satisfy this document.
 | Weekly sample is complete but whole-population coverage is unknown | Keep that distinction; do not generalize to all history or rerun whole-store inventory as a prerequisite |
 | Saved audit is reused | Scan no history; validate freshness and recompute one recommendation with current code |
 | Requested adaptive delegation | Assign useful independent native lanes, observe effective child selections where available, include integration and failed-work cost, and validate the combined result |
+| Independent lane with selectable history | Use only context controls exposed by the active interface; retain its goal, files, constraints and acceptance check. A small prompt alone does not establish a smaller fork |
+| Compaction or interruption with a handoff | Reconcile worktree/HEAD, completed evidence and pending native handles; recover the next action without repeating completed or running work |
+| Large filtered or truncated output | Preserve status, essential errors, exact scope and available original-result reference; a shorter output is not a successful check or whole-task savings |
 | Small sequential task | Continue directly when delegation adds no useful independent work |
 | Earlier or mixed model generation in history | Preserve records and selected settings; withhold unsupported GPT-6 optimization claims |
 | Package-only installation | No automatic personal-setting rewrite or repair hook |

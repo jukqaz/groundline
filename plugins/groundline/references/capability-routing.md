@@ -19,6 +19,11 @@ success. A missing history record, unavailable signal, or absent denominator
 is UNKNOWN, never evidence of non-use. Do not export raw conversation text to
 fill a missing aggregate; inspect only relevant local evidence when authorized.
 
+For delegated context, resumed work or large results, use
+[task continuity](task-continuity.md) when relevant. A small brief does not prove
+bounded forked history. Confirm the installed interface's accepted fields and
+actual result instead of copying another client's tool or hook contract.
+
 | Observed eligible opportunity | Native surface to consider | Evidence before use and outcome check |
 | --- | --- | --- |
 | Independent, bounded reads can proceed without shared state | Parallel native tool calls; combine per-call results | Confirm the calls are independent and the active interface supports concurrent calls. Preserve each result/error and verify the combined answer against all required inputs. |

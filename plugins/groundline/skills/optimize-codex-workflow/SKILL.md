@@ -1,6 +1,6 @@
 ---
 name: optimize-codex-workflow
-description: Use for requested Codex workflow improvement, model or effort selection, or delivery quality and resource comparison. Skip ordinary implementation, generic delegation, and small routine tasks.
+description: Use for requested Codex workflow improvement, model/effort selection, or delivery quality/resource comparison. Skip routine implementation and delegation.
 ---
 
 # Task selection and workflow assessment
@@ -35,6 +35,9 @@ leave required implementation or verification unfinished.
   or optimization authorizes a different choice; respect no-delegation policies.
   Avoid duplicate checks, same-file edits and recursive fan-out. Integrate and
   verify returned work; reuse existing agents and waitable operations when useful.
+  When lane context or handoff needs definition, use
+  [task continuity](../../references/task-continuity.md). A compact prompt alone
+  does not limit inherited history or prove lower total token use.
   Keep small sequential work local; an assessment-only request remains advisory.
 - **Empirical comparison of an existing choice, or preparing an `efficiency route`
   packet:** use [evidence routing](../../references/evidence-routing.md).
@@ -58,6 +61,8 @@ Resolve references from this installed plugin. Read
 
 Carry the goal, user corrections, authority, completed checks and remaining
 acceptance work across phases. Pass only decision-relevant context to children.
+For a long or resumed task that needs a handoff or verification reuse, use
+[task continuity](../../references/task-continuity.md); small tasks need no ledger.
 After steering or compaction, resume existing work and inspect any running
 operation before starting another. A service authentication or permission gap
 requires its normal supported path, not a model change or wider permissions.
