@@ -1,29 +1,34 @@
 ---
 name: optimize-codex-workflow
-description: Assess a requested Codex workflow, choose relevant skills, tools and native capabilities, and compare GPT-6 delivery quality and owned resources. Use for workflow improvement or adaptive selection; skip small routine tasks.
+description: Use for requested Codex workflow improvement, model or effort selection, or delivery quality and resource comparison. Skip ordinary implementation, generic delegation, and small routine tasks.
 ---
 
 # Task selection and workflow assessment
 
-Keep native Codex in charge of execution. Select for the requested outcome,
-current phase and acceptance checks; preserve explicit model/effort choices and
-permissions. Optimize GPT-6.1 Sol and GPT-6 Astra, Sol and Luna only. Historical records and
-explicit older selections remain intact, outside optimization scope.
+Keep native Codex in charge of execution. Preserve current and explicit
+model/effort choices and permissions; ordinary work and delegation inherit them.
+Propose model/effort changes only for a requested model/effort selection or
+optimization. Use the active host catalog and user choices, not a fixed model
+allowlist. Historical records remain intact; empirical commands retain their
+documented input contracts.
 
 ## Choose the relevant route
 
-- **Task/lane selection or a prospective plan:** use [model and effort guidance](../../references/model-effort-routing.md).
-  Select model and effort independently, including supported xhigh/max when
-  depth is needed. Use the active host's catalog/tools; bundled metadata does
-  not prove account access. Reassess at a meaningful phase change, not every turn.
+- **Requested model/effort selection or optimization plan:** use
+  [model and effort guidance](../../references/model-effort-routing.md).
+  Propose model and effort independently using the active host's supported range.
+  Bundled metadata does not prove account access. Reassess at a meaningful phase
+  change within that request, not every turn. A proposal is not an effective change.
   Descriptive history can inform a plan without an evidence packet, usage audit
   or comparison quota. State proposed choices as task judgments, not measured wins.
 - **Independent implementation or research lanes:** use bounded native subagents
   when the user or applicable project guidance authorizes delegation, useful root
   work can continue, and results can be integrated.
-  Give each lane a concrete output, relevant context, acceptance checks and
-  disjoint edit ownership. Choose its supported model/effort under the guide;
-  respect an explicit no-delegation policy. Integrate and verify returned work.
+  Give each lane a concrete output, compact relevant context, acceptance checks
+  and disjoint edit ownership. Inherit model/effort unless a requested selection
+  or optimization authorizes a different choice; respect no-delegation policies.
+  Avoid duplicate checks, same-file edits and recursive fan-out. Integrate and
+  verify returned work; reuse existing agents and waitable operations when useful.
   Keep small sequential work local; an assessment-only request remains advisory.
 - **Empirical comparison of an existing choice, or preparing an `efficiency route`
   packet:** use [evidence routing](../../references/evidence-routing.md).
@@ -52,7 +57,8 @@ operation before starting another. A service authentication or permission gap
 requires its normal supported path, not a model change or wider permissions.
 A request to verify runtime behavior, appearance or deployment may close an
 existing acceptance gap; it is not automatically rework or a model failure.
-Escalate for demonstrated reasoning difficulty, not permission/network failures.
+Model/effort escalation proposals require a requested selection or optimization
+and demonstrated reasoning difficulty, not permission/network failures.
 
 For requested usage-driven adaptation, after an agreed delivery is assessed,
 use [delivery evidence](../../references/delivery-evidence.md) to record its actual

@@ -8,9 +8,11 @@ use. More features, more agents or higher effort are not independent objectives.
    Insights report when they answer the question. Keep collection health and
    population coverage separate from the observed task sample. See
    [weekly audit](weekly-usage-audit.md).
-2. **Choose for the next task.** Use [model/effort guidance](model-effort-routing.md)
-   and current native availability. A prospective judgment needs no quota of past
-   tasks. Preserve explicit selections and delegation permissions.
+2. **Plan for the next task.** Preserve current and inherited model/effort and
+   delegation permissions. Use [model/effort guidance](model-effort-routing.md)
+   and current native availability only for requested model/effort selection or
+   optimization. A prospective proposal needs no quota of past tasks and is not
+   an observed runtime change.
 3. **Record the agreed result.** Use [delivery evidence](delivery-evidence.md) to
    capture requested/effective selections, acceptance, rework and all owned costs.
    Include failed attempts and children. Missing observations remain null.

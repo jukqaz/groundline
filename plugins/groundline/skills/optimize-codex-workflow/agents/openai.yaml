@@ -1,6 +1,6 @@
 interface:
   display_name: "Optimize Codex Workflow"
   short_description: "Improve Codex workflows with relevant skills, tools and evidence"
-  default_prompt: "Use $optimize-codex-workflow to assess my workflow, select relevant skills, tools and native capabilities, and verify outcomes while preserving my explicit model, effort, permissions and settings."
+  default_prompt: "Use $optimize-codex-workflow to assess the workflow improvement or comparison I requested, select relevant capabilities, and verify outcomes. Preserve current and inherited model, effort, permissions and settings; propose model or effort changes only if I requested their selection or optimization."
 policy:
   allow_implicit_invocation: true

@@ -44,8 +44,10 @@ unverified. A stale catalog can produce a stale finding: refresh the evidence,
 not an invented compatibility alias. Service-tier presence is reported, never
 treated as a verified tier or rewritten.
 
-Run `CODEX_BIN --strict-config doctor --summary --no-color --ascii` separately
-when validating native settings. Distinguish its configuration row from
+Verify affected settings with scoped native diagnostics such as `config/read` or
+`skills/list`, where supported and relevant. Use
+`CODEX_BIN --strict-config doctor --summary --no-color --ascii` only when full
+installation or runtime health diagnosis is needed. Distinguish its configuration row from
 terminal, WebSocket, desktop, and task-store failures. Do not change permissions,
 remove task state, or disable safety checks to make every row green.
 
