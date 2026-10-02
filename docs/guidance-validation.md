@@ -100,6 +100,36 @@ actions, outcome, and remaining gaps without raw transcripts, credentials, or
 private paths. A manual reading of these cases is not a model-run pass. Repeat
 checks for relevant changes or concrete unresolved risk.
 
+### Native evaluation evidence
+
+Before an authorized comparison, verify the installed app-server protocol and
+effective permissions. A write-restricted workspace does not establish restricted
+reads. Probe the allowed and excluded paths using task-owned fixture files without
+starting a model turn. Reject an unsupported policy or a failed isolation probe;
+do not silently fall back to unrestricted reads, scan personal history, or change
+the user's default profile. Documentation and generated protocol schemas may
+describe different runtime versions.
+
+Bind token updates and terminal events to the requested thread and turn. Treat
+cumulative updates as snapshots, retain cached input and reasoning output as
+subsets, and preserve missing, invalid, or reset counters as unknown. Drain queued
+events after termination and retain foreign-thread observations separately; they
+cannot replace the root total or establish child ownership. Root usage alone does
+not establish complete child, Guardian, or retry accounting.
+
+For continuity, correlate the actual command launch, subsequent interaction, and
+successful completion using the same native item and process handle. Reading a
+script name or writing a completion claim is insufficient. Match the `turn/steer`
+acknowledgement to the active turn and inspect the accepted input and resulting
+artifact. An interrupted turn remains incomplete even when partial output exists.
+
+Reserve a full per-run allowance before starting another inference and include
+late usage in the total. Enforce the authorized call count and wall/token limits;
+an exhausted or exceeded budget requires a new explicit numerical authorization.
+Replay existing traces and test the harness without spending another inference.
+Neither a successful harness test nor an inconclusive pilot qualifies a workflow
+for default promotion.
+
 ## Release and installation
 
 Local source edits do not update installed plugins. Qualify and publish through

@@ -669,6 +669,51 @@ mod tests {
     }
 
     #[test]
+    fn c1_known_retry_usage_is_included_once_in_delivery_totals() {
+        let mut value = receipt();
+        value["resources"]["entries"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({
+                "owner":"retry","unit_hash":h(10),"response_hash":h(11),
+                "input_tokens":9,"cached_input_tokens":3,"output_tokens":4,
+                "reasoning_output_tokens":2,"total_tokens":13
+            }));
+        let outcome = outcome_from_receipt(&value).unwrap().unwrap();
+        assert_eq!(outcome["owned_total_tokens"], 38);
+        assert_eq!(outcome["owned_resources_complete"], true);
+        let summary = summarize_receipts(&[value.clone()]).unwrap();
+        let resources = &summary["overall"]["resources"];
+        assert_eq!(resources["all_owners"]["entry_count"], 3);
+        assert_eq!(resources["all_owners"]["total_tokens"]["known_sum"], 38);
+        assert_eq!(resources["all_owners"]["total_tokens"]["missing_count"], 0);
+        assert_eq!(resources["complete_delivery_total_tokens"]["known_sum"], 38);
+        let retry = resources["by_owner"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["owner"] == "retry")
+            .unwrap();
+        for (field, expected) in [
+            ("input_tokens", 9),
+            ("cached_input_tokens", 3),
+            ("output_tokens", 4),
+            ("reasoning_output_tokens", 2),
+            ("total_tokens", 13),
+        ] {
+            assert_eq!(retry["resources"][field]["known_sum"], expected, "{field}");
+            assert_eq!(retry["resources"][field]["missing_count"], 0, "{field}");
+        }
+        let duplicate = value["resources"]["entries"][2].clone();
+        value["resources"]["entries"]
+            .as_array_mut()
+            .unwrap()
+            .push(duplicate);
+        assert!(outcome_from_receipt(&value).is_err());
+        assert!(summarize_receipts(&[value]).is_err());
+    }
+
+    #[test]
     fn absent_effective_selection_never_inherits_requested_selection() {
         let mut value = receipt();
         value["effective"] = Value::Null;

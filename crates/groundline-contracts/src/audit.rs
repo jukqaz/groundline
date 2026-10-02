@@ -1898,6 +1898,49 @@ mod tests {
     }
 
     #[test]
+    fn c1_launch_failure_does_not_borrow_a_later_poll_success() {
+        for failed_launch in [
+            json!({"is_error":true,"output":"failed to spawn: private launch detail"}),
+            json!({"isError":true,"output":"failed to spawn: private launch detail"}),
+            json!({"status":"error","output":"failed to spawn: private launch detail"}),
+            json!({"exit_code":127,"output":"failed to spawn: private launch detail"}),
+        ] {
+            let raw = lines(&[
+                json!({"type":"response_item","payload":{"type":"function_call",
+                    "name":"exec_command","call_id":"launch","arguments":"cargo test"}}),
+                json!({"type":"response_item","payload":{"type":"function_call_output",
+                    "call_id":"launch","output":failed_launch}}),
+                json!({"type":"response_item","payload":{"type":"function_call",
+                    "name":"write_stdin","call_id":"unlinked-poll","arguments":"{\"session_id\":42}"}}),
+                json!({"type":"response_item","payload":{"type":"function_call_output",
+                    "call_id":"unlinked-poll","output":{"exit_code":0}}}),
+            ]);
+            let projected = raw
+                .lines()
+                .map(|line| {
+                    Record::parse(line)
+                        .unwrap()
+                        .unwrap()
+                        .audit_projection()
+                        .unwrap()
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            for input in [&raw, &projected] {
+                let audit = audit_rollouts(&[input], 0, 20, AuditWindow::default()).unwrap();
+                let tools = &audit["tools"];
+                assert_eq!(tools["verification_failure_count"], 1);
+                assert_eq!(tools["verification_success_count"], 0);
+                assert_eq!(tools["verification_unresolved_count"], 0);
+                assert_eq!(tools["verification_recovered_by_poll_count"], 0);
+                assert_eq!(tools["verification_unresolved_reasons"], json!({}));
+                assert_eq!(tools["failure_signals"], json!({"nonzero_exit":1}));
+            }
+            assert!(!projected.contains("private launch detail"));
+        }
+    }
+
+    #[test]
     fn contradictory_terminal_results_remain_unresolved() {
         let mut records = vec![
             json!({"type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"check","arguments":"cargo test"}}),

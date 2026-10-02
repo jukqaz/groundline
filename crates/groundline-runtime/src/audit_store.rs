@@ -637,6 +637,92 @@ mod tests {
         assert_eq!(guardian["collection_complete"], true);
     }
 
+    #[cfg(feature = "insights-client")]
+    #[test]
+    fn c1_guardian_native_tokens_survive_audit_and_event_projection() {
+        use groundline_contracts::event::{CollectorIdentity, ConsentReceipt, build_basic_event};
+
+        let home = codex_home();
+        let sessions = home.path().join("sessions");
+        fs::create_dir(&sessions).unwrap();
+        let rollout = sessions.join("guardian.jsonl");
+        fixture_database(
+            home.path(),
+            &rollout,
+            r#"{"subagent":{"other":"guardian"}}"#,
+        );
+        let records = [
+            serde_json::json!({"type":"session_meta","payload":{"id":"guardian-owner","originator":"codex_cli"}}),
+            serde_json::json!({"timestamp":"1970-01-01T00:00:01Z","type":"event_msg","payload":{
+                "type":"token_count","info":{"total_token_usage":{
+                    "input_tokens":12,"cached_input_tokens":5,"output_tokens":5,
+                    "reasoning_output_tokens":2,"total_tokens":17
+                }}
+            }}),
+        ];
+        fs::write(
+            &rollout,
+            records
+                .iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n",
+        )
+        .unwrap();
+        let audit = collect_audit(
+            home.path(),
+            chrono::DateTime::from_timestamp(0, 0).unwrap(),
+            chrono::DateTime::from_timestamp(2, 0).unwrap(),
+            None,
+            false,
+        )
+        .unwrap();
+        assert_eq!(audit["scope"]["guardian_rollout_count"], 1);
+        assert_eq!(audit["guardian"]["collection_complete"], true);
+        assert_eq!(audit["root"]["provider_reported_usage"]["total_tokens"], 0);
+        assert_eq!(
+            audit["delegated"]["provider_reported_usage"]["total_tokens"],
+            0
+        );
+        let event = build_basic_event(
+            &audit,
+            CollectorIdentity {
+                instance_id: uuid::Uuid::new_v4(),
+                os_family: "linux",
+                runtime_family: "codex_cli",
+                execution_mode: "local_headless",
+            },
+            ConsentReceipt {
+                receipt_id: uuid::Uuid::new_v4(),
+                accepted_at_utc: "1970-01-01T00:00:00Z",
+            },
+            env!("CARGO_PKG_VERSION"),
+            0,
+            "manual",
+        )
+        .unwrap();
+        for usage in [
+            &audit["guardian"]["provider_reported_usage"],
+            &event["metrics"]["guardian"]["usage"],
+        ] {
+            for (field, expected) in [
+                ("input_tokens", 12),
+                ("cached_input_tokens", 5),
+                ("output_tokens", 5),
+                ("reasoning_output_tokens", 2),
+                ("total_tokens", 17),
+            ] {
+                assert_eq!(usage[field], expected, "{field}");
+            }
+        }
+        assert_eq!(
+            audit["guardian"]["provider_reported_usage"]["non_cached_input_tokens"],
+            7
+        );
+        assert_eq!(event["sample"]["guardian_count"], 1);
+    }
+
     #[test]
     fn later_thread_updates_do_not_remove_earlier_window_usage() {
         let home = codex_home();
