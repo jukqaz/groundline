@@ -12,6 +12,12 @@ optimization. Use the active host catalog and user choices, not a fixed model
 allowlist. Historical records remain intact; empirical commands retain their
 documented input contracts.
 
+Prioritize accepted work and required verification. Select agents and native
+capabilities when their expected quality or time benefit justifies coordination
+and total parent/child token cost. Use direct tools for bounded work and reduce
+duplicate reads, oversized handoffs and repeated reviews. Token savings must not
+leave required implementation or verification unfinished.
+
 ## Choose the relevant route
 
 - **Requested model/effort selection or optimization plan:** use

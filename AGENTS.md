@@ -41,6 +41,11 @@
   Propose model/effort changes only for a requested selection or optimization.
 - Use Codex built-in agents and any user-owned specialist agents directly;
   GroundLine does not install or override custom agents.
+- Prioritize the accepted outcome and required verification. Select agents and
+  native capabilities when their expected quality or time benefit justifies
+  coordination and total parent/child token cost. Use direct tools for bounded
+  work and avoid duplicate reads, oversized handoffs, and repeated reviews.
+  Do not omit necessary implementation or verification to save tokens.
 - Leave model and reasoning effort unpinned unless the user explicitly requests
   a setting. Explicit `setup --model/--effort` is a configuration operation,
   not a prerequisite for ordinary guidance review or repair.
