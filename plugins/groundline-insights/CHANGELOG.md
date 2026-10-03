@@ -1,6 +1,6 @@
 # GroundLine Insights changes
 
-## Unreleased
+## 2026.10.03-a (`2026.1003.1`)
 
 - schema 5를 유지하며 6.1 Sol 집계와 ingest revision 9를 지원합니다. 실제 revision 8 fingerprint에서 원본·기존 상태를 보존하는 저장소 전환을 검증합니다. API를 먼저 갱신해야 하며 revision 9 데이터 수용 뒤에는 forward repair가 기본입니다.
 - worker 상태에 로컬 수집 범위, capture·worker 처리·수집·전송의 독립 근거를 표시합니다. 과거 ACK나 플러그인 활성만으로 현재 실행·cloud·계정 전체 수집을 주장하지 않습니다.
