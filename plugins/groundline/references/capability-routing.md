@@ -19,10 +19,15 @@ success. A missing history record, unavailable signal, or absent denominator
 is UNKNOWN, never evidence of non-use. Do not export raw conversation text to
 fill a missing aggregate; inspect only relevant local evidence when authorized.
 
+For delegated context, resumed work or large results, use
+[task continuity](task-continuity.md) when relevant. A small brief does not prove
+bounded forked history. Confirm the installed interface's accepted fields and
+actual result instead of copying another client's tool or hook contract.
+
 | Observed eligible opportunity | Native surface to consider | Evidence before use and outcome check |
 | --- | --- | --- |
 | Independent, bounded reads can proceed without shared state | Parallel native tool calls; combine per-call results | Confirm the calls are independent and the active interface supports concurrent calls. Preserve each result/error and verify the combined answer against all required inputs. |
-| Work has independent lanes whose outputs can be integrated | Native GPT-6 subagents, with a compact handoff when a child needs bounded context | Confirm user or applicable project authority, current model/effort controls, concurrency, and lane independence. Preserve no-delegation restrictions. Select a supported pair per lane; inspect returned evidence and perform root integration checks. Do not claim the running root switched model or effort. |
+| Work has independent lanes whose outputs can be integrated | Native built-in or user-owned specialist agents, with a compact handoff when a child needs bounded context | Confirm user or applicable project authority, concurrency, and lane independence. Preserve no-delegation restrictions and inherit current model/effort settings. Propose a different pair only for requested model/effort selection or optimization; inspect effective settings and returned evidence, then perform root integration checks. Do not claim the running root switched model or effort. |
 | A native operation is long-running and returns a waitable handle | Supported asynchronous execution and native wait/poll tools | Confirm the actual handle and wait mechanism. Wait on the matching operation, correlate its terminal result, and inspect completion/failure; a process start or orchestration response is not success. |
 | A repeatable specialist workflow matches the task | Installed, relevant Codex skill | Confirm discovery, enabled state and invocation policy separately; read required instructions only when the trigger applies. An explicit-only audit skill is not missing. Verify the requested behavior or deliverable, not just discovery or invocation. |
 | Needed context or an authorized action belongs to a connected service | Authenticated MCP or app connector | Confirm the exact connected tool and identity are available, required auth is valid, and the operation is authorized. For writes, verify the specific saved state by rereading it. Do not infer connector access from a plugin listing. |

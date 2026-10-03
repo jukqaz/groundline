@@ -31,15 +31,21 @@
   Ask for new authority only when scope or external effects materially change.
 - Use other GroundLine skills only when their explicit workflow matches the
   request; ordinary planning and implementation stay Codex-native.
-- Optimize model guidance and outcome comparisons for GPT-6.1 Sol and GPT-6
-  Astra, Sol, and Luna only; verify the exact native catalog on the execution
-  host and preserve older records without treating them as optimization targets.
-- A user request or applicable GPT-6 selection skill can authorize useful
-  independent subagents throughout that task. Follow the GPT-6 model/effort reference for per-lane
-  selection, compact handoffs, disjoint ownership, and integration checks.
-  Preserve explicit task-level selections and any no-delegation policy.
+- Use the execution host's current native catalog and the user's choices for
+  requested model/effort selection or optimization. Named models and dated
+  observations are examples; empirical commands retain their documented input
+  contracts. Ordinary work and delegation inherit current model/effort settings.
+- A user request or applicable project instructions can authorize useful
+  independent subagents throughout that task. Use compact handoffs, disjoint
+  ownership, and root integration checks; preserve any no-delegation policy.
+  Propose model/effort changes only for a requested selection or optimization.
 - Use Codex built-in agents and any user-owned specialist agents directly;
   GroundLine does not install or override custom agents.
+- Prioritize the accepted outcome and required verification. Select agents and
+  native capabilities when their expected quality or time benefit justifies
+  coordination and total parent/child token cost. Use direct tools for bounded
+  work and avoid duplicate reads, oversized handoffs, and repeated reviews.
+  Do not omit necessary implementation or verification to save tokens.
 - Leave model and reasoning effort unpinned unless the user explicitly requests
   a setting. Explicit `setup --model/--effort` is a configuration operation,
   not a prerequisite for ordinary guidance review or repair.

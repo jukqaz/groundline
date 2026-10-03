@@ -1,7 +1,7 @@
 interface:
   display_name: "Align Agent Home"
-  short_description: "Apply GroundLine and repair evidenced setup mistakes"
-  default_prompt: "Use $align-agent-home to apply GroundLine, inspect existing Codex settings and active guidance against current official model instructions, back up and repair evidenced mistakes within this request, and verify the result while preserving intentional user choices."
+  short_description: "Install or verify GroundLine; repair scoped Codex settings"
+  default_prompt: "Use $align-agent-home to inspect or carry out the GroundLine installation, verification, or Codex settings repair I requested. Preserve existing choices and verify only the affected path."
 policy:
   allow_implicit_invocation: true
 dependencies:

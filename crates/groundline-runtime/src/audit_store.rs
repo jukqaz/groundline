@@ -763,6 +763,129 @@ mod tests {
     }
 
     #[test]
+    fn native_usage_keeps_equal_snapshots_from_independent_sessions() {
+        let home = codex_home();
+        let sessions = home.path().join("sessions");
+        let archived = home.path().join("archived_sessions");
+        fs::create_dir(&sessions).unwrap();
+        fs::create_dir(&archived).unwrap();
+        let first = sessions.join("first.jsonl");
+        let second = archived.join("second.jsonl");
+        let database = fixture_database(home.path(), &first, "cli");
+        for (path, owner) in [(&first, "first-owner"), (&second, "second-owner")] {
+            let records = [
+                serde_json::json!({"type":"session_meta","payload":{"id":owner,"originator":"codex_cli"}}),
+                serde_json::json!({"timestamp":"1970-01-01T00:00:01Z","type":"token_usage_record","payload":{"thread_id":owner,"response_id":"same-response","usage":{"total_tokens":7},"thread_token_usage":{"total_tokens":7}}}),
+                serde_json::json!({"timestamp":"1970-01-01T00:00:01Z","type":"event_msg","payload":{"type":"task_complete"}}),
+            ];
+            fs::write(
+                path,
+                records
+                    .iter()
+                    .map(Value::to_string)
+                    .collect::<Vec<_>>()
+                    .join("\n")
+                    + "\n",
+            )
+            .unwrap();
+        }
+        Connection::open(database)
+            .unwrap()
+            .execute(
+                "INSERT INTO threads VALUES (?1, 'cli', 1, 1, 1)",
+                params![second.to_string_lossy()],
+            )
+            .unwrap();
+        let time = |n| chrono::DateTime::from_timestamp(n, 0).unwrap();
+        for completed_only in [false, true] {
+            let audit = collect_audit(home.path(), time(0), time(2), None, completed_only).unwrap();
+            assert_eq!(audit["scope"]["selected_root_count"], 2);
+            assert_eq!(audit["root"]["provider_reported_usage"]["total_tokens"], 14);
+            assert_eq!(
+                audit["root"]["provider_reported_usage"]["cumulative_rollout_count"],
+                2
+            );
+            assert_eq!(audit["collection_complete"], true);
+        }
+    }
+
+    #[test]
+    fn native_usage_keeps_failed_cancelled_retried_and_interrupted_children() {
+        let home = codex_home();
+        let sessions = home.path().join("sessions");
+        fs::create_dir(&sessions).unwrap();
+        let root = sessions.join("root.jsonl");
+        let database = fixture_database(home.path(), &root, "cli");
+        fs::write(&root, completed_fixture("root-owner")).unwrap();
+        let connection = Connection::open(database).unwrap();
+        let source = r#"{"subagent":{"other":"worker"}}"#;
+        for (owner, terminal) in [
+            ("failed-child", "turn_aborted"),
+            ("cancelled-child", "turn_aborted"),
+            ("retried-child", "turn_aborted"),
+            ("interrupted-child", "task_started"),
+        ] {
+            let path = sessions.join(format!("{owner}.jsonl"));
+            let mut records = vec![
+                serde_json::json!({"type":"session_meta","payload":{"id":owner,"originator":"codex_cli"}}),
+                serde_json::json!({"timestamp":"1970-01-01T00:00:01Z","type":"token_usage_record","payload":{"thread_id":owner,"response_id":"first-response","usage":{"total_tokens":7},"thread_token_usage":(owner != "retried-child").then(|| serde_json::json!({"total_tokens":7}))}}),
+            ];
+            if matches!(owner, "failed-child" | "retried-child") {
+                records.push(serde_json::json!({"timestamp":"1970-01-01T00:00:01Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"failed-call","arguments":"cargo test"}}));
+                records.push(serde_json::json!({"timestamp":"1970-01-01T00:00:01Z","type":"response_item","payload":{"type":"function_call_output","call_id":"failed-call","output":{"is_error":true}}}));
+            }
+            if owner == "retried-child" {
+                // Without a cumulative total, distinct retries count while
+                // replaying the same owned response cannot add another charge.
+                let retry = serde_json::json!({"timestamp":"1970-01-01T00:00:01Z","type":"token_usage_record","payload":{"thread_id":owner,"response_id":"retry-response","usage":{"total_tokens":5}}});
+                records.extend([retry.clone(), retry]);
+            }
+            records.push(serde_json::json!({"timestamp":"1970-01-01T00:00:01Z","type":"event_msg","payload":{"type":terminal}}));
+            fs::write(
+                &path,
+                records
+                    .iter()
+                    .map(Value::to_string)
+                    .collect::<Vec<_>>()
+                    .join("\n")
+                    + "\n",
+            )
+            .unwrap();
+            connection
+                .execute(
+                    "INSERT INTO threads VALUES (?1, ?2, 0, 0, 1)",
+                    params![path.to_string_lossy(), source],
+                )
+                .unwrap();
+        }
+        drop(connection);
+        let time = |n| chrono::DateTime::from_timestamp(n, 0).unwrap();
+        for completed_only in [false, true] {
+            let audit = collect_audit(home.path(), time(0), time(2), None, completed_only).unwrap();
+            assert_eq!(audit["scope"]["selected_root_count"], 1);
+            assert_eq!(audit["scope"]["delegated_rollout_count"], 4);
+            assert_eq!(
+                audit["delegated"]["provider_reported_usage"]["total_tokens"],
+                33
+            );
+            assert_eq!(
+                audit["delegated"]["provider_reported_usage"]["usage_event_count"],
+                2
+            );
+            assert_eq!(
+                audit["delegated"]["provider_reported_usage"]["cumulative_rollout_count"],
+                3
+            );
+            assert_eq!(
+                audit["delegated"]["provider_reported_usage"]["response_rollout_count"],
+                1
+            );
+            assert_eq!(audit["delegated"]["activity"]["task_completed"], 0);
+            assert_eq!(audit["collection_complete"], true);
+        }
+    }
+
+    #[test]
     fn metadata_updates_do_not_reintroduce_inactive_inherited_history() {
         let home = codex_home();
         let sessions = home.path().join("sessions");
@@ -1253,25 +1376,33 @@ mod tests {
     }
 
     #[test]
-    fn weekly_excludes_every_duplicate_identity_in_the_selected_window() {
+    fn weekly_native_usage_excludes_every_duplicate_identity_in_the_selected_window() {
         let home = codex_home();
         let sessions = home.path().join("sessions");
+        let archived = home.path().join("archived_sessions");
         fs::create_dir(&sessions).unwrap();
+        fs::create_dir(&archived).unwrap();
         let first = sessions.join("first.jsonl");
-        let second = sessions.join("second.jsonl");
+        let second = archived.join("second.jsonl");
         let db = fixture_database(home.path(), &first, "cli");
-        fs::write(&first, completed_fixture("same-owner")).unwrap();
-        fs::write(&second, completed_fixture("same-owner")).unwrap();
+        let replay = format!(
+            "{}{}\n",
+            completed_fixture("same-owner"),
+            serde_json::json!({"timestamp":"1970-01-01T00:00:01Z","type":"token_usage_record","payload":{"thread_id":"same-owner","response_id":"replayed-response","usage":{"total_tokens":7},"thread_token_usage":{"total_tokens":7}}})
+        );
+        fs::write(&first, &replay).unwrap();
+        fs::write(&second, &replay).unwrap();
         Connection::open(db)
             .unwrap()
             .execute(
-                "INSERT INTO threads VALUES (?1, 'cli', 0, 1, 1)",
+                "INSERT INTO threads VALUES (?1, 'cli', 1, 1, 1)",
                 params![second.to_string_lossy()],
             )
             .unwrap();
         let time = |n| chrono::DateTime::from_timestamp(n, 0).unwrap();
         let audit = collect_audit(home.path(), time(0), time(2), None, true).unwrap();
         assert_eq!(audit["scope"]["selected_root_count"], 0);
+        assert_eq!(audit["root"]["provider_reported_usage"]["total_tokens"], 0);
         assert_eq!(
             audit["coverage"]["duplicate_thread_id_excluded_rollout_count"],
             2
