@@ -379,7 +379,23 @@ fn subprocess_stop_uses_the_same_control_lock() {
     }
     let home = setup("http://127.0.0.1:18080");
     let directory = state_directory(home.path()).unwrap();
-    let permit = collection_permit(&directory).unwrap();
+    // A parallel fork can briefly retain enable's locked file description until
+    // exec closes its inherited descriptor. Synchronize this fixture on the real
+    // control lock; production collection_permit must remain nonblocking.
+    let permit = collection_control_lock(&directory).unwrap();
+    let started = std::time::Instant::now();
+    loop {
+        match permit.try_lock() {
+            Ok(()) => break,
+            Err(std::fs::TryLockError::WouldBlock)
+                if started.elapsed() < Duration::from_secs(5) =>
+            {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => panic!("fixture control lock acquisition failed: {error}"),
+        }
+    }
+    require_collection(&directory).unwrap();
     let mut child = std::process::Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
