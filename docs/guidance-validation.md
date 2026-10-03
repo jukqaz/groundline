@@ -134,8 +134,13 @@ acknowledgement to the active turn and inspect the accepted input and resulting
 artifact. An interrupted turn remains incomplete even when partial output exists.
 
 Reserve a full per-run allowance before starting another inference and include
-late usage in the total. Enforce the authorized call count and wall/token limits;
-an exhausted or exceeded budget requires a new explicit numerical authorization.
+late usage in the total. Stop further starts and request interruption at the
+planned call count and wall/token thresholds; observed root thresholds are not
+hard billing caps. Distinguish explicit user limits from agent-authored execution
+limits. Enlarging a user-imposed limit requires renewed authorization. An
+agent-authored limit does not create a new approval requirement: reassess the
+failure and changed conditions, isolation, functional oracle, and complete owned
+usage before planning another bounded run within the authorized scope.
 Replay existing traces and test the harness without spending another inference.
 Neither a successful harness test nor an inconclusive pilot qualifies a workflow
 for default promotion.
