@@ -22,6 +22,7 @@ runtime features that do not need them.
 | Rust source | `syn`, `proc-macro2` | Exact spans for narrowly allowed source-scanner exceptions; malformed input gets no exception |
 | JavaScript tool calls | Oxc AST | Bounded static calls and literal arguments, never execution or general control-flow inference |
 | Shell command classification | `shlex` plus a narrow prefix grammar | Classify executable position, not command-like text inside search arguments |
+| Observed model labels | Existing `regex` crate and bounded byte checks | One shared public naming grammar for Rust/ClickHouse; unknown private shapes become stable domain-separated SHA-256 keys |
 | Secret storage | `secrecy`, `zeroize`, private file helpers | No secret-bearing values in errors or reports |
 
 Checksums have a fixed byte format: expected SHA-256, two spaces, exact executable
@@ -94,8 +95,22 @@ Use [guidance validation](guidance-validation.md) for behavioral evidence and th
 [release checklist](release-checklist.md) only when qualifying a release.
 
 Model IDs use bounded standard-library byte checks for local selection syntax.
-Regression inputs include `gpt-6.1-sol`, unknown 6.x tiers, future-generation Sol,
-and unconfirmed snapshot suffixes. Generation checks precede historical tier
-checks so newly observed models cannot enter legacy Sol cohorts. The exact
-optimization allowlist is separate from syntax and native catalog availability;
-no snapshot suffix is removed to infer availability.
+Observation labels preserve version and dated snapshot IDs rather than grouping
+new models into historical families. Their 96-byte grammar uses the workspace's
+existing `regex` dependency only in features that publish model observations;
+the same literal is used in ClickHouse validation. This avoids divergent custom
+Rust/SQL parsers. Local selection syntax keeps its separate 256-byte byte check.
+Opaque observations also accept bounded Unicode aliases; applying local selection
+syntax to them would collapse distinct models into `unknown` without a privacy
+benefit. Empty/unset IDs, control characters, and overlong input stay unknown.
+Regression inputs include `gpt-6.1-sol`, future generations, dated snapshots,
+distinct private models, and context/response overflow. The exact optimization
+allowlist remains separate from observed identities and native catalog
+availability. Existing family aggregates are not reconstructed into exact IDs.
+
+Model response counts describe unique owned native usage records linked by an
+explicit turn ID, not tasks, completed turns, or context records. Conflicting or
+missing links remain unattributed; residual counters without response records do
+not create response counts. Both the event and period report preserve all six
+token counters and response/context totals when their distinct-model bound is
+exceeded. Historical components without response-count metadata stay unobserved.

@@ -1556,6 +1556,93 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "insights-client")]
+    #[test]
+    fn activity_pipeline_preserves_model_versions_private_keys_and_unique_responses() {
+        use groundline_contracts::event::{CollectorIdentity, ConsentReceipt, build_basic_event};
+        use serde_json::json;
+        let home = codex_home();
+        let sessions = home.path().join("sessions");
+        fs::create_dir(&sessions).unwrap();
+        let rollout = sessions.join("models.jsonl");
+        fixture_database(home.path(), &rollout, "cli");
+        let models = [
+            "gpt-6.1-sol",
+            "gpt-6-sol-2026-09-22",
+            "gpt-7-sol",
+            "provider/private-one",
+            "provider/private-two",
+        ];
+        let mut rows = vec![json!({"type":"session_meta","payload":{"id":"fixture-owner"}})];
+        for (n, model) in models.iter().enumerate() {
+            let turn = format!("turn-{n}");
+            rows.push(
+                json!({"timestamp":"1970-01-01T00:00:01Z","type":"turn_context",
+                "payload":{"turn_id":turn,"model":model,"effort":"high"}}),
+            );
+            let response = json!({"timestamp":"1970-01-01T00:00:01Z","type":"token_usage_record",
+                "payload":{"thread_id":"fixture-owner","turn_id":turn,"response_id":format!("response-{n}"),
+                    "usage":{"input_tokens":10,"cached_input_tokens":3,"cache_write_input_tokens":2,
+                        "output_tokens":5,"reasoning_output_tokens":1,"total_tokens":15}}});
+            rows.push(response.clone());
+            if n == 0 {
+                rows.push(response);
+            }
+        }
+        fs::write(
+            &rollout,
+            rows.iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .unwrap();
+        let audit = collect_audit(
+            home.path(),
+            chrono::DateTime::from_timestamp(0, 0).unwrap(),
+            chrono::DateTime::from_timestamp(2, 0).unwrap(),
+            None,
+            false,
+        )
+        .unwrap();
+        let event = build_basic_event(
+            &audit,
+            CollectorIdentity {
+                instance_id: uuid::Uuid::new_v4(),
+                os_family: "linux",
+                runtime_family: "codex_cli",
+                execution_mode: "local_headless",
+            },
+            ConsentReceipt {
+                receipt_id: uuid::Uuid::new_v4(),
+                accepted_at_utc: "1970-01-01T00:00:00Z",
+            },
+            env!("CARGO_PKG_VERSION"),
+            0,
+            "manual",
+        )
+        .unwrap();
+        assert_eq!(event["analysis"]["root"]["observed_response_count"], 5);
+        assert_eq!(event["analysis"]["root"]["unattributed_response_count"], 0);
+        assert_eq!(event["metrics"]["root"]["usage"]["total_tokens"], 75);
+        let buckets = event["analysis"]["root"]["buckets"].as_array().unwrap();
+        assert_eq!(buckets.len(), 5);
+        for model in models {
+            let label = groundline_contracts::model::observed_label(model);
+            let bucket = buckets.iter().find(|b| b["model_family"] == label).unwrap();
+            assert_eq!(bucket["response_count"], 1);
+            assert_eq!(bucket["tokens"]["cache_write_input_tokens"], 2);
+            assert!(
+                event["metrics"]["root"]["model_effort"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|b| b["model_family"] == label && b["count"] == 1)
+            );
+        }
+        assert!(!event.to_string().contains("provider/private"));
+    }
+
     #[cfg(unix)]
     #[test]
     fn rejects_symlinked_database_and_session_root() {

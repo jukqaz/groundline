@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use groundline_contracts::insights::BASIC_CONTRACT_REVISION;
 use serde_json::{Value, json};
 use tempfile::tempdir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -110,7 +111,7 @@ async fn health_checks_preserve_state_and_never_send_credentials_or_collect() {
         server.await.unwrap();
         assert_eq!(result["status"], if expected == "api_compatible" { "PASS" } else { "FAIL" });
         assert_eq!(result["result_code"], expected);
-        assert_eq!(result["required_basic_contract_revision"], 9);
+        assert_eq!(result["required_basic_contract_revision"], BASIC_CONTRACT_REVISION);
         assert_eq!(result["network_attempted"], true);
         assert_eq!(result["mutation_performed"], false);
         assert!(!result.to_string().contains(&endpoint));

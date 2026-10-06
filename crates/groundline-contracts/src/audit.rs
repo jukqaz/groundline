@@ -564,10 +564,20 @@ pub fn audit_rollouts(
                     .unwrap_or("unset");
                 let label = format!(
                     "{}|{}",
-                    crate::model::family(model),
+                    crate::model::observed_label(model),
                     crate::model::effort(effort)
                 );
-                increment(&mut model_effort, label.clone())?;
+                // Reserve one explicit residual row instead of retaining an
+                // unbounded number of private/public model names. Counts are
+                // conserved; response-token attribution has its own bound.
+                let count_label = if model_effort.contains_key(&label)
+                    || model_effort.len() < crate::model::MAX_MODEL_CONTEXTS - 1
+                {
+                    label.clone()
+                } else {
+                    "overflow|unknown".to_owned()
+                };
+                increment(&mut model_effort, count_label)?;
                 if previous_model
                     .as_ref()
                     .is_some_and(|previous| previous != &label)
@@ -1702,10 +1712,33 @@ mod tests {
         let result = audit_rollouts(&[&data], 0, 20, AuditWindow::default()).unwrap();
         assert_eq!(
             result["model_effort"]["counts"],
-            json!({"gpt-6-astra|high":1,"other|unknown":1})
+            json!({"gpt-6-astra|high":1,
+                format!("{}|unknown",crate::model::observed_label("secret-custom-model")):1})
         );
         assert_eq!(result["model_effort"]["transition_count"], 1);
         assert!(!result.to_string().contains("secret-custom"));
+    }
+
+    #[test]
+    fn new_model_context_cap_conserves_counts_across_rollouts() {
+        let records = (0..150)
+            .map(|n| {
+                json!({"type":"turn_context","payload":{
+                    "model":format!("gpt-{}-sol",n+10),"effort":"high"
+                }})
+            })
+            .collect::<Vec<_>>();
+        let first = lines(&records[..100]);
+        let second = lines(&records[100..]);
+        let result = audit_rollouts(&[&first, &second], 0, 20, AuditWindow::default()).unwrap();
+        let counts = result["model_effort"]["counts"].as_object().unwrap();
+        assert_eq!(counts.len(), crate::model::MAX_MODEL_CONTEXTS);
+        assert_eq!(
+            counts.values().map(|v| v.as_u64().unwrap()).sum::<u64>(),
+            150
+        );
+        assert_eq!(counts["overflow|unknown"], 23);
+        assert_eq!(result["activity"]["turn_contexts"], 150);
     }
 
     #[test]
@@ -2209,13 +2242,29 @@ fn owned_response_attribution_conserves_mixed_models_across_windows() {
     assert_eq!(whole["provider_reported_usage"]["total_tokens"], 10);
     assert_eq!(first["provider_reported_usage"]["total_tokens"], 6);
     assert_eq!(second["provider_reported_usage"]["total_tokens"], 4);
+    let buckets = whole["model_attributed_usage"]["buckets"]
+        .as_array()
+        .unwrap();
+    for (model, n) in [("gpt-6-astra", 6), ("gpt-5.6-sol", 3)] {
+        let bucket = buckets.iter().find(|b| b["model_family"] == model).unwrap();
+        assert_eq!(bucket["tokens"]["total_tokens"], n);
+        assert_eq!(bucket["response_count"], 1);
+    }
     assert_eq!(
-        whole["model_attributed_usage"]["buckets"][0]["tokens"]["total_tokens"],
-        6
+        whole["model_attributed_usage"]["observed_response_count"],
+        3
     );
     assert_eq!(
-        whole["model_attributed_usage"]["buckets"][1]["tokens"]["total_tokens"],
-        3
+        whole["model_attributed_usage"]["unattributed_response_count"],
+        1
+    );
+    assert_eq!(
+        first["model_attributed_usage"]["observed_response_count"],
+        1
+    );
+    assert_eq!(
+        second["model_attributed_usage"]["observed_response_count"],
+        2
     );
     assert_eq!(
         whole["model_attributed_usage"]["unattributed"]["total_tokens"],
@@ -2223,7 +2272,7 @@ fn owned_response_attribution_conserves_mixed_models_across_windows() {
     );
     assert_eq!(
         second["model_attributed_usage"]["buckets"][0]["model_family"],
-        "sol"
+        "gpt-5.6-sol"
     );
     assert_eq!(
         second["model_attributed_usage"]["unattributed"]["total_tokens"],
