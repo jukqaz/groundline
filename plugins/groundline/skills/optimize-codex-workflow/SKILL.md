@@ -53,6 +53,10 @@ leave required implementation or verification unfinished.
   no routing packet, weekly scan, comparison quota, or automatic delegation.
   For a requested quality/resource benchmark, use
   [usage assessment](../../references/usage-assessment.md).
+- **Requested usage-driven learning and environment improvement:** use
+  [adaptive environment](../../references/adaptive-environment.md) to connect
+  actual outcomes and relevant official model changes to scoped personal updates.
+  Distinguish existing repair paths from planned persistent learning features.
 
 Resolve references from this installed plugin. Read
 [command resolution](../../references/platform-commands.md) only when a CLI is needed.

@@ -1,7 +1,11 @@
 # GroundLine 아키텍처
 
-GroundLine은 Codex 사용 관측과 실제 작업 결과를 연결해 선택 근거를 제공합니다.
+GroundLine은 사용 패턴·실제 작업 결과·현재 모델의 공식 지침을 연결해
+사용 방식과 공통 Codex 환경을 개선하는 것을 목표로 합니다.
 실행·모델 적용·권한·에이전트·작업 관리는 Codex가 담당합니다.
+
+아래는 현재 구현 경계입니다. 개인 기준·지속 학습·환경별 적용 영수증의 추가 계약과
+구현 순서는 [지속 개선과 환경 통일 설계](adaptive-environment-design.md)에 구분합니다.
 
 ```mermaid
 flowchart LR

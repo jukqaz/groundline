@@ -12,6 +12,7 @@
 | 수집·서버 장애 진단 | [운영 안내](../insights-operations.md) |
 | 코드·파서 변경 | [기여 안내](../../CONTRIBUTING.md), [아키텍처](../architecture.md), [개발 계약](../development.md) |
 | 지침 변경 평가 | [행동 검증](../guidance-validation.md) |
+| 지속 개선·환경 통일 설계 | [재설계](../adaptive-environment-design.md) (추가 구현 대상 구분) |
 | 릴리스 검증·게시 | [체크리스트](../release-checklist.md), [버전 규칙](../versioning.md) |
 
 설치된 명령과 계약은 플러그인 문서에서 확인합니다:

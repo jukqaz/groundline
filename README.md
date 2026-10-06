@@ -1,8 +1,9 @@
 # GroundLine
 
-GroundLine uses Codex activity and actual delivery outcomes to inform GPT-6
-Astra, Sol, and Luna model, effort, and subagent choices. Codex owns execution,
-permissions, settings, and agents. Earlier generations remain readable as history.
+GroundLine connects Codex usage patterns, actual work outcomes and current
+official model guidance to improve a user's workflow and common Codex environment.
+Codex owns execution, permissions, settings and agents. Historical observations
+remain intact; environment changes follow the user's explicit choices and scope.
 
 [한국어](README.ko.md) · [Documentation](docs/index.md)
 
@@ -46,6 +47,11 @@ The evidence loop is **audit → delivery → route**. Start with the
 [CLI examples](docs/examples.md); record failed and incomplete work as well as
 successes. Weekly samples do not establish whole-history coverage, and aggregate
 usage alone cannot identify the best model or prove improvement.
+
+The [adaptive environment design](docs/adaptive-environment-design.md) extends
+this loop to a personal baseline, scoped application, recovery and later outcomes.
+Persistent learning and environment synchronization are planned capabilities;
+the current release provides observation, comparison and bounded settings repair.
 
 Core guidance and model-led analysis consume input tokens. Insights' native
 collector does not call a language model. Compare quality, rework, user effort,
