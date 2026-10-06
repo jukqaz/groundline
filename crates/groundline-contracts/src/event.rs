@@ -92,10 +92,22 @@ fn model_effort(component: &Map<String, Value>) -> Value {
     for (key, value) in counts {
         let amount = value.as_u64().unwrap_or(0);
         let (model, effort) = key.split_once('|').unwrap_or((key, "unknown"));
-        let key = (
-            crate::model::family(model).to_owned(),
-            crate::model::effort(effort).to_owned(),
-        );
+        let model = if crate::model::valid_label(model) {
+            model.to_owned()
+        } else {
+            crate::model::observed_label(model)
+        };
+        let label = (model, crate::model::effort(effort).to_owned());
+        let overflow = ("overflow".to_owned(), "unknown".to_owned());
+        let known_count = normalized.len() - usize::from(normalized.contains_key(&overflow));
+        let key = if normalized.contains_key(&label)
+            || label == overflow
+            || known_count < crate::model::MAX_MODEL_CONTEXTS - 1
+        {
+            label
+        } else {
+            overflow
+        };
         let current = normalized.get(&key).copied().unwrap_or(0);
         if let Some(next) = current.checked_add(amount) {
             normalized.insert(key, next);
@@ -386,9 +398,9 @@ mod tests {
             result,
             json!([
                 {"model_family":"astra","effort":"high","count":3},
-                {"model_family":"gpt-6","effort":"low","count":1},
                 {"model_family":"gpt-6-astra","effort":"high","count":2},
-                {"model_family":"other","effort":"low","count":4}
+                {"model_family":"gpt-6.1","effort":"low","count":1},
+                {"model_family":crate::model::observed_label("private-console"),"effort":"low","count":4}
             ])
         );
         assert!(!result.to_string().contains("private-console"));
@@ -408,7 +420,61 @@ mod tests {
         let result = model_effort(component.as_object().unwrap());
         assert_eq!(
             result.as_array().unwrap().len(),
-            crate::model::MAX_MODEL_CONTEXTS
+            crate::model::MODEL_FAMILIES.len() * crate::model::EFFORTS.len()
+        );
+    }
+
+    #[test]
+    fn excess_model_context_pairs_have_an_explicit_conserving_overflow() {
+        let contexts = (0..150)
+            .map(|n| (format!("gpt-{}-sol|high", n + 10), json!(2)))
+            .collect::<Map<_, _>>();
+        let component = json!({"model_effort":{"counts":contexts}});
+        let result = model_effort(component.as_object().unwrap());
+        let rows = result.as_array().unwrap();
+        assert_eq!(rows.len(), crate::model::MAX_MODEL_CONTEXTS);
+        assert_eq!(
+            rows.iter()
+                .map(|r| r["count"].as_u64().unwrap())
+                .sum::<u64>(),
+            300
+        );
+        let overflow = rows
+            .iter()
+            .find(|r| r["model_family"] == "overflow")
+            .unwrap();
+        assert_eq!(overflow["effort"], "unknown");
+        assert_eq!(overflow["count"], 46);
+    }
+
+    #[test]
+    fn an_existing_overflow_row_does_not_displace_a_retained_private_model() {
+        let private = crate::model::observed_label("provider/retained-model");
+        let mut contexts = (0..126)
+            .map(|n| (format!("gpt-{}-sol|high", n + 10), json!(1)))
+            .collect::<Map<_, _>>();
+        contexts.insert(format!("{private}|high"), json!(1));
+        contexts.insert("overflow|unknown".to_owned(), json!(3));
+        let result = model_effort(
+            json!({"model_effort":{"counts":contexts}})
+                .as_object()
+                .unwrap(),
+        );
+        let rows = result.as_array().unwrap();
+        assert_eq!(rows.len(), crate::model::MAX_MODEL_CONTEXTS);
+        assert_eq!(
+            rows.iter()
+                .map(|r| r["count"].as_u64().unwrap())
+                .sum::<u64>(),
+            130
+        );
+        assert!(
+            rows.iter()
+                .any(|r| r["model_family"] == private && r["count"] == 1)
+        );
+        assert!(
+            rows.iter()
+                .any(|r| r["model_family"] == "overflow" && r["count"] == 3)
         );
     }
 }

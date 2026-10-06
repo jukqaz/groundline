@@ -6,10 +6,10 @@ use super::{ApiError, ClickHouse, TRUSTED_EVENT_PREDICATE, analysis, projection}
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-// Exact revision-8 expression from the v2026.929.1 source tree, not the older
+// Exact revision-9 expression from the preceding source tree, not the older
 // migration's previous expression. The frozen catalog is checked below.
 pub(super) const PREVIOUS_FINGERPRINT: &str =
-    "a230de5bd9799dbb85fc1b1806df95986e032d5cfd93511f6795246bfaa80092";
+    "5ba127ae474735e0fa641a9fc3d1a6182db5d546e280aabf1d10192c864c41e3";
 const TRUST_COLUMN: &str = "trusted_event_v5";
 const STAGED_COLUMN: &str = "trusted_event_v5_revalidated";
 // A scan that does not finish promptly leaves the guarded views in place and

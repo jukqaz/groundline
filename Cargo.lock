@@ -676,6 +676,7 @@ dependencies = [
  "oxc_ast",
  "oxc_parser",
  "oxc_span",
+ "regex",
  "semver",
  "serde",
  "serde-saphyr",

@@ -1,4 +1,5 @@
 //! Real Codex, real packages, isolated home; deliberately no account or service credentials.
+use groundline_contracts::insights::BASIC_CONTRACT_REVISION;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs;
@@ -448,7 +449,14 @@ fn real_codex_upgrades_metadata_repeats_and_preserves_settings_and_consent() {
 
     assert_blocked(run_installer("core"), "insights_server_compatibility");
     assert_eq!(saved_files(&insights_state), saved_state);
-    health.revision.store(9, Ordering::Relaxed);
+    health
+        .revision
+        .store(BASIC_CONTRACT_REVISION - 1, Ordering::Relaxed);
+    assert_blocked(run_installer("core"), "insights_server_compatibility");
+    assert_eq!(saved_files(&insights_state), saved_state);
+    health
+        .revision
+        .store(BASIC_CONTRACT_REVISION, Ordering::Relaxed);
     for failure in ["add", "upgrade"] {
         let output = run_installer_with_failure("core", Some(failure));
         let receipt = package::receipt(&output);

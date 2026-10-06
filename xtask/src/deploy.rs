@@ -2303,15 +2303,34 @@ mod tests {
     #[test]
     fn grafana_gate_executes_every_panel_and_checks_semantics() {
         let (response, plan) = valid_grafana_response();
-        // 19 overview panels, 10 analysis panels, four variable queries,
-        // and the independent fleet reference must all execute.
-        assert_eq!(plan.queries.len(), 45);
+        // 25 overview panels, 14 analysis panels, six variable queries, an
+        // annotation and the independent fleet reference must all execute.
+        assert_eq!(plan.queries.len(), 47);
         assert!(
             plan.queries
                 .iter()
                 .all(|query| !query["rawSql"].as_str().unwrap().contains("${"))
         );
         assert!(grafana_query_ready(&response, &plan));
+
+        let coverage = plan
+            .queries
+            .iter()
+            .find(|query| {
+                query["rawSql"]
+                    .as_str()
+                    .unwrap()
+                    .contains("FROM groundline.model_usage_coverage")
+            })
+            .unwrap()["refId"]
+            .as_str()
+            .unwrap();
+        let mut missing_coverage = response.clone();
+        missing_coverage["results"]
+            .as_object_mut()
+            .unwrap()
+            .remove(coverage);
+        assert!(!grafana_query_ready(&missing_coverage, &plan));
 
         let mut drifted = response;
         let reference = plan.semantic_refs["fleet_reference"].clone();

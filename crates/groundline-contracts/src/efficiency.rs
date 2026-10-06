@@ -174,7 +174,6 @@ fn comparison_snapshot(value: &Value, label: &str) -> Result<ComparisonSnapshot,
             "execution_mode",
             &["desktop", "local_headless", "remote_headless", "unknown"][..],
         ),
-        ("model_family", crate::model::MODEL_FAMILIES),
         ("effort", crate::model::EFFORTS),
     ] {
         if !allowed(cohort.get(field), options) {
@@ -182,6 +181,15 @@ fn comparison_snapshot(value: &Value, label: &str) -> Result<ComparisonSnapshot,
                 "invalid_comparison_cohort:{label}:{field}"
             )));
         }
+    }
+    if !cohort
+        .get("model_family")
+        .and_then(Value::as_str)
+        .is_some_and(crate::model::valid_label)
+    {
+        return Err(ContractError(format!(
+            "invalid_comparison_cohort:{label}:model_family"
+        )));
     }
 
     let sample_fields = [
@@ -732,6 +740,22 @@ mod tests {
             );
             assert_eq!(excluded["metric_deltas"], ready["metric_deltas"]);
         }
+        for observed in [
+            "gpt-6.2-sol-2026-10-06".to_owned(),
+            crate::model::observed_label("private/model-name"),
+        ] {
+            let mut outside = packet.clone();
+            outside["baseline"]["cohort"]["model_family"] = json!(observed);
+            outside["candidate"]["cohort"]["model_family"] = json!(observed);
+            assert_eq!(
+                compare_aggregate_periods(&outside).unwrap()["status"],
+                "OUTSIDE_OPTIMIZATION_SCOPE"
+            );
+        }
+        let mut private = packet.clone();
+        private["baseline"]["cohort"]["model_family"] = json!("private/model-name");
+        let rejected = compare_aggregate_periods(&private).unwrap_err().to_string();
+        assert!(!rejected.contains("private/model-name"));
         assert_eq!(
             ready["metric_deltas"]["compactions_per_root"]["relative_delta"],
             -0.5

@@ -66,8 +66,9 @@ the updated executable on every collector process, including detached hooks.
 
 Every due cycle checks `/healthz` before enrollment/upload, including with a
 cached collector token. `ingest_capabilities` must advertise Basic schema 5 and
-revision 9 or newer, not an exact package version. Revision 9 includes exact
-GPT-6 and separate 6.1 Sol labels. Output signals may overlap or refer to earlier-window calls;
+revision 10 or newer, not an exact package version. Revision 10 adds dynamic
+model identities and explicit response observations. Output signals may overlap
+or refer to earlier-window calls;
 they are bounded output proxies, not failed-call counts. Cache ratios, disjoint
 windows, coherent usage totals, and provenance remain validated.
 
@@ -155,15 +156,46 @@ Read-only Codex SQLite produces schema-5 `groundline-insights-basic-weekly` even
 aggregate usage, lifecycle, latency, verification, boundary counters, and bounded
 platform/runtime dimensions.
 
-Model/effort dimensions are shared Rust allowlists used by normalization,
-ingestion, weekly reports, and comparisons. GPT-6.1 Sol and GPT-6 Astra/Sol/Luna have separate
-versioned labels. Historical astra/sol/luna labels remain unchanged and cannot
-qualify GPT-6 optimization. Unknown model IDs remain `other`. These labels do not route models or prove
-account availability. Usage provenance is also a shared bounded allowlist;
-native response-only usage and mixed-source aggregates have distinct labels.
-Contract revision 9 requires API support for these labels before updated
-collectors are enabled; rejected events stay operator-visible. Event envelope
-schema 5 and existing stored events remain unchanged.
+Model observations use the dynamic shared `PUBLIC_MODEL_PATTERN` grammar, not
+a fixed model catalog. Public labels have at most 96 lowercase ASCII bytes;
+versions and snapshots retain their exact IDs. Valid model IDs outside that
+public grammar become `private-<64 lowercase hex>`, computed with SHA-256 over
+`groundline-model-id-v1\0` followed by the trimmed exact ID bytes. Private names,
+paths, credentials, and conversation content never enter the public dimensions;
+no original-name/key registry is uploaded or installed. Identity is explicit:
+`public_model_id`, `opaque_model_id`, `historical_family`, `unknown`, or
+`overflow`. Historical `astra`/`sol`/`luna`, `gpt-6`, and `other` remain family
+observations. Previously normalized base labels such as `gpt-6-sol` also remain
+historical when the component lacks response-count observations, because an
+older snapshot may have been collapsed. They remain separate from new exact-ID
+groups and are not retrospectively interpreted as exact model IDs.
+Optimization eligibility remains a separate policy using the current native
+catalog; observation labels neither route models nor prove account availability.
+
+Each root/delegated component independently admits at most 128 model/effort
+context pairs and 128 attributed-token buckets. The bound is independent of the
+number of public models. Context collection reserves one overflow row and
+preserves excess context counts. Usage overflow retains all six counters in the
+unattributed residual. `overflow_response_count` is a subset of
+`unattributed_response_count`; adding both would double-count.
+
+Context counts describe native turn-context records. Observed responses count
+unique owned native usage records, with model/effort attribution only when an
+explicit turn link is coherent. Neither is a completed-task count. Response
+counts absent from historical events remain unobserved, not zero. All six token
+counters conserve the authoritative component totals, including cache-write
+input. Missing links, conflicting contexts, or inconsistent native/UI baselines
+remain unattributed; totals are never allocated by context frequency. Usage
+provenance remains a shared bounded allowlist with distinct native response-only
+and mixed-source labels.
+
+Contract revision 10 requires API support before updated collectors are enabled;
+rejected events stay operator-visible. Event envelope schema 5 and existing
+stored event sources remain unchanged. The supported revision-9 trust migration
+checks the exact prior definition, verifies source hashes and row counts, and
+uses an atomic swap without rewriting payloads, IDs, periods, or counters.
+Unknown definitions are rejected. Migration does not reconstruct older IDs or
+response counts.
 
 Activity samples count selected ongoing or completed roots with
 `completed_root_coverage=false`; weekly samples require a final completed turn.
@@ -242,11 +274,31 @@ triggering `OPTIMIZE` or manual deletion.
 
 Reports are schema-3 `groundline-insights-weekly-report` documents with fixed
 7, 30, or 90-day windows, sufficiency and coverage signals, bounded
-distributions, update advisories, and fleet/storage counters.
+distributions, update advisories, and fleet/storage counters. Basic event bodies
+are capped at 256 KiB and reports at 1 MiB. Report `query_set_version` 4 describes
+the new observation semantics without changing event schema 5 or API schema 3.
+
+`cohorts.model_usage_patterns` groups model identity, effort, root/delegated, and
+explicit purpose. It exposes context counts, nullable observed response counts,
+all six token fields, and per-cohort coverage. Period aggregation caps retained
+labeled rows at 128 per component/purpose cohort and retains the excess in an
+additional overflow row and coverage counters: at most 774 rows across the six
+cohorts. Historical response-unobserved windows
+remain visible alongside measured windows. Unknown/overflow context counts,
+unattributed responses, and unattributed tokens accompany comparisons.
+Response attribution uses observed responses only; tokens are not a price or
+subscription-quota measure, and these statistics do not establish causal
+improvement. Model-specific latency, tool use, and quality require actual turn
+attribution; whole-event totals are never duplicated across model rows.
 
 Grafana panels use the provisioned ClickHouse datasource and fixed query
 templates. Dashboard availability, datasource health, query execution, report
 generation, and collector upload are separate evidence lanes.
+Model-pattern panels read API-owned `model_usage_patterns` and
+`model_usage_coverage` views with the existing OS/runtime/version/installation/
+device/purpose filters. Zero-token unknown residuals do not fabricate observed
+windows; only matching contexts, observed responses, or positive token counters
+produce model-pattern rows.
 
 ## Deployment boundary
 

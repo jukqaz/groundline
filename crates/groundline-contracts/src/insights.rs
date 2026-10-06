@@ -7,14 +7,17 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::ContractError;
-use crate::model::{EFFORTS, MAX_MODEL_CONTEXTS, MODEL_FAMILIES};
+use crate::model::{EFFORTS, MAX_MODEL_CONTEXTS, MODEL_FAMILIES, identity_kind, valid_label};
 
 pub mod analysis;
 
-pub const MAX_WEEKLY_REPORT_BYTES: usize = 128 * 1024;
-pub const MAX_BASIC_EVENT_BYTES: usize = 64 * 1024;
+/// At most six cohorts of 128 model/effort pairs plus one overflow row each.
+pub const MAX_MODEL_REPORT_PAIRS: usize = 128;
+pub const MAX_MODEL_PATTERN_ROWS: usize = 2 * 3 * (MAX_MODEL_REPORT_PAIRS + 1);
+pub const MAX_WEEKLY_REPORT_BYTES: usize = 1024 * 1024;
+pub const MAX_BASIC_EVENT_BYTES: usize = 256 * 1024;
 /// Semantic allowlist revision, independent of the envelope schema version.
-pub const BASIC_CONTRACT_REVISION: u64 = 9;
+pub const BASIC_CONTRACT_REVISION: u64 = 10;
 
 pub fn ingest_capabilities() -> Value {
     serde_json::json!({"basic_schema_versions":[5], "basic_contract_revision":BASIC_CONTRACT_REVISION})
@@ -177,6 +180,7 @@ pub struct TokenMetrics {
     pub input: u64,
     pub cached_input: u64,
     pub non_cached_input: u64,
+    pub cache_write_input: u64,
     pub output: u64,
     pub reasoning_output: u64,
     pub total: u64,
@@ -230,9 +234,14 @@ pub struct Cohorts {
     pub event_distributions: EventDistributions,
     pub installation_distributions: InstallationDistributions,
     pub model_effort_context_distribution: Vec<ModelEffortContext>,
+    pub model_effort_context_coverage: ModelContextCoverage,
     pub model_effort_token_efficiency: ModelEffortTokenEfficiency,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_token_distribution: Option<Vec<ModelTokenUsage>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_token_distribution_coverage: Option<Vec<ModelTokenCoverage>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_usage_patterns: Option<ModelUsagePatterns>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -240,9 +249,95 @@ pub struct Cohorts {
 pub struct ModelTokenUsage {
     pub component: String,
     pub model_family: String,
+    pub model_identity: String,
     pub effort: String,
     pub input_tokens: u64,
     pub cached_input_tokens: u64,
+    pub cache_write_input_tokens: u64,
+    pub output_tokens: u64,
+    pub reasoning_output_tokens: u64,
+    pub total_tokens: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelContextCoverage {
+    pub row_limit: usize,
+    pub context_count: u64,
+    pub overflow_context_count: u64,
+    pub unknown_context_count: u64,
+    pub dimension_coverage: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelTokenCoverage {
+    pub component: String,
+    pub row_limit: usize,
+    pub total_tokens: u64,
+    pub overflow_total_tokens: u64,
+    pub unknown_total_tokens: u64,
+    pub dimension_coverage: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelUsagePatterns {
+    pub basis: String,
+    pub context_count_basis: String,
+    pub response_count_basis: String,
+    pub task_count_attributed: bool,
+    pub row_limit_per_cohort: usize,
+    pub rows: Vec<ModelUsagePattern>,
+    pub coverage: Vec<ModelUsageCoverage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelUsagePattern {
+    pub component: String,
+    pub purpose: String,
+    pub model_family: String,
+    pub model_identity: String,
+    pub effort: String,
+    pub event_count: u64,
+    pub response_observed_event_count: u64,
+    pub response_unobserved_event_count: u64,
+    pub context_count: u64,
+    pub observed_response_count: Option<u64>,
+    pub input_tokens: u64,
+    pub cached_input_tokens: u64,
+    pub cache_write_input_tokens: u64,
+    pub output_tokens: u64,
+    pub reasoning_output_tokens: u64,
+    pub total_tokens: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelUsageCoverage {
+    pub component: String,
+    pub purpose: String,
+    pub event_count: u64,
+    pub response_observed_event_count: u64,
+    pub response_unobserved_event_count: u64,
+    pub context_count: u64,
+    pub overflow_context_count: u64,
+    pub unknown_context_count: u64,
+    pub context_dimension_coverage: Option<f64>,
+    pub observed_response_count: Option<u64>,
+    pub unattributed_response_count: Option<u64>,
+    pub overflow_response_count: Option<u64>,
+    pub attributed_response_count: Option<u64>,
+    pub response_attribution_coverage: Option<f64>,
+    pub report_overflow_response_count: Option<u64>,
+    pub report_overflow_total_tokens: u64,
+    pub attributed_total_tokens: u64,
+    pub unattributed_total_tokens: u64,
+    pub token_attribution_coverage: Option<f64>,
+    pub input_tokens: u64,
+    pub cached_input_tokens: u64,
+    pub cache_write_input_tokens: u64,
     pub output_tokens: u64,
     pub reasoning_output_tokens: u64,
     pub total_tokens: u64,
@@ -285,6 +380,7 @@ pub struct InstallationDistribution {
 #[serde(deny_unknown_fields)]
 pub struct ModelEffortContext {
     pub model_family: String,
+    pub model_identity: String,
     pub effort: String,
     pub context_count: u64,
 }
@@ -397,6 +493,293 @@ fn valid_installation_distribution(
         )
 }
 
+fn valid_model_identity(model: &str, identity: &str) -> bool {
+    identity == identity_kind(model)
+        || (identity == "historical_family"
+            && model != "unknown"
+            && MODEL_FAMILIES.contains(&model))
+}
+
+fn dimension_ratio(value: Option<f64>, total: u64, overflow: u64, unknown: u64) -> bool {
+    total
+        .checked_sub(overflow)
+        .and_then(|n| n.checked_sub(unknown))
+        .is_some_and(|known| ratio_matches(value, known, total))
+}
+
+fn valid_token_counters(fields: [u64; 6]) -> bool {
+    let [input, cached, _, output, reasoning, total] = fields;
+    cached <= input
+        && reasoning <= output
+        && input
+            .checked_add(output)
+            .is_some_and(|minimum| minimum <= total)
+}
+
+fn model_token_fields(row: &ModelTokenUsage) -> [u64; 6] {
+    [
+        row.input_tokens,
+        row.cached_input_tokens,
+        row.cache_write_input_tokens,
+        row.output_tokens,
+        row.reasoning_output_tokens,
+        row.total_tokens,
+    ]
+}
+fn pattern_token_fields(row: &ModelUsagePattern) -> [u64; 6] {
+    [
+        row.input_tokens,
+        row.cached_input_tokens,
+        row.cache_write_input_tokens,
+        row.output_tokens,
+        row.reasoning_output_tokens,
+        row.total_tokens,
+    ]
+}
+fn coverage_token_fields(row: &ModelUsageCoverage) -> [u64; 6] {
+    [
+        row.input_tokens,
+        row.cached_input_tokens,
+        row.cache_write_input_tokens,
+        row.output_tokens,
+        row.reasoning_output_tokens,
+        row.total_tokens,
+    ]
+}
+
+fn valid_model_patterns(patterns: &ModelUsagePatterns, report: &WeeklyReport) -> bool {
+    if patterns.basis != "owned_response_turn_link"
+        || patterns.context_count_basis != "turn_context_observations"
+        || patterns.response_count_basis != "owned_usage_response_observations"
+        || patterns.task_count_attributed
+        || patterns.row_limit_per_cohort != MAX_MODEL_REPORT_PAIRS
+        || patterns.rows.len() > MAX_MODEL_PATTERN_ROWS
+        || patterns.coverage.len() > 6
+    {
+        return false;
+    }
+    let mut coverage_keys = BTreeSet::new();
+    let mut row_keys = BTreeSet::new();
+    for row in &patterns.rows {
+        if !matches!(row.component.as_str(), "root" | "delegated")
+            || !analysis::PURPOSES.contains(&row.purpose.as_str())
+            || !valid_label(&row.model_family)
+            || !valid_model_identity(&row.model_family, &row.model_identity)
+            || !EFFORTS.contains(&row.effort.as_str())
+            || (row.model_family == "overflow" && row.effort != "unknown")
+            || row.event_count == 0
+            || row
+                .response_observed_event_count
+                .checked_add(row.response_unobserved_event_count)
+                != Some(row.event_count)
+            || (row.response_observed_event_count == 0) != row.observed_response_count.is_none()
+            || !valid_token_counters(pattern_token_fields(row))
+            || (row.context_count == 0
+                && row.observed_response_count.unwrap_or(0) == 0
+                && pattern_token_fields(row).iter().all(|n| *n == 0))
+            || !row_keys.insert((
+                &row.component,
+                &row.purpose,
+                &row.model_family,
+                &row.model_identity,
+                &row.effort,
+            ))
+        {
+            return false;
+        }
+    }
+    for c in &patterns.coverage {
+        if !matches!(c.component.as_str(), "root" | "delegated")
+            || !analysis::PURPOSES.contains(&c.purpose.as_str())
+            || !coverage_keys.insert((&c.component, &c.purpose))
+            || c.event_count == 0
+            || c.response_observed_event_count
+                .checked_add(c.response_unobserved_event_count)
+                != Some(c.event_count)
+            || !valid_token_counters(coverage_token_fields(c))
+            || c.attributed_total_tokens
+                .checked_add(c.unattributed_total_tokens)
+                != Some(c.total_tokens)
+            || !ratio_matches(
+                c.token_attribution_coverage,
+                c.attributed_total_tokens,
+                c.total_tokens,
+            )
+        {
+            return false;
+        }
+        let selected = patterns
+            .rows
+            .iter()
+            .filter(|r| r.component == c.component && r.purpose == c.purpose)
+            .collect::<Vec<_>>();
+        if selected.len() > MAX_MODEL_REPORT_PAIRS + 1
+            || selected.iter().any(|r| {
+                r.event_count > c.event_count
+                    || r.response_observed_event_count > c.response_observed_event_count
+                    || r.response_unobserved_event_count > c.response_unobserved_event_count
+            })
+            || !sums_to(selected.iter().map(|r| r.context_count), c.context_count)
+            || !sums_to(
+                selected
+                    .iter()
+                    .filter(|r| r.model_family == "overflow")
+                    .map(|r| r.context_count),
+                c.overflow_context_count,
+            )
+            || !sums_to(
+                selected
+                    .iter()
+                    .filter(|r| r.model_family == "unknown")
+                    .map(|r| r.context_count),
+                c.unknown_context_count,
+            )
+            || !dimension_ratio(
+                c.context_dimension_coverage,
+                c.context_count,
+                c.overflow_context_count,
+                c.unknown_context_count,
+            )
+            || !sums_to(
+                selected
+                    .iter()
+                    .filter(|r| r.model_family == "overflow")
+                    .map(|r| r.total_tokens),
+                c.report_overflow_total_tokens,
+            )
+        {
+            return false;
+        }
+        for (field, expected) in coverage_token_fields(c).into_iter().enumerate() {
+            if !sums_to(
+                selected.iter().map(|r| pattern_token_fields(r)[field]),
+                expected,
+            ) {
+                return false;
+            }
+        }
+        match (
+            c.observed_response_count,
+            c.unattributed_response_count,
+            c.overflow_response_count,
+            c.attributed_response_count,
+            c.report_overflow_response_count,
+        ) {
+            (None, None, None, None, None) => {
+                if c.response_observed_event_count != 0
+                    || c.response_attribution_coverage.is_some()
+                    || selected.iter().any(|r| r.observed_response_count.is_some())
+                {
+                    return false;
+                }
+            }
+            (
+                Some(observed),
+                Some(unattributed),
+                Some(overflow),
+                Some(attributed),
+                Some(report_overflow),
+            ) => {
+                if c.response_observed_event_count == 0
+                    || overflow > unattributed
+                    || attributed.checked_add(unattributed) != Some(observed)
+                    || !ratio_matches(c.response_attribution_coverage, attributed, observed)
+                    || !sums_to(
+                        selected
+                            .iter()
+                            .map(|r| r.observed_response_count.unwrap_or(0)),
+                        observed,
+                    )
+                    || !sums_to(
+                        selected
+                            .iter()
+                            .filter(|r| r.model_family == "overflow")
+                            .map(|r| r.observed_response_count.unwrap_or(0)),
+                        report_overflow,
+                    )
+                {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+    }
+    if patterns
+        .rows
+        .iter()
+        .any(|r| !coverage_keys.contains(&(&r.component, &r.purpose)))
+    {
+        return false;
+    }
+    for component in ["root", "delegated"] {
+        let coverage = patterns
+            .coverage
+            .iter()
+            .filter(|c| c.component == component)
+            .collect::<Vec<_>>();
+        if !sums_to(
+            coverage.iter().map(|c| c.event_count),
+            report.coverage.event_count,
+        ) {
+            return false;
+        }
+        let expected_total = if component == "root" {
+            report.weekly_metrics.tokens.total
+        } else {
+            report.weekly_metrics.tokens.delegated_total
+        };
+        if !sums_to(coverage.iter().map(|c| c.total_tokens), expected_total) {
+            return false;
+        }
+        if component == "root" {
+            for (field, expected) in [
+                report.weekly_metrics.tokens.input,
+                report.weekly_metrics.tokens.cached_input,
+                report.weekly_metrics.tokens.cache_write_input,
+                report.weekly_metrics.tokens.output,
+                report.weekly_metrics.tokens.reasoning_output,
+                report.weekly_metrics.tokens.total,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                if !sums_to(
+                    coverage.iter().map(|c| coverage_token_fields(c)[field]),
+                    expected,
+                ) {
+                    return false;
+                }
+            }
+            if !sums_to(
+                coverage.iter().map(|c| c.context_count),
+                report.cohorts.model_effort_context_coverage.context_count,
+            ) {
+                return false;
+            }
+        }
+        if let Some(tokens) = &report.cohorts.model_token_distribution {
+            let tokens = tokens
+                .iter()
+                .filter(|r| r.component == component)
+                .collect::<Vec<_>>();
+            for field in 0..6 {
+                let sum = tokens
+                    .iter()
+                    .try_fold(0_u64, |n, r| n.checked_add(model_token_fields(r)[field]));
+                if !sum.is_some_and(|total| {
+                    sums_to(
+                        coverage.iter().map(|c| coverage_token_fields(c)[field]),
+                        total,
+                    )
+                }) {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
 impl WeeklyReport {
     pub fn from_slice(bytes: &[u8]) -> Result<Self, ContractError> {
         if bytes.len() > MAX_WEEKLY_REPORT_BYTES {
@@ -432,7 +815,7 @@ impl WeeklyReport {
             || source.freshness_time_field != "received_at"
             || source.roster_source != "enrolled_installation_registry"
             || source.analysis_mode != "descriptive_single_period"
-            || source.query_set_version != 3
+            || source.query_set_version != 4
             || !source.basic_aggregate_only
         {
             return invalid();
@@ -665,22 +1048,56 @@ impl WeeklyReport {
             return invalid();
         }
         let contexts = &self.cohorts.model_effort_context_distribution;
-        if contexts.len() > 256
+        if contexts.len() > MAX_MODEL_REPORT_PAIRS + 1
             || contexts.iter().any(|item| {
-                !MODEL_FAMILIES.contains(&item.model_family.as_str())
+                !valid_label(&item.model_family)
+                    || !valid_model_identity(&item.model_family, &item.model_identity)
                     || !EFFORTS.contains(&item.effort.as_str())
                     || item.context_count == 0
+                    || (item.model_family == "overflow" && item.effort != "unknown")
             })
             || contexts.windows(2).any(|window| {
-                (&window[0].model_family, &window[0].effort)
-                    >= (&window[1].model_family, &window[1].effort)
+                (
+                    &window[0].model_family,
+                    &window[0].model_identity,
+                    &window[0].effort,
+                ) >= (
+                    &window[1].model_family,
+                    &window[1].model_identity,
+                    &window[1].effort,
+                )
             })
+        {
+            return invalid();
+        }
+        let context_coverage = &self.cohorts.model_effort_context_coverage;
+        let overflow_contexts = contexts.iter().filter(|r| r.model_family == "overflow");
+        let unknown_contexts = contexts.iter().filter(|r| r.model_family == "unknown");
+        if context_coverage.row_limit != MAX_MODEL_REPORT_PAIRS
+            || !sums_to(
+                contexts.iter().map(|r| r.context_count),
+                context_coverage.context_count,
+            )
+            || !sums_to(
+                overflow_contexts.map(|r| r.context_count),
+                context_coverage.overflow_context_count,
+            )
+            || !sums_to(
+                unknown_contexts.map(|r| r.context_count),
+                context_coverage.unknown_context_count,
+            )
+            || !dimension_ratio(
+                context_coverage.dimension_coverage,
+                context_coverage.context_count,
+                context_coverage.overflow_context_count,
+                context_coverage.unknown_context_count,
+            )
         {
             return invalid();
         }
         let efficiency = &self.cohorts.model_effort_token_efficiency;
         if let Some(rows) = &self.cohorts.model_token_distribution {
-            if rows.len() > 2 * MAX_MODEL_CONTEXTS
+            if rows.len() > 2 * (MAX_MODEL_REPORT_PAIRS + 1)
                 || efficiency.status != "DESCRIPTIVE"
                 || efficiency.reason_code != "completed_turns_not_attributed_to_model_effort"
                 || efficiency.context_distribution_only
@@ -690,9 +1107,17 @@ impl WeeklyReport {
             let mut keys = BTreeSet::new();
             for row in rows {
                 if !matches!(row.component.as_str(), "root" | "delegated")
-                    || !MODEL_FAMILIES.contains(&row.model_family.as_str())
+                    || !valid_label(&row.model_family)
+                    || !valid_model_identity(&row.model_family, &row.model_identity)
                     || !EFFORTS.contains(&row.effort.as_str())
-                    || !keys.insert((&row.component, &row.model_family, &row.effort))
+                    || (row.model_family == "overflow" && row.effort != "unknown")
+                    || !valid_token_counters(model_token_fields(row))
+                    || !keys.insert((
+                        &row.component,
+                        &row.model_family,
+                        &row.model_identity,
+                        &row.effort,
+                    ))
                 {
                     return invalid();
                 }
@@ -714,6 +1139,7 @@ impl WeeklyReport {
                 (1, self.weekly_metrics.tokens.cached_input),
                 (2, self.weekly_metrics.tokens.output),
                 (3, self.weekly_metrics.tokens.reasoning_output),
+                (4, self.weekly_metrics.tokens.cache_write_input),
             ] {
                 let sum =
                     rows.iter()
@@ -725,6 +1151,7 @@ impl WeeklyReport {
                                     r.cached_input_tokens,
                                     r.output_tokens,
                                     r.reasoning_output_tokens,
+                                    r.cache_write_input_tokens,
                                 ][key],
                             )
                         });
@@ -732,9 +1159,60 @@ impl WeeklyReport {
                     return invalid();
                 }
             }
+            let Some(coverage) = &self.cohorts.model_token_distribution_coverage else {
+                return invalid();
+            };
+            if coverage.len() != 2 {
+                return invalid();
+            }
+            let mut components = BTreeSet::new();
+            for c in coverage {
+                let selected = rows
+                    .iter()
+                    .filter(|r| r.component == c.component)
+                    .collect::<Vec<_>>();
+                if !matches!(c.component.as_str(), "root" | "delegated")
+                    || !components.insert(&c.component)
+                    || c.row_limit != MAX_MODEL_REPORT_PAIRS
+                    || selected.len() > MAX_MODEL_REPORT_PAIRS + 1
+                    || !sums_to(selected.iter().map(|r| r.total_tokens), c.total_tokens)
+                    || !sums_to(
+                        selected
+                            .iter()
+                            .filter(|r| r.model_family == "overflow")
+                            .map(|r| r.total_tokens),
+                        c.overflow_total_tokens,
+                    )
+                    || !sums_to(
+                        selected
+                            .iter()
+                            .filter(|r| r.model_family == "unknown")
+                            .map(|r| r.total_tokens),
+                        c.unknown_total_tokens,
+                    )
+                    || !dimension_ratio(
+                        c.dimension_coverage,
+                        c.total_tokens,
+                        c.overflow_total_tokens,
+                        c.unknown_total_tokens,
+                    )
+                {
+                    return invalid();
+                }
+            }
         } else if efficiency.status != "UNAVAILABLE"
             || efficiency.reason_code != "token_usage_not_attributed_to_model_effort"
             || !efficiency.context_distribution_only
+            || self.cohorts.model_token_distribution_coverage.is_some()
+        {
+            return invalid();
+        }
+
+        if self
+            .cohorts
+            .model_usage_patterns
+            .as_ref()
+            .is_some_and(|patterns| !valid_model_patterns(patterns, self))
         {
             return invalid();
         }
@@ -1203,13 +1681,20 @@ fn validate_session_metrics(value: &Value) -> bool {
         || !model_effort.iter().all(|item| {
             exact_object_keys(item, &["count", "effort", "model_family"])
                 && item.get("count").is_some_and(non_negative_u32)
-                && allowed_string(
-                    item.get("model_family").unwrap_or(&Value::Null),
-                    MODEL_FAMILIES,
-                )
+                && item
+                    .get("model_family")
+                    .and_then(Value::as_str)
+                    .is_some_and(valid_label)
                 && allowed_string(item.get("effort").unwrap_or(&Value::Null), EFFORTS)
+                && (item["model_family"] != "overflow" || item["effort"] == "unknown")
         })
     {
+        return false;
+    }
+    let mut observation_keys = BTreeSet::new();
+    if model_effort.iter().any(|item| {
+        !observation_keys.insert((item["model_family"].as_str(), item["effort"].as_str()))
+    }) {
         return false;
     }
     let quality = object.get("quality_proxies").and_then(Value::as_object);
@@ -1618,7 +2103,8 @@ pub fn validate_basic_event_bytes(bytes: &[u8]) -> Result<Value, ContractError> 
 mod tests {
     use serde_json::{Value, json};
 
-    use super::{WeeklyReport, validate_guardian_metrics, validate_session_metrics};
+    use super::{WeeklyReport, analysis, validate_guardian_metrics, validate_session_metrics};
+    use crate::model::MAX_MODEL_CONTEXTS;
 
     fn session_metrics() -> Value {
         json!({
@@ -1725,7 +2211,7 @@ mod tests {
                 "freshness_time_field": "received_at",
                 "roster_source": "enrolled_installation_registry",
                 "analysis_mode": "descriptive_single_period",
-                "query_set_version": 3,
+                "query_set_version": 4,
                 "basic_aggregate_only": true
             },
             "collection_health": {
@@ -1797,6 +2283,7 @@ mod tests {
                     "input": 100,
                     "cached_input": 80,
                     "non_cached_input": 20,
+                    "cache_write_input": 0,
                     "output": 10,
                     "reasoning_output": 2,
                     "total": 110,
@@ -1850,6 +2337,7 @@ mod tests {
                     "execution_mode": [{"value": "desktop", "installation_count": 1}]
                 },
                 "model_effort_context_distribution": [],
+                "model_effort_context_coverage": {"row_limit":128,"context_count":0,"overflow_context_count":0,"unknown_context_count":0,"dimension_coverage":null},
                 "model_effort_token_efficiency": {
                     "status": "UNAVAILABLE",
                     "reason_code": "token_usage_not_attributed_to_model_effort",
@@ -1869,6 +2357,171 @@ mod tests {
                 "minimum_observed_root_count": 5
             }
         })
+    }
+
+    fn patterns_report() -> Value {
+        let mut report = report();
+        let tokens = serde_json::json!({"input_tokens":100,"cached_input_tokens":80,"cache_write_input_tokens":7,"output_tokens":10,"reasoning_output_tokens":2,"total_tokens":110});
+        report["weekly_metrics"]["tokens"]["cache_write_input"] = json!(7);
+        let mut row = tokens.clone();
+        for (key, value) in [
+            ("component", json!("root")),
+            ("purpose", json!("production")),
+            ("model_family", json!("gpt-7.2-sol-2026-10-04")),
+            ("model_identity", json!("public_model_id")),
+            ("effort", json!("high")),
+            ("context_count", json!(0)),
+            ("event_count", json!(2)),
+            ("response_observed_event_count", json!(0)),
+            ("response_unobserved_event_count", json!(2)),
+            ("observed_response_count", Value::Null),
+        ] {
+            row[key] = value;
+        }
+        let coverage = |component: &str, component_tokens: Value| {
+            let mut c = component_tokens;
+            for (key, value) in [
+                ("component", json!(component)),
+                ("purpose", json!("production")),
+                ("event_count", json!(2)),
+                ("response_observed_event_count", json!(0)),
+                ("response_unobserved_event_count", json!(2)),
+                ("context_count", json!(0)),
+                ("overflow_context_count", json!(0)),
+                ("unknown_context_count", json!(0)),
+                ("context_dimension_coverage", Value::Null),
+                ("observed_response_count", Value::Null),
+                ("unattributed_response_count", Value::Null),
+                ("overflow_response_count", Value::Null),
+                ("attributed_response_count", Value::Null),
+                ("response_attribution_coverage", Value::Null),
+                ("report_overflow_response_count", Value::Null),
+                ("report_overflow_total_tokens", json!(0)),
+                (
+                    "attributed_total_tokens",
+                    json!(if component == "root" { 110 } else { 0 }),
+                ),
+                ("unattributed_total_tokens", json!(0)),
+                (
+                    "token_attribution_coverage",
+                    if component == "root" {
+                        json!(1.0)
+                    } else {
+                        Value::Null
+                    },
+                ),
+            ] {
+                c[key] = value;
+            }
+            c
+        };
+        let zero = analysis::TOKEN_FIELDS
+            .iter()
+            .map(|f| ((*f).to_owned(), json!(0)))
+            .collect::<serde_json::Map<_, _>>();
+        report["cohorts"]["model_usage_patterns"] = json!({"basis":"owned_response_turn_link",
+            "context_count_basis":"turn_context_observations","response_count_basis":"owned_usage_response_observations",
+            "task_count_attributed":false,"row_limit_per_cohort":128,"rows":[row],
+            "coverage":[coverage("root",tokens),coverage("delegated",Value::Object(zero))]});
+        report
+    }
+
+    #[test]
+    fn dynamic_metric_labels_accept_versions_snapshots_and_opaque_ids_with_a_separate_cap() {
+        let mut metrics = session_metrics();
+        let private_a = crate::model::observed_label("provider/PRIVATE_SENTINEL_A");
+        let private_b = crate::model::observed_label("provider/PRIVATE_SENTINEL_B");
+        assert_ne!(private_a, private_b);
+        metrics["model_effort"] = json!([
+            {"model_family":"gpt-7.2-sol-2026-10-04","effort":"high","count":1},
+            {"model_family":private_a,"effort":"medium","count":2},
+            {"model_family":private_b,"effort":"low","count":3},
+            {"model_family":"overflow","effort":"unknown","count":4}]);
+        assert!(validate_session_metrics(&metrics));
+        assert!(
+            !serde_json::to_string(&metrics)
+                .unwrap()
+                .contains("PRIVATE_SENTINEL")
+        );
+        for (index, field, value) in [
+            (0, "model_family", json!("PRIVATE_SENTINEL")),
+            (0, "model_family", json!("private-short")),
+            (3, "effort", json!("high")),
+            (0, "count", json!(u64::from(u32::MAX) + 1)),
+        ] {
+            let mut bad = metrics.clone();
+            bad["model_effort"][index][field] = value;
+            assert!(!validate_session_metrics(&bad));
+        }
+        metrics["model_effort"][1] = metrics["model_effort"][0].clone();
+        assert!(!validate_session_metrics(&metrics));
+        metrics["model_effort"]=Value::Array((0..MAX_MODEL_CONTEXTS).map(|n|json!({"model_family":format!("gpt-7.{n}-sol"),"effort":"medium","count":1})).collect());
+        assert!(validate_session_metrics(&metrics));
+        metrics["model_effort"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"model_family":"gpt-8-sol","effort":"medium","count":1}));
+        assert!(!validate_session_metrics(&metrics));
+    }
+
+    #[test]
+    fn model_pattern_report_preserves_response_absence_and_every_token_counter() {
+        let report = patterns_report();
+        assert!(WeeklyReport::from_slice(&serde_json::to_vec(&report).unwrap()).is_ok());
+        for pointer in [
+            "/cohorts/model_usage_patterns/rows/0/cache_write_input_tokens",
+            "/cohorts/model_usage_patterns/coverage/0/cached_input_tokens",
+            "/cohorts/model_usage_patterns/coverage/0/observed_response_count",
+        ] {
+            let mut bad = report.clone();
+            *bad.pointer_mut(pointer).unwrap() = json!(0);
+            assert!(
+                WeeklyReport::from_slice(&serde_json::to_vec(&bad).unwrap()).is_err(),
+                "accepted {pointer}"
+            );
+        }
+        let mut observed = report.clone();
+        let row = &mut observed["cohorts"]["model_usage_patterns"]["rows"][0];
+        row["response_observed_event_count"] = json!(1);
+        row["response_unobserved_event_count"] = json!(1);
+        row["observed_response_count"] = json!(3);
+        let coverage = &mut observed["cohorts"]["model_usage_patterns"]["coverage"][0];
+        coverage["response_observed_event_count"] = json!(1);
+        coverage["response_unobserved_event_count"] = json!(1);
+        coverage["observed_response_count"] = json!(3);
+        coverage["unattributed_response_count"] = json!(0);
+        coverage["overflow_response_count"] = json!(0);
+        coverage["attributed_response_count"] = json!(3);
+        coverage["response_attribution_coverage"] = json!(1.0);
+        coverage["report_overflow_response_count"] = json!(0);
+        assert!(WeeklyReport::from_slice(&serde_json::to_vec(&observed).unwrap()).is_ok());
+        observed["cohorts"]["model_usage_patterns"]["rows"][0]["observed_response_count"] =
+            Value::Null;
+        assert!(WeeklyReport::from_slice(&serde_json::to_vec(&observed).unwrap()).is_err());
+        let mut duplicate = report.clone();
+        let row = duplicate["cohorts"]["model_usage_patterns"]["rows"][0].clone();
+        duplicate["cohorts"]["model_usage_patterns"]["rows"]
+            .as_array_mut()
+            .unwrap()
+            .push(row);
+        assert!(WeeklyReport::from_slice(&serde_json::to_vec(&duplicate).unwrap()).is_err());
+        let mut private = report;
+        private["cohorts"]["model_usage_patterns"]["rows"][0]["model_family"] =
+            json!("PRIVATE_SENTINEL");
+        assert!(WeeklyReport::from_slice(&serde_json::to_vec(&private).unwrap()).is_err());
+    }
+
+    #[test]
+    fn historical_and_current_base_labels_are_not_merged_or_reidentified() {
+        let mut report = report();
+        report["cohorts"]["model_effort_context_distribution"] = json!([
+            {"model_family":"gpt-6-sol","model_identity":"historical_family","effort":"high","context_count":2},
+            {"model_family":"gpt-6-sol","model_identity":"public_model_id","effort":"high","context_count":4}]);
+        report["cohorts"]["model_effort_context_coverage"] = json!({"row_limit":128,"context_count":6,"overflow_context_count":0,"unknown_context_count":0,"dimension_coverage":1.0});
+        assert!(WeeklyReport::from_slice(&serde_json::to_vec(&report).unwrap()).is_ok());
+        report["cohorts"]["model_effort_context_distribution"][0]["model_identity"] =
+            json!("public_model_id");
+        assert!(WeeklyReport::from_slice(&serde_json::to_vec(&report).unwrap()).is_err());
     }
 
     #[test]

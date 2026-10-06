@@ -95,7 +95,7 @@ fn report_fixture() -> Value {
             "freshness_time_field": "received_at",
             "roster_source": "enrolled_installation_registry",
             "analysis_mode": "descriptive_single_period",
-            "query_set_version": 3,
+            "query_set_version": 4,
             "basic_aggregate_only": true
         },
         "collection_health": {
@@ -167,6 +167,7 @@ fn report_fixture() -> Value {
                 "input": 100,
                 "cached_input": 80,
                 "non_cached_input": 20,
+                "cache_write_input": 0,
                 "output": 10,
                 "reasoning_output": 2,
                 "total": 110,
@@ -220,6 +221,10 @@ fn report_fixture() -> Value {
                 "execution_mode": [{"value": "desktop", "installation_count": 1}]
             },
             "model_effort_context_distribution": [],
+            "model_effort_context_coverage": {
+                "row_limit":128,"context_count":0,"overflow_context_count":0,
+                "unknown_context_count":0,"dimension_coverage":null
+            },
             "model_effort_token_efficiency": {
                 "status": "UNAVAILABLE",
                 "reason_code": "token_usage_not_attributed_to_model_effort",
@@ -248,10 +253,16 @@ fn report_fixture() -> Value {
         "context_distribution_only":false
     });
     report["cohorts"]["model_token_distribution"] = json!([{
-        "component":"root", "model_family":"gpt-6-sol", "effort":"medium",
-        "input_tokens":100, "cached_input_tokens":80, "output_tokens":10,
+        "component":"root", "model_family":"gpt-6-sol", "model_identity":"public_model_id", "effort":"medium",
+        "input_tokens":100, "cached_input_tokens":80, "cache_write_input_tokens":0,"output_tokens":10,
         "reasoning_output_tokens":2, "total_tokens":110
     }]);
+    report["cohorts"]["model_token_distribution_coverage"] = json!([
+        {"component":"root","row_limit":128,"total_tokens":110,"overflow_total_tokens":0,
+            "unknown_total_tokens":0,"dimension_coverage":1.0},
+        {"component":"delegated","row_limit":128,"total_tokens":0,"overflow_total_tokens":0,
+            "unknown_total_tokens":0,"dimension_coverage":null}
+    ]);
     report
 }
 

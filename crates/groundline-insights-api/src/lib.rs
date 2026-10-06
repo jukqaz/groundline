@@ -33,13 +33,14 @@ use url::Url;
 use uuid::Uuid;
 
 mod analysis;
+mod model_patterns;
 mod projection;
 mod telemetry;
 mod trust_migration;
 
 const API_VERSION: &str = "3";
-const MAX_REQUEST_BYTES: usize = 64 * 1024;
-const MAX_CLICKHOUSE_BYTES: usize = 1024 * 1024;
+const MAX_REQUEST_BYTES: usize = groundline_contracts::insights::MAX_BASIC_EVENT_BYTES;
+const MAX_CLICKHOUSE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_REQUESTS_PER_MINUTE: usize = 600;
 const MAX_PRE_AUTH_REQUESTS_PER_MINUTE: usize = 120;
 const MAX_PRE_AUTH_GLOBAL_REQUESTS_PER_MINUTE: usize = 2400;
@@ -543,7 +544,13 @@ impl ClickHouse {
             if include_database {
                 pairs.append_pair("database", &self.database);
             }
-            pairs.append_pair("query", query);
+            // JSONEachRow inserts keep their short SQL in the query parameter.
+            // Generated trust predicates can exceed an HTTP request-line bound;
+            // send read/DDL SQL in the POST body rather than an oversized URL.
+            if body.is_some() {
+                pairs.append_pair("query", query);
+            }
+            pairs.append_pair("output_format_json_quote_64bit_integers", "0");
             pairs.append_pair("date_time_input_format", "best_effort");
             pairs.append_pair("input_format_skip_unknown_fields", "0");
             pairs.append_pair("insert_allow_materialized_columns", "0");
@@ -551,12 +558,20 @@ impl ClickHouse {
                 pairs.append_pair(&format!("param_{key}"), value);
             }
         }
-        let body = body.unwrap_or_default();
+        let is_json_insert = body.is_some();
+        let body = body.unwrap_or_else(|| query.as_bytes().to_vec());
         let request = self
             .client
             .post(url)
             .header(header::AUTHORIZATION, self.authorization.clone())
-            .header(header::CONTENT_TYPE, "application/json")
+            .header(
+                header::CONTENT_TYPE,
+                if is_json_insert {
+                    "application/json"
+                } else {
+                    "text/plain; charset=utf-8"
+                },
+            )
             .header(header::CONTENT_LENGTH, body.len())
             .body(body);
         let response = request.send().await.map_err(|_| ApiError::storage())?;
@@ -638,6 +653,10 @@ impl ClickHouse {
             .await?;
         }
         self.request(&analysis::usage_view(), &[], None).await?;
+        self.request(&model_patterns::pattern_view(), &[], None)
+            .await?;
+        self.request(&model_patterns::coverage_view(), &[], None)
+            .await?;
         telemetry::ensure(self).await?;
         let policy = json!({
             "policy_key":"stable",
@@ -685,6 +704,30 @@ impl ClickHouse {
             .filter(|line| !line.is_empty())
             .map(|line| serde_json::from_slice(line).map_err(|_| ApiError::storage()))
             .collect()
+    }
+
+    async fn json_report_rows(
+        &self,
+        query: &str,
+        parameters: &[(&str, String)],
+    ) -> Result<Vec<Value>, ApiError> {
+        let rows = self.json_rows(query, parameters).await?;
+        for row in &rows {
+            validate_report_counter_bounds(row)?;
+        }
+        Ok(rows)
+    }
+
+    async fn json_report_row(
+        &self,
+        query: &str,
+        parameters: &[(&str, String)],
+    ) -> Result<Option<Value>, ApiError> {
+        let row = self.json_row(query, parameters).await?;
+        if let Some(row) = &row {
+            validate_report_counter_bounds(row)?;
+        }
+        Ok(row)
     }
 
     async fn collector(&self, collector_id: Uuid) -> Result<Option<Collector>, ApiError> {
@@ -1704,6 +1747,54 @@ fn ratio(numerator: u64, denominator: u64) -> Value {
     }
 }
 
+// SQL uses UInt128 for model/report aggregates. Reject a number outside the
+// wire u64 range before count() defaults or report ratios can consume it. JSON
+// overflow/fractional numbers never become rounded model observations or zero.
+fn validate_report_counter_bounds(value: &Value) -> Result<(), ApiError> {
+    const LABELS: &[&str] = &[
+        "component",
+        "purpose",
+        "model_family",
+        "model_identity",
+        "effort",
+        "dimension",
+        "value",
+        "policy_latest_version",
+    ];
+    const NULLABLE: &[&str] = &[
+        "observed_response_count",
+        "unattributed_response_count",
+        "overflow_response_count",
+        "latest_received_at_utc",
+    ];
+    let valid = match value {
+        Value::Number(number) => number.as_u64().is_some(),
+        Value::Array(items) => items
+            .iter()
+            .all(|item| validate_report_counter_bounds(item).is_ok()),
+        Value::Object(object) => object.iter().all(|(field, value)| {
+            if LABELS.contains(&field.as_str()) {
+                value.is_string()
+            } else if field == "latest_received_at_utc" {
+                value.is_null() || value.is_string()
+            } else if value.is_null() {
+                NULLABLE.contains(&field.as_str())
+            } else {
+                value.as_u64().is_some()
+            }
+        }),
+        _ => false,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "report_counter_overflow",
+        ))
+    }
+}
+
 fn distributions(rows: &[Value], dimension: &str, count_key: &str) -> Vec<Value> {
     rows.iter()
         .filter(|row| row.get("dimension").and_then(Value::as_str) == Some(dimension))
@@ -1743,34 +1834,42 @@ async fn weekly_report(
     ];
     let summary = state
         .clickhouse
-        .json_row(REPORT_SUMMARY_QUERY, &params)
+        .json_report_row(REPORT_SUMMARY_QUERY, &params)
         .await?
         .unwrap_or_else(|| json!({}));
     let fleet = state
         .clickhouse
-        .json_row(REPORT_FLEET_QUERY, &params)
+        .json_report_row(REPORT_FLEET_QUERY, &params)
         .await?
         .unwrap_or_else(|| json!({}));
     let storage = state
         .clickhouse
-        .json_row(REPORT_STORAGE_QUERY, &params)
+        .json_report_row(REPORT_STORAGE_QUERY, &params)
         .await?
         .unwrap_or_else(|| json!({}));
     let event_cohorts = state
         .clickhouse
-        .json_rows(REPORT_EVENT_COHORT_QUERY, &params)
+        .json_report_rows(REPORT_EVENT_COHORT_QUERY, &params)
         .await?;
     let install_cohorts = state
         .clickhouse
-        .json_rows(REPORT_INSTALL_COHORT_QUERY, &[])
+        .json_report_rows(REPORT_INSTALL_COHORT_QUERY, &[])
         .await?;
     let model_effort = state
         .clickhouse
-        .json_rows(REPORT_MODEL_EFFORT_QUERY, &params)
+        .json_report_rows(report_model_effort_query(), &params)
         .await?;
     let model_tokens = state
         .clickhouse
-        .json_rows(REPORT_MODEL_TOKENS_QUERY, &params)
+        .json_report_rows(report_model_tokens_query(), &params)
+        .await?;
+    let model_pattern_rows = state
+        .clickhouse
+        .json_report_rows(&model_patterns::pattern_query(), &params)
+        .await?;
+    let model_pattern_coverage = state
+        .clickhouse
+        .json_report_rows(&model_patterns::coverage_query(), &params)
         .await?;
     validated_report_response(build_report(
         query.days,
@@ -1784,6 +1883,8 @@ async fn weekly_report(
             install_cohorts,
             model_effort,
             model_tokens: Some(model_tokens),
+            model_pattern_rows: Some(model_pattern_rows),
+            model_pattern_coverage: Some(model_pattern_coverage),
         },
     ))
 }
@@ -1792,6 +1893,10 @@ async fn weekly_report(
 struct ReportRows {
     #[serde(default)]
     model_tokens: Option<Vec<Value>>,
+    #[serde(default)]
+    model_pattern_rows: Option<Vec<Value>>,
+    #[serde(default)]
+    model_pattern_coverage: Option<Vec<Value>>,
     summary: Value,
     fleet: Value,
     storage: Value,
@@ -1803,6 +1908,8 @@ struct ReportRows {
 fn build_report(days: u16, end: DateTime<Utc>, latest_version: &str, rows: &ReportRows) -> Value {
     let ReportRows {
         model_tokens,
+        model_pattern_rows,
+        model_pattern_coverage,
         summary,
         fleet,
         storage,
@@ -1936,7 +2043,7 @@ fn build_report(days: u16, end: DateTime<Utc>, latest_version: &str, rows: &Repo
         "source_contract":{
             "dataset":"basic_active","time_basis":"utc","metric_time_field":"period_end_or_generated_at",
             "freshness_time_field":"received_at","roster_source":"enrolled_installation_registry",
-            "analysis_mode":"descriptive_single_period","query_set_version":3,"basic_aggregate_only":true
+            "analysis_mode":"descriptive_single_period","query_set_version":4,"basic_aggregate_only":true
         },
         "collection_health":{
             "enrolled_installation_count":count(fleet,"enrolled_installation_count"),
@@ -1983,7 +2090,8 @@ fn build_report(days: u16, end: DateTime<Utc>, latest_version: &str, rows: &Repo
         },
         "weekly_metrics":{
             "tokens":{"input":count(summary,"input_tokens"),"cached_input":count(summary,"cached_input_tokens"),
-                "non_cached_input":count(summary,"non_cached_input_tokens"),"output":count(summary,"output_tokens"),
+                "non_cached_input":count(summary,"non_cached_input_tokens"),
+                "cache_write_input":count(summary,"cache_write_input_tokens"),"output":count(summary,"output_tokens"),
                 "reasoning_output":count(summary,"reasoning_output_tokens"),"total":count(summary,"total_tokens"),
                 "delegated_total":count(summary,"delegated_total_tokens"),"guardian_total":count(summary,"guardian_total_tokens")},
             "workflow":{"compactions":count(summary,"compactions"),"compactions_per_observed_root":ratio(count(summary,"compactions"),observed_roots),
@@ -2009,10 +2117,13 @@ fn build_report(days: u16, end: DateTime<Utc>, latest_version: &str, rows: &Repo
                 "os_family":distributions(install_cohorts,"os_family","installation_count"),"runtime_family":distributions(install_cohorts,"runtime_family","installation_count"),
                 "execution_mode":distributions(install_cohorts,"execution_mode","installation_count")},
             "model_effort_context_distribution":model_effort,
+            "model_effort_context_coverage":model_patterns::context_coverage(model_effort),
             "model_effort_token_efficiency":if model_tokens.is_some() {
                 json!({"status":"DESCRIPTIVE","reason_code":"completed_turns_not_attributed_to_model_effort","context_distribution_only":false})
             } else {json!({"status":"UNAVAILABLE","reason_code":"token_usage_not_attributed_to_model_effort","context_distribution_only":true})},
-            "model_token_distribution":model_tokens
+            "model_token_distribution":model_tokens,
+            "model_token_distribution_coverage":model_tokens.as_ref().map(|rows|model_patterns::token_coverage(rows)),
+            "model_usage_patterns":model_pattern_rows.as_ref().zip(model_pattern_coverage.as_ref()).map(|(rows,coverage)|model_patterns::report(rows,coverage))
         },
         "data_quality":{"status":if quality.is_empty(){"PASS"}else if quality.contains("no_events"){"FAIL"}else{"PARTIAL"},
             "reason_codes":quality,"sample_sufficient_event_count":sample_sufficient,"sample_insufficient_event_count":sample_insufficient},
@@ -2032,13 +2143,19 @@ fn validated_report_response(report: Value) -> Result<Response, ApiError> {
     Ok(safe_response(StatusCode::OK, report, "accepted"))
 }
 
-const REPORT_SUMMARY_QUERY: &str = r#"SELECT count() AS event_count, sum(eligible_root_count) AS eligible_root_total, sum(selected_root_count) AS selected_root_total, sum(observed_root_count) AS observed_root_total, sum(task_completed) AS completed_turn_count, sum(unreadable_root_count) AS unreadable_root_count, sum(root_truncated_count) AS root_truncated_count, sum(truncated_count) AS non_root_truncated_count, sum(originator_unclassified_excluded_root_count) AS originator_unclassified_count, sum(originator_source_fallback_root_count) AS originator_source_fallback_count, countIf(observed_root_count > 0) AS root_usage_applicable_event_count, countIf(observed_root_count > 0 AND usage_source IN ('unavailable','unknown')) AS root_usage_missing_event_count, countIf(fallback_rollout_count > 0) AS root_usage_fallback_event_count, countIf(delegated_count > 0) AS delegated_usage_applicable_event_count, countIf(delegated_count > 0 AND delegated_usage_source IN ('unavailable','unknown')) AS delegated_usage_missing_event_count, countIf(delegated_fallback_rollout_count > 0) AS delegated_usage_fallback_event_count, countIf(guardian_count > 0) AS guardian_usage_applicable_event_count, countIf(guardian_count > 0 AND guardian_usage_source IN ('unavailable','unknown')) AS guardian_usage_missing_event_count, countIf(guardian_fallback_rollout_count > 0) AS guardian_usage_fallback_event_count, sum(guardian_incomplete_excluded_count) AS guardian_incomplete_excluded_count, countIf(selection_mode != 'activity_window') AS completed_root_coverage_applicable_event_count, countIf(capability_completed_root_coverage = 1 AND selection_mode != 'activity_window') AS completed_root_coverage_capable_event_count, countIf(capability_latency_completed_count = 1) AS latency_capable_event_count, countIf(capability_root_boundary_counts = 1) AS boundary_count_capable_event_count, countIf(guardian_review_count > 0) AS guardian_attribution_applicable_event_count, countIf(guardian_review_count > 0 AND capability_guardian_workspace_attribution = 1) AS guardian_attribution_capable_event_count, countIf(component_nonpass = 1) AS component_nonpass_event_count, countIf(sample_sufficient = 1) AS sample_sufficient_event_count, countIf(sample_sufficient = 0) AS sample_insufficient_event_count, countIf((observed_root_count > 0 AND usage_source IN ('unavailable','unknown')) OR (delegated_count > 0 AND delegated_usage_source IN ('unavailable','unknown')) OR (guardian_count > 0 AND guardian_usage_source IN ('unavailable','unknown'))) AS usage_missing_count, sum(fallback_rollout_count + delegated_fallback_rollout_count + guardian_fallback_rollout_count) AS usage_fallback_count, sum(input_tokens) AS input_tokens, sum(cached_input_tokens) AS cached_input_tokens, sum(non_cached_input_tokens) AS non_cached_input_tokens, sum(output_tokens) AS output_tokens, sum(reasoning_output_tokens) AS reasoning_output_tokens, sum(total_tokens) AS total_tokens, sum(delegated_total_tokens) AS delegated_total_tokens, sum(guardian_total_tokens) AS guardian_total_tokens, sum(compactions) AS compactions, sum(long_turn_count) AS long_turn_count, sum(exact_repeated_call_groups) AS exact_repeated_call_groups, sum(calls_in_exact_repeated_groups) AS calls_in_exact_repeated_groups, sum(nonzero_exit_count + timeout_count + rejected_count) AS failure_signal_count, sum(tool_call_count) AS tool_call_count, sum(user_messages_with_text) AS user_messages_with_text, sum(short_message_count) AS short_message_count, sum(broad_scope_message_count) AS broad_scope_message_count, sum(boundary_review_root_count) AS boundary_review_root_count, sum(long_lived_root_count) AS long_lived_root_count, sum(verification_tool_calls) AS verification_tool_call_count, sum(verification_success_count) AS verification_success_count, sum(verification_failure_count) AS verification_failure_count, sum(verification_unresolved_count) AS verification_unresolved_count, sum(guardian_review_count) AS guardian_review_total, sum(guardian_workspace_attributed_review_count) AS guardian_workspace_attributed_review_count FROM groundline.basic_active WHERE ifNull(period_end, generated_at) > parseDateTimeBestEffort({start:String}) AND ifNull(period_end, generated_at) <= parseDateTimeBestEffort({end:String}) FORMAT JSONEachRow"#;
+const REPORT_SUMMARY_QUERY: &str = r#"SELECT count() AS event_count, sum(eligible_root_count) AS eligible_root_total, sum(selected_root_count) AS selected_root_total, sum(observed_root_count) AS observed_root_total, sum(task_completed) AS completed_turn_count, sum(unreadable_root_count) AS unreadable_root_count, sum(root_truncated_count) AS root_truncated_count, sum(truncated_count) AS non_root_truncated_count, sum(originator_unclassified_excluded_root_count) AS originator_unclassified_count, sum(originator_source_fallback_root_count) AS originator_source_fallback_count, countIf(observed_root_count > 0) AS root_usage_applicable_event_count, countIf(observed_root_count > 0 AND usage_source IN ('unavailable','unknown')) AS root_usage_missing_event_count, countIf(fallback_rollout_count > 0) AS root_usage_fallback_event_count, countIf(delegated_count > 0) AS delegated_usage_applicable_event_count, countIf(delegated_count > 0 AND delegated_usage_source IN ('unavailable','unknown')) AS delegated_usage_missing_event_count, countIf(delegated_fallback_rollout_count > 0) AS delegated_usage_fallback_event_count, countIf(guardian_count > 0) AS guardian_usage_applicable_event_count, countIf(guardian_count > 0 AND guardian_usage_source IN ('unavailable','unknown')) AS guardian_usage_missing_event_count, countIf(guardian_fallback_rollout_count > 0) AS guardian_usage_fallback_event_count, sum(guardian_incomplete_excluded_count) AS guardian_incomplete_excluded_count, countIf(selection_mode != 'activity_window') AS completed_root_coverage_applicable_event_count, countIf(capability_completed_root_coverage = 1 AND selection_mode != 'activity_window') AS completed_root_coverage_capable_event_count, countIf(capability_latency_completed_count = 1) AS latency_capable_event_count, countIf(capability_root_boundary_counts = 1) AS boundary_count_capable_event_count, countIf(guardian_review_count > 0) AS guardian_attribution_applicable_event_count, countIf(guardian_review_count > 0 AND capability_guardian_workspace_attribution = 1) AS guardian_attribution_capable_event_count, countIf(component_nonpass = 1) AS component_nonpass_event_count, countIf(sample_sufficient = 1) AS sample_sufficient_event_count, countIf(sample_sufficient = 0) AS sample_insufficient_event_count, countIf((observed_root_count > 0 AND usage_source IN ('unavailable','unknown')) OR (delegated_count > 0 AND delegated_usage_source IN ('unavailable','unknown')) OR (guardian_count > 0 AND guardian_usage_source IN ('unavailable','unknown'))) AS usage_missing_count, sum(fallback_rollout_count + delegated_fallback_rollout_count + guardian_fallback_rollout_count) AS usage_fallback_count, sum(toUInt128(input_tokens)) AS input_tokens, sum(toUInt128(cached_input_tokens)) AS cached_input_tokens, sum(toUInt128(JSONExtractUInt(payload_json,'metrics','root','usage','cache_write_input_tokens'))) AS cache_write_input_tokens, sum(toUInt128(non_cached_input_tokens)) AS non_cached_input_tokens, sum(toUInt128(output_tokens)) AS output_tokens, sum(toUInt128(reasoning_output_tokens)) AS reasoning_output_tokens, sum(toUInt128(total_tokens)) AS total_tokens, sum(toUInt128(delegated_total_tokens)) AS delegated_total_tokens, sum(guardian_total_tokens) AS guardian_total_tokens, sum(compactions) AS compactions, sum(long_turn_count) AS long_turn_count, sum(exact_repeated_call_groups) AS exact_repeated_call_groups, sum(calls_in_exact_repeated_groups) AS calls_in_exact_repeated_groups, sum(nonzero_exit_count + timeout_count + rejected_count) AS failure_signal_count, sum(tool_call_count) AS tool_call_count, sum(user_messages_with_text) AS user_messages_with_text, sum(short_message_count) AS short_message_count, sum(broad_scope_message_count) AS broad_scope_message_count, sum(boundary_review_root_count) AS boundary_review_root_count, sum(long_lived_root_count) AS long_lived_root_count, sum(verification_tool_calls) AS verification_tool_call_count, sum(verification_success_count) AS verification_success_count, sum(verification_failure_count) AS verification_failure_count, sum(verification_unresolved_count) AS verification_unresolved_count, sum(guardian_review_count) AS guardian_review_total, sum(guardian_workspace_attributed_review_count) AS guardian_workspace_attributed_review_count FROM groundline.basic_active WHERE ifNull(period_end, generated_at) > parseDateTimeBestEffort({start:String}) AND ifNull(period_end, generated_at) <= parseDateTimeBestEffort({end:String}) FORMAT JSONEachRow"#;
 const REPORT_FLEET_QUERY: &str = r#"WITH policy AS (SELECT argMax(latest_version, updated_at) AS latest_version FROM groundline.release_policy FINAL WHERE policy_key='stable'), enrolled AS (SELECT collector_id, created_at, enrollment_schema_version, os_family, runtime_family, execution_mode, groundline_version FROM groundline.collectors FINAL WHERE revoked=0), any_events AS (SELECT collector_id, toUInt8(1) AS present, max(received_at) AS last_seen FROM groundline.basic_active GROUP BY collector_id), reporting AS (SELECT collector_id, toUInt8(1) AS present FROM groundline.basic_active WHERE ifNull(period_end, generated_at) > parseDateTimeBestEffort({start:String}) AND ifNull(period_end, generated_at) <= parseDateTimeBestEffort({end:String}) GROUP BY collector_id), current_events AS (SELECT collector_id, received_at, ifNull(period_end, generated_at) AS event_time FROM groundline.basic_active CROSS JOIN policy WHERE groundline_version=policy.latest_version), current_observed AS (SELECT collector_id, toUInt8(1) AS present, max(received_at) AS last_seen FROM current_events GROUP BY collector_id), current_reporting AS (SELECT collector_id, toUInt8(1) AS present FROM current_events WHERE event_time > parseDateTimeBestEffort({start:String}) AND event_time <= parseDateTimeBestEffort({end:String}) GROUP BY collector_id) SELECT policy.latest_version AS policy_latest_version, count() AS enrolled_installation_count, countIf(enrollment_schema_version=2 AND os_family!='unknown' AND runtime_family!='unknown' AND execution_mode!='unknown' AND groundline_version!='unknown') AS metadata_known_installation_count, count() - metadata_known_installation_count AS metadata_unknown_installation_count, countIf(ifNull(any_events.present,0)=1) AS observed_installation_count, countIf(ifNull(reporting.present,0)=1) AS reporting_installation_count, countIf(any_events.last_seen >= now('UTC') - INTERVAL 7 DAY) AS recent_installation_count, countIf(ifNull(any_events.present,0)=0) AS never_reported_installation_count, countIf(ifNull(any_events.present,0)=0 AND enrolled.created_at > now('UTC') - INTERVAL 24 HOUR) AS pending_initial_report_installation_count, countIf(ifNull(any_events.present,0)=0 AND enrolled.created_at <= now('UTC') - INTERVAL 24 HOUR) AS overdue_never_reported_installation_count, countIf(ifNull(any_events.present,0)=1 AND any_events.last_seen < now('UTC') - INTERVAL 7 DAY) AS stale_observed_installation_count, countIf(enrolled.groundline_version=policy.latest_version) AS current_package_claim_installation_count, countIf(enrolled.groundline_version=policy.latest_version AND ifNull(current_observed.present,0)=0) AS current_package_claim_unobserved_installation_count, countIf(ifNull(current_observed.present,0)=1) AS current_observed_installation_count, countIf(ifNull(current_reporting.present,0)=1) AS current_reporting_installation_count, countIf(current_observed.last_seen >= now('UTC') - INTERVAL 7 DAY) AS current_recent_installation_count, if(countIf(ifNull(any_events.present,0)=1)=0, CAST(NULL, 'Nullable(String)'), formatDateTime(max(any_events.last_seen), '%Y-%m-%dT%H:%i:%SZ', 'UTC')) AS latest_received_at_utc, toUInt8(max(any_events.last_seen) >= now('UTC') - INTERVAL 48 HOUR) AS fresh FROM enrolled CROSS JOIN policy LEFT JOIN any_events USING collector_id LEFT JOIN reporting USING collector_id LEFT JOIN current_observed USING collector_id LEFT JOIN current_reporting USING collector_id GROUP BY policy.latest_version FORMAT JSONEachRow"#;
 const REPORT_STORAGE_QUERY: &str = r#"WITH logical AS (SELECT event_id, received_at, generated_at FROM groundline.basic_active WHERE ifNull(period_end, generated_at) > parseDateTimeBestEffort({start:String}) AND ifNull(period_end, generated_at) <= parseDateTimeBestEffort({end:String})), active AS (SELECT collector_id,current_generation FROM groundline.collectors FINAL WHERE revoked=0), stored AS (SELECT events.event_id FROM groundline.basic_weekly events INNER JOIN active ON events.collector_id=active.collector_id AND events.collection_generation=active.current_generation INNER JOIN logical USING event_id) SELECT (SELECT count() FROM stored) AS stored_event_row_count, (SELECT count() FROM logical) AS deduplicated_event_count, stored_event_row_count-deduplicated_event_count AS duplicate_event_row_count, (SELECT count() FROM groundline.basic_retention WHERE expires_at < now('UTC')) AS ttl_expired_event_row_count, (SELECT countIf(dateDiff('second',generated_at,received_at)>21600) FROM logical) AS delayed_delivery_event_count, (SELECT countIf(dateDiff('second',generated_at,received_at)>86400) FROM logical) AS overdue_delivery_event_count, (SELECT countIf(generated_at>received_at+INTERVAL 5 MINUTE) FROM logical) AS clock_skew_event_count, (SELECT count() FROM groundline.basic_quarantined WHERE ifNull(period_end, generated_at) > parseDateTimeBestEffort({start:String}) AND ifNull(period_end, generated_at) <= parseDateTimeBestEffort({end:String})) AS quarantined_event_count FORMAT JSONEachRow"#;
 const REPORT_EVENT_COHORT_QUERY: &str = r#"SELECT dimension,value,count() AS count FROM (SELECT 'schema_version' dimension,toString(schema_version) value FROM groundline.basic_active WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) UNION ALL SELECT 'groundline_version',groundline_version FROM groundline.basic_active WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) UNION ALL SELECT 'os_family',os_family FROM groundline.basic_active WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) UNION ALL SELECT 'runtime_family',runtime_family FROM groundline.basic_active WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) UNION ALL SELECT 'execution_mode',execution_mode FROM groundline.basic_active WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String})) GROUP BY dimension,value ORDER BY dimension,value FORMAT JSONEachRow"#;
 const REPORT_INSTALL_COHORT_QUERY: &str = r#"SELECT dimension,value,count() AS count FROM (SELECT 'groundline_version' dimension,groundline_version value FROM groundline.collectors FINAL WHERE revoked=0 UNION ALL SELECT 'os_family',os_family FROM groundline.collectors FINAL WHERE revoked=0 UNION ALL SELECT 'runtime_family',runtime_family FROM groundline.collectors FINAL WHERE revoked=0 UNION ALL SELECT 'execution_mode',execution_mode FROM groundline.collectors FINAL WHERE revoked=0) GROUP BY dimension,value ORDER BY dimension,value FORMAT JSONEachRow"#;
-const REPORT_MODEL_EFFORT_QUERY: &str = r#"SELECT tupleElement(item,1) AS model_family, tupleElement(item,2) AS effort, sum(tupleElement(item,3)) AS context_count FROM groundline.basic_active ARRAY JOIN arrayZip(model_families,efforts,model_effort_counts) AS item WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) GROUP BY model_family,effort ORDER BY model_family,effort FORMAT JSONEachRow"#;
-const REPORT_MODEL_TOKENS_QUERY: &str = r#"SELECT component,model_family,effort,sum(input_tokens) AS input_tokens,sum(cached_input_tokens) AS cached_input_tokens,sum(output_tokens) AS output_tokens,sum(reasoning_output_tokens) AS reasoning_output_tokens,sum(total_tokens) AS total_tokens FROM groundline.model_usage WHERE ifNull(period_end,generated_at)>parseDateTimeBestEffort({start:String}) AND ifNull(period_end,generated_at)<=parseDateTimeBestEffort({end:String}) GROUP BY component,model_family,effort ORDER BY component,model_family,effort FORMAT JSONEachRow"#;
+fn report_model_effort_query() -> &'static str {
+    static QUERY: OnceLock<String> = OnceLock::new();
+    QUERY.get_or_init(model_patterns::context_query)
+}
+fn report_model_tokens_query() -> &'static str {
+    static QUERY: OnceLock<String> = OnceLock::new();
+    QUERY.get_or_init(model_patterns::token_query)
+}
 
 #[derive(Debug, Error)]
 pub enum RunError {
@@ -2576,6 +2693,25 @@ mod tests {
         assert_eq!(row["collection_generation"], 7);
     }
 
+    fn unobserved_responses(event: &mut Value) {
+        for component in ["root", "delegated"] {
+            if let Some(object) = event["analysis"][component].as_object_mut() {
+                for field in [
+                    "observed_response_count",
+                    "unattributed_response_count",
+                    "overflow_response_count",
+                ] {
+                    object.remove(field);
+                }
+                if let Some(buckets) = object.get_mut("buckets").and_then(Value::as_array_mut) {
+                    for bucket in buckets {
+                        bucket.as_object_mut().unwrap().remove("response_count");
+                    }
+                }
+            }
+        }
+    }
+
     fn reseal_event(event: &mut Value) {
         let object = event.as_object_mut().unwrap();
         object.remove("event_id");
@@ -3002,6 +3138,38 @@ mod tests {
     }
 
     #[test]
+    fn report_counter_bounds_reject_exact_overflow_before_defaulting_or_rounding() {
+        let maximum: Value =
+            serde_json::from_str("{\"observed_response_count\":18446744073709551615}").unwrap();
+        assert_eq!(maximum["observed_response_count"].as_u64(), Some(u64::MAX));
+        assert!(validate_report_counter_bounds(&maximum).is_ok());
+        for raw in [
+            "{\"observed_response_count\":18446744073709551616}",
+            "{\"total_tokens\":36893488147419103230}",
+            "{\"total_tokens\":1.5}",
+            "{\"total_tokens\":\"18446744073709551615\"}",
+        ] {
+            let value: Value = serde_json::from_str(raw).unwrap();
+            assert!(
+                matches!(
+                    validate_report_counter_bounds(&value),
+                    Err(ApiError::Rejected {
+                        status: StatusCode::UNPROCESSABLE_ENTITY,
+                        reason: "report_counter_overflow"
+                    })
+                ),
+                "accepted {raw}"
+            );
+        }
+        assert!(
+            validate_report_counter_bounds(
+                &json!({"component":"root","observed_response_count":null})
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
     fn counters_and_generations_fail_closed_at_u32_boundaries() {
         assert!(checked_u32_sum(u64::from(u32::MAX), 1).is_err());
         assert_eq!(
@@ -3103,7 +3271,7 @@ mod tests {
         let previous_expression =
             trust_migration::expression(&analysis::previous_storage_predicate());
         db.request(
-            &format!("ALTER TABLE groundline.basic_weekly MODIFY COLUMN trusted_event_v5 UInt8 MATERIALIZED {previous_expression} COMMENT 'a230de5bd9799dbb85fc1b1806df95986e032d5cfd93511f6795246bfaa80092'"),
+            &format!("ALTER TABLE groundline.basic_weekly MODIFY COLUMN trusted_event_v5 UInt8 MATERIALIZED {previous_expression} COMMENT '5ba127ae474735e0fa641a9fc3d1a6182db5d546e280aabf1d10192c864c41e3'"),
             &[],
             None,
         )
@@ -3116,8 +3284,9 @@ mod tests {
         reseal_event(&mut old_valid);
         let mut newly_valid = integration_event(collector_id, 0);
         let zero_tokens = newly_valid["analysis"]["root"]["unattributed"].clone();
+        unobserved_responses(&mut newly_valid);
         newly_valid["analysis"]["root"]["buckets"] = json!([{
-            "model_family":"gpt-6.1-sol", "effort":"medium", "tokens":zero_tokens
+            "model_family":"gpt-7.3-sol-2026-10-04", "effort":"medium", "tokens":zero_tokens
         }]);
         reseal_event(&mut newly_valid);
         let rows = [
@@ -3172,15 +3341,16 @@ mod tests {
             db.request_at(query, &[], None, index != 0).await.unwrap();
         }
         let old_expression = trust_migration::expression(&analysis::previous_storage_predicate());
-        let old_fingerprint = "a230de5bd9799dbb85fc1b1806df95986e032d5cfd93511f6795246bfaa80092";
+        let old_fingerprint = "5ba127ae474735e0fa641a9fc3d1a6182db5d546e280aabf1d10192c864c41e3";
         db.request(
             &format!("ALTER TABLE groundline.basic_weekly ADD COLUMN trusted_event_v5 UInt8 MATERIALIZED {old_expression} COMMENT '{old_fingerprint}'"),
             &[], None,
         ).await.unwrap();
         let mut event = integration_event(Uuid::new_v4(), 0);
         let zero_tokens = event["analysis"]["root"]["unattributed"].clone();
+        unobserved_responses(&mut event);
         event["analysis"]["root"]["buckets"] = json!([{
-            "model_family":"gpt-6.1-sol", "effort":"medium", "tokens":zero_tokens
+            "model_family":"gpt-7.3-sol-2026-10-04", "effort":"medium", "tokens":zero_tokens
         }]);
         reseal_event(&mut event);
         let mut body = serde_json::to_vec(&event_row(&event, Utc::now()).unwrap()).unwrap();
@@ -3275,7 +3445,7 @@ mod tests {
         }
         let old_expression = trust_migration::expression(&analysis::previous_storage_predicate());
         db.request(
-            &format!("ALTER TABLE groundline.basic_weekly ADD COLUMN trusted_event_v5 UInt8 MATERIALIZED {old_expression} COMMENT 'a230de5bd9799dbb85fc1b1806df95986e032d5cfd93511f6795246bfaa80092'"),
+            &format!("ALTER TABLE groundline.basic_weekly ADD COLUMN trusted_event_v5 UInt8 MATERIALIZED {old_expression} COMMENT '5ba127ae474735e0fa641a9fc3d1a6182db5d546e280aabf1d10192c864c41e3'"),
             &[],
             None,
         )
@@ -3302,11 +3472,13 @@ mod tests {
         reseal_event(&mut old_valid);
         let mut newly_valid = integration_event(collector_id, 0);
         let zero_tokens = newly_valid["analysis"]["root"]["unattributed"].clone();
+        unobserved_responses(&mut newly_valid);
         newly_valid["analysis"]["root"]["buckets"] = json!([{
-            "model_family":"gpt-6.1-sol", "effort":"high", "tokens":zero_tokens
+            "model_family":"gpt-7.3-sol-2026-10-04", "effort":"high", "tokens":zero_tokens
         }]);
         reseal_event(&mut newly_valid);
         let mut legacy_sol = integration_event(collector_id, 0);
+        unobserved_responses(&mut legacy_sol);
         legacy_sol["analysis"]["root"]["buckets"] = json!([{
             "model_family":"sol", "effort":"medium", "tokens":zero_tokens
         }]);
@@ -3362,7 +3534,7 @@ mod tests {
         let current_expression = trust_migration::expression(&analysis::predicate());
         let current_fingerprint = format!("{:x}", Sha256::digest(current_expression.as_bytes()));
         let pending_comment = format!(
-            "migration:a230de5bd9799dbb85fc1b1806df95986e032d5cfd93511f6795246bfaa80092:{current_fingerprint}:pending"
+            "migration:5ba127ae474735e0fa641a9fc3d1a6182db5d546e280aabf1d10192c864c41e3:{current_fingerprint}:pending"
         );
         db.request(
             "CREATE OR REPLACE VIEW groundline.basic_current AS SELECT *, trusted_event_v5 FROM groundline.basic_weekly WHERE 0",
@@ -3437,7 +3609,7 @@ mod tests {
             .await
             .unwrap(),
             b"3\n",
-            "the previously hidden valid 6.1 Sol row must be rejudged"
+            "the previously hidden valid dynamic model row must be rejudged"
         );
         for (event, trusted) in [
             (&old_valid, 1),
@@ -3490,19 +3662,11 @@ mod tests {
         state.config = config;
         state.clickhouse = db.clone();
         let router = app(state);
-        let labels = groundline_contracts::model::MODEL_FAMILIES
-            .iter()
-            .filter(|model| **model != "unknown")
-            .flat_map(|model| {
-                groundline_contracts::model::EFFORTS
-                    .iter()
-                    .filter(|effort| **effort != "unknown")
-                    .map(move |effort| (*model, *effort))
-            })
+        let labels = (0..groundline_contracts::model::MAX_MODEL_CONTEXTS)
+            .map(|n| (format!("gpt-7.{n}-sol"), "medium"))
             .collect::<Vec<_>>();
-        assert_eq!(labels.len(), 99);
         let mut boundary_collectors = Vec::new();
-        for bucket_count in [91, 98, 99] {
+        for bucket_count in [127, 128] {
             let collector_id = Uuid::new_v4();
             boundary_collectors.push(collector_id);
             let enrollment = json!({
@@ -3526,6 +3690,7 @@ mod tests {
             assert_eq!(response.status(), StatusCode::CREATED);
             let mut event = integration_event(collector_id, 0);
             let zero_tokens = event["analysis"]["root"]["unattributed"].clone();
+            unobserved_responses(&mut event);
             event["analysis"]["root"]["buckets"] = Value::Array(
                 labels[..bucket_count]
                     .iter()
@@ -3569,6 +3734,7 @@ mod tests {
         for malformed_case in ["duplicate", "unknown_model", "negative_tokens", "wrong_sum"] {
             let mut valid = integration_event(boundary_collectors[0], 0);
             let zero_tokens = valid["analysis"]["root"]["unattributed"].clone();
+            unobserved_responses(&mut valid);
             valid["analysis"]["root"]["buckets"] = Value::Array(
                 labels
                     .iter()
@@ -3633,7 +3799,7 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let report = response_json(response).await;
-        assert!(report["coverage"]["event_count"].as_u64().unwrap_or(0) >= 3);
+        assert!(report["coverage"]["event_count"].as_u64().unwrap_or(0) >= 2);
         // Migration fixtures bypass ingest and share synthetic windows. Keep
         // them outside the report cohort above, then expose their preserved
         // model attribution through the normal registered-collector view.
@@ -3725,7 +3891,7 @@ mod tests {
             REPORT_STORAGE_QUERY,
             REPORT_EVENT_COHORT_QUERY,
             REPORT_INSTALL_COHORT_QUERY,
-            REPORT_MODEL_EFFORT_QUERY,
+            report_model_effort_query(),
         ] {
             clickhouse.request(query, &params, None).await.unwrap();
         }
@@ -3790,6 +3956,486 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires an isolated loopback ClickHouse, schema reset, and explicit mutation opt-in"]
+    async fn clickhouse_dynamic_model_patterns_preserve_period_overflow_and_observation_coverage() {
+        let _database_guard = CLICKHOUSE_TEST_LOCK.lock().await;
+        let config = clickhouse_test_config();
+        assert_eq!(
+            std::env::var("GROUNDLINE_CLICKHOUSE_TEST_ALLOW_SCHEMA_RESET").as_deref(),
+            Ok("true")
+        );
+        let db = ClickHouse::new(&config).unwrap();
+        db.request_at("DROP DATABASE IF EXISTS groundline", &[], None, false)
+            .await
+            .unwrap();
+        db.ensure_storage(&config).await.unwrap();
+        let mut state = unit_state(28, 4);
+        state.config = config;
+        state.clickhouse = db.clone();
+        let router = app(state);
+        let collector = Uuid::new_v4();
+        let enrollment = json!({"schema_version":2,"kind":"groundline-insights-owner-enrollment",
+            "collector_instance_id":collector,"collector_token":"c".repeat(32),
+            "os_family":"linux","runtime_family":"codex_cli","execution_mode":"local_headless",
+            "groundline_version":env!("CARGO_PKG_VERSION")});
+        let response = router
+            .clone()
+            .oneshot(local_request(
+                Method::POST,
+                "/v1/enroll",
+                &"e".repeat(32),
+                Some(&enrollment),
+                &[],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let fields = groundline_contracts::insights::analysis::TOKEN_FIELDS;
+        let bucket_tokens = [10_u64, 3, 2, 5, 1, 15];
+        let residual = [2_u64, 1, 3, 1, 0, 3];
+        let token_object = |values: [u64; 6]| {
+            Value::Object(
+                fields
+                    .iter()
+                    .zip(values)
+                    .map(|(k, v)| ((*k).to_owned(), json!(v)))
+                    .collect(),
+            )
+        };
+        let mut events = Vec::new();
+        for bank in 0..2 {
+            let mut event = integration_event(collector, 0);
+            let end = Utc::now() - ChronoDuration::minutes(2 * bank);
+            event["period"]["start_utc"] = json!(
+                (end - ChronoDuration::minutes(1)).to_rfc3339_opts(SecondsFormat::Secs, true)
+            );
+            event["period"]["end_utc"] = json!(end.to_rfc3339_opts(SecondsFormat::Secs, true));
+            let models = (0..128)
+                .map(|n| match n {
+                    0 => "gpt-6-sol".to_owned(),
+                    1 => groundline_contracts::model::observed_label(&format!(
+                        "provider/PRIVATE_SENTINEL_A_{bank}"
+                    )),
+                    2 => groundline_contracts::model::observed_label(&format!(
+                        "provider/PRIVATE_SENTINEL_B_{bank}"
+                    )),
+                    _ => format!("gpt-7.{}-sol-2026-10-04", 128 * bank + n),
+                })
+                .collect::<Vec<_>>();
+            event["sample"]["delegated_count"] = json!(1);
+            let template = event["metrics"]["root"]["usage"].clone();
+            for component in ["root", "delegated"] {
+                event["metrics"][component]["usage"] = template.clone();
+                let usage = &mut event["metrics"][component]["usage"];
+                for (field, (n, r)) in fields.iter().zip(bucket_tokens.into_iter().zip(residual)) {
+                    usage[*field] = json!(128 * n + r);
+                }
+                usage["non_cached_input_tokens"] = json!(
+                    usage["input_tokens"].as_u64().unwrap()
+                        - usage["cached_input_tokens"].as_u64().unwrap()
+                );
+                usage["cached_input_ratio"] = ratio(
+                    usage["cached_input_tokens"].as_u64().unwrap(),
+                    usage["input_tokens"].as_u64().unwrap(),
+                );
+                event["metrics"][component]["model_effort"] = Value::Array(
+                    models
+                        .iter()
+                        .map(|m| json!({"model_family":m,"effort":"medium","count":1}))
+                        .collect(),
+                );
+                event["metrics"][component]["activity"]["turn_contexts"] = json!(128);
+                event["analysis"][component] = json!({"basis":"owned_response_turn_link",
+                    "buckets":models.iter().map(|m|json!({"model_family":m,"effort":"medium","tokens":token_object(bucket_tokens),"response_count":1})).collect::<Vec<_>>(),
+                    "unattributed":token_object(residual),"observed_response_count":129,"unattributed_response_count":1,"overflow_response_count":1});
+            }
+            event["analysis"]["purpose"] = json!("production");
+            reseal_event(&mut event);
+            let encoded = serde_json::to_vec(&event).unwrap();
+            assert!(
+                !String::from_utf8(encoded.clone())
+                    .unwrap()
+                    .contains("PRIVATE_SENTINEL")
+            );
+            assert!(
+                validate_basic_event_bytes(&encoded).is_ok(),
+                "dense event {bank} invalid"
+            );
+            assert!(encoded.len() <= groundline_contracts::insights::MAX_BASIC_EVENT_BYTES);
+            let headers = [
+                ("x-groundline-collector-id", collector.to_string()),
+                ("x-groundline-version", env!("CARGO_PKG_VERSION").to_owned()),
+                (
+                    "idempotency-key",
+                    event["idempotency_key"].as_str().unwrap().to_owned(),
+                ),
+            ];
+            let response = router
+                .clone()
+                .oneshot(local_request(
+                    Method::POST,
+                    "/v1/events",
+                    &"c".repeat(32),
+                    Some(&event),
+                    &headers,
+                ))
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::ACCEPTED,
+                "dense ingest {bank}"
+            );
+            if bank == 0 {
+                let duplicate = router
+                    .clone()
+                    .oneshot(local_request(
+                        Method::POST,
+                        "/v1/events",
+                        &"c".repeat(32),
+                        Some(&event),
+                        &headers,
+                    ))
+                    .await
+                    .unwrap();
+                assert_eq!(duplicate.status(), StatusCode::OK);
+                assert_eq!(response_json(duplicate).await["outcome"], "duplicate");
+            }
+            events.push(event);
+        }
+        let mut historical = integration_event(collector, 0);
+        let end = Utc::now() - ChronoDuration::days(20);
+        historical["period"]["start_utc"] =
+            json!((end - ChronoDuration::minutes(1)).to_rfc3339_opts(SecondsFormat::Secs, true));
+        historical["period"]["end_utc"] = json!(end.to_rfc3339_opts(SecondsFormat::Secs, true));
+        historical["metrics"]["root"]["model_effort"] = json!([
+            {"model_family":"gpt-6-sol","effort":"medium","count":1},{"model_family":"sol","effort":"medium","count":1}]);
+        historical["metrics"]["root"]["activity"]["turn_contexts"] = json!(2);
+        let usage = &mut historical["metrics"]["root"]["usage"];
+        for (field, n) in fields.iter().zip(bucket_tokens) {
+            usage[*field] = json!(2 * n);
+        }
+        usage["non_cached_input_tokens"] = json!(14);
+        usage["cached_input_ratio"] = json!(0.3);
+        historical["analysis"]["root"]["buckets"] = json!([
+            {"model_family":"gpt-6-sol","effort":"medium","tokens":token_object(bucket_tokens)},
+            {"model_family":"sol","effort":"medium","tokens":token_object(bucket_tokens)}]);
+        unobserved_responses(&mut historical);
+        reseal_event(&mut historical);
+        let headers = [
+            ("x-groundline-collector-id", collector.to_string()),
+            ("x-groundline-version", env!("CARGO_PKG_VERSION").to_owned()),
+            (
+                "idempotency-key",
+                historical["idempotency_key"].as_str().unwrap().to_owned(),
+            ),
+        ];
+        let response = router
+            .clone()
+            .oneshot(local_request(
+                Method::POST,
+                "/v1/events",
+                &"c".repeat(32),
+                Some(&historical),
+                &headers,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED, "historical ingest");
+        let identities=db.json_rows("SELECT model_identity,sum(context_count) AS contexts FROM groundline.model_usage_patterns WHERE collector_id={id:UUID} AND component='root' AND model_family='gpt-6-sol' GROUP BY model_identity ORDER BY model_identity FORMAT JSONEachRow",&[("id",collector.to_string())]).await.unwrap();
+        assert_eq!(
+            identities,
+            vec![
+                json!({"model_identity":"historical_family","contexts":1}),
+                json!({"model_identity":"public_model_id","contexts":2})
+            ]
+        );
+        for days in [7, 30, 90] {
+            let response = router
+                .clone()
+                .oneshot(local_request(
+                    Method::GET,
+                    &format!("/v3/reports/weekly?days={days}"),
+                    &"a".repeat(32),
+                    None,
+                    &[],
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{days} day report");
+            let report = response_json(response).await;
+            assert!(WeeklyReport::from_slice(&serde_json::to_vec(&report).unwrap()).is_ok());
+            assert_eq!(
+                report["coverage"]["event_count"],
+                if days == 7 { 2 } else { 3 }
+            );
+            let patterns = &report["cohorts"]["model_usage_patterns"];
+            let rows = patterns["rows"].as_array().unwrap();
+            assert!(rows.len() <= groundline_contracts::insights::MAX_MODEL_PATTERN_ROWS);
+            for component in ["root", "delegated"] {
+                let coverage = patterns["coverage"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|r| r["component"] == component && r["purpose"] == "production")
+                    .unwrap();
+                assert_eq!(coverage["observed_response_count"], 258);
+                assert_eq!(coverage["unattributed_response_count"], 2);
+                assert_eq!(coverage["overflow_response_count"], 2);
+                assert_eq!(coverage["context_count"], 256);
+                assert!(coverage["overflow_context_count"].as_u64().unwrap() > 0);
+                assert_eq!(coverage["response_observed_event_count"], 2);
+                let cohort = rows
+                    .iter()
+                    .filter(|r| r["component"] == component && r["purpose"] == "production")
+                    .collect::<Vec<_>>();
+                assert!(cohort.len() <= 129);
+                assert!(cohort.iter().any(|r| r["model_family"] == "overflow"
+                    && r["effort"] == "unknown"
+                    && r["model_identity"] == "overflow"));
+                for (field, (n, r)) in fields.iter().zip(bucket_tokens.into_iter().zip(residual)) {
+                    assert_eq!(
+                        cohort
+                            .iter()
+                            .map(|row| row[*field].as_u64().unwrap())
+                            .sum::<u64>(),
+                        2 * (128 * n + r),
+                        "{component} {field}"
+                    );
+                }
+            }
+            if days > 7 {
+                let historical = patterns["coverage"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|r| r["component"] == "root" && r["purpose"] == "unclassified")
+                    .unwrap();
+                assert!(historical["observed_response_count"].is_null());
+                assert_eq!(historical["response_unobserved_event_count"], 1);
+                assert!(
+                    rows.iter()
+                        .filter(|r| r["purpose"] == "unclassified")
+                        .all(|r| r["observed_response_count"].is_null())
+                );
+            }
+            assert_eq!(
+                report["cohorts"]["model_effort_context_coverage"]["context_count"],
+                if days == 7 { 256 } else { 258 }
+            );
+            let token_rows = report["cohorts"]["model_token_distribution"]
+                .as_array()
+                .unwrap();
+            assert!(token_rows.len() <= 258);
+            for component in ["root", "delegated"] {
+                for (field, (n, r)) in fields.iter().zip(bucket_tokens.into_iter().zip(residual)) {
+                    let history = if days > 7 && component == "root" {
+                        2 * n
+                    } else {
+                        0
+                    };
+                    assert_eq!(
+                        token_rows
+                            .iter()
+                            .filter(|row| row["component"] == component)
+                            .map(|row| row[*field].as_u64().unwrap())
+                            .sum::<u64>(),
+                        2 * (128 * n + r) + history,
+                        "legacy {component} {field}"
+                    );
+                }
+            }
+        }
+        for case in [
+            "context_duplicate",
+            "context_cap",
+            "private_label",
+            "response_partial",
+            "response_null",
+            "response_zero",
+            "response_sum",
+            "bucket_unknown",
+            "bucket_overflow",
+            "bucket_cached",
+            "bucket_reasoning",
+            "bucket_total",
+            "residual_cached",
+            "residual_total",
+        ] {
+            let mut bad = events[0].clone();
+            match case {
+                "context_duplicate" => {
+                    bad["metrics"]["root"]["model_effort"][1] =
+                        bad["metrics"]["root"]["model_effort"][0].clone()
+                }
+                "context_cap" => bad["metrics"]["root"]["model_effort"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(json!({"model_family":"gpt-9-sol","effort":"medium","count":1})),
+                "private_label" => {
+                    bad["metrics"]["root"]["model_effort"][0]["model_family"] =
+                        json!("PRIVATE_SENTINEL")
+                }
+                "response_partial" => {
+                    bad["analysis"]["root"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("overflow_response_count");
+                }
+                "response_null" => bad["analysis"]["root"]["observed_response_count"] = Value::Null,
+                "response_zero" => {
+                    bad["analysis"]["root"]["buckets"][0]["response_count"] = json!(0)
+                }
+                "response_sum" => bad["analysis"]["root"]["observed_response_count"] = json!(130),
+                "bucket_unknown" => {
+                    bad["analysis"]["root"]["buckets"][0]["model_family"] = json!("unknown")
+                }
+                "bucket_overflow" => {
+                    bad["analysis"]["root"]["buckets"][0]["model_family"] = json!("overflow")
+                }
+                "bucket_cached" => {
+                    bad["analysis"]["root"]["buckets"][0]["tokens"]["cached_input_tokens"] =
+                        json!(11);
+                    bad["analysis"]["root"]["buckets"][1]["tokens"]["cached_input_tokens"] =
+                        json!(0);
+                    bad["analysis"]["root"]["buckets"][2]["tokens"]["cached_input_tokens"] =
+                        json!(0);
+                    bad["analysis"]["root"]["buckets"][3]["tokens"]["cached_input_tokens"] =
+                        json!(1);
+                }
+                "bucket_reasoning" => {
+                    bad["analysis"]["root"]["buckets"][0]["tokens"]["reasoning_output_tokens"] =
+                        json!(6);
+                    for n in 1..6 {
+                        bad["analysis"]["root"]["buckets"][n]["tokens"]["reasoning_output_tokens"] =
+                            json!(0);
+                    }
+                }
+                "bucket_total" => {
+                    bad["analysis"]["root"]["buckets"][0]["tokens"]["total_tokens"] = json!(14);
+                    bad["analysis"]["root"]["buckets"][1]["tokens"]["total_tokens"] = json!(16);
+                }
+                "residual_cached" => {
+                    bad["analysis"]["root"]["unattributed"]["cached_input_tokens"] = json!(3);
+                    bad["analysis"]["root"]["buckets"][0]["tokens"]["cached_input_tokens"] =
+                        json!(1);
+                }
+                "residual_total" => {
+                    bad["analysis"]["root"]["unattributed"]["total_tokens"] = json!(2);
+                    bad["analysis"]["root"]["buckets"][0]["tokens"]["total_tokens"] = json!(16);
+                }
+                _ => unreachable!(),
+            }
+            reseal_event(&mut bad);
+            assert!(
+                validate_basic_event_bytes(&serde_json::to_vec(&bad).unwrap()).is_err(),
+                "Rust accepted {case}"
+            );
+            // Keep projected columns coherent with the malformed raw payload so
+            // the model/response SQL guard itself is exercised.
+            let mut row = projection::row(&bad).unwrap();
+            row.insert(
+                "received_at".to_owned(),
+                json!(Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)),
+            );
+            row.insert(
+                "payload_json".to_owned(),
+                json!(serde_json::to_string(&bad).unwrap()),
+            );
+            db.request(
+                "INSERT INTO groundline.basic_weekly FORMAT JSONEachRow",
+                &[],
+                Some(serde_json::to_vec(&row).unwrap()),
+            )
+            .await
+            .unwrap();
+            assert_eq!(db.request("SELECT count() FROM groundline.basic_quarantined WHERE event_id={id:UUID} FORMAT TabSeparated",&[("id",bad["event_id"].as_str().unwrap().to_owned())],None).await.unwrap(),b"1\n","SQL accepted {case}");
+        }
+        // Two valid wire counts can exceed u64 across a period. Keep the SQL
+        // sum exact and reject the report before any JSON numeric default.
+        let oversized_collector = Uuid::new_v4();
+        let mut enrollment = enrollment.clone();
+        enrollment["collector_instance_id"] = json!(oversized_collector);
+        let response = router
+            .clone()
+            .oneshot(local_request(
+                Method::POST,
+                "/v1/enroll",
+                &"e".repeat(32),
+                Some(&enrollment),
+                &[],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        for offset in [10, 12] {
+            let mut event = integration_event(oversized_collector, 0);
+            let end = Utc::now() - ChronoDuration::minutes(offset);
+            event["period"]["start_utc"] = json!(
+                (end - ChronoDuration::minutes(1)).to_rfc3339_opts(SecondsFormat::Secs, true)
+            );
+            event["period"]["end_utc"] = json!(end.to_rfc3339_opts(SecondsFormat::Secs, true));
+            event["analysis"]["root"]["observed_response_count"] = json!(u64::MAX);
+            event["analysis"]["root"]["unattributed_response_count"] = json!(u64::MAX);
+            event["analysis"]["root"]["overflow_response_count"] = json!(0);
+            reseal_event(&mut event);
+            assert!(validate_basic_event_bytes(&serde_json::to_vec(&event).unwrap()).is_ok());
+            let headers = [
+                ("x-groundline-collector-id", oversized_collector.to_string()),
+                ("x-groundline-version", env!("CARGO_PKG_VERSION").to_owned()),
+                (
+                    "idempotency-key",
+                    event["idempotency_key"].as_str().unwrap().to_owned(),
+                ),
+            ];
+            let response = router
+                .clone()
+                .oneshot(local_request(
+                    Method::POST,
+                    "/v1/events",
+                    &"c".repeat(32),
+                    Some(&event),
+                    &headers,
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::ACCEPTED);
+        }
+        let response = router
+            .clone()
+            .oneshot(local_request(
+                Method::GET,
+                "/v3/reports/weekly?days=7",
+                &"a".repeat(32),
+                None,
+                &[],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            response_json(response).await["reason_code"],
+            "report_counter_overflow"
+        );
+        // Retire every collector owned by this fixture so later global reports
+        // cannot inherit its dense model dimensions or quarantined payloads.
+        for id in [oversized_collector, collector] {
+            let response = router
+                .clone()
+                .oneshot(local_request(
+                    Method::DELETE,
+                    &format!("/v1/collectors/{id}"),
+                    &"a".repeat(32),
+                    None,
+                    &[("x-groundline-delete-confirm", id.to_string())],
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+        }
+    }
+
+    #[tokio::test]
     #[ignore = "requires an isolated loopback ClickHouse and explicit mutation opt-in"]
     async fn clickhouse_model_device_and_diagnostic_observations_preserve_evidence() {
         let _database_guard = CLICKHOUSE_TEST_LOCK.lock().await;
@@ -3839,6 +4485,7 @@ mod tests {
         let mut event = integration_event(ids[0], 0);
         event["metrics"]["root"]["usage"]["total_tokens"] = json!(22);
         let zero = event["analysis"]["root"]["unattributed"].clone();
+        unobserved_responses(&mut event);
         let bucket = |model: &str, n: u64| {
             let mut t = zero.clone();
             t["total_tokens"] = json!(n);
@@ -4174,7 +4821,7 @@ mod tests {
             ("install cohorts", REPORT_INSTALL_COHORT_QUERY, &[]),
             (
                 "model effort",
-                REPORT_MODEL_EFFORT_QUERY,
+                report_model_effort_query(),
                 report_params.as_slice(),
             ),
         ] {

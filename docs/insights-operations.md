@@ -16,7 +16,7 @@ groundline-insights worker status
 groundline-insights worker check-server --json
 ```
 
-Current collectors require Basic schema 5 and ingest contract revision 9 or
+Current collectors require Basic schema 5 and ingest contract revision 10 or
 newer. Deploy the API first. A missing profile returns `NOT_CONFIGURED` without
 network access; malformed profiles or incompatible/unreachable APIs fail without
 changing local state. A compatible health response does not prove authentication,
@@ -49,7 +49,8 @@ groundline-insights insights fetch-report --days 7 --admin-token-file /private/a
 The overview shows the entire enrolled fleet, including installations with no
 accepted event. Follow an installation's analysis link to preserve the selected
 time range and inspect its usage. The analysis dashboard applies OS, runtime,
-reported version, and installation filters to every panel. An opaque SHA-256
+reported version, installation, device-group, and explicit-purpose filters to
+every usage panel. An opaque SHA-256
 installation key is used for links; the four-character display suffix is not a
 unique identifier. A random installation UUID is not a person or device count.
 
@@ -70,8 +71,11 @@ removes it from the roster and usage data; it does not end platform support.
 | Tokens per completed turn | Root provider tokens / completed turns | Descriptive ratio; not price or a causal model comparison |
 | Cache ratio | Cached input / input tokens | NULL for a zero denominator; not a whole-prompt cache hit rate |
 | Mean window p90 | Mean of eligible window p90 durations | Not the pooled p90 and not model inference latency |
-| Model/effort contexts | Native turn-context counts | Kept separate from response-attributed tokens |
-| Model/effort tokens | Owned native response counters plus an explicit unattributed residual | Model/effort comes from an explicit turn link; all six token counters conserve the authoritative root/delegated total. No per-model completed-turn denominator is available |
+| Model/effort contexts | Native turn-context counts by root/delegated and explicit purpose | A context is neither a response nor a completed task; unknown and overflow dimensions remain visible |
+| Observed model responses | Unique owned native usage records | Requires an explicit response-to-turn link for model/effort attribution. Historical missing counts are excluded from response sums; mixed cohorts retain their unobserved-window count, and an entirely unobserved cohort remains NULL |
+| Model/effort tokens | Owned native response counters plus an explicit unattributed residual | All six counters, including cache-write input, conserve each authoritative root/delegated total. No per-model completed-task denominator is available |
+| Model identity | Public exact ID, opaque private key, historical family, unknown, or overflow | Versions and snapshots remain distinct; historical family labels are never relabeled as exact IDs |
+| Model coverage | Context dimensions, observed responses, and total-token attribution | Unknown/overflow contexts and unattributed responses/tokens accompany each comparison. Overflow responses are already included in unattributed responses |
 | Verification success | Detected successes / detected successes plus failures | Tool-result proxy; unresolved calls remain separate |
 | Delivery delay | Receipt minus generation, seconds | Over six hours is delayed, over 24 hours overdue; generation more than five minutes ahead is clock skew |
 | TTL backlog | Physical rows past their retention deadline | Eventual background cleanup; not a reason for routine `OPTIMIZE FINAL` |
@@ -81,7 +85,16 @@ back to generation time. The interval follows Grafana's selected range with a
 one-hour minimum. This display does not reconstruct activity within a source
 window. Cohort comparisons require at least ten observed roots and retain
 schema/version/runtime dimensions. Coverage and missingness must accompany any
-comparison. Ratios and model labels do not establish improvement causally.
+comparison. The usage-pattern table and token trend read API-owned
+`model_usage_patterns`; the coverage table reads `model_usage_coverage`.
+A model row's window count includes only windows with a matching context,
+observed response, or positive token counter. The zero-token `unknown` residual
+does not create an observation in every window. Coverage separately counts
+response-observed and response-unobserved windows; only observed responses enter
+the response-attribution denominator. Token counters are neither prices nor
+subscription-quota measurements. Ratios and model labels do not establish
+improvement causally. Model-specific latency, tools, and quality are not inferred
+by copying whole-window totals into each model row.
 
 ## Retired installations
 
@@ -130,9 +143,9 @@ may print that expression with different spacing and parentheses; the API
 compares its `EXPLAIN AST` result with the source expression. A matching comment
 alone cannot authorize a changed definition. Unknown schema states fail closed.
 
-The one supported transition is from Basic revision 8, released in v2026.929.1,
+The one supported transition is from Basic revision 9, released in v2026.1006.1,
 with fingerprint
-`a230de5bd9799dbb85fc1b1806df95986e032d5cfd93511f6795246bfaa80092`.
+`5ba127ae474735e0fa641a9fc3d1a6182db5d546e280aabf1d10192c864c41e3`.
 Startup first makes `basic_current` return no rows, which also guards its active
 and quarantined views. It switches TTL to the new predicate directly, then adds
 `trusted_event_v5_revalidated` with a pending marker. Existing parts calculate
@@ -164,9 +177,12 @@ lazily until an optional, separately planned materialization. For that later
 maintenance, scope `MATERIALIZE COLUMN trusted_event_v5` to inventoried
 partitions, await mutation completion, and repeat source-row and view checks.
 Never mount production storage into a rehearsal. An image rollback alone does
-not undo schema or TTL changes. After revision-9 events have been accepted, use
-a forward repair. An older API cannot safely accept or expose their 6.1 Sol
-dimensions; restoring an older image is not a data recovery procedure.
+not undo schema or TTL changes. After revision-10 events have been accepted, use
+a forward repair. An older API cannot safely accept or expose their dynamic
+model dimensions and response observations; restoring an older image is not a
+data recovery procedure. An installation still using revision 8 must first
+complete the released revision-9 transition; revision 10 does not recognize an
+older trust definition as the previous schema.
 
 ## Dependency upgrades and recovery
 
@@ -295,14 +311,41 @@ and `unclassified` are the other accepted values. The default is unclassified.
 A window started before the latest declaration remains unclassified, including
 backfill. Purpose does not infer task intent, change consent, or start collection.
 
-The current v5 event envelope's optional `analysis` observation is advertised by
-contract revision 7. When absent, existing accepted envelopes remain unchanged
-and their tokens are projected as unattributed. Present observations have strict
-keys, bounded labels, and exact token-conservation checks in Rust and ClickHouse.
-The SQL bucket limit uses the same `MAX_MODEL_CONTEXTS` constant as Rust; the
-current catalog permits 90 distinct non-unknown model/effort pairs.
-Inconsistent native/UI counter baselines, missing links, and conflicting contexts
-remain unattributed. No event's total is spread over context frequencies.
+The current v5 event envelope's optional `analysis` observation was introduced
+in contract revision 7. Revision 10 observes dynamic model/effort identities,
+root/delegated context counts, unique owned native response records, and all six
+token counters by the explicit window purpose. When analysis or its response
+counts are absent, those measurements remain unobserved; existing accepted
+envelopes are preserved. Tokens without a verified turn link are unattributed.
+Present observations have strict keys, bounded labels, and exact token-
+conservation checks in Rust and ClickHouse. No event's total is spread over
+context frequencies.
+
+Public model IDs use the shared `PUBLIC_MODEL_PATTERN` grammar, at most 96
+lowercase ASCII bytes, and preserve version and snapshot suffixes. Valid model
+IDs outside that public grammar become `private-<64 lowercase hex>`:
+SHA-256 of the fixed `groundline-model-id-v1\0` domain followed by the trimmed
+exact ID bytes. Different private IDs remain distinguishable without uploading
+their original names or keeping a name/key registry. Historical `sol`, `gpt-6`,
+and `other` observations retain `historical_family` identity. Previously
+normalized base labels such as `gpt-6-sol` are also historical when the component
+lacks response-count observations: a collapsed snapshot cannot establish an
+exact model ID. Historical and newly observed base IDs remain separate groups.
+
+Rust and SQL share `MAX_MODEL_CONTEXTS = 128`, independent of any installed or
+optimization model catalog. The bound applies separately to each component's
+model/effort context array and attributed-token buckets. Context collection
+reserves one overflow row and preserves the count of excess pairs there. Usage
+records for excess pairs retain all six counters in the unattributed residual
+and expose an overflow response count, which is a subset of unattributed
+responses. Missing links, conflicting contexts, and inconsistent native/UI
+baselines also remain unattributed. Period reports separately cap retained
+labeled model rows at 128 per component/purpose cohort and preserve excess
+observations in an additional overflow row and coverage counters. Across the
+two components and three purposes this permits at most 774 pattern rows; a
+query limit never silently drops the tail. Basic event bodies are bounded to
+256 KiB and schema-3 reports to 1 MiB. Report query-set version 4 identifies
+these semantics; event schema 5 and API schema 3 remain unchanged.
 
 ## Verification and remaining contracts
 
@@ -319,9 +362,14 @@ Browser verification must also cover All, single/multiple selections, empty
 results, and a roster-to-analysis link with its time range preserved.
 Health responses alone do not prove this path.
 
-Revision 9 adds generation-specific GPT-6 tier labels. Historical labels and
-events are preserved; older, mixed, and unversioned cohorts are not optimization
-targets. This change does not require rewriting existing ClickHouse rows.
+Revision 10 requires an updated API before enabling the updated collectors.
+The supported migration recognizes the exact previous revision-9 trust
+predicate, preserves source payloads, event IDs, periods, and counters, and
+verifies row counts and source hashes before the atomic table swap. Unknown
+definitions fail closed. Historical labels and missing response observations
+remain unchanged; older, mixed, and unversioned cohorts are not optimization
+targets. Neither migration nor reporting reconstructs historical exact model
+IDs or responses.
 Verify source, package, install, and a fresh receipt independently. A local
 build or server-reported version does not prove that device's installed files.
 Use a consistent temporary backup and an isolated restore for schema changes.
