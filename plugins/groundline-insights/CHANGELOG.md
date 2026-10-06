@@ -1,5 +1,10 @@
 # GroundLine Insights changes
 
+## 2026.10.06-b (`2026.1006.2`)
+
+- root/child의 정확한 모델·effort·coverage 및 기간별 모델 패턴 조회를 추가했습니다. 과거 모델 계열과 미관측 ID를 보존합니다.
+- ClickHouse·Grafana 모델 패턴 질의와 overflow·coverage 검증을 강화하며 기존 수집·전송 계약을 유지합니다.
+
 ## 2026.10.06-a (`2026.1006.1`)
 
 - Core와 릴리스 버전을 맞추고 ingest revision 9를 유지합니다. API 호환성을 먼저 확인하며 기존 동의·연결·수집 상태를 보존합니다. 설치 무결성과 실제 훅·worker·서버 수신의 증거는 별도로 확인합니다.

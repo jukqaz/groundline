@@ -137,6 +137,11 @@ operation and the active App/PATH versions. On hosts that support it,
 `auto_review.extra_policy` adds local review guidance alongside the main policy;
 managed `guardian_extra_policy` takes precedence. Prefer a narrow additive rule
 for the already authorized scope. Do not replace the policy just to reduce prompts.
+If a short custom replacement causes broad denials, restore the built-in policy
+and express only scoped clarification in `extra_policy`. Put the user's actual
+authorization, concrete target, planned change and relevant checks in visible
+context before a review; hidden reasoning is not reviewer evidence. Routine
+permitted actions need no forced prompt or extra reviewer call.
 `auto_review.policy` and managed `guardian_policy_config` replace the current
 policy; they require access to its full current text and preservation of existing
 rules. If that text is unavailable, do not override it.
@@ -149,6 +154,14 @@ For connected tools, inspect server/tool-specific `default_tools_approval_mode`
 and `approval_mode` before considering broad permission changes. Computer Use
 app approvals remain separate. Verify supported keys with both the actual bundled
 and PATH CLI, and distinguish a parsed file from the effective fresh-task policy.
+Keep Full Access and Approve for me distinct. Setting `approvals_reviewer` to
+`auto_review` prepares eligible interactive requests; it does not create a review
+under `never`. A `forbidden` rule is an unconditional block. Broad Git command
+bans are not needed to describe scoped authorization; retain only the destructive
+command restrictions requested by the user. Test rules with `execpolicy check`,
+which evaluates tokens without running the command. Restart is needed to load
+changed startup rules. An explicit reviewer denial requires a materially safer
+alternative or the native exact-action approval path, never an indirect retry.
 
 Remove a reported obsolete feature only within an authorized settings repair
 and after verifying the exact key on the actual host. For example,

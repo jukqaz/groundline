@@ -20,14 +20,24 @@ fn private_json(path: &Path, value: &Value) -> String {
 }
 
 fn run(root: &Path, args: &[&str], paths: &[(&str, &Path)]) -> Value {
+    run_with_expected_exit(root, args, paths, true)
+}
+
+fn run_with_expected_exit(
+    root: &Path,
+    args: &[&str],
+    paths: &[(&str, &Path)],
+    success: bool,
+) -> Value {
     let mut command = Command::new(env!("CARGO_BIN_EXE_groundline"));
-    command.args(args);
+    command.current_dir(root).args(args);
     for (flag, path) in paths {
         command.arg(flag).arg(path);
     }
     let output = command.output().unwrap();
-    assert!(
+    assert_eq!(
         output.status.success(),
+        success,
         "args={args:?}, stdout={}, stderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
@@ -35,6 +45,89 @@ fn run(root: &Path, args: &[&str], paths: &[(&str, &Path)]) -> Value {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(!stdout.contains(root.to_str().unwrap()));
     serde_json::from_str(&stdout).unwrap()
+}
+
+struct EnvironmentFixture {
+    _temp: tempfile::TempDir,
+    root: PathBuf,
+    target: PathBuf,
+    before: &'static str,
+    after: &'static str,
+}
+
+impl EnvironmentFixture {
+    fn new() -> Self {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        let skills = root.join("skills");
+        fs::create_dir(&skills).unwrap();
+        fs::set_permissions(&skills, fs::Permissions::from_mode(0o700)).unwrap();
+        let target = skills.join("SKILL.md");
+        let before = "---\nname: workflow\ndescription: fixture\n---\nBefore.\n";
+        let after = "---\nname: workflow\ndescription: fixture\n---\nAfter.\n";
+        fs::write(&target, before).unwrap();
+        private_json(
+            &root.join("baseline.json"),
+            &json!({
+                "kind":"groundline-environment-baseline", "schema":1,
+                "revision":"baseline-1", "parent_revision":null,
+                "source_revision":"source-1", "authority_revision":"authority-1",
+                "exception_revision":"device-1", "authority_ref":"user-request-1",
+                "managed_targets":[{"target_id":"workflow", "kind":"skill_file",
+                    "desired_sha256":hash(after.as_bytes()), "dependencies":[], "managed_block":null}]
+            }),
+        );
+        private_json(
+            &root.join("bindings.json"),
+            &json!({
+                "kind":"groundline-environment-device-bindings", "schema":1,
+                "revision":"device-1", "device_id":"fixture",
+                "roots":[{"root_id":"owner", "path":skills, "aliases":[]}],
+                "targets":[{"target_id":"workflow", "root_id":"owner", "relative_path":"SKILL.md"}]
+            }),
+        );
+        private_json(
+            &root.join("proposal.json"),
+            &json!({
+                "kind":"groundline-environment-proposal", "schema":1,
+                "proposal_id":"relative-change", "basis_revision":"baseline-1",
+                "source_revision":"source-1", "authority_ref":"user-request-1",
+                "changes":[{"target_id":"workflow", "content":after}]
+            }),
+        );
+        Self {
+            _temp: temp,
+            root,
+            target,
+            before,
+            after,
+        }
+    }
+
+    fn assert_register_error(&self, baseline: &str, expected: &str) {
+        let output = Command::new(env!("CARGO_BIN_EXE_groundline"))
+            .current_dir(&self.root)
+            .args([
+                "environment",
+                "register",
+                "--state-dir",
+                "PRIVATE_STATE",
+                "--baseline",
+                baseline,
+                "--bindings",
+                "bindings.json",
+                "--json",
+            ])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        assert!(!stdout.contains(self.root.to_str().unwrap()));
+        let result: Value = serde_json::from_str(&stdout).unwrap();
+        assert_eq!(result["error"], expected);
+        assert_eq!(fs::read_to_string(&self.target).unwrap(), self.before);
+    }
 }
 
 fn link(
@@ -306,4 +399,175 @@ fn applied_plan_links_real_operation_and_preserves_unobserved_effects() {
     );
     assert!(!result.to_string().contains("Before."));
     assert!(!result.to_string().contains("After."));
+}
+
+#[test]
+fn bare_cwd_relative_state_and_inputs_complete_environment_roundtrip() {
+    let fixture = EnvironmentFixture::new();
+    let state_arg = Path::new("PRIVATE_STATE");
+    let state = fixture.root.join(state_arg);
+    let registered = run(
+        &fixture.root,
+        &["environment", "register", "--json"],
+        &[
+            ("--state-dir", state_arg),
+            ("--baseline", Path::new("baseline.json")),
+            ("--bindings", Path::new("bindings.json")),
+        ],
+    );
+    assert_eq!(registered["status"], "REGISTERED");
+    let before = run(
+        &fixture.root,
+        &["environment", "inspect", "--json"],
+        &[("--state-dir", state_arg)],
+    );
+    assert!(before["disk_revision"].is_null());
+    assert!(before["active_revision"].is_null());
+    let planned = run(
+        &fixture.root,
+        &["environment", "plan", "--json"],
+        &[
+            ("--state-dir", state_arg),
+            ("--proposal", Path::new("proposal.json")),
+        ],
+    );
+    assert_eq!(
+        planned["plan_sha256"],
+        hash(&fs::read(state.join("plans/relative-change.json")).unwrap())
+    );
+    let applied = run(
+        &fixture.root,
+        &[
+            "environment",
+            "apply",
+            "--proposal-id",
+            "relative-change",
+            "--json",
+        ],
+        &[("--state-dir", state_arg)],
+    );
+    assert_eq!(applied["status"], "APPLIED");
+    assert_eq!(fs::read_to_string(&fixture.target).unwrap(), fixture.after);
+    let observed = run(
+        &fixture.root,
+        &["environment", "inspect", "--json"],
+        &[("--state-dir", state_arg)],
+    );
+    assert_eq!(observed["disk_revision"], "baseline-1");
+    assert!(observed["active_revision"].is_null());
+    let operation_id = applied["operation_id"].as_str().unwrap();
+    let recovered = run_with_expected_exit(
+        &fixture.root,
+        &[
+            "environment",
+            "recover",
+            "--operation-id",
+            operation_id,
+            "--json",
+        ],
+        &[("--state-dir", state_arg)],
+        false,
+    );
+    assert_eq!(recovered["status"], "PARTIAL");
+    assert_eq!(
+        recovered["entries"][0]["status"],
+        "DISK_OBSERVED_AFTER_ONLY"
+    );
+    assert_eq!(recovered["native_activation"], "UNVERIFIED");
+    let rolled = run(
+        &fixture.root,
+        &[
+            "environment",
+            "rollback",
+            "--operation-id",
+            operation_id,
+            "--json",
+        ],
+        &[("--state-dir", state_arg)],
+    );
+    assert_eq!(rolled["status"], "ROLLED_BACK");
+    assert_eq!(fs::read_to_string(&fixture.target).unwrap(), fixture.before);
+    assert_eq!(
+        fs::metadata(&state).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    assert_eq!(
+        fs::metadata(state.join("head.json"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+    assert!(!planned.to_string().contains("Before."));
+    assert!(!planned.to_string().contains("After."));
+}
+
+#[test]
+fn cwd_relative_inputs_and_state_preserve_link_and_owner_boundaries() {
+    for boundary in ["input_symlink", "input_hardlink", "state_symlink"] {
+        let fixture = EnvironmentFixture::new();
+        match boundary {
+            "input_symlink" => {
+                std::os::unix::fs::symlink(
+                    fixture.root.join("baseline.json"),
+                    fixture.root.join("baseline-link.json"),
+                )
+                .unwrap();
+                fixture
+                    .assert_register_error("baseline-link.json", "environment_leaf_link_or_open");
+                assert!(!fixture.root.join("PRIVATE_STATE").exists());
+            }
+            "input_hardlink" => {
+                fs::hard_link(
+                    fixture.root.join("baseline.json"),
+                    fixture.root.join("baseline-copy.json"),
+                )
+                .unwrap();
+                fixture
+                    .assert_register_error("baseline.json", "environment_owner_or_link_contract");
+                assert!(!fixture.root.join("PRIVATE_STATE").exists());
+            }
+            "state_symlink" => {
+                let outside = fixture.root.join("outside-state");
+                fs::create_dir(&outside).unwrap();
+                fs::set_permissions(&outside, fs::Permissions::from_mode(0o700)).unwrap();
+                std::os::unix::fs::symlink(&outside, fixture.root.join("PRIVATE_STATE")).unwrap();
+                fixture.assert_register_error("baseline.json", "environment_state_directory_open");
+                assert_eq!(fs::read_dir(outside).unwrap().count(), 0);
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[test]
+fn registered_roots_remain_absolute_and_targets_remain_root_relative() {
+    for boundary in ["root", "alias", "target_parent", "absolute_target"] {
+        let fixture = EnvironmentFixture::new();
+        let input = fixture.root.join("bindings.json");
+        let mut bindings: Value = serde_json::from_slice(&fs::read(&input).unwrap()).unwrap();
+        let expected = match boundary {
+            "root" => {
+                bindings["roots"][0]["path"] = json!("skills");
+                "environment_invalid_root_binding"
+            }
+            "alias" => {
+                bindings["roots"][0]["aliases"] = json!(["skills"]);
+                "environment_invalid_root_binding"
+            }
+            "target_parent" => {
+                bindings["targets"][0]["relative_path"] = json!("../SKILL.md");
+                "environment_invalid_relative_path"
+            }
+            "absolute_target" => {
+                bindings["targets"][0]["relative_path"] = json!(fixture.target);
+                "environment_invalid_relative_path"
+            }
+            _ => unreachable!(),
+        };
+        private_json(&input, &bindings);
+        fixture.assert_register_error("baseline.json", expected);
+        assert!(!fixture.root.join("PRIVATE_STATE").exists());
+    }
 }

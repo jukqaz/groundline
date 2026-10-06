@@ -88,6 +88,13 @@ fn owner(file: &File, directory: bool, private: bool) -> Result<(), ContractErro
 
 /// The canonical name is resolved once, then every component is opened without links.
 pub(super) fn canonical_dir(path: &Path, private: bool) -> Result<Directory, ContractError> {
+    // Path::parent returns an empty path for a bare relative filename. Bind
+    // that parent to cwd before opening the same canonical, owner-checked fd.
+    let path = if path.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        path
+    };
     let canonical = io(fs::canonicalize(path))?;
     let file = open_absolute(&canonical)?;
     owner(&file, true, private)?;

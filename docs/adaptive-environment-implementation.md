@@ -44,13 +44,13 @@ skill_file digest는 전체 파일 내용, agents_block digest는 marker를 제�
 제공된 authority hash는 기존 승인 범위를 가리키며 새 권한이나 승인 진위를 만들어 주지 않습니다.
 첫 등록의 parent_revision은 null입니다. 이후 기준 갱신은 현재 revision과 같은 부모를
 제시해야 하며, 임의 병합이나 오래된 기준 덮어쓰기는 하지 않습니다.
+bindings의 roots.path와 aliases는 절대 경로입니다. target.relative_path는 등록 root를
+기준으로 해석합니다. state-dir와 입력 파일은 현재 작업 디렉터리 기준 상대 경로도 받습니다.
 
     groundline environment register --state-dir PRIVATE_STATE --baseline baseline.json --bindings bindings.json --json
     groundline environment inspect --state-dir PRIVATE_STATE --json
     groundline environment plan --state-dir PRIVATE_STATE --proposal proposal.json --json
     groundline environment apply --state-dir PRIVATE_STATE --proposal-id PROPOSAL_ID --json
-    groundline environment recover --state-dir PRIVATE_STATE --operation-id OPERATION_ID --json
-    groundline environment rollback --state-dir PRIVATE_STATE --operation-id OPERATION_ID --json
 
 PRIVATE_STATE와 입력 파일은 사용자가 지정한 비공개 위치입니다. 입력 예시는 계약을
 설명하는 형식이며 사용자가 관리 대상으로 등록하지 않은 경로를 자동 등록하지 않습니다.
@@ -100,8 +100,19 @@ desired revision, disk digest, native discovery/metadata, execution effect를 �
 
     groundline learning link-outcome --input link.json --receipt delivery.json --state PRIVATE_LEARNING
     groundline learning propose --input candidate.json --state PRIVATE_LEARNING
-    groundline learning evaluate --input evaluation.json --deliveries PRIVATE_DELIVERIES --state PRIVATE_LEARNING --operation application.json
+    groundline learning evaluate --input evaluation.json --deliveries PRIVATE_DELIVERIES --state PRIVATE_LEARNING --operation PRIVATE_STATE/operations/OPERATION_ID.json
     groundline learning status --state PRIVATE_LEARNING
+
+정상 작업은 기준 결과 연결 → 후보 기록 → 환경 계획·적용 → 자연 업무의 후속 결과
+연결 → 평가 순서입니다. apply 출력의 operation_id로 private operation 파일을 찾습니다.
+evaluate의 --operation에는 stdout 요약이 아닌 해당 파일을 전달합니다.
+
+recover는 중단된 적용을 조사할 때만 사용하며 정상 APPLIED 영수증의 후속 단계가
+아닙니다. 디스크 관측만으로 적용 이력을 확정하지 않습니다. rollback은 후속 결과를
+평가한 뒤 필요할 때 수행하는 별도 단계입니다.
+
+    groundline environment recover --state-dir PRIVATE_STATE --operation-id OPERATION_ID --json
+    groundline environment rollback --state-dir PRIVATE_STATE --operation-id OPERATION_ID --json
 
 link는 receipt의 실제 바이트 hash와 필드를 대조합니다. 미관측 당시 revision은 null로
 남기며, 작업 이후 시각을 당시 관측 시각으로 넣으면 거부합니다. provenance hash는
