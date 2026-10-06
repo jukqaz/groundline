@@ -19,6 +19,8 @@ pub mod grafana;
 pub mod insights;
 #[cfg(feature = "integrity")]
 pub mod integrity;
+#[cfg(feature = "efficiency")]
+pub mod learning;
 #[cfg(any(feature = "audit", feature = "efficiency", feature = "insights"))]
 pub mod model;
 #[cfg(feature = "audit")]

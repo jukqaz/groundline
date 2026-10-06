@@ -15,6 +15,9 @@ mod audit_review;
 mod config_audit;
 mod config_repair;
 mod delivery;
+mod environment;
+mod environment_observation;
+mod learning;
 mod operations;
 mod personal;
 mod routing;
@@ -33,6 +36,27 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Align registered private guidance files with a revisioned baseline.
+    Environment {
+        #[command(subcommand)]
+        command: environment::Command,
+    },
+    /// Link actual outcomes and evaluate scoped private improvement candidates.
+    Learning {
+        #[command(subcommand)]
+        command: learning::Command,
+    },
+    /// Observe native App and PATH loading separately without starting model turns.
+    EnvironmentObserve {
+        #[arg(long)]
+        app_cli: PathBuf,
+        #[arg(long)]
+        path_cli: PathBuf,
+        #[arg(long)]
+        codex_home: PathBuf,
+        #[arg(long)]
+        target: Vec<PathBuf>,
+    },
     /// Inspect or roll back an existing private personal-guidance trial.
     Personal {
         #[command(subcommand)]
@@ -289,7 +313,11 @@ fn emit(value: &Value, json_output: bool) {
 fn failure(error: ContractError) -> Value {
     let mutation = if error.0.starts_with("delivery_summary_") {
         json!(false)
-    } else if error.0.starts_with("personal_") || error.0.starts_with("delivery_") {
+    } else if error.0.starts_with("personal_")
+        || error.0.starts_with("delivery_")
+        || error.0.starts_with("environment_")
+        || error.0.starts_with("learning_")
+    {
         Value::Null
     } else {
         json!(false)
@@ -308,6 +336,15 @@ fn failure(error: ContractError) -> Value {
 
 fn run(cli: Cli) -> Result<(), ExitCode> {
     let result: Result<(Value, bool), ContractError> = match cli.command {
+        Command::Environment { command } => environment::run(command).map(|value| (value, true)),
+        Command::Learning { command } => learning::run(command).map(|value| (value, true)),
+        Command::EnvironmentObserve {
+            app_cli,
+            path_cli,
+            codex_home,
+            target,
+        } => environment_observation::inspect(&app_cli, &path_cli, &codex_home, &target)
+            .map(|value| (value, true)),
         Command::Personal { command } => personal::run(command).map(|value| (value, true)),
         Command::ConfigRepair(options) => config_repair::run(options).map(|value| (value, true)),
         Command::Setup(options) => match setup::run(options) {
@@ -501,10 +538,23 @@ fn run(cli: Cli) -> Result<(), ExitCode> {
             emit(&value, json_output);
             if matches!(
                 value.get("kind").and_then(Value::as_str),
-                Some("groundline-config-audit" | "groundline-config-repair" | "groundline-setup")
+                Some(
+                    "groundline-config-audit"
+                        | "groundline-config-repair"
+                        | "groundline-setup"
+                        | "groundline-environment-inspection"
+                        | "groundline-environment-operation"
+                        | "groundline-environment-result"
+                        | "groundline-learning-evaluation"
+                        | "groundline-environment-observation"
+                )
             ) && value.get("status").and_then(Value::as_str) == Some("FAIL")
             {
                 Err(ExitCode::FAILURE)
+            } else if value["kind"] == "groundline-environment-result"
+                && matches!(value["status"].as_str(), Some("PARTIAL" | "CONFLICT"))
+            {
+                Err(ExitCode::from(2))
             } else {
                 Ok(())
             }

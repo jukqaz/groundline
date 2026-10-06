@@ -12,7 +12,7 @@ required-features = ["audit"]
 [features]
 default = ["audit", "efficiency", "version"]
 audit = ["dep:chrono", "dep:serde", "dep:serde_json", "serde_json/raw_value", "dep:sha2", "dep:regex", "dep:shlex", "dep:oxc_allocator", "dep:oxc_ast", "dep:oxc_parser", "dep:oxc_span"]
-efficiency = ["dep:chrono", "dep:serde", "dep:serde_json", "dep:sha2", "dep:regex", "version"]
+efficiency = ["dep:chrono", "dep:serde", "dep:serde_json", "dep:sha2", "dep:regex", "dep:url", "version"]
 insights = ["dep:chrono", "dep:serde", "dep:serde_json", "dep:sha2", "dep:regex", "dep:uuid", "version"]
 integrity = ["dep:hmac", "dep:sha2"]
 guidance = ["dep:serde", "dep:serde-saphyr"]
@@ -33,4 +33,5 @@ serde_json = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
 shlex = { workspace = true, optional = true }
 thiserror.workspace = true
+url = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }

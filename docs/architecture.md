@@ -4,8 +4,8 @@ GroundLine은 사용 패턴·실제 작업 결과·현재 모델의 공식 지�
 사용 방식과 공통 Codex 환경을 개선하는 것을 목표로 합니다.
 실행·모델 적용·권한·에이전트·작업 관리는 Codex가 담당합니다.
 
-아래는 현재 구현 경계입니다. 개인 기준·지속 학습·환경별 적용 영수증의 추가 계약과
-구현 순서는 [지속 개선과 환경 통일 설계](adaptive-environment-design.md)에 구분합니다.
+아래는 현재 구현 경계입니다. 개인 기준·기기 예외·실제 적용과 후속 결과를 연결하는
+[로컬 구현](adaptive-environment-implementation.md)과 [설계의 후속 범위](adaptive-environment-design.md)를 구분합니다.
 
 ```mermaid
 flowchart LR
@@ -18,13 +18,19 @@ flowchart LR
   Insights[선택적 Insights 집계] -. 설명용 맥락 .-> Compare
   Compare --> Decision[근거와 불확실성]
   Decision --> Codex[다음 작업 판단]
+  Receipt --> Context[작업 당시 revision·정정 sidecar]
+  Context --> Candidate[범위가 정해진 개선 후보]
+  Baseline[공통 기준·기기 예외] --> Plan[비공개 계획·적용·복구]
+  Candidate --> Plan
+  Plan --> Followup[후속 직접 결과]
+  Followup --> Context
 ```
 
 | 경계 | 소유 책임 | 제외 |
 | --- | --- | --- |
 | `groundline-contracts` | 구조·수치·소유권 검증, 관측 해석, 결과 비교 | 파일·네트워크·설정 변경 |
 | `groundline-runtime` | 제한된 native 읽기, 저장소 진단, Insights 연결·수집 | root 모델 자동 변경, 개인 작업 분류 추정 |
-| `groundline-cli` | 명령 입출력, 비공개 결과 기록, 명시적 설정 변경·복구 | background 수집, 별도 실험 정책 |
+| `groundline-cli` | 명령 입출력, 비공개 결과·환경·학습 상태, 등록 지침 적용·복구와 App/PATH metadata 관측 | background 수집, 별도 실험 정책 |
 | Insights CLI/API | 동의된 전송, 서버 집계, 운영 상태 | 대화 원문 업로드, 집계만으로 품질 판정 |
 | `xtask` | 소스·패키지·설치 검증, 명시적 배포 | 사용자 작업마다 강제하는 절차 |
 
@@ -34,6 +40,7 @@ flowchart LR
 - **결과:** 실제 근거의 hash와 명시적 해석을 연결하며 요청·실행·완료를 구분합니다. child 선택을 root에서 상속하지 않고 실패·재시도·위임 비용을 한 번씩 계산합니다. 없는 관측은 unknown, 로컬 hash는 provider 인증이 아닙니다. [결과 계약](../plugins/groundline/references/delivery-evidence.md)
 - **비교:** 현재 카탈로그와 같은 작업군의 직접 결과를 비교하며 품질·재작업·자원 보호를 적용합니다. 집계가 불완전해도 직접 증거는 별도로 판단합니다. 운영 임계값은 통계적 확신이나 자동 개선의 증명이 아닙니다. [라우팅 계약](../plugins/groundline/references/evidence-routing.md)
 - **상태:** Core는 Insights 동의·전송 상태를 파일 존재로 추측하지 않습니다. 기존 개인 상태는 status/rollback으로만 복구하며 사용자 설정·기록을 삭제하거나 폐기 형식을 자동 변환하지 않습니다. [복구 계약](../plugins/groundline/references/personal-recovery.md)
+- **환경·학습:** 새 owner-private 상태는 기준·계획·파일 적용·후속 결과를 연결하고 오래된 revision과 사용자 편집을 보존합니다. native 발견·지침 사용·업무 효과와 실제 비교 기준·현재 계획 기준을 구분합니다. [실행 계약](adaptive-environment-implementation.md)
 
 공용 계약에 I/O를 넣거나 새 실행기·지침 registry·상태 추측 경로를 만들기 전에
 기존 소유 경계에서 해결할 수 있는지 확인합니다. 폐기 기능은

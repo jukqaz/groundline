@@ -50,8 +50,9 @@ usage alone cannot identify the best model or prove improvement.
 
 The [adaptive environment design](docs/adaptive-environment-design.md) extends
 this loop to a personal baseline, scoped application, recovery and later outcomes.
-Persistent learning and environment synchronization are planned capabilities;
-the current release provides observation, comparison and bounded settings repair.
+The [local implementation](docs/adaptive-environment-implementation.md) connects
+registered guidance plans, recoverable application and private outcome sidecars.
+Installed-plugin activation and later workflow effects require separate evidence.
 
 Core guidance and model-led analysis consume input tokens. Insights' native
 collector does not call a language model. Compare quality, rework, user effort,

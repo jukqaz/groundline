@@ -12,7 +12,7 @@
 | Diagnose collection and server state | [Operations](insights-operations.md) |
 | Change code or parsing | [Contributing](../CONTRIBUTING.md), [architecture](architecture.md), [development contracts](development.md) |
 | Evaluate guidance changes | [Behavioral validation](guidance-validation.md) |
-| Design continuous improvement and environment alignment | [Adaptive environment design](adaptive-environment-design.md) (planned capabilities) |
+| Improve and align a personal environment | [Local environment and learning CLI](adaptive-environment-implementation.md), [design and remaining scope](adaptive-environment-design.md) |
 | Select native Codex capabilities for that loop | [Capability research and mapping](codex-native-capabilities.md) |
 | Qualify and publish a release | [Release checklist](release-checklist.md), [versioning](versioning.md) |
 

@@ -655,6 +655,7 @@ dependencies = [
  "groundline-runtime",
  "proptest",
  "rusqlite",
+ "rustix",
  "serde",
  "serde_json",
  "serde_path_to_error",
@@ -684,6 +685,7 @@ dependencies = [
  "sha2",
  "shlex",
  "thiserror",
+ "url",
  "uuid",
 ]
 

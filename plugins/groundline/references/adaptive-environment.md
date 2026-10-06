@@ -3,9 +3,10 @@
 Use this reference for requested usage-driven improvement and environment
 alignment. Connect observations, actual delivery outcomes and relevant official
 model guidance to a reviewed personal baseline, then verify its next results.
-The current release provides audit, delivery, comparison and bounded settings
-repair. A persistent learner, baseline synchronizer and environment-receipt CLI
-are planned; do not invent their commands or report them as active.
+This source provides audit, delivery, comparison, bounded settings repair and
+the [private environment and learning CLI](https://github.com/jukqaz/groundline/blob/main/docs/adaptive-environment-implementation.md).
+Check the installed binary's commands before using it; source implementation
+does not prove installed-plugin activation or later workflow improvement.
 
 ## Establish the requested baseline
 
@@ -26,6 +27,9 @@ databases or provider caches between hosts.
 1. Reuse relevant [audit](weekly-usage-audit.md) observations and
    [delivery evidence](delivery-evidence.md). Distinguish native completion,
    assistant reporting, checks and user acceptance. Missing results stay unknown.
+   Existing period aggregates describe usage. Do not infer historical task
+   quality, environment/skill revisions or exact model IDs from them. Link
+   current private outcome evidence to the revisions observed during that work.
 2. Describe a specific recurring friction or explicit correction and a scoped
    change. Record its basis, expected result and what would invalidate it.
 3. Review current official guidance only for the affected model/runtime change

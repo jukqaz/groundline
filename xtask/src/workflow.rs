@@ -103,13 +103,14 @@ fn native_delivery_command_is_complete(line: &str) -> bool {
         return false;
     }
     let mut rest = args[7..].iter().copied();
-    let (mut delivery, mut routing) = (false, false);
+    let (mut delivery, mut routing, mut adaptive) = (false, false, false);
     while let Some(arg) = rest.next() {
         match arg {
             "--lib" => {}
             "--test" => match rest.next() {
                 Some("delivery_cli") => delivery = true,
                 Some("routing_cli") => routing = true,
+                Some("adaptive_environment_cli") => adaptive = true,
                 Some("setup_cli" | "config_repair_cli" | "install_cli") => {}
                 _ => return false,
             },
@@ -118,12 +119,13 @@ fn native_delivery_command_is_complete(line: &str) -> bool {
             "--" => {
                 return delivery
                     && routing
+                    && adaptive
                     && rest.all(|arg| matches!(arg, "--show-output" | "--nocapture"));
             }
             _ => return false,
         }
     }
-    delivery && routing
+    delivery && routing && adaptive
 }
 
 fn native_delivery_checks_are_required(workflow: &str) -> bool {
@@ -411,7 +413,11 @@ mod tests {
         let workflow = include_str!("../../.github/workflows/rust.yml");
         assert!(native_delivery_checks_are_required(workflow));
         for job in ["native-setup", "artifacts"] {
-            for removed in [" --test delivery_cli", " --test routing_cli"] {
+            for removed in [
+                " --test delivery_cli",
+                " --test routing_cli",
+                " --test adaptive_environment_cli",
+            ] {
                 let mut document: serde_json::Value = serde_saphyr::from_str(workflow).unwrap();
                 for step in document["jobs"][job]["steps"].as_array_mut().unwrap() {
                     if let Some(run) = step["run"].as_str() {

@@ -1,6 +1,7 @@
 # 조사에 따른 GroundLine 개선사항
 
-상태: 2026-10-06 개선안. 구현·설정 적용·배포 완료를 뜻하지 않습니다.
+상태: 2026-10-06 개선안과 [첫 로컬 구현](adaptive-environment-implementation.md).
+소스·단일 기기 검증과 지속적인 업무 효과·다중 기기 적용·배포를 구분합니다.
 [현재 재설계](adaptive-environment-design.md)의 보완 항목과 구현 완료 기준입니다.
 적용·복구의 파일 안전성은 [경계 조건 조사](adaptive-environment-safety-research.md)를 따릅니다.
 

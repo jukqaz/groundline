@@ -9,7 +9,8 @@
    bounded retries/diagnostics, and real loopback capability preflight tests.
    Confirm owner APIs advertise the new ingest contract before collector
    upgrades; public stable promotion alone cannot prove private API readiness.
-   Both native PR and artifact jobs must execute `delivery_cli` and `routing_cli`
+   Both native PR and artifact jobs must execute `delivery_cli`, `routing_cli`,
+   and `adaptive_environment_cli`
    on every supported target. Listing tests or applying a test-name filter does
    not qualify these suites.
    Before promoting revised routing or skill behavior as the default, compare
