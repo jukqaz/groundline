@@ -26,7 +26,7 @@ suites cover these product boundaries:
 
 | Surface | Required contract coverage |
 | --- | --- |
-| Audit and saved review | Bounded read-only collection, selected-window coverage, private output, zero history scans on saved review, one current recommendation recomputation |
+| Audit and saved review | Bounded read-only collection, selected-window coverage, private output, zero history scans on saved review, one current recommendation recomputation, fixed diagnostic reason totals with unchanged verdicts, unknown legacy/mismatched diagnostics, rejection of unsafe diagnostic values |
 | Whole-store diagnostic | Separate metadata scope; no claim that its counts are the weekly task-window population |
 | Delivery recording and summary | Local artifact hashes, proposed/requested/effective selections, failed and unknown outcomes, owned resources, duplicate ownership, private write-once receipts and symlink rejection |
 | Empirical routing | Current schema and native catalog, matched GPT-6 outcomes, protected quality, rework and total resources, incomplete evidence, no guessed model/effort pair |

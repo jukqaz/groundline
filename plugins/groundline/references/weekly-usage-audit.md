@@ -135,8 +135,10 @@ fork or subagent coverage. Response records count as fallback rollouts and have
 an explicit bounded provenance label, separate from last-usage-only evidence.
 
 Model contexts use bounded family and effort labels. New GPT-6 observations
-use gpt-6.1-sol, gpt-6-astra, gpt-6-sol, and gpt-6-luna; historical unversioned labels remain
-descriptive and outside optimization scope. They do
+use gpt-6.1-sol, gpt-6-astra, gpt-6-sol, and gpt-6-luna; the two Sol versions
+remain separate. Historical unversioned labels remain descriptive and outside
+optimization scope. Do not assign previously collapsed Sol labels to 6.1 or pool
+observations across changed normalization rules as evidence of an improvement. They do
 not attribute token totals to individual models or estimate billing.
 
 Report completed root tasks and completed turns separately. `task_latency` counts
@@ -162,6 +164,28 @@ not test-command words quoted inside a search or inspection. Unsupported dynamic
 or compound shell/JavaScript shapes remain `other_command`; preserve
 `tools.unclassified_command_call_count` and `tools.verification_classification_scope`
 as classification coverage limits, not proof that no verification occurred.
+`tools.command_diagnostics_revision: 1` adds bounded `other_command_reasons`
+without changing category membership or native verification outcomes:
+
+| Reason | Meaning |
+| --- | --- |
+| `parsed_exec_without_verification` | A supported literal exec wrapper contains no recognized verification; it may contain recognized inspection or poll calls |
+| `unclassified_nested_command` | A supported exec wrapper contains an unsupported nested command and no recognized verification |
+| `unsupported_exec_shape` | The exec wrapper cannot be mapped by the bounded literal AST parser |
+| `other_direct_command` | A direct call remains an unclassified command |
+
+Count one reason per top-level `other_command` call, not per nested command.
+The reason counts sum to `tools.unclassified_command_call_count`; do not add
+them to that total. Korean review and `readout` retain these diagnostics only
+when the revision, keys, integer counts and sum agree. Older saved audits lack
+this observation and display unknown diagnostics, never invented zeroes.
+Unsafe keys or nonnumeric values are rejected before a saved audit is retained
+in output; numeric inconsistencies remain unknown in the readout.
+Diagnostics do not prove a check ran or succeeded, recover unsupported dynamic
+execution, or measure accepted deliveries. No raw command, path, handle or source
+text is exported. Compare outcomes only under the same classifier and collection
+conditions; this diagnostic revision alone is not a quality improvement.
+
 Report outcome coverage before interpreting success ratios. Separate
 calls to poll a process are connected only with a matching explicit handle in the
 same rollout and observation window. Literal awaited native polls can be recognized
