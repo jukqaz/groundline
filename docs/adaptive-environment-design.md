@@ -130,6 +130,11 @@ catalog의 모델 지원 정보만으로 모델의 권장 지침을 확인했다
 
 ## 계획·적용·복구
 
+중단·기준 충돌·부분 복구 의존성·경로 binding의 후속 구현 계약은
+[경계 조건 조사](adaptive-environment-safety-research.md)에 정리합니다.
+원본 재읽기뿐 아니라 변경 전 준비 기록, 기준의 조건부 갱신, 남은 consumer의
+의존성 보존, 검증한 owner root 기준의 파일 연산을 함께 구현해야 합니다.
+
 향후 환경 기능은 읽기 전용 `inspect`, 정확한 diff의 `plan`, 제한 적용 `apply`,
 사용자 편집을 보존하는 `rollback` 책임으로 나눕니다. 명령 이름·CLI 형식은 구현 시 확정합니다.
 
