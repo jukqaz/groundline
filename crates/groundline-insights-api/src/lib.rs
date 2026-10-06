@@ -750,6 +750,18 @@ impl ClickHouse {
         }
     }
 
+    async fn revoked(&self, collector_id: Uuid) -> Result<bool, ApiError> {
+        let row = self.json_row(
+            "SELECT count() > 0 AS is_revoked FROM groundline.collectors FINAL WHERE collector_id = {collector_id:UUID} AND revoked != 0 FORMAT JSONEachRow",
+            &[("collector_id", collector_id.to_string())],
+        ).await?.ok_or_else(ApiError::storage)?;
+        match row.get("is_revoked").and_then(Value::as_u64) {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(ApiError::storage()),
+        }
+    }
+
     async fn write_collector(&self, collector: &Collector) -> Result<(), ApiError> {
         let mut body = serde_json::to_vec(&collector.as_row()).map_err(|_| ApiError::storage())?;
         body.push(b'\n');
@@ -1270,6 +1282,13 @@ async fn enroll(
         .await?
     {
         return Err(ApiError::new(StatusCode::FORBIDDEN, "collector_retired"));
+    }
+    if state
+        .clickhouse
+        .revoked(input.collector_instance_id)
+        .await?
+    {
+        return Err(ApiError::new(StatusCode::FORBIDDEN, "collector_revoked"));
     }
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
     let existing = state
@@ -4694,6 +4713,28 @@ mod tests {
         assert_eq!(preserved.current_generation, 7);
         assert_eq!(preserved.token_hash, token_hash);
 
+        let mut conflicting_enrollment = enrollment.clone();
+        conflicting_enrollment["collector_token"] = json!("d".repeat(32));
+        let response = router
+            .clone()
+            .oneshot(local_request(
+                Method::POST,
+                "/v1/enroll",
+                &"e".repeat(32),
+                Some(&conflicting_enrollment),
+                &[],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            response_json(response).await["reason_code"],
+            "collector_already_enrolled"
+        );
+        let preserved = clickhouse.collector(collector_id).await.unwrap().unwrap();
+        assert_eq!(preserved.current_generation, 7);
+        assert_eq!(preserved.token_hash, token_hash);
+
         let event = integration_event(collector_id, 7);
         let event_id = event["event_id"].as_str().expect("event id");
         let event_headers = [
@@ -5120,6 +5161,73 @@ mod tests {
             assert_eq!(clickhouse.request("SELECT count() FROM groundline.basic_quarantined WHERE event_id={id:UUID} FORMAT TabSeparated", &[("id", forged["event_id"].as_str().unwrap().to_owned())], None).await.unwrap(), b"1\n");
         }
 
+        // A raw external revocation must not become a fresh enrollment, even
+        // with the owner's valid enrollment credential and another token.
+        let mut revoked_row = preserved.as_row();
+        revoked_row["revoked"] = json!(1);
+        revoked_row["updated_at"] = json!(
+            (Utc::now() + ChronoDuration::seconds(1)).to_rfc3339_opts(SecondsFormat::Millis, true)
+        );
+        clickhouse
+            .request(
+                "INSERT INTO groundline.collectors FORMAT JSONEachRow",
+                &[],
+                Some(serde_json::to_vec(&revoked_row).unwrap()),
+            )
+            .await
+            .unwrap();
+        assert!(!clickhouse.retired(collector_id).await.unwrap());
+        assert!(clickhouse.revoked(collector_id).await.unwrap());
+        let collector_query = "SELECT * FROM groundline.collectors FINAL WHERE collector_id={id:UUID} FORMAT JSONEachRow";
+        let collector_params = [("id", collector_id.to_string())];
+        let before = clickhouse
+            .json_rows(collector_query, &collector_params)
+            .await
+            .unwrap();
+        assert_eq!(before.len(), 1);
+        for (credential, input, status, reason) in [
+            (
+                "x".repeat(32),
+                &enrollment,
+                StatusCode::UNAUTHORIZED,
+                "enrollment_credential_rejected",
+            ),
+            (
+                "e".repeat(32),
+                &enrollment,
+                StatusCode::FORBIDDEN,
+                "collector_revoked",
+            ),
+            (
+                "e".repeat(32),
+                &conflicting_enrollment,
+                StatusCode::FORBIDDEN,
+                "collector_revoked",
+            ),
+        ] {
+            let response = router
+                .clone()
+                .oneshot(local_request(
+                    Method::POST,
+                    "/v1/enroll",
+                    &credential,
+                    Some(input),
+                    &[],
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), status);
+            assert_eq!(response_json(response).await["reason_code"], reason);
+            assert_eq!(
+                clickhouse
+                    .json_rows(collector_query, &collector_params)
+                    .await
+                    .unwrap(),
+                before,
+                "rejected enrollment must preserve the complete revoked record"
+            );
+        }
+
         let response = router
             .clone()
             .oneshot(local_request(
@@ -5141,6 +5249,16 @@ mod tests {
                 .is_none()
         );
         assert!(clickhouse.retired(collector_id).await.unwrap());
+        // Even an externally restored revoked row cannot override retirement.
+        clickhouse
+            .request(
+                "INSERT INTO groundline.collectors FORMAT JSONEachRow",
+                &[],
+                Some(serde_json::to_vec(&revoked_row).unwrap()),
+            )
+            .await
+            .unwrap();
+        assert!(clickhouse.revoked(collector_id).await.unwrap());
         let response = router
             .clone()
             .oneshot(local_request(

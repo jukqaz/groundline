@@ -115,6 +115,10 @@ The `/v1/enroll` route requires all of the following:
 
 The enrollment credential is distinct from the proxy, admin, and collector
 tokens. A collector UUID cannot be rebound to a different collector token.
+Retired IDs remain denied. A current collector row marked `revoked` also
+rejects enrollment without changing its token, generation, or stored row,
+including with a valid owner enrollment credential. The normal API does not
+create this revoked-only state; this guard covers externally modified storage.
 After enrollment, event upload and collector-scoped operations require the
 per-collector token. Administrative reports and deletion use the admin token.
 The CLI requires that admin token through an explicit owner-private token file;
@@ -132,6 +136,8 @@ The API distinguishes `enrollment_credential_rejected`,
 `proxy_authentication_rejected`, and `tailnet_peer_rejected` with HTTP 401.
 Disabled enrollment returns 403 `enrollment_disabled`; a collector identity
 already bound to another token returns 409 `collector_already_enrolled`.
+Retired IDs return 403 `collector_retired`; externally revoked rows return 403
+`collector_revoked`. Retirement takes precedence when both states exist.
 The worker preserves only these allowlisted, status-matched reasons. Other
 401/403 replies become `remote_authentication_rejected`; arbitrary response text
 is never emitted. These permanent failures still require an operator retry.
