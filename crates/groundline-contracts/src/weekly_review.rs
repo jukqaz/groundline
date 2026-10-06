@@ -42,6 +42,47 @@ fn availability(audit: &Value, key: &str) -> &'static str {
     }
 }
 
+const COMMAND_REASONS: &[(&str, &str)] = &[
+    (
+        "parsed_exec_without_verification",
+        "해석된 래퍼·검증 인식 없음",
+    ),
+    ("unclassified_nested_command", "래퍼 내부 명령 미분류"),
+    ("unsupported_exec_shape", "지원하지 않는 실행 래퍼"),
+    ("other_direct_command", "기타 직접 명령"),
+];
+
+/// Missing or inconsistent diagnostics stay unknown; never export arbitrary keys.
+fn command_diagnostics(root: &Value) -> Value {
+    if root
+        .pointer("/tools/command_diagnostics_revision")
+        .and_then(Value::as_u64)
+        != Some(1)
+    {
+        return Value::Null;
+    }
+    let Some(values) = root
+        .pointer("/tools/other_command_reasons")
+        .and_then(Value::as_object)
+    else {
+        return Value::Null;
+    };
+    let mut total = 0_u64;
+    for (key, value) in values {
+        if !COMMAND_REASONS.iter().any(|(code, _)| *code == key) {
+            return Value::Null;
+        }
+        let Some(next) = value.as_u64().and_then(|count| total.checked_add(count)) else {
+            return Value::Null;
+        };
+        total = next;
+    }
+    if count(root, "/tools/unclassified_command_call_count") != Some(total) {
+        return Value::Null;
+    }
+    json!({"revision":1,"reasons":values})
+}
+
 fn validate_audit(audit: &Value) -> Result<(), crate::ContractError> {
     if audit["kind"] != "groundline-codex-weekly-audit"
         || audit["schema"] != 1
@@ -54,6 +95,21 @@ fn validate_audit(audit: &Value) -> Result<(), crate::ContractError> {
         ]
         .iter()
         .any(|field| audit[*field] != false)
+        || ["root", "delegated", "guardian"].iter().any(|name| {
+            let tools = &audit[name]["tools"];
+            tools
+                .get("command_diagnostics_revision")
+                .is_some_and(|v| !v.is_null() && !v.is_u64())
+                || tools.get("other_command_reasons").is_some_and(|v| {
+                    !v.is_null()
+                        && !v.as_object().is_some_and(|counts| {
+                            counts.iter().all(|(key, count)| {
+                                COMMAND_REASONS.iter().any(|(code, _)| *code == key)
+                                    && count.is_u64()
+                            })
+                        })
+                })
+        })
     {
         return Err(crate::ContractError(
             "unsafe_weekly_review_input".to_owned(),
@@ -157,6 +213,8 @@ fn render_review(audit: Value, recommendation: Value) -> Result<Value, crate::Co
     let unresolved = count(root, "/tools/verification_unresolved_count");
     let recovered = count(root, "/tools/verification_recovered_by_poll_count");
     let unclassified_commands = count(root, "/tools/unclassified_command_call_count");
+    let command_diagnostics = command_diagnostics(root);
+    let command_reasons = reasons(&command_diagnostics, "/reasons", COMMAND_REASONS);
     // These store-level failures never reached the root parser. Keep their
     // denominators separate instead of hiding them behind its zero issue count.
     let unreadable_roots = count(&audit, "/scope/unreadable_completed_root_count");
@@ -180,7 +238,7 @@ fn render_review(audit: Value, recommendation: Value) -> Result<Value, crate::Co
         )
     };
     let collection_coverage = format!(
-        "별도 읽기 실패: 루트 {}개 · 위임 {}개 · Guardian {}개 · 실행 출처 미분류 {}개\n검증 호출 분류 범위 밖 명령 {}건 (검증 성공·실패·미확정 건수에 포함되지 않음)",
+        "별도 읽기 실패: 루트 {}개 · 위임 {}개 · Guardian {}개 · 실행 출처 미분류 {}개\n검증 호출 분류 범위 밖 명령 {}건 (검증 성공·실패·미확정 건수에 포함되지 않음)\n명령 분류 진단: {command_reasons}",
         shown(unreadable_roots),
         shown(unreadable_delegated),
         shown(unreadable_guardian),
@@ -282,6 +340,8 @@ fn render_review(audit: Value, recommendation: Value) -> Result<Value, crate::Co
             "verification_success_count":success,"verification_failure_count":failure,"verification_unresolved_count":unresolved,
             "verification_recovered_by_poll_count":recovered,
             "unclassified_command_call_count":unclassified_commands,
+            "command_diagnostics_revision":command_diagnostics["revision"],
+            "other_command_reasons":command_diagnostics["reasons"],
             "unreadable_root_count":unreadable_roots,"unreadable_delegated_count":unreadable_delegated,
             "unreadable_guardian_count":unreadable_guardian,"originator_unclassified_root_count":unclassified_roots,
             "store_integrity":inventory,
@@ -300,6 +360,75 @@ fn render_review(audit: Value, recommendation: Value) -> Result<Value, crate::Co
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn command_diagnostic_readout_preserves_counts_and_unknown_old_reports() {
+        let mut audit = json!({"kind":"groundline-codex-weekly-audit","schema":1,
+            "raw_content_emitted":false,"private_paths_emitted":false,"thread_ids_emitted":false,
+            "rollout_paths_emitted":false,"secret_value_printed":false,"status":"PARTIAL",
+            "scope":{},"root":{"tools":{"unclassified_command_call_count":4,
+                "command_diagnostics_revision":1,"other_command_reasons":{
+                    "parsed_exec_without_verification":1,"unclassified_nested_command":1,
+                    "unsupported_exec_shape":1,"other_direct_command":1}}}});
+        let result = review(audit.clone()).unwrap();
+        assert_eq!(result["readout"]["unclassified_command_call_count"], 4);
+        assert_eq!(
+            result["readout"]["other_command_reasons"],
+            audit["root"]["tools"]["other_command_reasons"]
+        );
+        assert!(
+            result["report_ko"]
+                .as_str()
+                .unwrap()
+                .contains("해석된 래퍼·검증 인식 없음 1건")
+        );
+        audit["root"]["tools"]
+            .as_object_mut()
+            .unwrap()
+            .remove("other_command_reasons");
+        let old = review(audit).unwrap();
+        assert!(old["readout"]["other_command_reasons"].is_null());
+        assert!(
+            old["report_ko"]
+                .as_str()
+                .unwrap()
+                .contains("명령 분류 진단: 사유 미집계")
+        );
+    }
+
+    #[test]
+    fn inconsistent_or_unknown_command_reason_keys_are_not_projected() {
+        for reasons in [
+            json!({"unsupported_exec_shape":2}),
+            json!({"PRIVATE_SENTINEL":1}),
+            json!({"unsupported_exec_shape":-1}),
+            json!({"unsupported_exec_shape":u64::MAX,"other_direct_command":1}),
+        ] {
+            let root = json!({"tools":{"unclassified_command_call_count":1,
+                "command_diagnostics_revision":1,"other_command_reasons":reasons}});
+            assert!(command_diagnostics(&root).is_null());
+        }
+    }
+
+    #[test]
+    fn private_command_diagnostics_are_rejected_before_retaining_the_audit() {
+        for name in ["root", "delegated", "guardian"] {
+            for (field, value) in [
+                ("other_command_reasons", json!({"PRIVATE_SENTINEL":1})),
+                (
+                    "other_command_reasons",
+                    json!({"other_direct_command":"PRIVATE_SENTINEL"}),
+                ),
+                ("command_diagnostics_revision", json!("PRIVATE_SENTINEL")),
+            ] {
+                let mut audit = safe_audit();
+                audit[name] = json!({"tools":{field:value}});
+                let error = review(audit).unwrap_err().to_string();
+                assert_eq!(error, "unsafe_weekly_review_input");
+                assert!(!error.contains("PRIVATE_SENTINEL"));
+            }
+        }
+    }
     #[test]
     fn sample_status_does_not_claim_or_require_full_population_coverage() {
         let mut audit = safe_audit();

@@ -1,5 +1,9 @@
 # GroundLine Insights changes
 
+## 2026.10.06-a (`2026.1006.1`)
+
+- Core와 릴리스 버전을 맞추고 ingest revision 9를 유지합니다. API 호환성을 먼저 확인하며 기존 동의·연결·수집 상태를 보존합니다. 설치 무결성과 실제 훅·worker·서버 수신의 증거는 별도로 확인합니다.
+
 ## 2026.10.03-a (`2026.1003.1`)
 
 - schema 5를 유지하며 6.1 Sol 집계와 ingest revision 9를 지원합니다. 실제 revision 8 fingerprint에서 원본·기존 상태를 보존하는 저장소 전환을 검증합니다. API를 먼저 갱신해야 하며 revision 9 데이터 수용 뒤에는 forward repair가 기본입니다.

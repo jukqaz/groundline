@@ -182,8 +182,15 @@ fn serialized_arguments(payload: &Map<String, Value>) -> String {
 }
 
 fn tool_category(name: &str, arguments: &str) -> &'static str {
+    tool_classification(name, arguments).0
+}
+
+/// Preserve the category contract; reasons diagnose `other_command` calls only.
+/// One wrapper is one call, regardless of how many native commands it contains.
+fn tool_classification(name: &str, arguments: &str) -> (&'static str, Option<&'static str>) {
     let name = name.to_ascii_lowercase();
-    if name.contains("wait") || name.contains("write_stdin") || name.contains("poll") {
+    let category = if name.contains("wait") || name.contains("write_stdin") || name.contains("poll")
+    {
         "wait_or_poll"
     } else if name.contains("spawn_agent")
         || name.contains("send_message")
@@ -198,14 +205,23 @@ fn tool_category(name: &str, arguments: &str) -> &'static str {
     } else if name.contains("apply_patch") || name.contains("write") || name.contains("edit") {
         "mutation"
     } else if name == "exec" {
-        continuation::plan(&name, arguments)
-            .filter(|plan| plan.has_verification)
-            .map_or("other_command", |_| "verification")
+        return match continuation::plan(&name, arguments) {
+            Some(plan) if plan.has_verification => ("verification", None),
+            Some(plan) if plan.has_unclassified_command => {
+                ("other_command", Some("unclassified_nested_command"))
+            }
+            Some(_) => ("other_command", Some("parsed_exec_without_verification")),
+            None => ("other_command", Some("unsupported_exec_shape")),
+        };
     } else if name.contains("exec") || name == "bash" || name == "shell" {
         command_category::category(arguments)
     } else {
         "other_tool"
-    }
+    };
+    (
+        category,
+        (category == "other_command").then_some("other_direct_command"),
+    )
 }
 
 /// Retain native outcome metadata while discarding stdout and content trees.
@@ -258,6 +274,7 @@ pub fn audit_rollouts(
     let mut broad_scope_count = 0_u64;
     let mut tool_names = BTreeMap::<String, u64>::new();
     let mut tool_categories = BTreeMap::<String, u64>::new();
+    let mut other_command_reasons = BTreeMap::<String, u64>::new();
     let mut call_signatures = BTreeMap::<[u8; 32], u64>::new();
     let mut failure_counts = BTreeMap::<String, u64>::new();
     let mut completed_durations = Vec::<u64>::new();
@@ -672,9 +689,12 @@ pub fn audit_rollouts(
                         "unknown"
                     });
                 let arguments = serialized_arguments(&payload);
-                let category = tool_category(name, &arguments);
+                let (category, reason) = tool_classification(name, &arguments);
                 increment(&mut tool_names, name)?;
                 increment(&mut tool_categories, category)?;
+                if let Some(reason) = reason {
+                    increment(&mut other_command_reasons, reason)?;
+                }
                 let mut digest = Sha256::new();
                 digest.update(name.as_bytes());
                 digest.update([0]);
@@ -912,6 +932,8 @@ pub fn audit_rollouts(
             "outcome_source": "native_status_metadata",
             "verification_classification_scope": "literal_commands_and_static_awaited_native_calls",
             "unclassified_command_call_count": tool_categories.get("other_command").copied().unwrap_or(0),
+            "command_diagnostics_revision": 1,
+            "other_command_reasons": other_command_reasons,
             "outcome_contract_revision": 2,
             "verification_recovered_by_poll_count": verification_recovered,
             "literal_poll_call_count": literal_poll_calls,
@@ -1405,6 +1427,86 @@ mod tests {
             }
             assert_eq!(audit["tools"]["by_category"]["inspection"], 1);
         }
+    }
+
+    #[test]
+    fn other_command_reasons_preserve_verdicts_usage_and_projection_privacy() {
+        let cases = [
+            (
+                "custom_tool_call",
+                "exec",
+                "text(await tools.exec_command({cmd:\"rg PRIVATE_SENTINEL src\"}));",
+            ),
+            (
+                "custom_tool_call",
+                "exec",
+                "text(await tools.exec_command({cmd:'cargo test && echo PRIVATE_SENTINEL'}));",
+            ),
+            (
+                "custom_tool_call",
+                "exec",
+                "if (true) text(await tools.exec_command({cmd:'cargo test'}));",
+            ),
+            (
+                "function_call",
+                "exec_command",
+                "{\"cmd\":\"sh -c 'cargo test'\"}",
+            ),
+            (
+                "custom_tool_call",
+                "exec",
+                "text(await tools.exec_command({cmd:'cargo test'}));",
+            ),
+        ];
+        let mut records = Vec::new();
+        for (index, (kind, name, input)) in cases.iter().enumerate() {
+            let id = format!("call-{index}");
+            records.push(json!({"type":"response_item","payload":{
+                "type":kind,"name":name,"call_id":id,"input":input
+            }}));
+            records.push(json!({"type":"response_item","payload":{
+                "type":"custom_tool_call_output","call_id":id,"output":{"exit_code":0}
+            }}));
+        }
+        records.push(
+            json!({"type":"event_msg","payload":{"type":"token_count","info":{
+                "total_token_usage":{"input_tokens":10,"cached_input_tokens":4,"output_tokens":7,
+                    "reasoning_output_tokens":3,"total_tokens":17}
+            }}}),
+        );
+        let raw = lines(&records);
+        let projected = raw
+            .lines()
+            .map(|line| {
+                Record::parse(line)
+                    .unwrap()
+                    .unwrap()
+                    .audit_projection()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let before = audit_rollouts(&[&raw], 0, 20, AuditWindow::default()).unwrap();
+        let after = audit_rollouts(&[&projected], 0, 20, AuditWindow::default()).unwrap();
+        assert_eq!(before["tools"], after["tools"]);
+        assert_eq!(
+            before["provider_reported_usage"],
+            after["provider_reported_usage"]
+        );
+        assert_eq!(before["tools"]["unclassified_command_call_count"], 4);
+        assert_eq!(before["tools"]["verification_success_count"], 1);
+        assert_eq!(before["tools"]["verification_failure_count"], 0);
+        assert_eq!(before["tools"]["verification_unresolved_count"], 0);
+        assert_eq!(before["tools"]["verification_recovered_by_poll_count"], 0);
+        assert_eq!(
+            before["tools"]["other_command_reasons"],
+            json!({
+                "parsed_exec_without_verification":1,"unclassified_nested_command":1,
+                "unsupported_exec_shape":1,"other_direct_command":1
+            })
+        );
+        assert_eq!(before["provider_reported_usage"]["total_tokens"], 17);
+        assert!(!before.to_string().contains("PRIVATE_SENTINEL"));
     }
 
     #[test]

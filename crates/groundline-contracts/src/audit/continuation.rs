@@ -14,12 +14,14 @@ use super::tool_outcome::handle_key;
 pub(super) struct Slot {
     pub poll: Option<String>,
     pub verification: bool,
+    unclassified_command: bool,
 }
 
 pub(super) struct Plan {
     pub slots: Vec<Slot>,
     pub unobserved_call: bool,
     pub has_verification: bool,
+    pub has_unclassified_command: bool,
 }
 
 fn native_key(name: &str, values: &Map<String, Value>) -> Option<String> {
@@ -109,13 +111,18 @@ fn native_call(expression: &Expression<'_>) -> Option<(String, Map<String, Value
 
 fn slot(expression: &Expression<'_>) -> Option<Slot> {
     let (name, values) = native_call(expression)?;
+    let command_category = (name == "exec_command").then(|| {
+        values
+            .get("cmd")
+            .and_then(Value::as_str)
+            .map_or("other_command", |cmd| {
+                super::tool_category("exec_command", cmd)
+            })
+    });
     Some(Slot {
         poll: native_key(&name, &values),
-        verification: name == "exec_command"
-            && values
-                .get("cmd")
-                .and_then(Value::as_str)
-                .is_some_and(|cmd| super::tool_category("exec_command", cmd) == "verification"),
+        verification: command_category == Some("verification"),
+        unclassified_command: command_category == Some("other_command"),
     })
 }
 
@@ -171,6 +178,7 @@ pub(super) fn plan(name: &str, arguments: &str) -> Option<Plan> {
                     Slot {
                         poll: None,
                         verification: false,
+                        unclassified_command: false,
                     }
                 } else {
                     slot(argument)?
@@ -182,10 +190,15 @@ pub(super) fn plan(name: &str, arguments: &str) -> Option<Plan> {
     }
     let has_verification = slots.iter().any(|slot| slot.verification)
         || variables.values().any(|(slot, _)| slot.verification);
+    let has_unclassified_command = slots.iter().any(|slot| slot.unclassified_command)
+        || variables
+            .values()
+            .any(|(slot, _)| slot.unclassified_command);
     (!slots.is_empty() && slots.len() <= 128).then(|| Plan {
         slots,
         unobserved_call: variables.values().any(|(_, observed)| !observed),
         has_verification,
+        has_unclassified_command,
     })
 }
 
