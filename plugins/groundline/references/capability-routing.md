@@ -26,6 +26,8 @@ actual result instead of copying another client's tool or hook contract.
 
 | Observed eligible opportunity | Native surface to consider | Evidence before use and outcome check |
 | --- | --- | --- |
+| A requested environment alignment or runtime change needs effective configuration evidence | Native config layers, App Server config/read and skills/list; supported plugin interfaces | Resolve the affected App/PATH, host, profile and project first. Disk-layer resolution does not verify a running task's overrides. Keep desired, written and observed active state separate; use [adaptive environment](adaptive-environment.md) for authorized personal updates. |
+| A model choice or observed context issue affects the work | Native model catalog/effort, usage events and compaction | Verify support and actual selection. Preserve explicit choices and native context defaults; use [model/effort guidance](model-effort-routing.md) only for the requested choice. Observe costs without copying API-only cache controls into Codex config. |
 | Independent, bounded reads can proceed without shared state | Parallel native tool calls; combine per-call results | Confirm the calls are independent and the active interface supports concurrent calls. Preserve each result/error and verify the combined answer against all required inputs. |
 | Work has independent lanes whose outputs can be integrated | Native built-in or user-owned specialist agents, with a compact handoff when a child needs bounded context | Confirm user or applicable project authority, concurrency, and lane independence. Preserve no-delegation restrictions and inherit current model/effort settings. Propose a different pair only for requested model/effort selection or optimization; inspect effective settings and returned evidence, then perform root integration checks. Do not claim the running root switched model or effort. |
 | A native operation is long-running and returns a waitable handle | Supported asynchronous execution and native wait/poll tools | Confirm the actual handle and wait mechanism. Wait on the matching operation, correlate its terminal result, and inspect completion/failure; a process start or orchestration response is not success. |
@@ -34,6 +36,7 @@ actual result instead of copying another client's tool or hook contract.
 | Work depends on a website or local app state | Built-in Browser, the user-selected Chrome/browser session, or Computer Use on the specified app | Choose the surface that matches the user's session and target. Confirm actual page/app access and any required sign-in or approval; inspect the resulting live state. A URL, screenshot, or tool start alone does not prove a transaction or save. |
 | Repository work needs isolation, parallel checkouts, or an app-managed environment | Native worktree creation and host-supported setup | Confirm a Git repository, active host support, starting state, and local dependency needs. Preserve current WIP; verify returned path, branch/commit, and repository root before editing or building. |
 | A code change or generated deliverable needs a reviewable handoff | Native diff/review panel or file/artifact preview | Confirm a diff or deliverable exists and the relevant viewer is available. Inspect the rendered file or exact diff and run the requested acceptance check; attachment or panel creation alone is not review. |
+| Environment application or verification belongs on another connected host | Native Remote/handoff and completion notifications | Verify the target host, repository and native runtime; keep per-host application evidence. Request a user-owned new chat only when authorized. Notify on meaningful completion, failure or required decision; do not infer full alignment from local success. |
 | A recurring user-owned decision or long-lived objective needs continuity | Native Goal for a user-requested objective; native heartbeat/automation for an explicitly requested follow-up | Create a Goal only on explicit request. Create or change recurrence only when requested; use the native heartbeat for a thread follow-up, and a standalone scheduled task only when its separate project/task behavior is requested. Verify the saved objective/prompt, schedule, and status. |
 | A later turn benefits from relevant saved preference or prior decision | Available memory/context reference | Use only relevant, permitted saved information and distinguish it from current evidence. Recheck drift-prone facts before acting; never use memory presence as proof of current runtime or account state. |
 | A permission prompt or sandbox boundary is affecting a concrete operation | Existing sandbox and approval controls, including auto-review only where supported and already authorized | Diagnose the exact denied operation and active host policy first. Keep least-privilege boundaries; do not broaden filesystem/network access, enable auto-review, or weaken sandboxing to increase utilization. Verify the original operation after an authorized narrow change. |
@@ -57,8 +60,12 @@ output under the [evidence routing contract](evidence-routing.md). The native ex
 authorized task/lane selection using host controls; aggregate counts cannot
 change a running root, choose settings automatically, or prove feature eligibility.
 
-Provider documentation reviewed 2026-09-30 (recheck the relevant page when the
-host or product changes):
+Related provider documentation. Configuration, execution, UI, review and
+automation surfaces were rechecked 2026-10-06; recheck the relevant page when
+the host or product changes:
+- [Configuration layers and profiles](https://learn.chatgpt.com/docs/config-file/config-basic)
+- [Native config, usage and compaction](https://learn.chatgpt.com/docs/app-server)
+- [Remote execution](https://learn.chatgpt.com/blog/mastering-codex-remote-for-engineering)
 - [Subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents)
 - [Long-running work](https://learn.chatgpt.com/docs/long-running-work)
 - [Git worktrees](https://learn.chatgpt.com/docs/environments/git-worktrees)

@@ -114,6 +114,7 @@ catalog의 모델 지원 정보만으로 모델의 권장 지침을 확인했다
 | 대상 항목 | 소유자, 논리적 대상, 예상 내용/허용 키와 digest, 변경 권한의 범위 |
 | 기기 예외 | 기기 ID, 논리적 대상의 로컬 경로, 차이와 이유, 지원 상태 |
 | 실제 관측 | App/PATH CLI 버전, 관련 config 해석, 활성 skill/plugin/hook 확인과 unknown |
+| native 기능 | 공식 근거, host 지원·현재 가용/활성/trust, 발동 조건, 소유자·마지막 검증 |
 | 적용 영수증 | proposal/basis/source revision, 변경 전후 digest, 백업 참조, 적용·검증·복구 상태 |
 
 모델·추론·권한·네트워크 값은 `config.toml`의 사용자 소유를 유지합니다.
@@ -152,6 +153,18 @@ writer 간 조율이며 다른 editor와의 race를 없앤다고 주장하지 �
 지속 실행은 Codex의 기존 작업·자동화 기능에 연결합니다. 초기에는 사용자 요청과
 의미 있는 버전/결과 변화에 반응하고, 일정·알림·변경 허용 범위는 명시한 정책에 따릅니다.
 이 설계 변경만으로 자동화를 등록하거나 상주 LLM/별도 실험 scheduler를 실행하지 않습니다.
+
+## Codex 기능 활용
+
+기능별 공식 조사와 설계 연결은 [Codex native capabilities](codex-native-capabilities.md)에
+정리합니다. native 기능으로 해결할 수 있는 작업은 그 기능을 먼저 사용하고 관련 실행과
+검증 결과를 개선 근거로 연결합니다. terminal/API/MCP, skills/plugins, subagents,
+worktrees/local environments, review/GitHub, Browser/Computer Use, Remote, 자동화,
+Goal/continuity, compaction/usage, hooks/trust와 권한을 필요에 따라 선택합니다.
+
+기능을 새로 발견하면 실제 host/계정의 지원과 관련 작업의 필요를 확인합니다.
+기존 [capability routing](../plugins/groundline/references/capability-routing.md)을 사용하며
+모든 작업에 기능 체크리스트나 추가 실행 계층을 강제하지 않습니다.
 
 ## 현재 설정 개선과 구현 순서
 
