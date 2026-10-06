@@ -430,8 +430,7 @@ jobs:
     if: >-
       startsWith(github.ref, 'refs/tags/v') ||
       (github.event_name == 'workflow_dispatch' &&
-       inputs.build_release_artifacts &&
-       github.ref == 'refs/heads/main')
+       inputs.build_release_artifacts)
     needs: qualification
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25

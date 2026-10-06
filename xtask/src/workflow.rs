@@ -204,6 +204,7 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
     for required in [
         "workflow_dispatch:",
         "build_release_artifacts:",
+        "startsWith(github.ref, 'refs/tags/v') ||\n      (github.event_name == 'workflow_dispatch' &&\n       inputs.build_release_artifacts)",
         "clickhouse_image:",
         "nginx_image:",
         "grafana_image:",
@@ -257,6 +258,8 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
         "--max-time 10",
         "retention-days: 14",
         "name: promote both plugins to stable",
+        "name: publish versioned two-product release\n    if: startsWith(github.ref, 'refs/tags/v')\n    needs: artifacts",
+        "name: promote both plugins to stable\n    if: startsWith(github.ref, 'refs/tags/v')",
         "rm -rf distribution",
         "--product core",
         "--product insights",
