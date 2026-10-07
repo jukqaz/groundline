@@ -203,6 +203,9 @@ impl Fixture {
         );
     }
     fn start(&self, id: &str) -> Value {
+        self.start_from_boundary(id, "start")
+    }
+    fn start_from_boundary(&self, id: &str, boundary_id: &str) -> Value {
         let path = self.root.join(format!("{id}-start.json"));
         json_file(
             &path,
@@ -210,7 +213,7 @@ impl Fixture {
             "scope":{"unit_hash":hash(id.as_bytes()),"cohort_sha256":hash(b"cohort"),"phase":"implementation",
                 "task_category":"code-change","criterion":{"sha256":hash(b"test-command-and-result"),"version":"v1"},
                 "target_id":"workflow","runtime":{"family":"codex_cli","version":env!("CARGO_PKG_VERSION"),"evidence_sha256":hash(&fs::read(&self.source).unwrap())}},
-            "boundary_id":"start","criterion_change_kind":"unknown","criterion_change_evidence_sha256":null}),
+            "boundary_id":boundary_id,"criterion_change_kind":"unknown","criterion_change_evidence_sha256":null}),
         );
         run(
             &self.root,
@@ -243,7 +246,30 @@ impl Fixture {
             evidence,
         )
     }
-    fn close(&self, complete_cost: bool) -> String {
+    fn capture_boundary(&self, event: &str) -> Value {
+        let trigger = match event {
+            "UserPromptSubmit" => "user_prompt_submit_hook",
+            "Stop" => "stop_hook",
+            _ => panic!("unsupported fixture event"),
+        };
+        let payload = serde_json::to_vec(&json!({"hook_event_name":event,
+            "session_id":"fixture-owner","turn_id":"fixture-turn","model":"gpt-6.1-sol",
+            "permission_mode":"default","prompt":"PRIVATE-NATIVE-BODY","transcript_path":self.source})).unwrap();
+        let id =
+            groundline_runtime::learning_boundary::capture(&self.home, trigger, payload.as_slice())
+                .unwrap()
+                .unwrap();
+        serde_json::from_slice(
+            &fs::read(
+                self.home
+                    .join("groundline/learning/boundaries")
+                    .join(format!("{id}.json")),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    }
+    fn finish_native(&self, complete_cost: bool) -> String {
         let usage = if complete_cost {
             json!({"input_tokens":100,"cached_input_tokens":20,"output_tokens":5,"reasoning_output_tokens":2,"total_tokens":105})
         } else {
@@ -260,6 +286,10 @@ impl Fixture {
         for value in lines {
             writeln!(file, "{}", serde_json::to_string(&value).unwrap()).unwrap();
         }
+        close_at
+    }
+    fn close(&self, complete_cost: bool) -> String {
+        self.finish_native(complete_cost);
         let end_at = chrono::Utc::now().to_rfc3339();
         self.boundary("end", "Stop", "fixture-owner", "fixture-turn", &end_at);
         end_at
@@ -314,6 +344,120 @@ impl Fixture {
         )
         .unwrap()
     }
+}
+
+#[test]
+fn captured_stop_before_native_completion_links_once_after_actual_closure() {
+    let fixture = Fixture::new();
+    fs::remove_file(
+        fixture
+            .home
+            .join("groundline/learning/boundaries/start.json"),
+    )
+    .unwrap();
+    let start_boundary = fixture.capture_boundary("UserPromptSubmit");
+    let started = fixture.start_from_boundary(
+        "captured-end-unit",
+        start_boundary["boundary_id"].as_str().unwrap(),
+    );
+    assert_eq!(started["native_boundary_matched"], true);
+    let (assessment, _, evidence) = fixture.assessment(&started, "verified");
+    assert_eq!(assessment["status"], "PENDING");
+    let end_boundary = fixture.capture_boundary("Stop");
+    let stop_at = end_boundary["observed_at_utc"].as_str().unwrap();
+    let pending = fixture.consume();
+    assert_eq!(pending["assessments"][0]["status"], "PENDING");
+    assert!(
+        fixture
+            .records("groundline-learning-task-outcome")
+            .is_empty()
+    );
+
+    // App dispatches Stop before persisting its task_complete event. A hook
+    // cutoff alone would exclude the real closure permanently on every retry.
+    let closed_at = fixture.finish_native(true);
+    assert!(
+        chrono::DateTime::parse_from_rfc3339(&closed_at).unwrap()
+            > chrono::DateTime::parse_from_rfc3339(stop_at).unwrap()
+    );
+    let session_hash = hash(b"groundline-hook-session\0fixture-owner");
+    let turn_hash = hash(b"groundline-hook-turn\0fixture-turn");
+    let proof = groundline_runtime::learning_response::observe(
+        &groundline_runtime::learning_response::TaskObservation {
+            unit_hash: hash(b"captured-end-unit"),
+            root: groundline_runtime::learning_response::NativeRef {
+                path: fixture.source.clone(),
+                session_hash,
+                turn_hash,
+            },
+            children: vec![],
+            owned_root_turn_hashes: vec![],
+            start_utc: start_boundary["observed_at_utc"].as_str().unwrap().into(),
+            end_utc: stop_at.into(),
+        },
+    )
+    .unwrap();
+    assert!(!proof.closure_observed);
+    assert!(
+        proof
+            .missing
+            .iter()
+            .any(|v| v == "native_root_closure_missing")
+    );
+
+    fixture.append_later_turn();
+    let archived = fixture.home.join("archived_sessions");
+    private_tree(&archived, &fixture.root);
+    fs::rename(&fixture.source, archived.join("rollout-fixture.jsonl")).unwrap();
+    let consumed = fixture.consume();
+    assert_eq!(
+        consumed["assessments"][0]["status"], "FINALIZED",
+        "{consumed}"
+    );
+    assert_eq!(consumed["archived_boundary_count"], 0);
+    let outcome = fixture
+        .records("groundline-learning-task-outcome")
+        .pop()
+        .unwrap()
+        .1;
+    assert_eq!(
+        outcome["boundary_sha256"],
+        groundline_contracts::learning::content_sha256(&end_boundary).unwrap()
+    );
+    let receipt = fixture.receipt();
+    assert_eq!(receipt["completed_at_utc"], closed_at);
+    assert_eq!(
+        receipt["verification"]["evidence_sha256"],
+        hash(&fs::read(evidence).unwrap())
+    );
+    assert_eq!(receipt["resources"]["entries"][0]["total_tokens"], 105);
+    assert_eq!(receipt["resources"]["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(receipt["effective"]["model"], "gpt-6.1-sol");
+    assert_eq!(receipt["effective"]["effort"], "medium");
+    let saved_proof: Value = serde_json::from_slice(
+        &fs::read(fixture.state.join("evidence").join(format!(
+            "{}.artifact",
+            outcome["native_response_proof_sha256"].as_str().unwrap()
+        )))
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(saved_proof["proof"]["root_closed_at_utc"], closed_at);
+    assert!(
+        chrono::DateTime::parse_from_rfc3339(
+            saved_proof["observation_cutoff_utc"].as_str().unwrap()
+        )
+        .unwrap()
+            > chrono::DateTime::parse_from_rfc3339(&closed_at).unwrap()
+    );
+    assert_eq!(fixture.consume()["mutation_performed"], false);
+    assert_eq!(fixture.records("groundline-learning-task-outcome").len(), 1);
+    let patterns = run(&fixture.root, &["learning", "patterns"], &[], true);
+    assert_eq!(patterns["readiness"]["totals"]["task_outcome_count"], 1);
+    assert_eq!(
+        patterns["readiness"]["totals"]["assessment_pending_connection_count"],
+        0
+    );
 }
 
 #[test]

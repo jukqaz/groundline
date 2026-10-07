@@ -224,10 +224,17 @@ pub(super) fn validate_connection(
     }
     if value["kind"] == "groundline-learning-task-outcome" {
         let link = reference(hashes, value, "link_sha256", "groundline-learning-link")?;
-        if link["completed_at_utc"] != boundary["observed_at_utc"]
-            || ["correction_kind", "correction_evidence_sha256"]
-                .into_iter()
-                .any(|k| link[k] != assessment["input"][k])
+        if contract::timestamp(
+            link["completed_at_utc"]
+                .as_str()
+                .ok_or_else(|| error("invalid_link_timestamp"))?,
+        )? < contract::timestamp(
+            boundary["observed_at_utc"]
+                .as_str()
+                .ok_or_else(|| error("invalid_boundary"))?,
+        )? || ["correction_kind", "correction_evidence_sha256"]
+            .into_iter()
+            .any(|k| link[k] != assessment["input"][k])
         {
             return Err(error("assessment_result_mismatch"));
         }
@@ -264,8 +271,36 @@ pub(super) fn check_request_evidence(
     }
     if let Some(hash) = request["native_response_proof_sha256"].as_str() {
         let proof = parse(&read_private(&checked_evidence(state, hash)?)?)?;
+        let boundary = state
+            .records
+            .iter()
+            .find(|v| {
+                learning::content_sha256(v).ok().as_deref() == request["boundary_sha256"].as_str()
+            })
+            .ok_or_else(|| error("boundary_missing"))?;
+        let root_closed = proof["proof"]["root_closed_at_utc"]
+            .as_str()
+            .ok_or_else(|| error("native_response_proof_mismatch"))?;
+        let closed_at = contract::timestamp(root_closed)?;
+        let boundary_at = contract::timestamp(
+            boundary["observed_at_utc"]
+                .as_str()
+                .ok_or_else(|| error("invalid_boundary"))?,
+        )?;
         if proof["kind"] != "groundline-native-response-proof"
             || proof["schema"] != 1
+            || proof["proof"]["closure_observed"] != true
+            || closed_at
+                < contract::timestamp(
+                    assessment["submitted_at_utc"]
+                        .as_str()
+                        .ok_or_else(|| error("invalid_assessment"))?,
+                )?
+            || contract::timestamp(
+                receipt["completed_at_utc"]
+                    .as_str()
+                    .ok_or_else(|| error("invalid_receipt"))?,
+            )? != closed_at.max(boundary_at)
             || proof["proof"]["resources"] != receipt["resources"]
             || proof["proof"]["root_effective"] != receipt["effective"]
             || proof["proof"]["native_artifacts"][0]["source_sha256"]
@@ -713,6 +748,15 @@ fn connect(
         .iter()
         .find(|v| learning::content_sha256(v).ok().as_deref() == task["boundary_sha256"].as_str())
         .ok_or_else(|| error("boundary_missing"))?;
+    let observation_cutoff_utc = chrono::Utc::now().to_rfc3339();
+    let boundary_at = contract::timestamp(
+        boundary["observed_at_utc"]
+            .as_str()
+            .ok_or_else(|| error("invalid_boundary"))?,
+    )?;
+    if boundary_at > contract::timestamp(&observation_cutoff_utc)? {
+        return Err(error("boundary_after_observation"));
+    }
     let proof = learning_response::observe(&TaskObservation {
         unit_hash: task["scope"]["unit_hash"]
             .as_str()
@@ -724,10 +768,10 @@ fn connect(
             .as_str()
             .ok_or_else(|| error("invalid_boundary"))?
             .into(),
-        end_utc: boundary["observed_at_utc"]
-            .as_str()
-            .ok_or_else(|| error("invalid_boundary"))?
-            .into(),
+        // App may dispatch Stop before persisting task_complete. The current
+        // clock bounds a read of only explicitly owned turns; it is never the
+        // completion timestamp. A retry can observe the actual later closure.
+        end_utc: observation_cutoff_utc.clone(),
         owned_root_turn_hashes: input.owned_root_turn_hashes.clone(),
     })?;
     if !proof.closure_observed
@@ -742,8 +786,20 @@ fn connect(
     {
         return Ok(None);
     }
+    let closed_at = proof
+        .root_closed_at_utc
+        .as_deref()
+        .ok_or_else(|| error("native_closure_missing"))?;
+    let completed_at_utc = if contract::timestamp(closed_at)? > boundary_at {
+        closed_at
+    } else {
+        boundary["observed_at_utc"]
+            .as_str()
+            .ok_or_else(|| error("invalid_boundary"))?
+    };
     let mut proof_bytes = serde_json::to_vec_pretty(
-        &json!({"kind":"groundline-native-response-proof","schema":1,"proof":&proof}),
+        &json!({"kind":"groundline-native-response-proof","schema":1,
+            "observation_cutoff_utc":observation_cutoff_utc,"proof":&proof}),
     )
     .map_err(|_| error("serialization_failed"))?;
     proof_bytes.push(b'\n');
@@ -773,7 +829,7 @@ fn connect(
     add_selection_path(&mut effective, &evidence)?;
     let manifest = json!({"kind":"groundline-delivery-manifest","schema":2,
         "unit_hash":task["scope"]["unit_hash"],"cohort_sha256":task["scope"]["cohort_sha256"],"phase":task["scope"]["phase"],
-        "completed_at_utc":boundary["observed_at_utc"],"recommendation":null,"requested":null,"effective":effective,
+        "completed_at_utc":completed_at_utc,"recommendation":null,"requested":null,"effective":effective,
         "verification":{"status":input.verification.status,"evidence_kind":input.verification.evidence_kind,
             "evidence_sha256":verification_hash,"artifact_path":verification,"rework":input.verification.rework},
         "resources":resources});

@@ -1,8 +1,9 @@
 # GroundLine Core changes
 
-## 2026.1008.1
+## 2026.1008.2
 
 - 직접 검증 evidence를 assessment로 보존하고 실제 native 종료 뒤 기존 receipt/finalize 경로에 연결합니다.
+- Stop 뒤 기록되는 실제 native 완료도 관측해 연결하며, 기본 workspace에서 필요한 개인 학습 경로 권한을 native 기능으로 요청하도록 안내합니다.
 - 명시한 root/child turn의 실제 모델·응답 비용을 읽고 중복 응답·소유권 충돌·미관측 비용을 구분합니다.
 - readiness에서 결과 연결 대기와 누락된 분석 근거를 명시 category별로 보여줍니다.
 - 생성 영수증의 원본과 요청을 보존해 중단 뒤 새 native 응답이 추가되어도 비용 소유권을 다시 배정하지 않고 재개합니다.

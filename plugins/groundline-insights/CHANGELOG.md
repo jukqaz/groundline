@@ -1,6 +1,6 @@
 # GroundLine Insights changes
 
-## 2026.1008.1
+## 2026.1008.2
 
 - Core와 패키지 버전을 맞추고 기존 fail-open worker가 pending assessment를 소비하는 경로를 재사용합니다.
 - 5개 native 훅·수집 동의·전송 및 서버 계약은 유지합니다. 학습 연결 실패는 일반 작업을 막지 않습니다.

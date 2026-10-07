@@ -15,6 +15,14 @@ groundline learning configure --environment-state environment-state --target wor
 groundline learning enable
 ```
 
+The learning commands read and write only the registered owner-private state.
+In workspace mode, that home directory may be outside the tool's writable
+scope; even a boundary lookup opens its coordination lock. Before recording,
+use native `request_permissions` for the profile's learning directory when
+needed, then run the command with the granted scope. Keep the current model,
+reviewer and sandbox settings. Do not weaken global permissions, bypass a
+rejection, or silently treat a failed record as completed work.
+
 The owner-private profile lives at
 `$CODEX_HOME/groundline/learning/profile.json`. Default records and delivery
 directories are beside it; explicit `--state`, `--deliveries`, and
