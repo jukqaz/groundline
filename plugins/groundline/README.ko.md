@@ -71,12 +71,18 @@ groundline efficiency route --input routing.json --catalog native-models.json --
 맥락이며, route는 설정을 바꾸거나 자동 학습된 개선을 입증하지 않습니다.
 기존 `personal status`/`rollback`은 [복구 전용](references/personal-recovery.md)입니다.
 
+요청한 지속 개선에는 [학습 루프](references/learning-loop.md)를 사용합니다. 당시 환경
+capture와 결과 연결 초안, 후보별 후속 상태, 공식 자료 snapshot 변경 확인, 비공개 지침
+bundle을 연결합니다. 명시 결정과 관측된 효과는 구분하고 실행은 native Codex가 담당합니다.
+
 ## 개인정보 경계
 
 Core에는 hook, 백그라운드 프로세스, 스케줄러, 수집 식별자와 네트워크 클라이언트가
 없습니다. audit는 범위가 제한된 읽기 전용 검사이고 receipt는 비공개 로컬 파일입니다.
-원문 prompt·transcript·경로·설정 값은 내보내지 않습니다. provider smoke는 owner
-hook manifest를 거절하며, 선택형 Insights는 별도 설치·동의를 요구합니다.
+감사 결과와 receipt는 native 원문 대화·경로·설정 값을 내보내지 않습니다. 비공개 환경
+bundle에는 선택한 관리 지침 본문과 공통 기준이 들어갑니다. 본문에 개인 정보가 있는지
+전송 전에 확인하고 공개 저장소에 넣지 않습니다. provider smoke는 owner hook manifest를
+거절하며, 선택형 Insights는 별도 설치·동의를 요구합니다.
 [보안](SECURITY.md)과 [개인정보 정책](https://github.com/jukqaz/groundline/blob/main/docs/privacy.md)을
 참고하세요.
 

@@ -42,6 +42,6 @@ because another week elapsed. Schedules require their own explicit request.
 
 There is one outcome-comparison path. The old fixed-rule personal trial writer
 is retired; existing private state can be inspected or recovered through
-[personal recovery](personal-recovery.md). Persistent learning and environment
-receipts are planned; use existing native tools for authorized changes today.
+[personal recovery](personal-recovery.md). Use [the learning loop](learning-loop.md) for capture, private outcome links,
+candidate readouts, official snapshots and portable environment bundles.
 Core does not maintain a parallel experiment scheduler or feature-usage score.

@@ -56,7 +56,8 @@ leave required implementation or verification unfinished.
 - **Requested usage-driven learning and environment improvement:** use
   [adaptive environment](../../references/adaptive-environment.md) to connect
   actual outcomes and relevant official model changes to scoped personal updates.
-  Distinguish existing repair paths from planned persistent learning features.
+  Use the scoped capture, preparation and candidate readout paths there;
+  existing settings repair remains a separate native operation.
 
 Resolve references from this installed plugin. Read
 [command resolution](../../references/platform-commands.md) only when a CLI is needed.

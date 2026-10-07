@@ -184,10 +184,46 @@ impl Directory {
         })
     }
 
+    pub fn optional_child(&self, name: &str) -> Result<Option<Self>, ContractError> {
+        leaf(name)?;
+        self.validate(true)?;
+        let file = match openat(&self.file, name, dir_flags(), Mode::empty()) {
+            Ok(file) => File::from(file),
+            Err(rustix::io::Errno::NOENT) => return Ok(None),
+            Err(_) => return Err(error("state_directory_open")),
+        };
+        owner(&file, true, true)?;
+        let binding = identity(&file)?;
+        Ok(Some(Self {
+            file,
+            path: self.path.join(name),
+            binding,
+        }))
+    }
+
     pub fn read(&self, name: &str) -> Result<Option<ReadFile>, ContractError> {
         leaf(name)?;
         self.validate(true)?;
         read_at(&self.file, name.as_ref(), true, MAX_STATE_BYTES)
+    }
+
+    pub fn names(&self) -> Result<Vec<String>, ContractError> {
+        self.validate(true)?;
+        let mut names = Vec::new();
+        for entry in io(fs::read_dir(&self.path))? {
+            let name = io(entry)?
+                .file_name()
+                .into_string()
+                .map_err(|_| error("non_utf8_path"))?;
+            leaf(&name)?;
+            names.push(name);
+            if names.len() > MAX_ARTIFACTS {
+                return Err(error("state_directory_limit"));
+            }
+        }
+        self.validate(true)?;
+        names.sort();
+        Ok(names)
     }
 
     /// Immutable artifact names use NOREPLACE, including on macOS.
@@ -326,6 +362,74 @@ pub(super) fn private_input(path: &Path) -> Result<Vec<u8>, ContractError> {
     read_at(&parent.file, name.as_ref(), true, MAX_STATE_BYTES)?
         .map(|r| r.bytes)
         .ok_or_else(|| error("input_missing"))
+}
+
+/// Transport paths must not resolve through links or parent traversal. Unlike
+/// registered root aliases, a shared bundle path is not an approved root alias.
+fn portable_parent(path: &Path) -> Result<(Directory, String), ContractError> {
+    let absolute = if path.is_absolute() {
+        path.to_owned()
+    } else {
+        io(std::env::current_dir())?.join(path)
+    };
+    let parent = absolute
+        .parent()
+        .ok_or_else(|| error("input_parent_required"))?;
+    let name = absolute
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| error("input_name"))?;
+    leaf(name)?;
+    let file = open_absolute(parent)?;
+    owner(&file, true, false)?;
+    let binding = identity(&file)?;
+    let directory = Directory {
+        file,
+        path: parent.to_owned(),
+        binding,
+    };
+    directory.validate(false)?;
+    Ok((directory, name.to_owned()))
+}
+
+pub(super) fn portable_input(path: &Path) -> Result<Vec<u8>, ContractError> {
+    let (parent, name) = portable_parent(path)?;
+    let read = read_at(&parent.file, name.as_ref(), true, MAX_STATE_BYTES)?
+        .ok_or_else(|| error("input_missing"))?;
+    parent.validate(false)?;
+    let last = read_at(&parent.file, name.as_ref(), true, MAX_STATE_BYTES)?
+        .ok_or_else(|| error("input_missing"))?;
+    if read.binding != last.binding || read.bytes != last.bytes {
+        return Err(error("file_changed_during_read"));
+    }
+    Ok(read.bytes)
+}
+
+/// A bundle export never replaces a different existing file.
+pub(super) fn portable_output(path: &Path, bytes: &[u8]) -> Result<bool, ContractError> {
+    if bytes.len() as u64 > MAX_STATE_BYTES {
+        return Err(error("state_file_too_large"));
+    }
+    let (parent, name) = portable_parent(path)?;
+    if let Some(previous) = read_at(&parent.file, name.as_ref(), true, MAX_STATE_BYTES)? {
+        if previous.bytes == bytes {
+            return Ok(false);
+        }
+        return Err(error("artifact_id_conflict"));
+    }
+    let mut candidate = Candidate::new(&parent, bytes, 0o600)?;
+    parent.validate(false)?;
+    if read_at(&parent.file, name.as_ref(), true, MAX_STATE_BYTES)?.is_some() {
+        return Err(error("state_file_conflict"));
+    }
+    candidate.commit(&parent, &name, false)?;
+    let current = read_at(&parent.file, name.as_ref(), true, MAX_STATE_BYTES)?
+        .ok_or_else(|| error("state_readback_missing"))?;
+    parent.validate(false)?;
+    if current.bytes != bytes {
+        return Err(error("state_readback_mismatch"));
+    }
+    Ok(true)
 }
 
 pub(super) struct ReadFile {

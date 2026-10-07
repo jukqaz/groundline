@@ -74,11 +74,19 @@ an empty packet `outcomes` array. Aggregate reports are optional context; routin
 changes no settings and does not establish automatically learned improvement.
 Existing `personal status`/`rollback` are [recovery only](references/personal-recovery.md).
 
+For requested ongoing adaptation, [the learning loop](references/learning-loop.md)
+connects capture and prepared outcome links to candidate readouts, official text
+snapshot comparison, and portable private guidance bundles. Native Codex remains
+the executor; explicit decisions and observed effectiveness stay separate.
+
 ## Privacy boundary
 
 Core has no hooks, background process, scheduler, collector identity, or network
 client. Audit is bounded and read-only; delivery receipts are private local files.
-Neither exports raw prompts, transcripts, paths, or configuration values.
+Audit output and delivery receipts exclude raw session text, paths and
+configuration values. Explicit private environment bundles contain owner-selected
+managed guidance text and common baseline metadata; review that text before
+transport and keep the bundle out of public repositories.
 Provider smoke rejects owner hook manifests. Optional Insights has separate
 installation and consent. See [Security](SECURITY.md) and
 [Privacy](https://github.com/jukqaz/groundline/blob/main/docs/privacy.md).

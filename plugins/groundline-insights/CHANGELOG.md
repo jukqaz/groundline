@@ -1,5 +1,9 @@
 # GroundLine Insights changes
 
+## 2026.10.07-b (`2026.1007.2`)
+
+- Core와 후보 버전을 맞춥니다. Insights의 hook·수집·인증·저장소·ingest revision은 변경하지 않습니다.
+
 ## 2026.10.07-a (`2026.1007.1`)
 
 - 외부에서 revoked로 표시된 수집기는 owner 등록 키로도 다시 활성화하거나 토큰·generation을 변경할 수 없도록 등록 경계를 보완합니다. 정상 등록·재등록과 삭제된 ID의 거부는 유지합니다.

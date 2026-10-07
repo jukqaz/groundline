@@ -18,6 +18,7 @@ mod delivery;
 mod environment;
 mod environment_observation;
 mod learning;
+mod official_sources;
 mod operations;
 mod personal;
 mod routing;
@@ -45,6 +46,11 @@ enum Command {
     Learning {
         #[command(subcommand)]
         command: learning::Command,
+    },
+    /// Compare explicit official-source snapshots and identify affected guidance.
+    Sources {
+        #[command(subcommand)]
+        command: official_sources::Command,
     },
     /// Observe native App and PATH loading separately without starting model turns.
     EnvironmentObserve {
@@ -338,6 +344,7 @@ fn run(cli: Cli) -> Result<(), ExitCode> {
     let result: Result<(Value, bool), ContractError> = match cli.command {
         Command::Environment { command } => environment::run(command).map(|value| (value, true)),
         Command::Learning { command } => learning::run(command).map(|value| (value, true)),
+        Command::Sources { command } => official_sources::run(command).map(|value| (value, true)),
         Command::EnvironmentObserve {
             app_cli,
             path_cli,

@@ -118,6 +118,84 @@ impl Fixture {
 }
 
 #[test]
+fn learning_context_rejects_an_existing_cooperative_writer_lock() {
+    let f = Fixture::new(Some("before\n"), "after\n");
+    f.register().unwrap();
+    let store = Store::open(&f.state, false).unwrap();
+    let guard = store.root.lock().unwrap();
+    assert_eq!(
+        learning_context(&f.state, "skill").unwrap_err().0,
+        "environment_writer_busy"
+    );
+    drop(guard);
+    let context = learning_context(&f.state, "skill").unwrap();
+    assert!(context["environment_revision"].is_null());
+    assert_eq!(context["skill_revision"], hash(b"before\n"));
+    assert!(
+        chrono::DateTime::parse_from_rfc3339(context["observed_at_utc"].as_str().unwrap()).is_ok()
+    );
+    let repeated = learning_context(&f.state, "skill").unwrap();
+    assert_eq!(context["provenance_sha256"], repeated["provenance_sha256"]);
+}
+
+#[test]
+fn learning_context_dates_applied_bytes_before_unlock_and_later_rollback() {
+    let f = Fixture::new(Some("before\n"), "after\n");
+    f.register().unwrap();
+    let plan = f.propose("context", vec![("skill", "after\n")]).unwrap();
+    apply(&f.state, "context").unwrap();
+    let state = f.state.clone();
+    let checkpoint = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let observed_checkpoint = checkpoint.clone();
+    BEFORE_CONTEXT_RETURN.with(|hook| {
+        *hook.borrow_mut() = Some(Box::new(move || {
+            // The result and timestamp are ready, but the helper still owns its
+            // lock: a real rollback writer cannot pass this boundary yet.
+            assert_eq!(
+                rollback(&state, "op-context").unwrap_err().0,
+                "environment_writer_busy"
+            );
+            assert_eq!(
+                fs::read_to_string(
+                    Store::open(&state, false)
+                        .unwrap()
+                        .current()
+                        .unwrap()
+                        .registry
+                        .roots[0]
+                        .canonical_path
+                        .join("SKILL.md")
+                )
+                .unwrap(),
+                "after\n"
+            );
+            *observed_checkpoint.borrow_mut() = Some(chrono::Utc::now());
+        }));
+    });
+    let started = chrono::Utc::now();
+    let context = learning_context(&f.state, "skill").unwrap();
+    let observed =
+        chrono::DateTime::parse_from_rfc3339(context["observed_at_utc"].as_str().unwrap())
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+    assert!(observed >= started);
+    assert!(observed <= checkpoint.borrow().unwrap());
+    assert_eq!(context["environment_revision"], plan["plan_sha256"]);
+    assert_eq!(context["skill_revision"], hash(b"after\n"));
+    let rollback_started = chrono::Utc::now();
+    assert_eq!(
+        rollback(&f.state, "op-context").unwrap()["status"],
+        "ROLLED_BACK"
+    );
+    assert!(observed <= rollback_started);
+    assert_eq!(
+        fs::read_to_string(f.skill_root.join("SKILL.md")).unwrap(),
+        "before\n"
+    );
+    assert!(learning_context(&f.state, "skill").unwrap()["environment_revision"].is_null());
+}
+
+#[test]
 fn no_op_has_no_operation_or_backup_and_reports_active_unknown() {
     let f = Fixture::new(Some("same\n"), "same\n");
     f.register().unwrap();

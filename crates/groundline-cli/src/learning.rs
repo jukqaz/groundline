@@ -1,5 +1,5 @@
 //! Bounded, write-once owner-private learning records. Native Codex supplies the
-//! candidate; this module neither calls a model nor reads current native state.
+//! candidate and explicit native evidence; this module never calls a model.
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::{Read, Write};
@@ -20,6 +20,30 @@ const MAX_DIRECTORY_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
+    /// Capture checked environment context before a scoped delivery completes.
+    Capture {
+        #[arg(long)]
+        environment_state: PathBuf,
+        #[arg(long)]
+        target: String,
+        #[arg(long)]
+        observation: PathBuf,
+        #[arg(long)]
+        native_evidence: Option<PathBuf>,
+        #[arg(long)]
+        state: PathBuf,
+    },
+    /// Prepare a private link draft from an earlier snapshot and exact receipt.
+    Prepare {
+        #[arg(long)]
+        receipt: PathBuf,
+        #[arg(long)]
+        snapshot: String,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        state: PathBuf,
+    },
     /// Link an existing receipt to explicit observations from that delivery.
     LinkOutcome {
         #[arg(long)]
@@ -47,10 +71,20 @@ pub(crate) enum Command {
         #[arg(long)]
         state: PathBuf,
     },
+    /// Record an explicit candidate decision with linked grounds and history.
+    Decide {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        state: PathBuf,
+    },
     /// Summarize private records without exposing their text or paths.
     Status {
         #[arg(long)]
         state: PathBuf,
+        /// Checked private application or rollback receipts; repeat as needed.
+        #[arg(long)]
+        operation: Vec<PathBuf>,
     },
 }
 
@@ -428,6 +462,16 @@ struct DuplicateAttempt {
 
 fn validate_record(value: &Value) -> Result<(), ContractError> {
     match value["kind"].as_str() {
+        Some("groundline-learning-snapshot") => {
+            let snapshot: learning::Snapshot =
+                serde_json::from_value(value.clone()).map_err(|_| error("invalid_snapshot"))?;
+            snapshot.validate()
+        }
+        Some("groundline-learning-decision") => {
+            let decision: learning::Decision =
+                serde_json::from_value(value.clone()).map_err(|_| error("invalid_decision"))?;
+            decision.validate()
+        }
         Some("groundline-learning-link") => {
             let link: learning::OutcomeLink =
                 serde_json::from_value(value.clone()).map_err(|_| error("invalid_link"))?;
@@ -566,6 +610,16 @@ fn validate_record_collection(records: &[Value]) -> Result<(), ContractError> {
                 }
             }
         }
+        if record["kind"] == "groundline-learning-decision" {
+            let decision: learning::Decision =
+                serde_json::from_value(record.clone()).map_err(|_| error("invalid_decision"))?;
+            learning::validate_decision_references(&decision, records)?;
+        }
+    }
+    for record in records.iter().filter(|record| {
+        record["kind"] == "groundline-learning-proposal" && record["status"] == "candidate"
+    }) {
+        learning::decision_head(records, &learning::content_sha256(record)?)?;
     }
     Ok(())
 }
@@ -574,6 +628,252 @@ fn readout(status: &str, mutation: bool) -> Value {
     json!({"kind":"groundline-learning-result", "schema":1, "status":status,
         "native_activation":"UNVERIFIED", "network_performed":false,
         "mutation_performed":mutation, "raw_content_emitted":false, "private_paths_emitted":false})
+}
+
+fn context_observed_at(context: &Value) -> Result<&str, ContractError> {
+    let timestamp = context["observed_at_utc"]
+        .as_str()
+        .ok_or_else(|| error("invalid_context_timestamp"))?;
+    chrono::DateTime::parse_from_rfc3339(timestamp)
+        .map_err(|_| error("invalid_context_timestamp"))?;
+    Ok(timestamp)
+}
+
+fn capture(
+    environment_state: &Path,
+    target: &str,
+    observation: &Path,
+    native_evidence: Option<&Path>,
+    state: &Path,
+) -> Result<Value, ContractError> {
+    let bytes = read_private(observation)?;
+    let input = parse(&bytes)?;
+    let observation: learning::CaptureInput =
+        serde_json::from_value(input.clone()).map_err(|_| error("invalid_capture_input"))?;
+    observation.validate()?;
+    match (&observation.runtime, native_evidence) {
+        (Some(runtime), Some(path)) => {
+            if sha256(&read_private(path)?) != runtime.evidence_sha256 {
+                return Err(error("native_evidence_mismatch"));
+            }
+        }
+        (None, None) => {}
+        _ => return Err(error("native_evidence_required")),
+    }
+    let context = crate::environment::learning_context(environment_state, target)?;
+    #[cfg(test)]
+    tests::AFTER_CAPTURE_CONTEXT.with(|hook| {
+        if let Some(hook) = hook.borrow_mut().take() {
+            hook(&context);
+        }
+    });
+    let mut value = learning::capture_snapshot(
+        &input,
+        &context,
+        &sha256(&bytes),
+        context_observed_at(&context)?,
+    )?;
+    let state = State::open(state, true)?;
+    // Retrying the same observation and checked context retains its original
+    // clock. Changed context creates a new observation rather than rewriting it.
+    let mut normalized = value.clone();
+    normalized["captured_at_utc"] = Value::Null;
+    if let Some(prior) = state.records.iter().find(|record| {
+        if record["kind"] != "groundline-learning-snapshot" {
+            return false;
+        }
+        let mut prior = (*record).clone();
+        prior["captured_at_utc"] = Value::Null;
+        prior == normalized
+    }) {
+        value = prior.clone();
+    }
+    let changed = state.save(&value)?;
+    let mut out = readout(
+        if changed {
+            "CAPTURED"
+        } else {
+            "ALREADY_CAPTURED"
+        },
+        changed,
+    );
+    out["snapshot_sha256"] = json!(learning::content_sha256(&value)?);
+    out["captured_at_utc"] = value["captured_at_utc"].clone();
+    out["environment_revision"] = value["environment_revision"].clone();
+    out["source_revision"] = value["source_revision"].clone();
+    out["skill"] = value["skill"].clone();
+    out["runtime_observed"] = json!(!value["runtime"].is_null());
+    out["native_evidence_authenticity_verified"] = json!(false);
+    Ok(out)
+}
+
+fn write_draft(path: &Path, value: &Value, state: &State) -> Result<bool, ContractError> {
+    let path = absolute(path)?;
+    let parent_path = path.parent().ok_or_else(|| error("invalid_path"))?;
+    let directory = directory_handle(parent_path, true)?;
+    let parent_metadata = directory
+        .metadata()
+        .map_err(|_| error("invalid_directory"))?;
+    let state_metadata = state
+        .directory
+        .metadata()
+        .map_err(|_| error("invalid_directory"))?;
+    if parent_metadata.dev() == state_metadata.dev()
+        && parent_metadata.ino() == state_metadata.ino()
+    {
+        return Err(error("draft_outside_state_required"));
+    }
+    let name = path.file_name().ok_or_else(|| error("invalid_path"))?;
+    let mut bytes = serde_json::to_vec_pretty(value).map_err(|_| error("serialization_failed"))?;
+    bytes.push(b'\n');
+    match openat(
+        &directory,
+        name,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
+        Mode::empty(),
+    ) {
+        Ok(fd) => {
+            return if read_handle(File::from(fd))? == bytes
+                && binding_matches(parent_path, &directory)
+            {
+                Ok(false)
+            } else {
+                Err(error("draft_conflict"))
+            };
+        }
+        Err(rustix::io::Errno::NOENT) => {}
+        Err(_) => return Err(error("invalid_output_file")),
+    }
+    let temporary = format!(".learning-{}.tmp", uuid::Uuid::new_v4());
+    let mut file = File::from(
+        openat(
+            &directory,
+            temporary.as_str(),
+            OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::from_raw_mode(0o600),
+        )
+        .map_err(|_| error("output_unavailable"))?,
+    );
+    let mut published = false;
+    let result = (|| {
+        file.write_all(&bytes)
+            .and_then(|_| file.sync_all())
+            .map_err(|_| error("output_write_failed"))?;
+        if !private_for_current_user(&file)
+            || file
+                .metadata()
+                .map_err(|_| error("output_write_failed"))?
+                .nlink()
+                != 1
+            || !binding_matches(parent_path, &directory)
+        {
+            return Err(error("output_write_failed"));
+        }
+        match linkat(
+            &directory,
+            temporary.as_str(),
+            &directory,
+            name,
+            AtFlags::empty(),
+        ) {
+            Ok(()) => published = true,
+            Err(rustix::io::Errno::EXIST) => {
+                return if read_at(&directory, name)? == bytes
+                    && binding_matches(parent_path, &directory)
+                {
+                    Ok(false)
+                } else {
+                    Err(error("draft_conflict"))
+                };
+            }
+            Err(_) => return Err(error("output_exists_or_unavailable")),
+        }
+        unlinkat(&directory, temporary.as_str(), AtFlags::empty())
+            .map_err(|_| error("output_write_failed"))?;
+        directory
+            .sync_all()
+            .map_err(|_| error("output_write_failed"))?;
+        if !binding_matches(parent_path, &directory) {
+            return Err(error("directory_binding_changed"));
+        }
+        Ok(true)
+    })();
+    if result.is_err()
+        && published
+        && let Ok(fd) = openat(
+            &directory,
+            name,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        && let (Ok(current), Ok(created)) = (File::from(fd).metadata(), file.metadata())
+        && current.dev() == created.dev()
+        && current.ino() == created.ino()
+    {
+        let _ = unlinkat(&directory, name, AtFlags::empty());
+    }
+    let _ = unlinkat(&directory, temporary.as_str(), AtFlags::empty());
+    result
+}
+
+fn prepare(
+    receipt: &Path,
+    snapshot: &str,
+    output: &Path,
+    state: &Path,
+) -> Result<Value, ContractError> {
+    if !learning::digest(snapshot) {
+        return Err(error("invalid_snapshot_reference"));
+    }
+    let bytes = read_private(receipt)?;
+    let state = State::open(state, false)?;
+    let value = state
+        .records
+        .iter()
+        .find(|v| {
+            v["kind"] == "groundline-learning-snapshot"
+                && learning::content_sha256(v).ok().as_deref() == Some(snapshot)
+        })
+        .ok_or_else(|| error("snapshot_missing"))?;
+    let input = learning::prepare_outcome(value, &parse(&bytes)?, &sha256(&bytes))?;
+    let changed = write_draft(output, &input, &state)?;
+    let mut out = readout(
+        if changed {
+            "PREPARED"
+        } else {
+            "ALREADY_PREPARED"
+        },
+        changed,
+    );
+    out["snapshot_sha256"] = json!(snapshot);
+    out["link_input_sha256"] = json!(learning::content_sha256(&input)?);
+    out["receipt_sha256"] = input["receipt_sha256"].clone();
+    out["correction_kind"] = input["correction_kind"].clone();
+    out["resource_authority"] = json!("original_delivery_receipt");
+    Ok(out)
+}
+
+fn decide(input: &Path, state: &Path) -> Result<Value, ContractError> {
+    let input = parse(&read_private(input)?)?;
+    let state = State::open(state, false)?;
+    let value =
+        learning::prepare_decision(&input, &state.records, &chrono::Utc::now().to_rfc3339())?;
+    let changed = state.save(&value)?;
+    let mut out = readout(
+        if changed {
+            "DECIDED"
+        } else {
+            "ALREADY_DECIDED"
+        },
+        changed,
+    );
+    out["decision_sha256"] = json!(learning::content_sha256(&value)?);
+    out["proposal_sha256"] = value["proposal_sha256"].clone();
+    out["decision"] = value["decision"].clone();
+    out["evaluation_sha256"] = value["evaluation_sha256"].clone();
+    out["causal_effect_verified"] = json!(false);
+    out["efficiency_improvement_verified"] = json!(false);
+    Ok(out)
 }
 
 fn link(input: &Path, receipt: &Path, state: &Path) -> Result<Value, ContractError> {
@@ -781,13 +1081,45 @@ fn evaluate(
     Ok(result)
 }
 
+#[cfg(test)]
 fn status(path: &Path) -> Result<Value, ContractError> {
+    status_with_operations(path, &[])
+}
+
+fn status_with_operations(path: &Path, paths: &[PathBuf]) -> Result<Value, ContractError> {
+    if paths.len() > learning::MAX_EVIDENCE_REFS {
+        return Err(error("too_many_operations"));
+    }
+    let mut operations = BTreeMap::new();
+    for path in paths {
+        let bytes = read_private(path)?;
+        let value = parse(&bytes)?;
+        crate::environment::validate_operation(&value)?;
+        let operation_id = value["operation_id"]
+            .as_str()
+            .ok_or_else(|| error("invalid_operation"))?
+            .to_owned();
+        let current = (sha256(&bytes), value);
+        if let Some(previous) = operations.insert(operation_id, current.clone())
+            && previous != current
+        {
+            return Err(error("operation_observation_conflict"));
+        }
+    }
+    let operations = operations.into_values().collect::<Vec<_>>();
     let state = State::open(path, false)?;
     let mut counts = BTreeMap::<String, usize>::new();
     let mut processed = BTreeSet::new();
     let mut analyses = BTreeMap::<String, Value>::new();
     for value in &state.records {
-        let category = if value["kind"] == "groundline-learning-link" {
+        let category = if value["kind"] == "groundline-learning-snapshot" {
+            "captured".to_owned()
+        } else if value["kind"] == "groundline-learning-decision" {
+            format!(
+                "decision_{}",
+                value["decision"].as_str().unwrap_or("unknown")
+            )
+        } else if value["kind"] == "groundline-learning-link" {
             "linked".to_owned()
         } else if value["kind"] == "groundline-learning-proposal" {
             value["status"].as_str().unwrap_or("unknown").to_owned()
@@ -848,11 +1180,32 @@ fn status(path: &Path) -> Result<Value, ContractError> {
     out["analysis_resources"] = json!({"owned_response_count":analyses.len(),
         "total_tokens":{"known_sum":(!analyses.is_empty() && missing < analyses.len()).then_some(total), "missing_count":missing},
         "unobserved_analysis_count":state.records.iter().filter(|v| ["groundline-learning-proposal", "groundline-learning-duplicate-attempt"].contains(&v["kind"].as_str().unwrap_or("")) && v["analysis"].is_null()).count()});
+    out["operation_observation_count"] = json!(operations.len());
+    out["candidates"] = json!(learning::candidate_readouts(&state.records, &operations)?);
     Ok(out)
 }
 
 pub(crate) fn run(command: Command) -> Result<Value, ContractError> {
     match command {
+        Command::Capture {
+            environment_state,
+            target,
+            observation,
+            native_evidence,
+            state,
+        } => capture(
+            &environment_state,
+            &target,
+            &observation,
+            native_evidence.as_deref(),
+            &state,
+        ),
+        Command::Prepare {
+            receipt,
+            snapshot,
+            output,
+            state,
+        } => prepare(&receipt, &snapshot, &output, &state),
         Command::LinkOutcome {
             input,
             receipt,
@@ -865,7 +1218,8 @@ pub(crate) fn run(command: Command) -> Result<Value, ContractError> {
             operation,
             state,
         } => evaluate(&input, &deliveries, &operation, &state),
-        Command::Status { state } => status(&state),
+        Command::Decide { input, state } => decide(&input, &state),
+        Command::Status { state, operation } => status_with_operations(&state, &operation),
     }
 }
 
@@ -873,6 +1227,10 @@ pub(crate) fn run(command: Command) -> Result<Value, ContractError> {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+    type CaptureContextHook = Box<dyn FnOnce(&Value)>;
+    std::thread_local! {
+        pub(super) static AFTER_CAPTURE_CONTEXT: std::cell::RefCell<Option<CaptureContextHook>> = const { std::cell::RefCell::new(None) };
+    }
     fn tempdir() -> Result<tempfile::TempDir, std::io::Error> {
         let directory = tempfile::tempdir_in(std::env::temp_dir().canonicalize()?)?;
         fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700))?;
@@ -906,6 +1264,126 @@ mod tests {
             "proposal_id":"review-1", "evidence_refs":[reference], "scope_sha256":h(4),
             "basis_revision":h(5), "source_revision":null, "plan_sha256":h(6),
             "status":decision, "reason":"Bounded native review", "target":null, "analysis":null})
+    }
+
+    #[test]
+    fn capture_retains_helper_observation_time_after_an_intervening_real_rollback() {
+        use crate::environment::{self, Command as EnvironmentCommand};
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let root = tempdir().unwrap();
+        let skills = root.path().join("skills");
+        fs::create_dir(&skills).unwrap();
+        fs::set_permissions(&skills, fs::Permissions::from_mode(0o700)).unwrap();
+        let target = skills.join("SKILL.md");
+        let before = "---\nname: workflow\ndescription: fixture\n---\nBefore.\n";
+        let after = "---\nname: workflow\ndescription: fixture\n---\nAfter.\n";
+        fs::write(&target, before).unwrap();
+        let baseline = root.path().join("baseline.json");
+        let bindings = root.path().join("bindings.json");
+        private_json(
+            &baseline,
+            &json!({"kind":"groundline-environment-baseline","schema":1,
+            "revision":"baseline-1","parent_revision":null,"source_revision":"source-1",
+            "authority_revision":"authority-1","exception_revision":"device-1","authority_ref":"user-request-1",
+            "managed_targets":[{"target_id":"workflow","kind":"skill_file","desired_sha256":sha256(after.as_bytes()),
+                "dependencies":[],"managed_block":null}]}),
+        );
+        private_json(
+            &bindings,
+            &json!({"kind":"groundline-environment-device-bindings","schema":1,
+            "revision":"device-1","device_id":"fixture","roots":[{"root_id":"owner","path":skills,"aliases":[]}],
+            "targets":[{"target_id":"workflow","root_id":"owner","relative_path":"SKILL.md"}]}),
+        );
+        let environment_state = root.path().join("environment");
+        environment::run(EnvironmentCommand::Register {
+            state_dir: environment_state.clone(),
+            baseline,
+            bindings,
+            json: true,
+        })
+        .unwrap();
+        let proposal = root.path().join("proposal.json");
+        private_json(
+            &proposal,
+            &json!({"kind":"groundline-environment-proposal","schema":1,
+            "proposal_id":"workflow-change","basis_revision":"baseline-1","source_revision":"source-1",
+            "authority_ref":"user-request-1","changes":[{"target_id":"workflow","content":after}]}),
+        );
+        let plan = environment::run(EnvironmentCommand::Plan {
+            state_dir: environment_state.clone(),
+            proposal,
+            json: true,
+        })
+        .unwrap();
+        let applied = environment::run(EnvironmentCommand::Apply {
+            state_dir: environment_state.clone(),
+            proposal_id: "workflow-change".into(),
+            json: true,
+        })
+        .unwrap();
+        assert_eq!(applied["status"], "APPLIED");
+        let operation_id = applied["operation_id"].as_str().unwrap().to_owned();
+        let observed = Rc::new(RefCell::new(None));
+        let held_observed = Rc::clone(&observed);
+        let rollback_state = environment_state.clone();
+        AFTER_CAPTURE_CONTEXT.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move |context| {
+                let rolled_back = environment::run(EnvironmentCommand::Rollback {
+                    state_dir: rollback_state,
+                    operation_id,
+                    json: true,
+                })
+                .unwrap();
+                assert_eq!(rolled_back["status"], "ROLLED_BACK");
+                *held_observed.borrow_mut() =
+                    Some((context.clone(), chrono::Utc::now().to_rfc3339()));
+            }));
+        });
+        let observation = root.path().join("observation.json");
+        let mut input = json!({"kind":"groundline-learning-capture-input","schema":1,
+            "unit_hash":h(1),"cohort_sha256":h(2),"phase":"implementation","runtime":null});
+        private_json(&observation, &input);
+        let state = root.path().join("learning");
+        let captured = capture(&environment_state, "workflow", &observation, None, &state).unwrap();
+        let (context, rollback_completed) = observed.borrow_mut().take().unwrap();
+        assert_eq!(captured["environment_revision"], plan["plan_sha256"]);
+        assert_eq!(captured["captured_at_utc"], context["observed_at_utc"]);
+        assert!(
+            chrono::DateTime::parse_from_rfc3339(captured["captured_at_utc"].as_str().unwrap())
+                .unwrap()
+                < chrono::DateTime::parse_from_rfc3339(&rollback_completed).unwrap()
+        );
+        assert_eq!(fs::read_to_string(&target).unwrap(), before);
+        assert!(environment::learning_context(&environment_state, "workflow").unwrap()["environment_revision"].is_null());
+        let stored = parse(
+            &read_private(&state.join(format!(
+                "{}.json",
+                captured["snapshot_sha256"].as_str().unwrap()
+            )))
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(stored["captured_at_utc"], context["observed_at_utc"]);
+        assert_eq!(stored["native_activation"], "UNVERIFIED");
+        for timestamp in [Value::Null, json!("invalid-timestamp")] {
+            let mut invalid = context.clone();
+            invalid["observed_at_utc"] = timestamp;
+            assert_eq!(
+                context_observed_at(&invalid).unwrap_err().0,
+                "learning_invalid_context_timestamp"
+            );
+        }
+        input["observed_at_utc"] = context["observed_at_utc"].clone();
+        private_json(&observation, &input);
+        assert_eq!(
+            capture(&environment_state, "workflow", &observation, None, &state)
+                .unwrap_err()
+                .0,
+            "learning_invalid_capture_input"
+        );
+        assert_eq!(status(&state).unwrap()["records"]["captured"], 1);
     }
 
     #[test]

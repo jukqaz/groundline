@@ -7,6 +7,7 @@
 | 설치·업데이트·복구 | [설치 안내](../installation.md) |
 | Core·Insights·동시 설치 선택 | [연동 경계](integrations.md) |
 | 실제 작업 감사와 결과 비교 | [CLI 예제](../examples.md) |
+| 업무·공식 변경·기기를 연결 | [학습 루프](../../plugins/groundline/references/learning-loop.md), [실행 계약](../adaptive-environment-implementation.md) |
 | Codex 실행 환경 호환성 확인 | [호환성](codex-compatibility.md) |
 | 운영자 서버 구축 | [셀프호스팅](self-hosting.md) |
 | 수집·서버 장애 진단 | [운영 안내](../insights-operations.md) |

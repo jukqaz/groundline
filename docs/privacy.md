@@ -16,6 +16,17 @@ restore unchanged GroundLine-generated guidance while preserving user edits.
 These recovery commands do not create or evaluate new trials, call a model, or
 change Codex settings. See [personal recovery](../plugins/groundline/references/personal-recovery.md).
 
+Requested environment and learning commands keep separate owner-private state.
+Capture snapshots and outcome links carry digests and explicit scoped observations,
+not native conversation bodies. Official text snapshots are supplied by native
+tools; the Core comparison cache stores mappings, digests and freshness metadata.
+Core does not fetch the text or authenticate its source. Portable bundles contain
+selected managed guidance text and common baseline lineage, excluding device
+bindings, paths and host exception fields. Managed text may itself contain private
+information: review it before transport and keep bundles outside public source.
+Native credentials, memory, sessions, databases and provider caches are not synced.
+See [the learning loop](../plugins/groundline/references/learning-loop.md).
+
 GroundLine Insights is separately installed, does not require Core, and remains
 inactive until the owner configures and enables it. It writes only bounded
 owner-private state under the Codex home and sends strict aggregate events to an

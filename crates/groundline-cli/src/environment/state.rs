@@ -9,10 +9,12 @@ use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 const MAX_TARGETS: usize = 64;
+const MAX_REVISIONS: usize = 64;
 
 #[cfg(test)]
 thread_local! {
     static AFTER_ROLLBACK_PREPARE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    static BEFORE_CONTEXT_RETURN: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
 }
 
 fn hash(bytes: &[u8]) -> String {
@@ -91,6 +93,102 @@ struct Baseline {
     exception_revision: String,
     authority_ref: String,
     managed_targets: Vec<ManagedTarget>,
+}
+
+/// Only common intent belongs in transport. Paths, device exceptions, native
+/// settings, operation backups and unrelated AGENTS content are never projected.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct CommonBaseline {
+    kind: String,
+    schema: u8,
+    revision: String,
+    parent_revision: Option<String>,
+    source_revision: String,
+    authority_revision: String,
+    authority_ref: String,
+    managed_targets: Vec<ManagedTarget>,
+}
+impl CommonBaseline {
+    fn from_local(local: &Baseline) -> Self {
+        Self {
+            kind: "groundline-environment-common-baseline".into(),
+            schema: 1,
+            revision: local.revision.clone(),
+            parent_revision: local.parent_revision.clone(),
+            source_revision: local.source_revision.clone(),
+            authority_revision: local.authority_revision.clone(),
+            authority_ref: local.authority_ref.clone(),
+            managed_targets: local.managed_targets.clone(),
+        }
+    }
+    fn local(&self, exception_revision: &str) -> Baseline {
+        Baseline {
+            kind: "groundline-environment-baseline".into(),
+            schema: 1,
+            revision: self.revision.clone(),
+            parent_revision: self.parent_revision.clone(),
+            source_revision: self.source_revision.clone(),
+            authority_revision: self.authority_revision.clone(),
+            exception_revision: exception_revision.into(),
+            authority_ref: self.authority_ref.clone(),
+            managed_targets: self.managed_targets.clone(),
+        }
+    }
+    fn digest(&self) -> Result<String, ContractError> {
+        Ok(hash(&bytes(self)?))
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CommonRevision {
+    baseline: CommonBaseline,
+    baseline_sha256: String,
+    modified_by_device_sha256: Option<String>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Lineage {
+    kind: String,
+    schema: u8,
+    revisions: Vec<CommonRevision>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BundlePayload {
+    lineage: Lineage,
+    contents: Vec<Change>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Bundle {
+    kind: String,
+    schema: u8,
+    payload_sha256: String,
+    payload: BundlePayload,
+}
+fn payload_digest(payload: &BundlePayload) -> Result<String, ContractError> {
+    let value = serde_json::to_value(payload).map_err(|_| error("serialization"))?;
+    Ok(hash(&bytes(&value)?))
+}
+impl Bundle {
+    fn baseline(&self) -> &CommonBaseline {
+        // All readers validate the nonempty lineage before using this method.
+        &self
+            .payload
+            .lineage
+            .revisions
+            .last()
+            .expect("validated lineage")
+            .baseline
+    }
+}
+
+struct ImportBasis<'a> {
+    bundle: &'a Bundle,
+    new_device: bool,
+    expected_revision: Option<&'a str>,
+    expected_exception_revision: Option<&'a str>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -832,6 +930,48 @@ pub(super) fn run(command: Command) -> Result<Value, ContractError> {
             operation_id,
             ..
         } => recover(&state_dir, &operation_id),
+        Command::Export {
+            state_dir,
+            proposal,
+            output,
+            ..
+        } => export_bundle(&state_dir, proposal.as_deref(), &output),
+        Command::InspectBundle {
+            bundle,
+            bundle_sha256,
+            bindings,
+            state_dir,
+            ..
+        } => inspect_bundle(&bundle, &bundle_sha256, &bindings, state_dir.as_deref()),
+        Command::Import {
+            state_dir,
+            bundle,
+            bundle_sha256,
+            bindings,
+            authority_ref,
+            new_device,
+            expected_revision,
+            expected_exception_revision,
+            ..
+        } => import_bundle(
+            &state_dir,
+            &bundle,
+            &bundle_sha256,
+            &bindings,
+            &authority_ref,
+            new_device,
+            (
+                expected_revision.as_deref(),
+                expected_exception_revision.as_deref(),
+            ),
+        ),
+        Command::PlanBundle {
+            state_dir,
+            bundle,
+            bundle_sha256,
+            proposal_id,
+            ..
+        } => plan_bundle(&state_dir, &bundle, &bundle_sha256, &proposal_id),
     }
 }
 
@@ -842,6 +982,15 @@ fn register(
 ) -> Result<Value, ContractError> {
     let baseline: Baseline = parse(&files::private_input(baseline_input)?)?;
     let bindings: Bindings = parse(&files::private_input(bindings_input)?)?;
+    register_documents(state_dir, baseline, bindings, None)
+}
+
+fn register_documents(
+    state_dir: &Path,
+    baseline: Baseline,
+    bindings: Bindings,
+    import: Option<ImportBasis<'_>>,
+) -> Result<Value, ContractError> {
     validate_baseline(&baseline)?;
     validate_bindings(&baseline, &bindings)?;
     let registry = build_registry(&baseline, &bindings)?;
@@ -853,6 +1002,28 @@ fn register(
     let registry_raw = bytes(&registry)?;
     let mut result = output("register");
     result["desired_revision"] = json!(baseline.revision);
+    if let Some(basis) = &import {
+        if basis.new_device {
+            if previous.is_some()
+                || basis.expected_revision.is_some()
+                || basis.expected_exception_revision.is_some()
+            {
+                return Err(error("import_device_already_registered"));
+            }
+        } else {
+            let current = store.current()?;
+            if basis.expected_revision != Some(current.head.revision.as_str())
+                || basis.expected_exception_revision
+                    != Some(current.baseline.exception_revision.as_str())
+            {
+                return Err(error("stale_import_basis"));
+            }
+            import_transition(&store, &current, basis.bundle)?;
+            if current.registry.device_id != bindings.device_id {
+                return Err(error("import_device_binding_mismatch"));
+            }
+        }
+    }
     if let Some(previous) = &previous {
         let current = store.current()?;
         if previous.baseline_sha256 == hash(&baseline_raw)
@@ -863,8 +1034,9 @@ fn register(
             result["mutation_performed"] = json!(false);
             return Ok(result);
         }
-        if baseline.parent_revision.as_deref() != Some(previous.revision.as_str())
-            || baseline.revision == previous.revision
+        if import.is_none()
+            && (baseline.parent_revision.as_deref() != Some(previous.revision.as_str())
+                || baseline.revision == previous.revision)
         {
             return Err(error("stale_parent_revision"));
         }
@@ -890,9 +1062,32 @@ fn register(
         {
             return Err(error("authority_revision_not_advanced"));
         }
-    } else if baseline.parent_revision.is_some() {
+    } else if import.is_none() && baseline.parent_revision.is_some() {
         return Err(error("initial_parent_must_be_null"));
     }
+    let lineage = if let Some(basis) = &import {
+        basis.bundle.payload.lineage.clone()
+    } else {
+        let mut lineage = if previous.is_some() {
+            load_lineage(&store, &store.current()?)?
+        } else {
+            Lineage {
+                kind: "groundline-environment-lineage".into(),
+                schema: 1,
+                revisions: vec![],
+            }
+        };
+        let common = CommonBaseline::from_local(&baseline);
+        lineage.revisions.push(CommonRevision {
+            baseline_sha256: common.digest()?,
+            baseline: common,
+            modified_by_device_sha256: Some(hash(
+                format!("groundline-environment-device\0{}", bindings.device_id).as_bytes(),
+            )),
+        });
+        lineage
+    };
+    validate_lineage(&lineage)?;
     let snapshots = store.artifacts("snapshots", true)?;
     let head = Head {
         kind: "groundline-environment-head".into(),
@@ -909,6 +1104,18 @@ fn register(
         false,
     )?;
     snapshots.write(
+        &format!("lineage-{}.json", head.baseline_sha256),
+        &bytes(&lineage)?,
+        false,
+    )?;
+    if let Some(basis) = &import {
+        snapshots.write(
+            &format!("contents-{}.json", basis.bundle.baseline().digest()?),
+            &bytes(&basis.bundle.payload.contents)?,
+            false,
+        )?;
+    }
+    snapshots.write(
         &format!("bindings-{}.json", head.bindings_sha256),
         &bindings_raw,
         false,
@@ -920,6 +1127,9 @@ fn register(
     )?;
     if bytes(&store.head()?)? != bytes(&previous)? {
         return Err(error("stale_parent_revision"));
+    }
+    for t in &registry.targets {
+        open_target(&registry, &t.input.target_id)?;
     }
     store.root.write("head.json", &bytes(&head)?, true)?;
     result["status"] = json!("REGISTERED");
@@ -968,6 +1178,10 @@ fn inspect(state_dir: &Path) -> Result<Value, ContractError> {
 
 fn plan(state_dir: &Path, proposal_input: &Path) -> Result<Value, ContractError> {
     let proposal: Proposal = parse(&files::private_input(proposal_input)?)?;
+    plan_proposal(state_dir, proposal)
+}
+
+fn plan_proposal(state_dir: &Path, proposal: Proposal) -> Result<Value, ContractError> {
     contract(
         &proposal.kind,
         proposal.schema,
@@ -1887,6 +2101,461 @@ fn recover(state_dir: &Path, operation_id: &str) -> Result<Value, ContractError>
     let mut result = summary(&op, "recover", false, saved);
     result["disk_observation_only"] = json!(true);
     result["automatic_resume_performed"] = json!(false);
+    Ok(result)
+}
+
+fn validate_lineage(lineage: &Lineage) -> Result<(), ContractError> {
+    contract(
+        &lineage.kind,
+        lineage.schema,
+        "groundline-environment-lineage",
+    )?;
+    if lineage.revisions.is_empty() || lineage.revisions.len() > MAX_REVISIONS {
+        return Err(error("lineage_limit"));
+    }
+    let mut revisions = BTreeSet::new();
+    let mut parent = None;
+    for revision in &lineage.revisions {
+        let common = &revision.baseline;
+        contract(
+            &common.kind,
+            common.schema,
+            "groundline-environment-common-baseline",
+        )?;
+        validate_baseline(&common.local("portable"))?;
+        if !revisions.insert(common.revision.as_str())
+            || common.parent_revision.as_deref() != parent
+            || common.digest()? != revision.baseline_sha256
+            || revision
+                .modified_by_device_sha256
+                .as_ref()
+                .is_some_and(|h| !valid_hash(h))
+        {
+            return Err(error("lineage_binding_mismatch"));
+        }
+        parent = Some(common.revision.as_str());
+    }
+    Ok(())
+}
+
+fn load_lineage(store: &Store, current: &Current) -> Result<Lineage, ContractError> {
+    let snapshots = store.artifacts("snapshots", false)?;
+    let common = CommonBaseline::from_local(&current.baseline);
+    if let Some(read) = snapshots.read(&format!("lineage-{}.json", current.head.baseline_sha256))? {
+        let lineage: Lineage = parse(&read.bytes)?;
+        validate_lineage(&lineage)?;
+        if lineage.revisions.last().map(|r| &r.baseline) != Some(&common) {
+            return Err(error("lineage_binding_mismatch"));
+        }
+        return Ok(lineage);
+    }
+    // Existing registration snapshots already retain parent revisions. Recover
+    // only that recorded lineage; a modifying device never observed stays null.
+    let mut recorded: BTreeMap<String, Vec<CommonBaseline>> = BTreeMap::new();
+    for name in snapshots.names()? {
+        let Some(digest) = name
+            .strip_prefix("baseline-")
+            .and_then(|n| n.strip_suffix(".json"))
+        else {
+            continue;
+        };
+        let local: Baseline = parse(&artifact(&snapshots, &name, digest)?)?;
+        validate_baseline(&local)?;
+        let candidate = CommonBaseline::from_local(&local);
+        let candidates = recorded.entry(candidate.revision.clone()).or_default();
+        if !candidates.contains(&candidate) {
+            candidates.push(candidate);
+        }
+    }
+    let mut reversed = vec![];
+    let mut next = common;
+    loop {
+        if reversed.len() >= MAX_REVISIONS {
+            return Err(error("lineage_limit"));
+        }
+        let parent = next.parent_revision.clone();
+        reversed.push(CommonRevision {
+            baseline_sha256: next.digest()?,
+            baseline: next,
+            modified_by_device_sha256: None,
+        });
+        let Some(parent) = parent else { break };
+        let candidates = recorded
+            .get(&parent)
+            .ok_or_else(|| error("lineage_parent_missing"))?;
+        if candidates.len() != 1 {
+            return Err(error("lineage_parent_conflict"));
+        }
+        next = candidates[0].clone();
+    }
+    reversed.reverse();
+    let lineage = Lineage {
+        kind: "groundline-environment-lineage".into(),
+        schema: 1,
+        revisions: reversed,
+    };
+    validate_lineage(&lineage)?;
+    Ok(lineage)
+}
+
+fn validate_contents(baseline: &CommonBaseline, contents: &[Change]) -> Result<(), ContractError> {
+    if contents.len() != baseline.managed_targets.len() {
+        return Err(error("bundle_content_scope"));
+    }
+    let local = baseline.local("portable");
+    let mut ids = BTreeSet::new();
+    for change in contents {
+        id(&change.target_id)?;
+        let t = target(&local, &change.target_id)?;
+        if !ids.insert(&change.target_id) || hash(change.content.as_bytes()) != t.desired_sha256 {
+            return Err(error("bundle_content_digest_mismatch"));
+        }
+        render(t, None, &change.content)?;
+    }
+    Ok(())
+}
+
+fn read_bundle(path: &Path, expected_sha256: &str) -> Result<Bundle, ContractError> {
+    if !valid_hash(expected_sha256) {
+        return Err(error("invalid_digest"));
+    }
+    let raw = files::portable_input(path)?;
+    if hash(&raw) != expected_sha256 {
+        return Err(error("bundle_digest_mismatch"));
+    }
+    let bundle: Bundle = parse(&raw)?;
+    contract(&bundle.kind, bundle.schema, "groundline-environment-bundle")?;
+    if payload_digest(&bundle.payload)? != bundle.payload_sha256 {
+        return Err(error("bundle_payload_digest_mismatch"));
+    }
+    validate_lineage(&bundle.payload.lineage)?;
+    validate_contents(bundle.baseline(), &bundle.payload.contents)?;
+    Ok(bundle)
+}
+
+fn desired_contents(
+    store: &Store,
+    current: &Current,
+    proposal_input: Option<&Path>,
+) -> Result<Vec<Change>, ContractError> {
+    let common = CommonBaseline::from_local(&current.baseline);
+    let contents = if let Some(path) = proposal_input {
+        let proposal: Proposal = parse(&files::private_input(path)?)?;
+        contract(
+            &proposal.kind,
+            proposal.schema,
+            "groundline-environment-proposal",
+        )?;
+        id(&proposal.proposal_id)?;
+        if proposal.basis_revision != current.head.revision
+            || proposal.source_revision != current.baseline.source_revision
+            || proposal.authority_ref != current.baseline.authority_ref
+        {
+            return Err(error("stale_basis_or_authority"));
+        }
+        proposal.changes
+    } else if let Some(read) = store
+        .artifacts("snapshots", false)?
+        .read(&format!("contents-{}.json", common.digest()?))?
+    {
+        parse(&read.bytes)?
+    } else {
+        let mut contents = vec![];
+        for t in &current.baseline.managed_targets {
+            let (_, _, read) = open_target(&current.registry, &t.target_id)?;
+            if managed_digest(t, &read)?.as_deref() != Some(t.desired_sha256.as_str()) {
+                return Err(error("desired_content_unavailable_supply_proposal"));
+            }
+            let whole =
+                text(&read)?.ok_or_else(|| error("desired_content_unavailable_supply_proposal"))?;
+            let content = if let Some(block) = &t.managed_block {
+                let (start, end) =
+                    block_range(&whole, block)?.ok_or_else(|| error("managed_block_missing"))?;
+                whole[start..end].to_owned()
+            } else {
+                whole
+            };
+            contents.push(Change {
+                target_id: t.target_id.clone(),
+                content,
+            });
+        }
+        contents
+    };
+    validate_contents(&common, &contents)?;
+    // Canonical target order makes exports stable regardless of proposal order.
+    let mut contents = contents;
+    contents.sort_by(|a, b| a.target_id.cmp(&b.target_id));
+    Ok(contents)
+}
+
+fn export_bundle(
+    state_dir: &Path,
+    proposal: Option<&Path>,
+    output_path: &Path,
+) -> Result<Value, ContractError> {
+    let store = Store::open(state_dir, false)?;
+    let _lock = store.root.lock()?;
+    let current = store.current()?;
+    let payload = BundlePayload {
+        lineage: load_lineage(&store, &current)?,
+        contents: desired_contents(&store, &current, proposal)?,
+    };
+    let payload_sha256 = payload_digest(&payload)?;
+    let bundle = Bundle {
+        kind: "groundline-environment-bundle".into(),
+        schema: 1,
+        payload_sha256,
+        payload,
+    };
+    if bytes(&store.current()?.head)? != bytes(&current.head)? {
+        return Err(error("stale_import_basis"));
+    }
+    let raw = bytes(&bundle)?;
+    let written = files::portable_output(output_path, &raw)?;
+    let mut result = output("export");
+    result["status"] = json!(if written { "EXPORTED" } else { "NO_CHANGE" });
+    result["desired_revision"] = json!(current.head.revision);
+    result["bundle_sha256"] = json!(hash(&raw));
+    result["payload_sha256"] = json!(bundle.payload_sha256);
+    result["private_bundle_saved"] = json!(true);
+    result["mutation_performed"] = json!(false);
+    result["bundle_file_created"] = json!(written);
+    result["lineage_count"] = json!(bundle.payload.lineage.revisions.len());
+    Ok(result)
+}
+
+fn import_transition(
+    store: &Store,
+    current: &Current,
+    bundle: &Bundle,
+) -> Result<&'static str, ContractError> {
+    let known = load_lineage(store, current)?;
+    let incoming = &bundle.payload.lineage.revisions;
+    if incoming.len() < known.revisions.len() {
+        return Err(error("stale_bundle_revision"));
+    }
+    for (known, incoming) in known.revisions.iter().zip(incoming) {
+        if known.baseline_sha256 != incoming.baseline_sha256
+            || (known.modified_by_device_sha256.is_some()
+                && known.modified_by_device_sha256 != incoming.modified_by_device_sha256)
+        {
+            return Err(error("bundle_lineage_conflict"));
+        }
+    }
+    Ok(if incoming.len() == known.revisions.len() {
+        "CURRENT"
+    } else {
+        "FAST_FORWARD"
+    })
+}
+
+fn bundle_observations(baseline: &Baseline, registry: &Registry) -> Vec<Value> {
+    baseline.managed_targets.iter().map(|t| {
+        match open_target(registry, &t.target_id).and_then(|(_, _, read)| Ok((managed_digest(t, &read)?, read.as_ref().map(|r| hash(&r.bytes))))) {
+            Ok((managed, disk)) => json!({"target_id":t.target_id,"desired_sha256":t.desired_sha256,
+                "disk_sha256":disk,"disk_managed_sha256":managed,"desired_matches_disk":managed.as_deref()==Some(t.desired_sha256.as_str()),
+                "status":"OBSERVED","native_activation":"UNVERIFIED"}),
+            Err(e) => json!({"target_id":t.target_id,"desired_sha256":t.desired_sha256,"disk_sha256":null,
+                "desired_matches_disk":false,"status":"CONFLICT","reason":e.0,"native_activation":"UNVERIFIED"}),
+        }
+    }).collect()
+}
+
+fn inspect_bundle(
+    bundle_path: &Path,
+    expected_sha256: &str,
+    bindings_path: &Path,
+    state_dir: Option<&Path>,
+) -> Result<Value, ContractError> {
+    let bundle = read_bundle(bundle_path, expected_sha256)?;
+    let bindings: Bindings = parse(&files::private_input(bindings_path)?)?;
+    let baseline = bundle.baseline().local(&bindings.revision);
+    validate_bindings(&baseline, &bindings)?;
+    let registry = build_registry(&baseline, &bindings)?;
+    let mut result = output("inspect-bundle");
+    let transition = if let Some(path) = state_dir {
+        let store = Store::open(path, false)?;
+        let current = store.current()?;
+        if current.registry.device_id != bindings.device_id {
+            return Err(error("import_device_binding_mismatch"));
+        }
+        result["current_revision"] = json!(current.head.revision);
+        result["current_exception_revision"] = json!(current.baseline.exception_revision);
+        import_transition(&store, &current, &bundle)?
+    } else {
+        "NEW_DEVICE"
+    };
+    result["status"] = json!("INSPECTED");
+    result["transition"] = json!(transition);
+    result["desired_revision"] = json!(baseline.revision);
+    result["exception_revision"] = json!(baseline.exception_revision);
+    result["bundle_sha256"] = json!(expected_sha256);
+    result["entries"] = json!(bundle_observations(&baseline, &registry));
+    result["mutation_performed"] = json!(false);
+    result["latest_remote_revision_verified"] = json!(false);
+    Ok(result)
+}
+
+fn import_bundle(
+    state_dir: &Path,
+    bundle_path: &Path,
+    expected_sha256: &str,
+    bindings_path: &Path,
+    authority_ref: &str,
+    new_device: bool,
+    expected_revisions: (Option<&str>, Option<&str>),
+) -> Result<Value, ContractError> {
+    let bundle = read_bundle(bundle_path, expected_sha256)?;
+    id(authority_ref)?;
+    if authority_ref != bundle.baseline().authority_ref {
+        return Err(error("import_authority_mismatch"));
+    }
+    let bindings: Bindings = parse(&files::private_input(bindings_path)?)?;
+    let baseline = bundle.baseline().local(&bindings.revision);
+    let mut result = register_documents(
+        state_dir,
+        baseline,
+        bindings,
+        Some(ImportBasis {
+            bundle: &bundle,
+            new_device,
+            expected_revision: expected_revisions.0,
+            expected_exception_revision: expected_revisions.1,
+        }),
+    )?;
+    result["operation"] = json!("import");
+    result["bundle_sha256"] = json!(expected_sha256);
+    result["targets_written"] = json!(false);
+    result["latest_remote_revision_verified"] = json!(false);
+    Ok(result)
+}
+
+fn plan_bundle(
+    state_dir: &Path,
+    bundle_path: &Path,
+    expected_sha256: &str,
+    proposal_id: &str,
+) -> Result<Value, ContractError> {
+    let bundle = read_bundle(bundle_path, expected_sha256)?;
+    let store = Store::open(state_dir, false)?;
+    let current = store.current()?;
+    if CommonBaseline::from_local(&current.baseline) != *bundle.baseline() {
+        return Err(error("bundle_not_imported_at_current_revision"));
+    }
+    let proposal = Proposal {
+        kind: "groundline-environment-proposal".into(),
+        schema: 1,
+        proposal_id: proposal_id.into(),
+        basis_revision: current.head.revision,
+        source_revision: current.baseline.source_revision,
+        authority_ref: current.baseline.authority_ref,
+        changes: bundle.payload.contents,
+    };
+    let mut result = plan_proposal(state_dir, proposal)?;
+    result["bundle_sha256"] = json!(expected_sha256);
+    Ok(result)
+}
+
+pub(super) fn learning_context(state_dir: &Path, target_id: &str) -> Result<Value, ContractError> {
+    id(target_id)?;
+    let store = Store::open(state_dir, false)?;
+    // Serialize the complete observation and its timestamp with other GroundLine
+    // writers. A caller must retain this time instead of dating an older snapshot.
+    let _lock = store.root.lock()?;
+    let current = store.current()?;
+    target(&current.baseline, target_id)?;
+    let (parent, _, observed) = open_target(&current.registry, target_id)?;
+    let digest = observed.as_ref().map(|r| hash(&r.bytes));
+    let leaf = observed.as_ref().map(|r| r.binding.clone());
+    let mut applicable = vec![];
+    let mut rolled_back = BTreeSet::new();
+    let mut operation_observations = BTreeMap::new();
+    if let Some(operations) = store.root.optional_child("operations")? {
+        for name in operations.names()? {
+            let Some(operation_id) = name.strip_suffix(".json") else {
+                continue;
+            };
+            let read = operations
+                .read(&name)?
+                .ok_or_else(|| error("operation_missing"))?;
+            operation_observations.insert(name.clone(), hash(&read.bytes));
+            let op: Operation = parse(&read.bytes)?;
+            check_operation(&op)?;
+            if op.operation_id != operation_id {
+                return Err(error("operation_id_mismatch"));
+            }
+            if op.action == "rollback" && op.entries.iter().any(|e| e.target_id == target_id) {
+                if let Some(original) = op.original_operation_id {
+                    rolled_back.insert(original);
+                }
+                continue;
+            }
+            if op.action != "apply" || op.status != "APPLIED" {
+                continue;
+            }
+            let Some(entry) = op
+                .entries
+                .iter()
+                .find(|e| e.target_id == target_id && e.status == "APPLIED")
+            else {
+                continue;
+            };
+            if entry.after_sha256 != digest
+                || entry.after_leaf != leaf
+                || entry.parent_binding != parent.binding
+            {
+                continue;
+            }
+            if let Ok((_, checked)) = plan_for_operation(&store, &op)
+                && bytes(&checked.head)? == bytes(&current.head)?
+            {
+                applicable.push(op);
+            }
+        }
+    }
+    applicable.retain(|op| !rolled_back.contains(&op.operation_id));
+    let operation = if applicable.len() == 1 {
+        applicable.pop()
+    } else {
+        None
+    };
+    let (_, _, last) = open_target(&current.registry, target_id)?;
+    if bytes(&store.current()?.head)? != bytes(&current.head)?
+        || last.as_ref().map(|r| (hash(&r.bytes), &r.binding))
+            != observed.as_ref().map(|r| (hash(&r.bytes), &r.binding))
+    {
+        return Err(error("context_changed_during_read"));
+    }
+    let mut final_operations = BTreeMap::new();
+    if let Some(operations) = store.root.optional_child("operations")? {
+        for name in operations.names()? {
+            if name.ends_with(".json") {
+                let read = operations
+                    .read(&name)?
+                    .ok_or_else(|| error("operation_missing"))?;
+                final_operations.insert(name, hash(&read.bytes));
+            }
+        }
+    }
+    if final_operations != operation_observations {
+        return Err(error("context_changed_during_read"));
+    }
+    let observed_at_utc = chrono::Utc::now().to_rfc3339();
+    let provenance_sha256 = hash(&bytes(&json!({"head":current.head,"target_id":target_id,
+        "parent_binding":parent.binding,"leaf":leaf,"skill_revision":digest,
+        "operation":operation.as_ref().map(|op| (&op.operation_id, &op.plan_sha256)),
+        "operation_sha256":operation.as_ref().and_then(|op| operation_observations.get(&format!("{}.json", op.operation_id)))}))?);
+    let result = json!({"environment_revision":operation.as_ref().map(|op| &op.plan_sha256),
+        "source_revision":current.baseline.source_revision,"target_id":target_id,"skill_revision":digest,
+        "observed_at_utc":observed_at_utc,
+        "provenance_sha256":provenance_sha256,"native_activation":"UNVERIFIED"});
+    #[cfg(test)]
+    BEFORE_CONTEXT_RETURN.with(|hook| {
+        if let Some(callback) = hook.borrow_mut().take() {
+            callback();
+        }
+    });
     Ok(result)
 }
 

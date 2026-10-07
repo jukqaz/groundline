@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub const MAX_EVIDENCE_REFS: usize = 64;
 
@@ -178,6 +178,176 @@ pub fn link_outcome(
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct CaptureInput {
+    pub kind: String,
+    pub schema: u8,
+    pub unit_hash: String,
+    pub cohort_sha256: String,
+    pub phase: String,
+    pub runtime: Option<RuntimeObservation>,
+}
+
+impl CaptureInput {
+    pub fn validate(&self) -> Result<(), ContractError> {
+        if self.kind != "groundline-learning-capture-input"
+            || self.schema != 1
+            || !digest(&self.unit_hash)
+            || !digest(&self.cohort_sha256)
+            || !delivery::PHASES.contains(&self.phase.as_str())
+            || self.runtime.as_ref().is_some_and(|r| {
+                !["codex_app", "codex_cli"].contains(&r.family.as_str())
+                    || !identifier(&r.version)
+                    || !digest(&r.evidence_sha256)
+            })
+        {
+            return Err(error("invalid_capture_input"));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Snapshot {
+    pub kind: String,
+    pub schema: u8,
+    pub captured_at_utc: String,
+    pub unit_hash: String,
+    pub cohort_sha256: String,
+    pub phase: String,
+    pub environment_revision: Option<String>,
+    pub source_revision: Option<String>,
+    pub skill: Option<SkillObservation>,
+    pub runtime: Option<RuntimeObservation>,
+    pub environment_provenance_sha256: String,
+    pub capture_input_sha256: String,
+    pub native_activation: String,
+}
+
+impl Snapshot {
+    pub fn validate(&self) -> Result<(), ContractError> {
+        CaptureInput {
+            kind: "groundline-learning-capture-input".into(),
+            schema: self.schema,
+            unit_hash: self.unit_hash.clone(),
+            cohort_sha256: self.cohort_sha256.clone(),
+            phase: self.phase.clone(),
+            runtime: self.runtime.clone(),
+        }
+        .validate()?;
+        let captured = DateTime::parse_from_rfc3339(&self.captured_at_utc)
+            .map_err(|_| error("invalid_snapshot_timestamp"))?;
+        if self.kind != "groundline-learning-snapshot"
+            || self.native_activation != "UNVERIFIED"
+            || captured.with_timezone(&Utc) > Utc::now() + chrono::Duration::minutes(5)
+            || !digest(&self.environment_provenance_sha256)
+            || !digest(&self.capture_input_sha256)
+            || [&self.environment_revision, &self.source_revision]
+                .into_iter()
+                .flatten()
+                .any(|r| !identifier(r))
+            || self
+                .skill
+                .as_ref()
+                .is_some_and(|s| !identifier(&s.target_id) || !digest(&s.revision))
+        {
+            return Err(error("invalid_snapshot"));
+        }
+        Ok(())
+    }
+}
+
+/// The CLI supplies its current clock and a checked environment context. Neither
+/// an input timestamp nor an input source revision can retrofit an earlier task.
+pub fn capture_snapshot(
+    input: &Value,
+    context: &Value,
+    input_sha256: &str,
+    captured_at_utc: &str,
+) -> Result<Value, ContractError> {
+    let input: CaptureInput =
+        serde_json::from_value(input.clone()).map_err(|_| error("invalid_capture_input"))?;
+    input.validate()?;
+    let target_id = context["target_id"]
+        .as_str()
+        .filter(|s| identifier(s))
+        .ok_or_else(|| error("invalid_environment_context"))?;
+    let revision = |key: &str| -> Result<Option<String>, ContractError> {
+        match &context[key] {
+            Value::Null => Ok(None),
+            Value::String(s) if identifier(s) => Ok(Some(s.clone())),
+            _ => Err(error("invalid_environment_context")),
+        }
+    };
+    let skill = match &context["skill_revision"] {
+        Value::Null => None,
+        Value::String(s) if digest(s) => Some(SkillObservation {
+            target_id: target_id.into(),
+            revision: s.clone(),
+        }),
+        _ => return Err(error("invalid_environment_context")),
+    };
+    let snapshot = Snapshot {
+        kind: "groundline-learning-snapshot".into(),
+        schema: 1,
+        captured_at_utc: captured_at_utc.into(),
+        unit_hash: input.unit_hash,
+        cohort_sha256: input.cohort_sha256,
+        phase: input.phase,
+        environment_revision: revision("environment_revision")?,
+        source_revision: revision("source_revision")?,
+        skill,
+        runtime: input.runtime,
+        environment_provenance_sha256: context["provenance_sha256"]
+            .as_str()
+            .ok_or_else(|| error("invalid_environment_context"))?
+            .into(),
+        capture_input_sha256: input_sha256.into(),
+        native_activation: "UNVERIFIED".into(),
+    };
+    snapshot.validate()?;
+    serde_json::to_value(snapshot).map_err(|_| error("serialization_failed"))
+}
+
+/// Prepare an ordinary link input without inventing acceptance or copying the
+/// resource ledger. The exact original receipt remains the resource authority.
+pub fn prepare_outcome(
+    snapshot: &Value,
+    receipt: &Value,
+    receipt_sha256: &str,
+) -> Result<Value, ContractError> {
+    let snapshot: Snapshot =
+        serde_json::from_value(snapshot.clone()).map_err(|_| error("invalid_snapshot"))?;
+    snapshot.validate()?;
+    delivery::validate_receipt(receipt)?;
+    if receipt["unit_hash"] != snapshot.unit_hash
+        || receipt["cohort_sha256"] != snapshot.cohort_sha256
+        || receipt["phase"] != snapshot.phase
+    {
+        return Err(error("snapshot_receipt_mismatch"));
+    }
+    let completed = receipt["completed_at_utc"]
+        .as_str()
+        .ok_or_else(|| error("invalid_link_timestamp"))?;
+    if DateTime::parse_from_rfc3339(&snapshot.captured_at_utc)
+        .map_err(|_| error("invalid_snapshot_timestamp"))?
+        > DateTime::parse_from_rfc3339(completed).map_err(|_| error("invalid_link_timestamp"))?
+    {
+        return Err(error("snapshot_after_delivery"));
+    }
+    let input = json!({"kind":"groundline-learning-link-input", "schema":1,
+        "receipt_sha256":receipt_sha256,"unit_hash":snapshot.unit_hash,
+        "cohort_sha256":snapshot.cohort_sha256,"phase":snapshot.phase,
+        "completed_at_utc":completed,"observed_at_utc":snapshot.captured_at_utc,
+        "environment_revision":snapshot.environment_revision,"skill":snapshot.skill,
+        "source_revision":snapshot.source_revision,"runtime":snapshot.runtime,
+        "correction_kind":"unknown","correction_evidence_sha256":null});
+    link_outcome(&input, receipt, receipt_sha256)?;
+    Ok(input)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AnalysisResources {
     pub unit_hash: String,
     pub resources: delivery::Resources,
@@ -236,7 +406,7 @@ pub struct SourceObservation {
 }
 
 impl SourceObservation {
-    fn validate(&self) -> Result<(), ContractError> {
+    pub fn validate(&self) -> Result<(), ContractError> {
         // A maintained URL parser handles authority, userinfo, ports, and host
         // normalization; string-prefix checks would accept lookalike domains.
         let url = url::Url::parse(&self.url).map_err(|_| error("invalid_source"))?;
@@ -261,7 +431,7 @@ impl SourceObservation {
             || self
                 .model
                 .as_ref()
-                .is_some_and(|m| !crate::model::optimization_model(m))
+                .is_some_and(|m| crate::model::identity_kind(m) != "public_model_id")
             || self.affected_target_ids.is_empty()
             || self.affected_target_ids.len() > MAX_EVIDENCE_REFS
             || self
@@ -421,6 +591,351 @@ pub struct EvaluationInput {
     pub proposal_revision: String,
     pub baseline_refs: Vec<String>,
     pub followup_refs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Decision {
+    pub kind: String,
+    pub schema: u8,
+    pub proposal_id: String,
+    pub proposal_sha256: String,
+    pub decision: String,
+    pub reason: String,
+    pub evidence_refs: Vec<String>,
+    pub evaluation_sha256: Option<String>,
+    pub previous_decision_sha256: Option<String>,
+    pub recorded_at_utc: Option<String>,
+}
+
+impl Decision {
+    pub fn validate(&self) -> Result<(), ContractError> {
+        let mut refs = BTreeSet::new();
+        if ![
+            "groundline-learning-decision-input",
+            "groundline-learning-decision",
+        ]
+        .contains(&self.kind.as_str())
+            || self.schema != 1
+            || !identifier(&self.proposal_id)
+            || !digest(&self.proposal_sha256)
+            || !["adopt", "hold", "reject"].contains(&self.decision.as_str())
+            || !text(&self.reason)
+            || self.evidence_refs.is_empty()
+            || self.evidence_refs.len() > MAX_EVIDENCE_REFS
+            || self
+                .evidence_refs
+                .iter()
+                .any(|r| !digest(r) || !refs.insert(r))
+            || [&self.evaluation_sha256, &self.previous_decision_sha256]
+                .into_iter()
+                .flatten()
+                .any(|r| !digest(r))
+            || (self.decision == "adopt" && self.evaluation_sha256.is_none())
+            || (self.kind == "groundline-learning-decision") != self.recorded_at_utc.is_some()
+        {
+            return Err(error("invalid_decision"));
+        }
+        if let Some(timestamp) = &self.recorded_at_utc {
+            let recorded = DateTime::parse_from_rfc3339(timestamp)
+                .map_err(|_| error("invalid_decision_timestamp"))?;
+            if recorded.with_timezone(&Utc) > Utc::now() + chrono::Duration::minutes(5) {
+                return Err(error("invalid_decision_timestamp"));
+            }
+        }
+        Ok(())
+    }
+}
+
+pub fn validate_decision_references(
+    decision: &Decision,
+    records: &[Value],
+) -> Result<(), ContractError> {
+    decision.validate()?;
+    let hashes: BTreeMap<String, &Value> = records
+        .iter()
+        .map(|v| Ok((content_sha256(v)?, v)))
+        .collect::<Result<_, ContractError>>()?;
+    let candidate = hashes
+        .get(&decision.proposal_sha256)
+        .filter(|v| {
+            v["kind"] == "groundline-learning-proposal"
+                && v["status"] == "candidate"
+                && v["proposal_id"] == decision.proposal_id
+        })
+        .ok_or_else(|| error("decision_candidate_missing"))?;
+    let mut allowed = BTreeSet::from([decision.proposal_sha256.clone()]);
+    for reference in candidate["evidence_refs"].as_array().into_iter().flatten() {
+        allowed.insert(
+            reference
+                .as_str()
+                .ok_or_else(|| error("invalid_proposal"))?
+                .into(),
+        );
+    }
+    let mut evaluations = BTreeSet::new();
+    for (hash, record) in &hashes {
+        if record["kind"] == "groundline-learning-evaluation-record"
+            && record["proposal_sha256"] == decision.proposal_sha256
+            && record["input"]["proposal_id"] == decision.proposal_id
+        {
+            allowed.insert(hash.clone());
+            evaluations.insert(hash.clone());
+            for reference in record["input"]["baseline_refs"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .chain(
+                    record["input"]["followup_refs"]
+                        .as_array()
+                        .into_iter()
+                        .flatten(),
+                )
+            {
+                allowed.insert(
+                    reference
+                        .as_str()
+                        .ok_or_else(|| error("invalid_evaluation"))?
+                        .into(),
+                );
+            }
+        }
+    }
+    if decision.evidence_refs.iter().any(|r| !allowed.contains(r))
+        || decision
+            .evaluation_sha256
+            .as_ref()
+            .is_some_and(|r| !evaluations.contains(r))
+    {
+        return Err(error("decision_evidence_unlinked"));
+    }
+    if let Some(previous) = &decision.previous_decision_sha256 {
+        let previous = hashes
+            .get(previous)
+            .ok_or_else(|| error("decision_history_conflict"))?;
+        if previous["kind"] != "groundline-learning-decision"
+            || previous["proposal_sha256"] != decision.proposal_sha256
+        {
+            return Err(error("decision_history_conflict"));
+        }
+    }
+    Ok(())
+}
+
+/// A single explicit decision chain per candidate; forks and disconnected
+/// histories fail closed instead of choosing an arbitrary file ordering.
+pub fn decision_head(
+    records: &[Value],
+    proposal_sha256: &str,
+) -> Result<Option<String>, ContractError> {
+    let mut children = BTreeMap::new();
+    for record in records {
+        if record["kind"] != "groundline-learning-decision"
+            || record["proposal_sha256"] != proposal_sha256
+        {
+            continue;
+        }
+        let decision: Decision =
+            serde_json::from_value(record.clone()).map_err(|_| error("invalid_decision"))?;
+        decision.validate()?;
+        if children
+            .insert(decision.previous_decision_sha256, content_sha256(record)?)
+            .is_some()
+        {
+            return Err(error("decision_history_conflict"));
+        }
+    }
+    let mut head = None;
+    let mut seen = BTreeSet::new();
+    while let Some(next) = children.get(&head) {
+        if !seen.insert(next.clone()) {
+            return Err(error("decision_history_conflict"));
+        }
+        head = Some(next.clone());
+    }
+    if seen.len() != children.len() {
+        return Err(error("decision_history_conflict"));
+    }
+    Ok(head)
+}
+
+pub fn prepare_decision(
+    input: &Value,
+    records: &[Value],
+    now: &str,
+) -> Result<Value, ContractError> {
+    let mut decision: Decision =
+        serde_json::from_value(input.clone()).map_err(|_| error("invalid_decision"))?;
+    if decision.kind != "groundline-learning-decision-input" {
+        return Err(error("invalid_decision"));
+    }
+    decision.evidence_refs.sort();
+    validate_decision_references(&decision, records)?;
+    let normalized = serde_json::to_value(&decision).map_err(|_| error("serialization_failed"))?;
+    for record in records {
+        if record["kind"] == "groundline-learning-decision" {
+            let mut prior: Decision =
+                serde_json::from_value(record.clone()).map_err(|_| error("invalid_decision"))?;
+            prior.kind = "groundline-learning-decision-input".into();
+            prior.recorded_at_utc = None;
+            prior.evidence_refs.sort();
+            if serde_json::to_value(prior).map_err(|_| error("serialization_failed"))? == normalized
+            {
+                return Ok(record.clone());
+            }
+        }
+    }
+    if decision_head(records, &decision.proposal_sha256)? != decision.previous_decision_sha256 {
+        return Err(error("decision_history_conflict"));
+    }
+    decision.kind = "groundline-learning-decision".into();
+    decision.recorded_at_utc = Some(now.into());
+    decision.validate()?;
+    serde_json::to_value(decision).map_err(|_| error("serialization_failed"))
+}
+
+fn operation_targets_proposal(proposal: &Proposal, operation: &Value) -> bool {
+    operation["kind"] == "groundline-environment-operation"
+        && operation["schema"] == 1
+        && operation["native_activation"] == "UNVERIFIED"
+        && operation["proposal_id"] == proposal.proposal_id
+        && operation["basis_revision"] == proposal.basis_revision
+        && operation["plan_sha256"] == proposal.plan_sha256
+        && proposal
+            .source_revision
+            .as_ref()
+            .is_none_or(|r| operation["source_revision"] == *r)
+        && proposal.target.as_ref().is_some_and(|target| {
+            let matching: Vec<&Value> = operation["entries"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|entry| entry["target_id"] == target.target_id)
+                .collect();
+            matching.len() == 1
+                && operation["authority_ref"] == target.authority_ref
+                && if operation["action"] == "rollback" {
+                    matching[0]["before_sha256"] == target.after_sha256
+                        && matching[0]["after_sha256"] == target.before_sha256
+                } else {
+                    matching[0]["before_sha256"] == target.before_sha256
+                        && matching[0]["after_sha256"] == target.after_sha256
+                }
+        })
+}
+
+pub fn operation_applies_to_proposal(proposal: &Proposal, operation: &Value) -> bool {
+    operation_targets_proposal(proposal, operation)
+        && operation["action"] == "apply"
+        && operation["status"] == "APPLIED"
+        && operation["entries"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|entry| {
+                proposal
+                    .target
+                    .as_ref()
+                    .is_some_and(|target| entry["target_id"] == target.target_id)
+                    && entry["status"] == "APPLIED"
+            })
+}
+
+/// Structured observations and explicit decisions stay separate. The caller
+/// validates private operation files; an evaluation alone cannot infer application.
+pub fn candidate_readouts(
+    records: &[Value],
+    operations: &[(String, Value)],
+) -> Result<Vec<Value>, ContractError> {
+    let mut candidates = Vec::new();
+    for candidate in records
+        .iter()
+        .filter(|v| v["kind"] == "groundline-learning-proposal" && v["status"] == "candidate")
+    {
+        let proposal: Proposal =
+            serde_json::from_value(candidate.clone()).map_err(|_| error("invalid_proposal"))?;
+        proposal.validate()?;
+        let hash = content_sha256(candidate)?;
+        let observed: Vec<_> = operations
+            .iter()
+            .filter(|(_, op)| op["proposal_id"] == proposal.proposal_id)
+            .collect();
+        let matching: Vec<_> = observed
+            .iter()
+            .filter(|(_, op)| {
+                operation_targets_proposal(&proposal, op)
+                    && (op["action"] != "rollback"
+                        || observed.iter().any(|(_, original)| {
+                            original["operation_id"].as_str().is_some()
+                                && original["operation_id"] == op["original_operation_id"]
+                                && original["action"] == "apply"
+                                && operation_targets_proposal(&proposal, original)
+                        }))
+            })
+            .collect();
+        let rollback = matching.iter().any(|(_, op)| op["action"] == "rollback");
+        let application = if rollback {
+            if matching
+                .iter()
+                .any(|(_, op)| op["action"] == "rollback" && op["status"] == "ROLLED_BACK")
+            {
+                "ROLLED_BACK"
+            } else {
+                "ROLLBACK_UNRESOLVED"
+            }
+        } else if matching
+            .iter()
+            .any(|(_, op)| operation_applies_to_proposal(&proposal, op))
+        {
+            "APPLIED"
+        } else if matching.iter().any(|(_, op)| op["status"] == "PARTIAL") {
+            "PARTIAL"
+        } else if matching.iter().any(|(_, op)| op["status"] == "PREPARED") {
+            "PREPARED"
+        } else {
+            "UNOBSERVED"
+        };
+        let evaluations: Vec<_> = records.iter().filter(|v| v["kind"] == "groundline-learning-evaluation-record" && v["proposal_sha256"] == hash)
+            .map(|v| Ok(json!({"evaluation_sha256":content_sha256(v)?,"status":v["result"]["status"],
+                "comparison_reasons":v["result"]["comparison_reasons"],
+                "analysis_attempt_resources_complete":v["result"]["analysis_attempt_resources"]["complete"]})))
+            .collect::<Result<_, ContractError>>()?;
+        let pending = application == "APPLIED"
+            && (evaluations.is_empty()
+                || evaluations.iter().all(|v| v["status"] == "INCONCLUSIVE"));
+        let head = decision_head(records, &hash)?;
+        let decision = head.as_ref().map(|head| {
+            let record = records.iter().find(|v| content_sha256(v).ok().as_ref() == Some(head)).ok_or_else(|| error("decision_history_conflict"))?;
+            Ok::<_, ContractError>(json!({"decision_sha256":head,"decision":record["decision"],
+                "reason_sha256":content_sha256(&record["reason"])?,"evidence_refs":record["evidence_refs"],
+                "evaluation_sha256":record["evaluation_sha256"],"recorded_at_utc":record["recorded_at_utc"]}))
+        }).transpose()?;
+        let mut analyses = vec![proposal.analysis.clone()];
+        for record in records {
+            let failed = record["kind"] == "groundline-learning-proposal"
+                && record["status"] == "failed"
+                && record["evidence_refs"] == candidate["evidence_refs"]
+                && record["scope_sha256"] == proposal.scope_sha256
+                && record["basis_revision"] == proposal.basis_revision
+                && record["source_revision"] == candidate["source_revision"];
+            let duplicate = record["kind"] == "groundline-learning-duplicate-attempt"
+                && record["duplicate_of_sha256"] == hash;
+            if failed || duplicate {
+                analyses.push(
+                    serde_json::from_value::<Option<AnalysisResources>>(record["analysis"].clone())
+                        .map_err(|_| error("invalid_analysis_resources"))?,
+                );
+            }
+        }
+        candidates.push(json!({"proposal_id":proposal.proposal_id,"proposal_sha256":hash,"plan_sha256":proposal.plan_sha256,
+            "application":{"state":application,"operation_sha256s":matching.iter().map(|(hash,_)| hash).collect::<Vec<_>>(),
+                "unmatched_operation_count":observed.len()-matching.len()},
+            "evaluation_pending":pending,"evaluations":evaluations,"declared_decision":decision,
+            "analysis_attempt_resources":summarize_analysis(&analyses,&[])?,
+            "native_activation":"UNVERIFIED","causal_effect_verified":false,"efficiency_improvement_verified":false}));
+    }
+    candidates.sort_by(|a, b| a["proposal_id"].as_str().cmp(&b["proposal_id"].as_str()));
+    Ok(candidates)
 }
 
 fn unknown_analysis() -> Value {
@@ -620,33 +1135,7 @@ pub fn evaluate(
     }
     // The CLI first applies the environment layer's structural operation
     // validator. This function checks semantic binding, never authentication.
-    if operation["kind"] != "groundline-environment-operation"
-        || operation["schema"] != 1
-        || operation["native_activation"] != "UNVERIFIED"
-        || operation["action"] != "apply"
-        || operation["proposal_id"] != proposal.proposal_id
-        || operation["basis_revision"] != proposal.basis_revision
-        || operation["plan_sha256"] != proposal.plan_sha256
-        || operation["status"] != "APPLIED"
-        || proposal
-            .source_revision
-            .as_ref()
-            .is_some_and(|r| operation["source_revision"] != *r)
-        || proposal.target.as_ref().is_none_or(|target| {
-            let Some(entries) = operation["entries"].as_array() else {
-                return true;
-            };
-            let matching: Vec<&Value> = entries
-                .iter()
-                .filter(|entry| entry["target_id"] == target.target_id)
-                .collect();
-            matching.len() != 1
-                || operation["authority_ref"] != target.authority_ref
-                || matching[0]["before_sha256"] != target.before_sha256
-                || matching[0]["after_sha256"] != target.after_sha256
-                || matching[0]["status"] != "APPLIED"
-        })
-    {
+    if !operation_applies_to_proposal(&proposal, operation) {
         reasons.insert("operation_not_applied_to_proposal");
     }
     let expected_link = &baseline_links[0];
@@ -938,6 +1427,180 @@ mod tests {
             p.source.as_mut().unwrap().url = url.into();
             assert_eq!(p.validate().unwrap_err().0, "learning_invalid_source");
         }
+    }
+
+    #[test]
+    fn official_source_accepts_future_public_identity_without_expanding_routing() {
+        let mut source = SourceObservation {
+            url: "https://developers.openai.com/".into(),
+            checked_at_utc: "2026-10-01T10:00:00Z".into(),
+            content_sha256: h(10),
+            model: Some("gpt-7-sol".into()),
+            runtime: None,
+            affected_target_ids: vec!["existing-skill".into()],
+        };
+        source.validate().unwrap();
+        assert!(!crate::model::optimization_model("gpt-7-sol"));
+        for model in [
+            "custom-company-model",
+            "sol",
+            "unknown",
+            &format!("private-{}", h(1)),
+        ] {
+            source.model = Some(model.into());
+            assert_eq!(source.validate().unwrap_err().0, "learning_invalid_source");
+        }
+    }
+
+    #[test]
+    fn snapshot_prepare_preserves_historical_context_and_exact_receipt_scope() {
+        let input = json!({"kind":"groundline-learning-capture-input", "schema":1,
+            "unit_hash":h(1), "cohort_sha256":h(90), "phase":"implementation", "runtime":null});
+        let context = json!({"environment_revision":null,"source_revision":"official-1",
+            "target_id":"existing-skill","skill_revision":h(82),"provenance_sha256":h(50)});
+        let snapshot = capture_snapshot(&input, &context, &h(51), "2026-10-01T11:00:00Z").unwrap();
+        let before = snapshot.clone();
+        let prepared = prepare_outcome(&snapshot, &receipt(1), &h(401)).unwrap();
+        assert_eq!(snapshot, before);
+        assert_eq!(prepared["environment_revision"], Value::Null);
+        assert_eq!(prepared["source_revision"], "official-1");
+        assert_eq!(prepared["skill"]["revision"], h(82));
+        assert_eq!(prepared["correction_kind"], "unknown");
+        assert!(prepared.get("resources").is_none());
+        assert_eq!(
+            prepare_outcome(&snapshot, &receipt(2), &h(402))
+                .unwrap_err()
+                .0,
+            "learning_snapshot_receipt_mismatch"
+        );
+        let mut changed = snapshot.clone();
+        changed["captured_at_utc"] = json!("2026-10-01T12:01:00Z");
+        assert_eq!(
+            prepare_outcome(&changed, &receipt(1), &h(401))
+                .unwrap_err()
+                .0,
+            "learning_snapshot_after_delivery"
+        );
+        let mut invalid_input = input.clone();
+        invalid_input["source_revision"] = json!("invented-source");
+        assert_eq!(
+            capture_snapshot(&invalid_input, &context, &h(51), "2026-10-01T11:00:00Z")
+                .unwrap_err()
+                .0,
+            "learning_invalid_capture_input"
+        );
+        invalid_input = input;
+        invalid_input["captured_at_utc"] = json!("2026-10-01T11:00:00Z");
+        assert!(
+            capture_snapshot(&invalid_input, &context, &h(51), "2026-10-01T11:00:00Z").is_err()
+        );
+    }
+
+    #[test]
+    fn candidate_readout_requires_actual_operation_and_keeps_unknown_evaluation_costs() {
+        let (input, p, links, receipts, mut operation) = evaluation();
+        let proposal_sha = content_sha256(&p).unwrap();
+        operation["operation_id"] = json!("op-skill-trigger-1");
+        let result = evaluate(&input, &p, &links, &receipts, &operation).unwrap();
+        let record = json!({"kind":"groundline-learning-evaluation-record","schema":1,
+            "input":input,"proposal_sha256":proposal_sha,"operation_sha256":h(998),"result":result});
+        let mut records = links;
+        records.push(p);
+        records.push(record);
+        let readout = &candidate_readouts(&records, &[]).unwrap()[0];
+        assert_eq!(readout["application"]["state"], "UNOBSERVED");
+        assert_eq!(readout["evaluations"][0]["status"], "INCONCLUSIVE");
+        assert_eq!(readout["analysis_attempt_resources"]["complete"], false);
+        assert!(readout["analysis_attempt_resources"]["additional_owned_total_tokens"].is_null());
+        operation["status"] = json!("PREPARED");
+        let operations = vec![(h(998), operation.clone())];
+        assert_eq!(
+            candidate_readouts(&records, &operations).unwrap()[0]["application"]["state"],
+            "PREPARED"
+        );
+        operation["status"] = json!("APPLIED");
+        let mut operations = vec![(h(998), operation.clone())];
+        let readout = &candidate_readouts(&records, &operations).unwrap()[0];
+        assert_eq!(readout["application"]["state"], "APPLIED");
+        assert_eq!(readout["evaluation_pending"], true);
+        let mut rollback = operation;
+        rollback["action"] = json!("rollback");
+        rollback["operation_id"] = json!("rollback-1");
+        rollback["original_operation_id"] = json!("op-skill-trigger-1");
+        rollback["status"] = json!("ROLLED_BACK");
+        rollback["entries"][0]["before_sha256"] = json!(h(83));
+        rollback["entries"][0]["after_sha256"] = json!(h(82));
+        operations.push((h(999), rollback));
+        assert_eq!(
+            candidate_readouts(&records, &operations).unwrap()[0]["application"]["state"],
+            "ROLLED_BACK"
+        );
+        operations.remove(0);
+        assert_eq!(
+            candidate_readouts(&records, &operations).unwrap()[0]["application"]["state"],
+            "UNOBSERVED"
+        );
+    }
+
+    #[test]
+    fn decisions_require_linked_evaluations_and_preserve_single_explicit_history() {
+        let (input, p, links, receipts, operation) = evaluation();
+        let proposal_sha = content_sha256(&p).unwrap();
+        let result = evaluate(&input, &p, &links, &receipts, &operation).unwrap();
+        let evaluation = json!({"kind":"groundline-learning-evaluation-record","schema":1,
+            "input":input,"proposal_sha256":proposal_sha,"operation_sha256":h(998),"result":result});
+        let evaluation_sha = content_sha256(&evaluation).unwrap();
+        let mut records = links;
+        records.push(p);
+        let mut input = json!({"kind":"groundline-learning-decision-input","schema":1,
+            "proposal_id":"skill-trigger-1","proposal_sha256":proposal_sha,"decision":"adopt",
+            "reason":"Explicit bounded trial","evidence_refs":[proposal_sha],
+            "evaluation_sha256":evaluation_sha,"previous_decision_sha256":null});
+        assert_eq!(
+            prepare_decision(&input, &records, "2026-10-01T12:10:00Z")
+                .unwrap_err()
+                .0,
+            "learning_decision_evidence_unlinked"
+        );
+        input["decision"] = json!("hold");
+        input["evaluation_sha256"] = Value::Null;
+        let hold = prepare_decision(&input, &records, "2026-10-01T12:10:00Z").unwrap();
+        let hold_sha = content_sha256(&hold).unwrap();
+        records.push(hold.clone());
+        assert_eq!(
+            prepare_decision(&input, &records, "2026-10-01T12:11:00Z").unwrap(),
+            hold
+        );
+        let hold_input = input.clone();
+        input["decision"] = json!("reject");
+        assert_eq!(
+            prepare_decision(&input, &records, "2026-10-01T12:11:00Z")
+                .unwrap_err()
+                .0,
+            "learning_decision_history_conflict"
+        );
+        records.push(evaluation);
+        input["decision"] = json!("adopt");
+        input["previous_decision_sha256"] = json!(hold_sha);
+        input["evaluation_sha256"] = json!(evaluation_sha);
+        input["evidence_refs"] = json!([proposal_sha, evaluation_sha]);
+        let adopt = prepare_decision(&input, &records, "2026-10-01T12:12:00Z").unwrap();
+        let adopt_sha = content_sha256(&adopt).unwrap();
+        records.push(adopt);
+        assert_eq!(
+            decision_head(&records, &proposal_sha).unwrap(),
+            Some(adopt_sha.clone())
+        );
+        assert_eq!(
+            prepare_decision(&hold_input, &records, "2026-10-01T12:13:00Z").unwrap(),
+            hold
+        );
+        let readout = &candidate_readouts(&records, &[]).unwrap()[0];
+        assert_eq!(readout["declared_decision"]["decision"], "adopt");
+        assert_eq!(readout["declared_decision"]["decision_sha256"], adopt_sha);
+        assert_eq!(readout["evaluations"][0]["status"], "INCONCLUSIVE");
+        assert_eq!(readout["application"]["state"], "UNOBSERVED");
+        assert_eq!(readout["efficiency_improvement_verified"], false);
     }
 
     #[test]

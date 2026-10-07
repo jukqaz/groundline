@@ -3,7 +3,7 @@
 use clap::Subcommand;
 use groundline_contracts::ContractError;
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
@@ -61,6 +61,81 @@ pub(crate) enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Export only the common baseline, its lineage and registered desired content.
+    Export {
+        #[arg(long)]
+        state_dir: PathBuf,
+        #[arg(long)]
+        proposal: Option<PathBuf>,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inspect a pinned private bundle against explicitly supplied local bindings.
+    InspectBundle {
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        bundle_sha256: String,
+        #[arg(long)]
+        bindings: PathBuf,
+        #[arg(long)]
+        state_dir: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Adopt a pinned baseline without writing targets or merging divergent history.
+    Import {
+        #[arg(long)]
+        state_dir: PathBuf,
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        bundle_sha256: String,
+        #[arg(long)]
+        bindings: PathBuf,
+        #[arg(long)]
+        authority_ref: String,
+        #[arg(
+            long,
+            conflicts_with = "expected_revision",
+            required_unless_present = "expected_revision"
+        )]
+        new_device: bool,
+        #[arg(long, requires = "expected_exception_revision")]
+        expected_revision: Option<String>,
+        #[arg(long, requires = "expected_revision", conflicts_with = "new_device")]
+        expected_exception_revision: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Save an existing apply/rollback plan using an already imported bundle.
+    PlanBundle {
+        #[arg(long)]
+        state_dir: PathBuf,
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        bundle_sha256: String,
+        #[arg(long)]
+        proposal_id: String,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// Read observed local revisions for learning; content and private paths stay private.
+pub(crate) fn learning_context(state: &Path, target_id: &str) -> Result<Value, ContractError> {
+    #[cfg(unix)]
+    {
+        state::learning_context(state, target_id)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (state, target_id);
+        Err(ContractError("environment_unsupported_platform".into()))
+    }
 }
 
 #[cfg(unix)]

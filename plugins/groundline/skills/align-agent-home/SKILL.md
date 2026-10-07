@@ -16,7 +16,8 @@ Choose only the affected verification route:
 - **Requested personal environment alignment:** use
   [adaptive environment](../../references/adaptive-environment.md) to establish
   common intent, host exceptions, scoped changes and actual App/PATH loading.
-  Use existing native repair paths; persistent synchronization is not implemented.
+  Use portable private bundles with local bindings for requested cross-device
+  alignment; retain the existing native settings repair paths.
 
 - **Package installation or verification:** resolve the installed executable through
   [platform commands](../../references/platform-commands.md) and use

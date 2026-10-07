@@ -5,6 +5,8 @@ alignment. Connect observations, actual delivery outcomes and relevant official
 model guidance to a reviewed personal baseline, then verify its next results.
 This source provides audit, delivery, comparison, bounded settings repair and
 the [private environment and learning CLI](https://github.com/jukqaz/groundline/blob/main/docs/adaptive-environment-implementation.md).
+For the low-friction capture, candidate tracking, official snapshot comparison
+and portable bundle flow, use [the learning loop](learning-loop.md).
 Check the installed binary's commands before using it; source implementation
 does not prove installed-plugin activation or later workflow improvement.
 
