@@ -3,10 +3,19 @@
 Read this reference when a skill needs a GroundLine or Codex CLI command.
 Do not run every example as a routine preflight.
 
-Resolve `GROUNDLINE_ROOT` from the installed skill file: the directory two
-levels above its containing skill directory. Do not use the current repository
-or another plugin's root. Resolve `GROUNDLINE_BIN` under that root using the
-verified execution platform:
+For a skill inside the installed plugin, `GROUNDLINE_ROOT` is the directory two
+levels above its containing skill directory. A user-owned copy under
+`.agents/skills` or `.codex/skills` does not have that layout. For such a copy,
+use the actual Codex executable's `plugin list --marketplace groundline --json`
+and select exactly the installed `groundline@groundline` entry. Resolve its
+reported version under the active Codex home's
+`plugins/cache/groundline/groundline/<version>` directory. Respect `CODEX_HOME`
+when set; otherwise use the OS user's `.codex` directory. Do not guess a latest
+version, use the marketplace checkout as a runtime, or fall back to the current
+repository or another plugin's root.
+
+Check that the candidate plugin manifest has the same name and version, then
+resolve `GROUNDLINE_BIN` under that root using the verified execution platform:
 
 | System | Architecture | Relative executable |
 | --- | --- | --- |
@@ -18,7 +27,10 @@ Intel macOS is unsupported. On Apple Silicon, a Rosetta shell still uses the
 ARM64 package. Use the native host architecture, not an emulated shell's architecture. Check
 that the file exists and is executable before invoking it. If the installed
 artifact is missing, report that lane unavailable; do not silently run a source
-build or an unrelated binary on `PATH`.
+build or an unrelated binary on `PATH`. Run that binary's
+`provider-smoke --plugin-root "$GROUNDLINE_ROOT" --require-installed --json`
+to verify the package and native installation before using a resolved copy.
+An installed or enabled flag alone does not prove active hooks or loaded guidance.
 
 In skill examples, replace the bare `groundline` name with this absolute path.
 Quote paths. POSIX shells can use `"$GROUNDLINE_BIN" <arguments>`. The examples

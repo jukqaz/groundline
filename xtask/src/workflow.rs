@@ -125,6 +125,7 @@ fn native_delivery_command_is_complete(line: &str) -> bool {
     let mut rest = args[7..].iter().copied();
     let (mut delivery, mut routing, mut adaptive) = (false, false, false);
     let (mut learning_loop, mut environment_sync, mut official_sources) = (false, false, false);
+    let mut learning_work = false;
     while let Some(arg) = rest.next() {
         match arg {
             "--lib" => {}
@@ -133,6 +134,7 @@ fn native_delivery_command_is_complete(line: &str) -> bool {
                 Some("routing_cli") => routing = true,
                 Some("adaptive_environment_cli") => adaptive = true,
                 Some("learning_loop_cli") => learning_loop = true,
+                Some("learning_work_cli") => learning_work = true,
                 Some("environment_sync_cli") => environment_sync = true,
                 Some("official_sources_cli") => official_sources = true,
                 Some("setup_cli" | "config_repair_cli" | "install_cli") => {}
@@ -145,6 +147,7 @@ fn native_delivery_command_is_complete(line: &str) -> bool {
                     && routing
                     && adaptive
                     && learning_loop
+                    && learning_work
                     && environment_sync
                     && official_sources
                     && rest.all(|arg| matches!(arg, "--show-output" | "--nocapture"));
@@ -152,7 +155,13 @@ fn native_delivery_command_is_complete(line: &str) -> bool {
             _ => return false,
         }
     }
-    delivery && routing && adaptive && learning_loop && environment_sync && official_sources
+    delivery
+        && routing
+        && adaptive
+        && learning_loop
+        && learning_work
+        && environment_sync
+        && official_sources
 }
 
 fn native_delivery_checks_are_required(workflow: &str) -> bool {
@@ -476,6 +485,7 @@ mod tests {
                 " --test routing_cli",
                 " --test adaptive_environment_cli",
                 " --test learning_loop_cli",
+                " --test learning_work_cli",
                 " --test environment_sync_cli",
                 " --test official_sources_cli",
             ] {

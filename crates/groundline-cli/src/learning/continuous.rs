@@ -5,7 +5,10 @@ use groundline_contracts::learning::continuous as contract;
 
 mod native_artifact;
 mod storage;
+#[path = "work.rs"]
+mod work;
 pub(super) use storage::{archived_record, load_archive_references};
+pub(super) use work::assess;
 
 fn codex_home(value: Option<&Path>) -> Result<PathBuf, ContractError> {
     absolute(
@@ -497,6 +500,11 @@ pub(super) fn validate_record(value: &Value) -> Result<(), ContractError> {
                 .map_err(|_| error("invalid_processing_record"))?
                 .validate()
         }
+        Some("groundline-learning-assessment") => {
+            serde_json::from_value::<contract::Assessment>(value.clone())
+                .map_err(|_| error("invalid_assessment"))?
+                .validate()
+        }
         Some("groundline-learning-task-start") => {
             let record: contract::TaskStartRecord =
                 serde_json::from_value(value.clone()).map_err(|_| error("invalid_task_start"))?;
@@ -537,6 +545,14 @@ pub(super) fn validate_record(value: &Value) -> Result<(), ContractError> {
                 ]
                 .into_iter()
                 .any(|v| !learning::digest(v))
+                || record
+                    .assessment_sha256
+                    .as_ref()
+                    .is_some_and(|v| !learning::digest(v))
+                || record
+                    .native_response_proof_sha256
+                    .as_ref()
+                    .is_some_and(|v| !learning::digest(v))
             {
                 return Err(error("invalid_task_outcome"));
             }
@@ -555,6 +571,14 @@ pub(super) fn validate_record(value: &Value) -> Result<(), ContractError> {
                 ]
                 .into_iter()
                 .any(|v| !learning::digest(v))
+                || record
+                    .assessment_sha256
+                    .as_ref()
+                    .is_some_and(|v| !learning::digest(v))
+                || record
+                    .native_response_proof_sha256
+                    .as_ref()
+                    .is_some_and(|v| !learning::digest(v))
             {
                 return Err(error("invalid_finalize_request"));
             }
@@ -573,8 +597,54 @@ pub(super) fn validate_collection(records: &[Value]) -> Result<(), ContractError
     let mut outcomes = BTreeMap::new();
     let mut boundaries = BTreeMap::new();
     let mut requests = BTreeMap::new();
+    let mut assessments = BTreeMap::new();
     for value in records {
         match value["kind"].as_str() {
+            Some("groundline-learning-assessment") => {
+                let task_hash = value["input"]["task_sha256"]
+                    .as_str()
+                    .ok_or_else(|| error("invalid_assessment"))?;
+                if assessments.insert(task_hash, value).is_some() {
+                    return Err(error("assessment_conflict"));
+                }
+                let task = hashes
+                    .get(task_hash)
+                    .copied()
+                    .filter(|v| v["kind"] == "groundline-learning-task-start")
+                    .ok_or_else(|| error("task_reference_missing"))?;
+                let boundary = reference(
+                    &hashes,
+                    task,
+                    "boundary_sha256",
+                    "groundline-learning-boundary",
+                )?;
+                let snapshot = reference(
+                    &hashes,
+                    task,
+                    "snapshot_sha256",
+                    "groundline-learning-snapshot",
+                )?;
+                let submitted = contract::timestamp(
+                    value["submitted_at_utc"]
+                        .as_str()
+                        .ok_or_else(|| error("invalid_assessment"))?,
+                )?;
+                if submitted
+                    < contract::timestamp(
+                        boundary["observed_at_utc"]
+                            .as_str()
+                            .ok_or_else(|| error("invalid_boundary"))?,
+                    )?
+                    || submitted
+                        < contract::timestamp(
+                            snapshot["captured_at_utc"]
+                                .as_str()
+                                .ok_or_else(|| error("invalid_snapshot"))?,
+                        )?
+                {
+                    return Err(error("assessment_before_task"));
+                }
+            }
             Some("groundline-learning-boundary") => {
                 let id = value["boundary_id"]
                     .as_str()
@@ -642,6 +712,7 @@ pub(super) fn validate_collection(records: &[Value]) -> Result<(), ContractError
                 {
                     return Err(error("native_boundary_mismatch"));
                 }
+                work::validate_connection(&hashes, value, boundary, task)?;
             }
             Some("groundline-learning-task-outcome") => {
                 let task = reference(
@@ -679,6 +750,14 @@ pub(super) fn validate_collection(records: &[Value]) -> Result<(), ContractError
                 {
                     return Err(error("task_receipt_mismatch"));
                 }
+                work::validate_connection(
+                    &hashes,
+                    value,
+                    boundary,
+                    value["task_sha256"]
+                        .as_str()
+                        .ok_or_else(|| error("invalid_task_outcome"))?,
+                )?;
             }
             Some("groundline-learning-trial-authorization") => {
                 let proposal = reference(
@@ -1156,6 +1235,8 @@ pub(super) fn finalize(
         boundary_sha256,
         native,
         receipt_sha256: receipt_sha256.clone(),
+        assessment_sha256: None,
+        native_response_proof_sha256: None,
     })
     .map_err(|_| error("serialization_failed"))?;
     // The exact original bytes remain the receipt authority. A failed link is
@@ -1230,6 +1311,12 @@ fn finalize_request(
     let record = json!({"kind":"groundline-learning-task-outcome","schema":1,"input_sha256":request["input_sha256"],
         "task_sha256":request["input"]["task_sha256"],"boundary_sha256":request["boundary_sha256"],
         "native":request["native"],"receipt_sha256":receipt_sha256,"link_sha256":learning::content_sha256(&link)?});
+    let mut record = record;
+    for key in ["assessment_sha256", "native_response_proof_sha256"] {
+        if let Some(value) = request.get(key) {
+            record[key] = value.clone();
+        }
+    }
     state.append(&link)?;
     state.append(&record)?;
     Ok(record)
@@ -1580,20 +1667,31 @@ fn consume_inner(home: Option<&Path>) -> Result<Value, ContractError> {
         }) {
             continue;
         }
-        if let Some((_, receipt)) = receipts
-            .iter()
-            .find(|(h, _)| request["receipt_sha256"] == *h)
-        {
-            finalize_request(&request, receipt, &mut state)?;
+        let receipt =
+            match work::restore_generated_receipt(&profile, &state, &request, &mut receipts) {
+                Ok(Some(receipt)) => Some(receipt),
+                Ok(None) => receipts
+                    .iter()
+                    .find(|(h, _)| request["receipt_sha256"] == *h)
+                    .map(|(_, v)| v.clone()),
+                Err(_) => continue,
+            };
+        if let Some(receipt) = receipt {
+            if work::check_request_evidence(&state, &request, &receipt).is_err() {
+                continue;
+            }
+            finalize_request(&request, &receipt, &mut state)?;
             resumed += 1;
         }
     }
+    let assessments = work::consume_pending(&home, &profile, &mut state, &mut receipts)?;
     let reconciliations = reconcile_candidates(&mut state, &receipts, &operations)?;
     let mut out = readout(
         "CONSUMED",
         archived_boundaries != 0
             || archived_records != 0
             || resumed != 0
+            || assessments.iter().any(|v| v["mutation_performed"] == true)
             || reconciliations
                 .iter()
                 .any(|v| v["mutation_performed"] == true),
@@ -1602,6 +1700,8 @@ fn consume_inner(home: Option<&Path>) -> Result<Value, ContractError> {
     out["archived_record_count"] = json!(archived_records);
     out["resumed_finalize_count"] = json!(resumed);
     out["reconciliations"] = json!(reconciliations);
+    out["assessments"] = json!(assessments);
+    out["readiness"] = readiness::summarize(&state.records, &receipts)?;
     out["quality_inferred_from_boundaries"] = json!(false);
     out["capacity"] = json!({"active_records":state.records.len(),"record_limit":MAX_ENTRIES-2,
         "byte_limit":MAX_DIRECTORY_BYTES,"coverage_scope":"bounded_active_reference_closure","archive_coverage":"uninspected",
@@ -1964,6 +2064,7 @@ pub(super) fn patterns(home: Option<&Path>) -> Result<Value, ContractError> {
     }
     let mut out = readout("PATTERNS", false);
     out["patterns"] = json!(patterns);
+    out["readiness"] = readiness::summarize(&state.records, &receipts)?;
     out["automatic_candidate_generation"] = json!(false);
     out["coverage_scope"] = json!("bounded_active_reference_closure");
     out["historical_quality_coverage_complete"] = json!(false);

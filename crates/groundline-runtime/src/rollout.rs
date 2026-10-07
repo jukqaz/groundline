@@ -1,7 +1,13 @@
 //! Codex's on-disk representations share one bounded, read-only reader.
 
+use std::fs::{File, Metadata};
 use std::io::{self, BufRead, BufReader, Read};
-use std::path::{Path, PathBuf};
+use std::os::unix::fs::MetadataExt;
+use std::path::{Component, Path, PathBuf};
+use std::time::{Duration, Instant};
+
+use groundline_contracts::{ContractError, rollout::SourceDigest};
+use rustix::fs::{Mode, OFlags, open, openat};
 
 use crate::local_file::{open_bounded_regular_file, owned_by_current_user};
 
@@ -12,6 +18,321 @@ pub(crate) const MAX_AUDIT_SCAN_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 // Native compaction/context records can contain multi-megabyte unused blobs.
 // Their raw read is bounded separately from the 4 MiB retained projection.
 const MAX_AUDIT_RECORD_BYTES: u64 = 64 * 1024 * 1024;
+
+pub(crate) const NATIVE_SOURCE_BYTES: u64 = 512 * 1024 * 1024;
+pub(crate) const NATIVE_RECORD_BYTES: u64 = 64 * 1024 * 1024;
+pub(crate) const NATIVE_RECORDS: u64 = 1_000_000;
+pub(crate) const NATIVE_READ_BUDGET: Duration = Duration::from_secs(10);
+
+/// Held source bindings allow the task reader to recheck *all* sources after
+/// reading children, rather than only checking the root before child I/O.
+pub(crate) struct NativeSnapshot {
+    pub(crate) source_sha256: String,
+    pub(crate) bytes_read: u64,
+    pub(crate) expanded_bytes: u64,
+    pub(crate) records_scanned: u64,
+    path: PathBuf,
+    directory: File,
+    file: File,
+    before: Metadata,
+    parent_before: Metadata,
+}
+
+fn native_error(code: &str) -> ContractError {
+    ContractError(format!("learning_response_{code}"))
+}
+
+fn native_directory(path: &Path) -> Result<File, ContractError> {
+    if !path.is_absolute()
+        || path
+            .components()
+            .any(|c| matches!(c, Component::CurDir | Component::ParentDir))
+    {
+        return Err(native_error("invalid_path"));
+    }
+    let mut directory = File::from(
+        open(
+            "/",
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|_| native_error("source_unavailable"))?,
+    );
+    for component in path.components() {
+        if let Component::Normal(name) = component {
+            directory = File::from(
+                openat(
+                    &directory,
+                    name,
+                    OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                    Mode::empty(),
+                )
+                .map_err(|_| native_error("source_unavailable"))?,
+            );
+        }
+    }
+    Ok(directory)
+}
+
+fn same_native_file(before: &Metadata, after: &Metadata) -> bool {
+    before.dev() == after.dev()
+        && before.ino() == after.ino()
+        && before.len() == after.len()
+        && before.mtime() == after.mtime()
+        && before.mtime_nsec() == after.mtime_nsec()
+        && before.ctime() == after.ctime()
+        && before.ctime_nsec() == after.ctime_nsec()
+        && before.uid() == after.uid()
+        && before.gid() == after.gid()
+        && before.mode() == after.mode()
+        && after.nlink() == 1
+        && after.is_file()
+}
+
+impl NativeSnapshot {
+    pub(crate) fn recheck(&self) -> Result<(), ContractError> {
+        let after = self
+            .file
+            .metadata()
+            .map_err(|_| native_error("source_changed"))?;
+        let current = native_directory(
+            self.path
+                .parent()
+                .ok_or_else(|| native_error("invalid_path"))?,
+        )
+        .map_err(|_| native_error("source_changed"))?;
+        let held = self
+            .directory
+            .metadata()
+            .map_err(|_| native_error("source_changed"))?;
+        let bound = current
+            .metadata()
+            .map_err(|_| native_error("source_changed"))?;
+        if !same_native_file(&self.before, &after)
+            || held.dev() != bound.dev()
+            || held.ino() != bound.ino()
+            || bound.dev() != self.parent_before.dev()
+            || bound.ino() != self.parent_before.ino()
+            || bound.uid() != self.parent_before.uid()
+            || bound.gid() != self.parent_before.gid()
+            || bound.mode() != self.parent_before.mode()
+        {
+            return Err(native_error("source_changed"));
+        }
+        let rebound = File::from(
+            openat(
+                &current,
+                self.path
+                    .file_name()
+                    .ok_or_else(|| native_error("invalid_path"))?,
+                OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
+                Mode::empty(),
+            )
+            .map_err(|_| native_error("source_changed"))?,
+        );
+        if !same_native_file(
+            &self.before,
+            &rebound
+                .metadata()
+                .map_err(|_| native_error("source_changed"))?,
+        ) {
+            return Err(native_error("source_changed"));
+        }
+        Ok(())
+    }
+}
+
+struct NativeHashingReader<R> {
+    reader: R,
+    digest: SourceDigest,
+    bytes: u64,
+}
+
+impl<R: Read> Read for NativeHashingReader<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let count = self.reader.read(buffer)?;
+        self.digest.update(&buffer[..count]);
+        self.bytes += count as u64;
+        Ok(count)
+    }
+}
+
+pub(crate) fn read_owned_native(
+    path: &Path,
+    maximum_bytes: u64,
+    started: Instant,
+    mut accept: impl FnMut(serde_json::Value) -> Result<(), ContractError>,
+) -> Result<NativeSnapshot, ContractError> {
+    read_native(path, maximum_bytes, started, false, |record| {
+        accept(record)?;
+        Ok(false)
+    })
+}
+
+pub(crate) fn read_native_metadata(
+    path: &Path,
+    maximum_bytes: u64,
+) -> Result<(Option<serde_json::Value>, NativeSnapshot), ContractError> {
+    let mut metadata = None;
+    let snapshot = read_native(
+        path,
+        maximum_bytes.min(2 * 1024 * 1024),
+        Instant::now(),
+        true,
+        |record| {
+            if record["type"] == "session_meta" {
+                metadata = Some(record);
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        },
+    )?;
+    Ok((metadata, snapshot))
+}
+
+fn read_native(
+    path: &Path,
+    maximum_bytes: u64,
+    started: Instant,
+    prefix: bool,
+    mut accept: impl FnMut(serde_json::Value) -> Result<bool, ContractError>,
+) -> Result<NativeSnapshot, ContractError> {
+    if !path.is_absolute()
+        || path.as_os_str().len() > 4096
+        || path
+            .components()
+            .any(|c| matches!(c, Component::CurDir | Component::ParentDir))
+    {
+        return Err(native_error("invalid_path"));
+    }
+    let compressed = path.to_string_lossy().ends_with(".jsonl.zst");
+    if !compressed && path.extension().is_none_or(|v| v != "jsonl") {
+        return Err(native_error("invalid_path"));
+    }
+    let maximum_bytes = maximum_bytes.min(NATIVE_SOURCE_BYTES);
+    if maximum_bytes == 0 {
+        return Err(native_error("source_byte_limit_exceeded"));
+    }
+    let directory = native_directory(path.parent().ok_or_else(|| native_error("invalid_path"))?)?;
+    let parent_before = directory
+        .metadata()
+        .map_err(|_| native_error("source_unavailable"))?;
+    let owner = rustix::process::geteuid().as_raw();
+    if parent_before.uid() != owner || parent_before.mode() & 0o022 != 0 {
+        return Err(native_error("source_owner_required"));
+    }
+    let mut file = File::from(
+        openat(
+            &directory,
+            path.file_name()
+                .ok_or_else(|| native_error("invalid_path"))?,
+            OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
+            Mode::empty(),
+        )
+        .map_err(|_| native_error("source_unavailable"))?,
+    );
+    let before = file
+        .metadata()
+        .map_err(|_| native_error("source_unavailable"))?;
+    if !before.is_file()
+        || before.nlink() != 1
+        || before.uid() != owner
+        || before.mode() & 0o022 != 0
+        || before.len() == 0
+    {
+        return Err(native_error("source_owner_required"));
+    }
+    if !prefix && before.len() > maximum_bytes {
+        return Err(native_error("source_byte_limit_exceeded"));
+    }
+    let mut input = NativeHashingReader {
+        reader: Read::by_ref(&mut file).take(if prefix {
+            before.len().min(maximum_bytes)
+        } else {
+            before.len()
+        }),
+        digest: SourceDigest::default(),
+        bytes: 0,
+    };
+    let decoded: Box<dyn Read + '_> = if compressed {
+        let mut decoder = zstd::stream::read::Decoder::new(&mut input)
+            .map_err(|_| native_error("invalid_source"))?;
+        decoder
+            .window_log_max(26)
+            .map_err(|_| native_error("invalid_source"))?;
+        Box::new(decoder)
+    } else {
+        Box::new(&mut input)
+    };
+    let mut reader = BufReader::with_capacity(64 * 1024, decoded.take(maximum_bytes + 1));
+    let mut expanded_bytes = 0_u64;
+    let mut records_scanned = 0_u64;
+    let mut line = Vec::new();
+    loop {
+        if started.elapsed() > NATIVE_READ_BUDGET {
+            return Err(native_error("processing_budget_exceeded"));
+        }
+        line.clear();
+        let count = Read::by_ref(&mut reader)
+            .take(NATIVE_RECORD_BYTES + 1)
+            .read_until(b'\n', &mut line)
+            .map_err(|_| native_error("invalid_source"))?;
+        if count == 0 {
+            break;
+        }
+        expanded_bytes += count as u64;
+        records_scanned += 1;
+        if expanded_bytes > maximum_bytes {
+            return Err(native_error("source_byte_limit_exceeded"));
+        }
+        if count as u64 > NATIVE_RECORD_BYTES {
+            return Err(native_error("source_record_limit_exceeded"));
+        }
+        if records_scanned > NATIVE_RECORDS || (prefix && records_scanned > 1024) {
+            return Err(native_error("source_record_count_exceeded"));
+        }
+        if line.last() != Some(&b'\n') {
+            return Err(native_error("incomplete_source_record"));
+        }
+        let text = std::str::from_utf8(&line).map_err(|_| native_error("invalid_source"))?;
+        if text.trim().is_empty() {
+            continue;
+        }
+        if let Some(record) = groundline_contracts::rollout::Record::parse(text)
+            .map_err(|_| native_error("invalid_source"))?
+            && accept(
+                record
+                    .learning_projection()
+                    .map_err(|_| native_error("invalid_source_projection"))?,
+            )?
+        {
+            break;
+        }
+    }
+    drop(reader);
+    let bytes_read = input.bytes;
+    let source_sha256 = input.digest.finish();
+    if !prefix && bytes_read != before.len() {
+        return Err(native_error("source_changed"));
+    }
+    let snapshot = NativeSnapshot {
+        source_sha256,
+        bytes_read,
+        expanded_bytes,
+        records_scanned,
+        path: path.to_path_buf(),
+        directory,
+        file,
+        before,
+        parent_before,
+    };
+    snapshot.recheck()?;
+    if started.elapsed() > NATIVE_READ_BUDGET {
+        return Err(native_error("processing_budget_exceeded"));
+    }
+    Ok(snapshot)
+}
 
 pub(crate) fn read_audit_rollout(
     path: &Path,

@@ -78,6 +78,10 @@ For requested ongoing adaptation, [the learning loop](references/learning-loop.m
 connects capture and prepared outcome links to candidate readouts, official text
 snapshot comparison, and portable private guidance bundles. Native Codex remains
 the executor; explicit decisions and observed effectiveness stay separate.
+An enabled private learning profile connects a criterion declared before work
+to `learning assess` and the actual native end. The consumer records owned
+response costs; readiness shows pending work and missing evidence. Automatic
+connection does not establish improved quality or authorize candidate adoption.
 
 ## Privacy boundary
 

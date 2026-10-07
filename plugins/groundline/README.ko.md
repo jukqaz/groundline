@@ -74,6 +74,10 @@ groundline efficiency route --input routing.json --catalog native-models.json --
 요청한 지속 개선에는 [학습 루프](references/learning-loop.md)를 사용합니다. 당시 환경
 capture와 결과 연결 초안, 후보별 후속 상태, 공식 자료 snapshot 변경 확인, 비공개 지침
 bundle을 연결합니다. 명시 결정과 관측된 효과는 구분하고 실행은 native Codex가 담당합니다.
+활성화한 학습 프로필에서는 의미 있는 작업 시작에 완료 기준을 선언하고 검증 결과를
+`learning assess`로 제출합니다. 실제 종료 뒤 소비기가 소유 응답 비용과 결과를 연결하며,
+`learning patterns`의 readiness가 대기 기록과 빠진 근거를 보여줍니다. 자동 연결은
+품질 향상이나 후보 채택을 자동으로 판정하지 않습니다.
 
 ## 개인정보 경계
 

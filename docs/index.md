@@ -8,6 +8,7 @@
 | Choose Core, Insights, or both | [Integration boundaries](integrations.md) |
 | Audit and compare actual work | [CLI examples](examples.md) |
 | Connect work, guidance changes, and devices | [Learning loop](../plugins/groundline/references/learning-loop.md), [implementation](adaptive-environment-implementation.md) |
+| Connect direct outcomes and owned response costs | [Design and completion criteria](goal-completion-design.md) |
 | Check Codex runtime compatibility | [Compatibility](codex-compatibility.md) |
 | Build an owner-operated server | [Self-hosting](self-hosting.md) |
 | Diagnose collection and server state | [Operations](insights-operations.md) |

@@ -11,6 +11,7 @@ audit-store = [
   "dep:chrono",
   "dep:dirs",
   "groundline-contracts/audit",
+  "groundline-contracts/efficiency",
   "dep:rusqlite",
   "dep:serde",
   "dep:serde_json",
@@ -47,7 +48,7 @@ insights-state = [
 chrono = { workspace = true, optional = true }
 command-group = { workspace = true, optional = true }
 dirs = { workspace = true, optional = true }
-groundline-contracts = { version = "2026.1007.2", path = "../groundline-contracts", default-features = false }
+groundline-contracts = { version = "2026.1008.1", path = "../groundline-contracts", default-features = false }
 ipnet = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 rusqlite = { workspace = true, optional = true }

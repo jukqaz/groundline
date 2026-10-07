@@ -19,6 +19,7 @@ const MAX_ENTRIES: usize = 1000;
 const MAX_DIRECTORY_BYTES: usize = 16 * 1024 * 1024;
 
 mod continuous;
+mod readiness;
 pub(crate) use continuous::{
     application_evaluations, authorize_application, default_application_check,
 };
@@ -75,6 +76,17 @@ pub(crate) enum Command {
         manifest: Option<PathBuf>,
         #[arg(long)]
         native_artifact: Option<PathBuf>,
+        #[arg(long)]
+        correction_evidence: Option<PathBuf>,
+        #[arg(long)]
+        codex_home: Option<PathBuf>,
+    },
+    /// Submit a direct result once; actual native closure resolves it later.
+    Assess {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        verification_evidence: Option<PathBuf>,
         #[arg(long)]
         correction_evidence: Option<PathBuf>,
         #[arg(long)]
@@ -1326,6 +1338,7 @@ fn status_with_operations(path: &Path, paths: &[PathBuf]) -> Result<Value, Contr
         "unobserved_analysis_count":state.records.iter().filter(|v| ["groundline-learning-proposal", "groundline-learning-duplicate-attempt"].contains(&v["kind"].as_str().unwrap_or("")) && v["analysis"].is_null()).count()});
     out["operation_observation_count"] = json!(operations.len());
     out["candidates"] = json!(learning::candidate_readouts(&state.records, &operations)?);
+    out["readiness"] = readiness::summarize(&state.records, &[])?;
     Ok(out)
 }
 
@@ -1371,6 +1384,17 @@ pub(crate) fn run(command: Command) -> Result<Value, ContractError> {
             receipt.as_deref(),
             manifest.as_deref(),
             native_artifact.as_deref(),
+            correction_evidence.as_deref(),
+            codex_home.as_deref(),
+        ),
+        Command::Assess {
+            input,
+            verification_evidence,
+            correction_evidence,
+            codex_home,
+        } => continuous::assess(
+            &input,
+            verification_evidence.as_deref(),
             correction_evidence.as_deref(),
             codex_home.as_deref(),
         ),

@@ -71,9 +71,14 @@ existing acceptance gap; it is not automatically rework or a model failure.
 Model/effort escalation proposals require a requested selection or optimization
 and demonstrated reasoning difficulty, not permission/network failures.
 
-For requested usage-driven adaptation, after an agreed delivery is assessed,
-use [delivery evidence](../../references/delivery-evidence.md) to record its actual
-result privately. Separate proposed, requested and observed effective selections;
+For enabled owner-private observations of meaningful work, use
+[the learning loop](../../references/learning-loop.md) to declare its criterion
+once before work and submit existing verification evidence after the check.
+The offline consumer waits for a matching native end and connects actual owned
+costs; submission alone is not a completed outcome. Skip routine tasks and
+duplicate evidence runs. For independently prepared receipts, use
+[delivery evidence](../../references/delivery-evidence.md). Separate proposed,
+requested and observed effective selections;
 include failures and unknowns. Do not replay completed work to fill a sample quota.
 Keep conversation text, credentials and private provider state out of reports.
 

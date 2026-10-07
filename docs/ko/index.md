@@ -15,6 +15,7 @@
 | 지침 변경 평가 | [행동 검증](../guidance-validation.md) |
 | 지속 개선·환경 통일 | [로컬 환경·학습 CLI](../adaptive-environment-implementation.md), [설계와 남은 범위](../adaptive-environment-design.md) |
 | 개선 순환에 native 기능 연결 | [Codex 기능 조사와 활용 기준](../codex-native-capabilities.md) |
+| 작업 결과와 비용 연결의 완성 기준 | [이번 설계와 근거](../goal-completion-design.md) |
 | 릴리스 검증·게시 | [체크리스트](../release-checklist.md), [버전 규칙](../versioning.md) |
 
 설치된 명령과 계약은 플러그인 문서에서 확인합니다:

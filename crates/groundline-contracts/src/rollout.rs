@@ -5,6 +5,22 @@ use std::collections::BTreeMap;
 use serde::de::{IgnoredAny, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use serde_json::{Value, value::RawValue};
+use sha2::{Digest, Sha256};
+
+/// Streaming digest of the exact stored native source, including discarded
+/// message bodies. Consumers keep neither those bodies nor the native IDs.
+#[derive(Default)]
+pub struct SourceDigest(Sha256);
+
+impl SourceDigest {
+    pub fn update(&mut self, bytes: &[u8]) {
+        self.0.update(bytes);
+    }
+
+    pub fn finish(self) -> String {
+        format!("{:x}", self.0.finalize())
+    }
+}
 
 pub struct Record<'a> {
     fields: BTreeMap<String, &'a RawValue>,
@@ -74,6 +90,65 @@ impl<'a> Record<'a> {
         Self::parse(raw.get()).ok()??.string("type")
     }
 
+    /// A separate, small projection for response ownership and token deltas.
+    /// It deliberately excludes messages, tool arguments/results, settings,
+    /// instructions and compaction history even when they are valid JSON.
+    pub fn learning_projection(&self) -> serde_json::Result<Value> {
+        let mut remaining = 64 * 1024;
+        let mut envelope = serde_json::Map::new();
+        for name in ["type", "timestamp", "ordinal"] {
+            if let Some(raw) = self.fields.get(name) {
+                envelope.insert(name.to_owned(), bounded_value(raw, &mut remaining)?);
+            }
+        }
+        let kind = self.string("type");
+        if !matches!(
+            kind.as_deref(),
+            Some(
+                "session_meta"
+                    | "turn_context"
+                    | "token_usage_record"
+                    | "event_msg"
+                    | "compacted"
+                    | "response_item"
+            )
+        ) {
+            return Ok(Value::Object(envelope));
+        }
+        if let Some(raw) = self.fields.get("payload")
+            && let Some(payload) = Self::parse(raw.get())?
+        {
+            let item = payload.string("type");
+            let mut fields = serde_json::Map::new();
+            for (name, raw) in &payload.fields {
+                if learning_field(kind.as_deref(), item.as_deref(), name) {
+                    let value = match name.as_str() {
+                        "usage" | "thread_token_usage" | "turn_token_usage" => project_object(
+                            raw,
+                            &[
+                                "input_tokens",
+                                "cached_input_tokens",
+                                "output_tokens",
+                                "reasoning_output_tokens",
+                                "total_tokens",
+                            ],
+                            &mut remaining,
+                        )?,
+                        "history_base" => {
+                            project_object(raw, &["end_ordinal_exclusive"], &mut remaining)?
+                        }
+                        "source" => project_source(raw, &mut remaining)?,
+                        "info" => project_info(raw, &mut remaining)?,
+                        _ => bounded_value(raw, &mut remaining)?,
+                    };
+                    fields.insert(name.clone(), value);
+                }
+            }
+            envelope.insert("payload".to_owned(), Value::Object(fields));
+        }
+        Ok(Value::Object(envelope))
+    }
+
     /// Retain the audit envelope while dropping bodies the audit never reads.
     /// Parsing the original record has already validated every JSON value.
     pub fn audit_projection(&self) -> serde_json::Result<String> {
@@ -138,6 +213,122 @@ impl<'a> Record<'a> {
         }
         Ok(projected)
     }
+}
+
+fn learning_field(kind: Option<&str>, item: Option<&str>, name: &str) -> bool {
+    match kind {
+        Some("session_meta") => matches!(
+            name,
+            "id" | "history_mode"
+                | "history_base"
+                | "forked_from_id"
+                | "forked_from_ordinal_exclusive"
+                | "subagent_history_start_ordinal"
+                | "parent_thread_id"
+                | "root_turn_id"
+                | "source"
+        ),
+        Some("turn_context") => matches!(
+            name,
+            "turn_id" | "root_turn_id" | "model" | "effort" | "reasoning_effort"
+        ),
+        Some("token_usage_record") => matches!(
+            name,
+            "thread_id"
+                | "turn_id"
+                | "root_turn_id"
+                | "response_id"
+                | "usage"
+                | "thread_token_usage"
+                | "turn_token_usage"
+        ),
+        Some("compacted") => matches!(name, "turn_id" | "root_turn_id"),
+        Some("response_item") => matches!(name, "type" | "name" | "namespace"),
+        Some("event_msg") => {
+            name == "type"
+                || match item {
+                    Some("token_count") => matches!(name, "turn_id" | "info"),
+                    Some("task_started" | "task_complete" | "turn_aborted") => {
+                        matches!(name, "turn_id" | "duration_ms")
+                    }
+                    Some("collab_agent_spawn_begin" | "collab_agent_spawn_end") => matches!(
+                        name,
+                        "turn_id" | "sender_thread_id" | "receiver_thread_id" | "call_id"
+                    ),
+                    Some("collab_agent_interaction_begin" | "collab_agent_interaction_end") => {
+                        matches!(
+                            name,
+                            "turn_id" | "sender_thread_id" | "receiver_thread_id" | "call_id"
+                        )
+                    }
+                    _ => false,
+                }
+        }
+        _ => false,
+    }
+}
+
+fn project_object(
+    raw: &RawValue,
+    names: &[&str],
+    remaining: &mut usize,
+) -> serde_json::Result<Value> {
+    let Some(record) = Record::parse(raw.get())? else {
+        return Ok(Value::Null);
+    };
+    let mut projected = serde_json::Map::new();
+    for name in names {
+        if let Some(raw) = record.fields.get(*name) {
+            projected.insert((*name).to_owned(), bounded_value(raw, remaining)?);
+        }
+    }
+    Ok(Value::Object(projected))
+}
+
+fn project_source(raw: &RawValue, remaining: &mut usize) -> serde_json::Result<Value> {
+    let Some(source) = Record::parse(raw.get())? else {
+        return Ok(Value::Null);
+    };
+    let Some(subagent) = source.fields.get("subagent") else {
+        return Ok(Value::Null);
+    };
+    let Some(subagent) = Record::parse(subagent.get())? else {
+        return Ok(Value::Null);
+    };
+    let Some(spawn) = subagent.fields.get("thread_spawn") else {
+        return Ok(Value::Null);
+    };
+    Ok(
+        serde_json::json!({"subagent":{"thread_spawn":project_object(
+        spawn, &["parent_thread_id", "root_turn_id"], remaining
+    )?}}),
+    )
+}
+
+fn project_info(raw: &RawValue, remaining: &mut usize) -> serde_json::Result<Value> {
+    let Some(info) = Record::parse(raw.get())? else {
+        return Ok(Value::Null);
+    };
+    let mut projected = serde_json::Map::new();
+    for name in ["total_token_usage", "last_token_usage"] {
+        if let Some(raw) = info.fields.get(name) {
+            projected.insert(
+                name.to_owned(),
+                project_object(
+                    raw,
+                    &[
+                        "input_tokens",
+                        "cached_input_tokens",
+                        "output_tokens",
+                        "reasoning_output_tokens",
+                        "total_tokens",
+                    ],
+                    remaining,
+                )?,
+            );
+        }
+    }
+    Ok(Value::Object(projected))
 }
 
 fn projection_limit() -> serde_json::Error {
@@ -237,6 +428,55 @@ mod tests {
         ] {
             assert!(Record::parse(invalid).is_err(), "{invalid}");
         }
+    }
+
+    #[test]
+    fn learning_projection_keeps_native_ownership_counters_and_agent_names_without_bodies() {
+        let body = "private source body".repeat(100_000);
+        for record in [
+            serde_json::json!({"type":"session_meta","payload":{
+                "id":"owner","parent_thread_id":"parent","base_instructions":body,
+                "source":{"subagent":{"thread_spawn":{"parent_thread_id":"parent",
+                    "agent_nickname":body,"agent_path":body,"root_turn_id":"root"}}}}}),
+            serde_json::json!({"type":"token_usage_record","payload":{
+                "thread_id":"owner","turn_id":"turn","root_turn_id":"root","response_id":"response",
+                "usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5,"private_extra":body},
+                "turn_token_usage":{"total_tokens":5},"thread_token_usage":{"total_tokens":100},
+                "private_extra":body}}),
+            serde_json::json!({"type":"response_item","payload":{"type":"function_call",
+                "name":"spawn_agent","namespace":"collaboration","arguments":body,"call_id":"private call"}}),
+            serde_json::json!({"type":"event_msg","payload":{"type":"user_message","message":body}}),
+            serde_json::json!({"type":"compacted","payload":{"root_turn_id":"root","replacement_history":body}}),
+        ] {
+            let raw = record.to_string();
+            let projected = Record::parse(&raw)
+                .unwrap()
+                .unwrap()
+                .learning_projection()
+                .unwrap();
+            let text = projected.to_string();
+            assert!(text.len() < 500);
+            assert!(!text.contains("private source body"));
+            assert!(!text.contains("private call"));
+            if record["type"] == "token_usage_record" {
+                assert_eq!(projected["payload"]["turn_token_usage"]["total_tokens"], 5);
+                assert_eq!(projected["payload"]["root_turn_id"], "root");
+            }
+            if record["type"] == "response_item" {
+                assert_eq!(projected["payload"]["name"], "spawn_agent");
+                assert_eq!(projected["payload"]["namespace"], "collaboration");
+            }
+        }
+        let oversized =
+            serde_json::json!({"type":"turn_context","payload":{"model":"x".repeat(65*1024)}})
+                .to_string();
+        assert!(
+            Record::parse(&oversized)
+                .unwrap()
+                .unwrap()
+                .learning_projection()
+                .is_err()
+        );
     }
 
     #[test]

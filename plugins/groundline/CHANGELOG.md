@@ -1,5 +1,13 @@
 # GroundLine Core changes
 
+## 2026.1008.1
+
+- 직접 검증 evidence를 assessment로 보존하고 실제 native 종료 뒤 기존 receipt/finalize 경로에 연결합니다.
+- 명시한 root/child turn의 실제 모델·응답 비용을 읽고 중복 응답·소유권 충돌·미관측 비용을 구분합니다.
+- readiness에서 결과 연결 대기와 누락된 분석 근거를 명시 category별로 보여줍니다.
+- 생성 영수증의 원본과 요청을 보존해 중단 뒤 새 native 응답이 추가되어도 비용 소유권을 다시 배정하지 않고 재개합니다.
+- 사용자 skill 복사본은 native plugin 목록의 설치 버전과 패키지 검증으로 실행 경로를 찾습니다.
+
 ## 2026.1007.5
 
 - 배포·설치·훅의 지원 대상을 Apple Silicon macOS(ARM64)와 Linux(ARM64·x86-64)로 줄였습니다. Intel macOS 패키지를 배포하지 않으며 실제 Intel 설치는 변경 전에 거절합니다. Apple Silicon의 Rosetta shell은 ARM64 패키지를 선택합니다.

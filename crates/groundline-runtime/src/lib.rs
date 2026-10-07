@@ -21,6 +21,8 @@ pub mod insights;
 pub mod insights_state;
 #[cfg(feature = "insights-state")]
 pub mod learning_boundary;
+#[cfg(feature = "audit-store")]
+pub mod learning_response;
 pub mod local_file;
 pub mod platform;
 #[cfg(feature = "audit-store")]

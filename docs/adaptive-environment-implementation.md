@@ -223,3 +223,17 @@ plan SHA·operation 원문 SHA·평가 SHA를 연결한다. bundle의 공통 식
 
 호출 계약과 native 후속 확인은 [learning loop](../plugins/groundline/references/learning-loop.md),
 실제 배포 완료 기준은 [release design](release-design.md)에서 확인한다.
+
+## 작업 결과의 관측 준비 상태
+
+readiness는 검증한 active/reference record와 원본 SHA를 확인한 receipt 범위에서만
+작업 시작, assessment 대기, task-outcome 연결과 비용·모델·검증 누락을 집계한다.
+capture/link-only는 완료 업무로 세지 않고 `TaskScope.task_category`의 명시 분류별
+숫자를 유지한다. 설치·fixture 표본이나 category 없는 기록을 실제 자연 업무로 바꾸지 않는다.
+archive 전체를 읽지 않으므로 historical quality coverage는 불완전하며, 비용·모델·runtime·
+verification unknown과 실패·재작업을 보존한다. assessment의 verified 단언만으로
+직접 receipt의 비용·품질을 관측했다고 추정하지 않는다.
+
+고정한 재사용 범위와 로컬 완성 기준은 [작업 결과 증거 설계](goal-completion-design.md)에
+정리한다. 제품 경로의 소스·설치·실행 검증과 이후 자연 업무의 비교 가능한 개선 효과는
+서로 다른 증거다.

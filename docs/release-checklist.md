@@ -11,7 +11,7 @@
    upgrades; public stable promotion alone cannot prove private API readiness.
    Both native PR and artifact jobs must execute `delivery_cli`, `routing_cli`,
    `adaptive_environment_cli`, `learning_loop_cli`, `environment_sync_cli`,
-   and `official_sources_cli`
+   `learning_work_cli`, and `official_sources_cli`
    on every supported target. Listing tests or applying a test-name filter does
    not qualify these suites.
    Before promoting revised routing or skill behavior as the default, compare

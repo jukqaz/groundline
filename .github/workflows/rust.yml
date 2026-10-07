@@ -393,7 +393,7 @@ jobs:
           echo "${cc_key}=musl-gcc" >> "$GITHUB_ENV"
           echo "${linker_key}=musl-gcc" >> "$GITHUB_ENV"
       - name: Verify user ownership, repair, setup, and installer behavior
-        run: cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --lib --test config_repair_cli --test setup_cli --test install_cli --test delivery_cli --test routing_cli --test adaptive_environment_cli --test learning_loop_cli --test environment_sync_cli --test official_sources_cli -- --show-output
+        run: cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --lib --test config_repair_cli --test setup_cli --test install_cli --test delivery_cli --test routing_cli --test adaptive_environment_cli --test learning_loop_cli --test learning_work_cli --test environment_sync_cli --test official_sources_cli -- --show-output
       - name: Verify native checksum endings for both plugins
         run: |
           cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --test cli_contract provider_smoke
@@ -402,6 +402,7 @@ jobs:
         run: |
           cargo test --locked -p groundline-runtime --lib --all-features --target "${{ matrix.target }}" local_file::tests -- --show-output
           cargo test --locked -p groundline-runtime --lib --all-features --target "${{ matrix.target }}" collection_stop_tests -- --show-output
+          cargo test --locked -p groundline-runtime --lib --all-features --target "${{ matrix.target }}" learning_response::tests -- --show-output
       - name: Verify clean installation with actual Codex
         shell: bash
         env:
@@ -468,10 +469,12 @@ jobs:
           echo "${linker_key}=musl-gcc" >> "$GITHUB_ENV"
       - name: Verify setup and installer behavior on each native target
         run: |
-          cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --lib --test setup_cli --test config_repair_cli --test install_cli --test delivery_cli --test routing_cli --test adaptive_environment_cli --test learning_loop_cli --test environment_sync_cli --test official_sources_cli
+          cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --lib --test setup_cli --test config_repair_cli --test install_cli --test delivery_cli --test routing_cli --test adaptive_environment_cli --test learning_loop_cli --test learning_work_cli --test environment_sync_cli --test official_sources_cli
           cargo test --locked -p groundline-insights-cli --target "${{ matrix.target }}" --test cli_contract
       - name: Verify collection stop across native processes
         run: cargo test --locked -p groundline-runtime --all-features --target "${{ matrix.target }}" collection_stop_tests
+      - name: Verify scoped native response ownership on each supported target
+        run: cargo test --locked -p groundline-runtime --lib --all-features --target "${{ matrix.target }}" learning_response::tests
       - name: Build both release binaries and the host packager
         run: |
           cargo build --locked -p xtask

@@ -1,5 +1,10 @@
 # GroundLine Insights changes
 
+## 2026.1008.1
+
+- Core와 패키지 버전을 맞추고 기존 fail-open worker가 pending assessment를 소비하는 경로를 재사용합니다.
+- 5개 native 훅·수집 동의·전송 및 서버 계약은 유지합니다. 학습 연결 실패는 일반 작업을 막지 않습니다.
+
 ## 2026.1007.5
 
 - 배포·설치·훅의 지원 대상을 Apple Silicon macOS(ARM64)와 Linux(ARM64·x86-64)로 줄였습니다. Intel macOS 패키지를 배포하지 않으며 실제 Intel 설치는 변경 전에 거절합니다. Apple Silicon의 Rosetta shell은 ARM64 패키지를 선택합니다.

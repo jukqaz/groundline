@@ -39,7 +39,7 @@ Read only boundaries matched to the current native artifact:
 ```console
 groundline learning boundaries --native-artifact native-rollout.jsonl
 groundline learning task-start --input task-start.json --native-artifact native-rollout.jsonl
-groundline learning finalize --input task-finalize.json --receipt receipts/delivery.json --native-artifact native-rollout.jsonl
+groundline learning assess --input assessment.json --verification-evidence verification.json
 ```
 
 When multiple native turns match, select the explicit `--turn-hash`; never take
@@ -87,6 +87,29 @@ the existing direct delivery evidence. Unknown costs and native activation stay
 unknown. `--manifest` can replace `--receipt` for the existing delivery builder;
 it does not infer an outcome from hook events.
 
+For ongoing observed work, submit an assessment after the agreed verification
+instead of hand-authoring response costs. `assessment.json` has kind
+`groundline-learning-assessment-input`, schema `1`, the returned `task_sha256`,
+and `verification` (`status`: `verified`, `failed`, or `unknown`; `evidence_kind`:
+`runtime_check`, `user_acceptance`, or `unobserved`; nullable `evidence_sha256`;
+`rework`: boolean). Known verification needs an existing evidence file matching
+its SHA. Unknown verification uses `unobserved`. Correction defaults to
+`unknown`; a known `correction_kind` also needs `correction_evidence_sha256`
+and `--correction-evidence`. Inputs accept no completion time, model or token
+counts. The CLI timestamps submission and preserves an immutable private copy
+of supplied verification evidence. Submission remains PENDING until an actual
+matching Stop or SessionEnd after submission is available.
+
+The consumer reads the exact task-start turn and any explicitly declared
+`owned_root_turn_hashes`. Optional `children` contain `session_hash` and
+`turn_hash` pairs. Native lineage must confirm child ownership of the task;
+merely sharing a parent chat does not prove it. Do not claim all turns in a
+chat or time window. Native response IDs deduplicate actual costs, and exact
+turn context supplies observed model/effort. Missing or unmatched responses,
+retry measurements, child coverage or model context remain unknown. Keep the
+explicit `finalize --input task-finalize.json --receipt receipts/delivery.json
+--native-artifact native-rollout.jsonl` route for independently prepared receipts.
+
 The consumer is deterministic and makes no model or network calls:
 
 ```console
@@ -97,6 +120,11 @@ groundline learning patterns
 
 Consumption links submitted outcomes, selects comparable natural follow-up
 evidence for applied candidates, and journals the evaluation-input digest.
+Assessments resolve through the existing delivery and finalization contracts;
+there is no model call to infer success from an end event. `patterns.readiness`
+shows unlinked starts, pending assessments, capture/link-only records and missing
+outcome, model and resource evidence by declared task category. Its bounded
+active scope is not complete historical coverage or measured improvement.
 Retries reuse saved results. No follow-up stays pending; mismatched cohorts,
 criteria, runtime, ownership or incomplete costs do not prove improvement.
 Unscoped hook boundaries remain unlinked. Readouts identify their bounded

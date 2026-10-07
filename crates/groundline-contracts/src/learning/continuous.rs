@@ -346,6 +346,10 @@ pub struct TaskOutcome {
     pub native: NativeReference,
     pub receipt_sha256: String,
     pub link_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assessment_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_response_proof_sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -358,6 +362,126 @@ pub struct FinalizeRequest {
     pub boundary_sha256: String,
     pub native: NativeReference,
     pub receipt_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assessment_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_response_proof_sha256: Option<String>,
+}
+
+/// Explicit task ownership without storing native paths or transcript text.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OwnedNativeTurn {
+    pub session_hash: String,
+    pub turn_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaskVerification {
+    pub status: String,
+    pub evidence_kind: String,
+    pub evidence_sha256: Option<String>,
+    pub rework: bool,
+}
+
+/// Native Codex submits the direct result once. Resource counts and model
+/// selections are absent: only the independent native reader supplies them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AssessmentInput {
+    pub kind: String,
+    pub schema: u8,
+    pub task_sha256: String,
+    pub verification: TaskVerification,
+    #[serde(default = "unknown_correction")]
+    pub correction_kind: String,
+    #[serde(default)]
+    pub correction_evidence_sha256: Option<String>,
+    #[serde(default)]
+    pub children: Vec<OwnedNativeTurn>,
+    #[serde(default)]
+    pub owned_root_turn_hashes: Vec<String>,
+}
+
+fn unknown_correction() -> String {
+    "unknown".into()
+}
+
+impl AssessmentInput {
+    pub fn validate(&self) -> Result<(), ContractError> {
+        let verification = &self.verification;
+        let mut children = BTreeSet::new();
+        let mut turns = BTreeSet::new();
+        if self.kind != "groundline-learning-assessment-input"
+            || self.schema != 1
+            || !digest(&self.task_sha256)
+            || !["verified", "failed", "unknown"].contains(&verification.status.as_str())
+            || !["runtime_check", "user_acceptance", "unobserved"]
+                .contains(&verification.evidence_kind.as_str())
+            || (verification.status == "unknown") != (verification.evidence_kind == "unobserved")
+            || (verification.status != "unknown" && verification.evidence_sha256.is_none())
+            || verification
+                .evidence_sha256
+                .as_ref()
+                .is_some_and(|h| !digest(h))
+            || ![
+                "unknown",
+                "acceptance",
+                "assistant_error",
+                "new_requirement",
+                "direction_change",
+            ]
+            .contains(&self.correction_kind.as_str())
+            || self
+                .correction_evidence_sha256
+                .as_ref()
+                .is_some_and(|h| !digest(h))
+            || (self.correction_kind != "unknown" && self.correction_evidence_sha256.is_none())
+            || self.children.len() > super::MAX_EVIDENCE_REFS
+            || self.children.iter().any(|child| {
+                !digest(&child.session_hash)
+                    || !digest(&child.turn_hash)
+                    || !children.insert((&child.session_hash, &child.turn_hash))
+            })
+            || self.owned_root_turn_hashes.len() > super::MAX_EVIDENCE_REFS
+            || self
+                .owned_root_turn_hashes
+                .iter()
+                .any(|h| !digest(h) || !turns.insert(h))
+        {
+            return Err(error("invalid_assessment"));
+        }
+        Ok(())
+    }
+}
+
+/// This immutable PENDING record is resolved by a linked task outcome. The
+/// submission timestamp never serves as a delivery completion timestamp.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Assessment {
+    pub kind: String,
+    pub schema: u8,
+    pub input_sha256: String,
+    pub input: AssessmentInput,
+    pub submitted_at_utc: String,
+    pub status: String,
+}
+
+impl Assessment {
+    pub fn validate(&self) -> Result<(), ContractError> {
+        self.input.validate()?;
+        timestamp(&self.submitted_at_utc)?;
+        if self.kind != "groundline-learning-assessment"
+            || self.schema != 1
+            || !digest(&self.input_sha256)
+            || self.status != "PENDING"
+        {
+            return Err(error("invalid_assessment"));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -435,6 +559,47 @@ impl ProcessingRecord {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn assessment_accepts_explicit_unknown_and_rejects_invented_evidence_clock_and_resources() {
+        let hash = "a".repeat(64);
+        let value = json!({"kind":"groundline-learning-assessment-input","schema":1,"task_sha256":hash,
+            "verification":{"status":"unknown","evidence_kind":"unobserved","evidence_sha256":null,"rework":false}});
+        let input: AssessmentInput = serde_json::from_value(value.clone()).unwrap();
+        input.validate().unwrap();
+        assert_eq!(input.correction_kind, "unknown");
+        let mut asserted = input.clone();
+        asserted.verification.status = "verified".into();
+        asserted.verification.evidence_kind = "runtime_check".into();
+        assert!(asserted.validate().is_err());
+        asserted.verification.evidence_sha256 = Some(hash.clone());
+        asserted.validate().unwrap();
+        for field in [
+            "submitted_at_utc",
+            "assessed_at_utc",
+            "resources",
+            "effective",
+            "transcript_path",
+        ] {
+            let mut invalid = value.clone();
+            invalid[field] = json!("operator-supplied");
+            assert!(serde_json::from_value::<AssessmentInput>(invalid).is_err());
+        }
+        asserted.owned_root_turn_hashes = vec![hash.clone(), hash.clone()];
+        assert!(asserted.validate().is_err());
+        asserted.owned_root_turn_hashes.clear();
+        asserted.children = vec![
+            OwnedNativeTurn {
+                session_hash: hash.clone(),
+                turn_hash: hash.clone(),
+            },
+            OwnedNativeTurn {
+                session_hash: hash.clone(),
+                turn_hash: hash,
+            },
+        ];
+        assert!(asserted.validate().is_err());
+    }
 
     #[test]
     fn boundary_keeps_missing_native_fields_unknown_and_rejects_asserted_activation() {

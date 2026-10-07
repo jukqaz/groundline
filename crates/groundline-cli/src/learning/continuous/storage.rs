@@ -43,10 +43,15 @@ fn refs(value: &Value) -> Vec<String> {
             add(&value["task_sha256"]);
             add(&value["boundary_sha256"]);
             add(&value["link_sha256"]);
+            add(&value["assessment_sha256"]);
         }
         Some("groundline-learning-finalize-request") => {
             add(&value["input"]["task_sha256"]);
             add(&value["boundary_sha256"]);
+            add(&value["assessment_sha256"]);
+        }
+        Some("groundline-learning-assessment") => {
+            add(&value["input"]["task_sha256"]);
         }
         Some("groundline-learning-trial-authorization") => add(&value["proposal_sha256"]),
         Some("groundline-learning-duplicate-attempt") => add(&value["duplicate_of_sha256"]),
@@ -171,6 +176,65 @@ pub(super) fn replay(
         return Err(error("invalid_archive_index"));
     }
     Ok(Some(value))
+}
+
+/// Existing immutable input indexes retain the completed task's direct
+/// closure. This permits exact assessment retry/conflict checks after cooling.
+pub(super) fn restore_task_completion(
+    state: &Path,
+    records: &mut Vec<Value>,
+    task_hash: &str,
+) -> Result<(), ContractError> {
+    let Some(task) = records.iter().find(|v| {
+        v["kind"] == "groundline-learning-task-start"
+            && learning::content_sha256(v).ok().as_deref() == Some(task_hash)
+    }) else {
+        return Ok(());
+    };
+    let input = task["input_sha256"]
+        .as_str()
+        .ok_or_else(|| error("invalid_task_start"))?;
+    let Some(bytes) = optional_private(&input_index_path(state, input)?)? else {
+        return Ok(());
+    };
+    let index = parse(&bytes)?;
+    if index["kind"] != "groundline-learning-archive-input"
+        || index["schema"] != 1
+        || index["input_sha256"] != input
+        || index["record_sha256"] != task_hash
+    {
+        return Err(error("invalid_archive_index"));
+    }
+    let extra = ["assessment_sha256", "completion_sha256"]
+        .into_iter()
+        .filter_map(|k| index.get(k))
+        .map(|v| {
+            v.as_str()
+                .filter(|h| learning::digest(h))
+                .map(str::to_owned)
+                .ok_or_else(|| error("invalid_archive_index"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    load_archive_references(state, records, &extra)?;
+    for key in ["assessment_sha256", "completion_sha256"] {
+        let Some(hash) = index.get(key).and_then(Value::as_str) else {
+            continue;
+        };
+        let value = records
+            .iter()
+            .find(|v| learning::content_sha256(v).ok().as_deref() == Some(hash))
+            .ok_or_else(|| error("archive_record_missing"))?;
+        if (key == "assessment_sha256"
+            && (value["kind"] != "groundline-learning-assessment"
+                || value["input"]["task_sha256"] != task_hash))
+            || (key == "completion_sha256"
+                && (value["kind"] != "groundline-learning-task-outcome"
+                    || value["task_sha256"] != task_hash))
+        {
+            return Err(error("invalid_archive_index"));
+        }
+    }
+    super::super::validate_record_collection(records)
 }
 
 fn archive_file(source: &Path, destination: &Path, before: &[u8]) -> Result<(), ContractError> {
@@ -299,6 +363,7 @@ pub(super) fn compact(
         if [
             "groundline-learning-task-start",
             "groundline-learning-task-outcome",
+            "groundline-learning-assessment",
         ]
         .contains(&value["kind"].as_str().unwrap_or(""))
         {
@@ -307,11 +372,36 @@ pub(super) fn compact(
                 .ok_or_else(|| error("invalid_task_start"))?;
             let path = input_index_path(&state.path, input)?;
             ensure_private_directory(path.parent().ok_or_else(|| error("invalid_path"))?)?;
-            write_draft(
-                &path,
-                &json!({"kind":"groundline-learning-archive-input","schema":1,"input_sha256":input,"record_sha256":hash}),
-                state,
-            )?;
+            let mut index = json!({"kind":"groundline-learning-archive-input","schema":1,"input_sha256":input,"record_sha256":hash});
+            if let Some(previous) = optional_private(&path)? {
+                let previous = parse(&previous)?;
+                if ["kind", "schema", "input_sha256", "record_sha256"]
+                    .into_iter()
+                    .any(|k| previous[k] != index[k])
+                {
+                    return Err(error("invalid_archive_index"));
+                }
+                for key in ["assessment_sha256", "completion_sha256"] {
+                    if let Some(value) = previous.get(key) {
+                        index[key] = value.clone();
+                    }
+                }
+            }
+            if value["kind"] == "groundline-learning-task-start" {
+                for related in hashes.values() {
+                    if related["kind"] == "groundline-learning-assessment"
+                        && related["input"]["task_sha256"] == *hash
+                    {
+                        index["assessment_sha256"] = json!(learning::content_sha256(related)?);
+                    }
+                    if related["kind"] == "groundline-learning-task-outcome"
+                        && related["task_sha256"] == *hash
+                    {
+                        index["completion_sha256"] = json!(learning::content_sha256(related)?);
+                    }
+                }
+            }
+            write_draft(&path, &index, state)?;
         }
     }
     let mut moved = 0;
