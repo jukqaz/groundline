@@ -34,7 +34,7 @@ their collection behavior without a Core dependency.
 
 For a substantive unit that the owner wants to learn from, native Codex authors
 the agreed completion criterion, cohort, phase and task category before work.
-Read only boundaries matched to the current owner-private native artifact:
+Read only boundaries matched to the current native artifact:
 
 ```console
 groundline learning boundaries --native-artifact native-rollout.jsonl
@@ -47,6 +47,33 @@ the latest boundary from another chat. A boundary UUID is a received-record ID,
 not proof of event ownership. Missing or unmatched native thread/turn evidence
 remains unknown. Native Codex prepares these private inputs; do not ask the
 owner to maintain JSON or fill out a rating form.
+
+Native JSONL is a read-only source, separate from owner-private learning inputs
+and state. Normal owner files (`0644`) and directories (`0755`) are supported;
+the nonempty file and its immediate parent must belong to the current user and
+must not be writable by another user. All directory components and the file
+are opened without following symlinks; non-regular and multiply linked files are rejected.
+Do not chmod, truncate, or rewrite the native source to make it acceptable.
+
+The native reader streams and hashes the entire original UTF-8 JSONL. It retains
+only session/turn correlation hashes, not instructions, prompts, or message
+bodies. Valid unrecognized records are ignored; malformed JSON or UTF-8 is
+rejected. The existing borrowed native parser's 128-field envelope limit also
+applies. Limits are 512 MiB per source, 64 MiB per line including its newline,
+1,000,000 scanned lines (including blank lines), and 4,096 distinct turn IDs.
+A 10-second processing budget is checked between records and after validation;
+it is not a hard timeout for a blocked filesystem read. `native_input` reports
+the full source SHA, bytes/lines scanned and limits. The independent archive
+reference lookup still has a total 4 MiB/512-entry budget.
+
+Reads bind one initial file length, then recheck device/inode, length,
+mtime/ctime, owner, mode, link count and the current path binding. A change found
+by that final recheck is rejected as `learning_native_artifact_changed`, rather
+than returning a prefix as a full artifact hash. Partially written JSON can
+instead fail format validation. Retry against the intact source when it is
+stable. A supplied runtime evidence SHA must match that read's full SHA. Correlation
+does not authenticate the source or turn shared native IDs into owned costs.
+It does not retroactively verify a task started without native evidence.
 
 `task-start.json` has kind `groundline-learning-task-start-input`, schema `1`,
 `boundary_id`, `scope` (`unit_hash`, `cohort_sha256`, `phase`, `task_category`,

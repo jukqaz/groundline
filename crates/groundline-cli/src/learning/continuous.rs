@@ -3,6 +3,7 @@
 use super::*;
 use groundline_contracts::learning::continuous as contract;
 
+mod native_artifact;
 mod storage;
 pub(super) use storage::{archived_record, load_archive_references};
 
@@ -850,45 +851,6 @@ fn checked_boundary_bounded(
     Ok((value, hash))
 }
 
-fn artifact_identity(bytes: &[u8]) -> Result<(Option<String>, BTreeSet<String>), ContractError> {
-    let data = std::str::from_utf8(bytes).map_err(|_| error("invalid_native_artifact"))?;
-    let mut session = None;
-    let mut turns = BTreeSet::new();
-    for line in data.lines().filter(|l| !l.trim().is_empty()) {
-        let Some(record) = groundline_contracts::rollout::Record::parse(line)
-            .map_err(|_| error("invalid_native_artifact"))?
-        else {
-            continue;
-        };
-        let kind = record.string("type");
-        if !matches!(kind.as_deref(), Some("session_meta" | "turn_context")) {
-            continue;
-        }
-        let payload = record
-            .value("payload")
-            .map_err(|_| error("invalid_native_artifact"))?
-            .unwrap_or(Value::Null);
-        if kind.as_deref() == Some("session_meta") {
-            if let Some(id) = payload["id"]
-                .as_str()
-                .filter(|v| !v.is_empty() && v.len() <= 256)
-            {
-                let current = sha256(format!("groundline-hook-session\0{id}").as_bytes());
-                if session.as_ref().is_some_and(|s| s != &current) {
-                    return Err(error("native_session_conflict"));
-                }
-                session = Some(current);
-            }
-        } else if let Some(id) = payload["turn_id"]
-            .as_str()
-            .filter(|v| !v.is_empty() && v.len() <= 256)
-        {
-            turns.insert(sha256(format!("groundline-hook-turn\0{id}").as_bytes()));
-        }
-    }
-    Ok((session, turns))
-}
-
 fn native_reference(
     boundary: &Value,
     artifact: Option<&Path>,
@@ -902,13 +864,14 @@ fn native_reference(
         boundary_matched: false,
     };
     if let Some(path) = artifact {
-        let bytes = read_private(path)?;
-        let (session, turns) = artifact_identity(&bytes)?;
-        reference.artifact_sha256 = Some(sha256(&bytes));
+        let observation = native_artifact::read(path)?;
+        reference.artifact_sha256 = Some(observation.sha256);
         if let (Some(expected_session), Some(expected_turn)) =
             (&reference.session_hash, &reference.turn_hash)
         {
-            if session.as_ref() != Some(expected_session) || !turns.contains(expected_turn) {
+            if observation.session_hash.as_ref() != Some(expected_session)
+                || !observation.turn_hashes.contains(expected_turn)
+            {
                 return Err(error("native_boundary_mismatch"));
             }
             reference.boundary_matched = true;
@@ -1407,9 +1370,12 @@ pub(super) fn boundaries(
 ) -> Result<Value, ContractError> {
     let home = codex_home(home)?;
     let profile = enabled_profile(&home)?;
-    let bytes = read_private(artifact)?;
-    let (session, turns) = artifact_identity(&bytes)?;
-    let session = session.ok_or_else(|| error("native_session_unobserved"))?;
+    let observation = native_artifact::read(artifact)?;
+    let session = observation
+        .session_hash
+        .clone()
+        .ok_or_else(|| error("native_session_unobserved"))?;
+    let turns = &observation.turn_hashes;
     if turn.is_some_and(|t| !learning::digest(t) || !turns.contains(t)) {
         return Err(error("native_turn_unobserved"));
     }
@@ -1423,6 +1389,7 @@ pub(super) fn boundaries(
         out["archived_boundary_count"] = json!(archived_count);
         out["coverage_scope"] = json!("bounded_matching_native_session");
         out["selection_automatic"] = json!(false);
+        out["native_input"] = observation.readout();
         return Ok(out);
     }
     let selected_turn = turn
@@ -1435,7 +1402,7 @@ pub(super) fn boundaries(
     const LOOKUP_ENTRIES: usize = 512;
     const LOOKUP_BYTES: usize = 4 * 1024 * 1024;
     let mut visited = 0_usize;
-    let mut remaining_bytes = LOOKUP_BYTES.saturating_sub(bytes.len());
+    let mut remaining_bytes = LOOKUP_BYTES;
     let root = boundaries_root(&home)
         .join("archive/references")
         .join(&session)
@@ -1524,6 +1491,7 @@ pub(super) fn boundaries(
     out["lookup_budget"] = json!({"entry_limit":LOOKUP_ENTRIES,"byte_limit":LOOKUP_BYTES,
         "entries_visited":visited,"bytes_read":LOOKUP_BYTES-remaining_bytes});
     out["selection_automatic"] = json!(false);
+    out["native_input"] = observation.readout();
     Ok(out)
 }
 

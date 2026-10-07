@@ -767,6 +767,218 @@ fn continuous_learning_hold_blocks_trial_and_adoption_but_allows_rollback() {
 }
 
 #[test]
+fn continuous_learning_reads_large_normal_native_source_without_changing_it() {
+    let fixture = Fixture::new().continuous();
+    let directory = fixture.root.join("native-sessions");
+    fs::create_dir(&directory).unwrap();
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o755)).unwrap();
+    let artifact = directory.join("native.jsonl");
+    let lines = [
+        json!({"type":"session_meta","payload":{"id":"fixture-owner",
+            "instructions":"private-native-instructions".repeat(120_000)}}),
+        json!({"type":"event_msg","payload":{"type":"user_message",
+            "message":"private-native-message".repeat(120_000)}}),
+        json!({"type":"turn_context","payload":{"turn_id":"other-native-turn"}}),
+        json!({"type":"turn_context","payload":{"turn_id":"normal-native"}}),
+    ];
+    let original = lines
+        .iter()
+        .map(|v| serde_json::to_string(v).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .into_bytes();
+    assert!(original.len() > 4 * 1024 * 1024);
+    fs::write(&artifact, &original).unwrap();
+    fs::set_permissions(&artifact, fs::Permissions::from_mode(0o644)).unwrap();
+    let digest = hash(&original);
+    let turn = hash(b"groundline-hook-turn\0normal-native");
+    fixture.boundary("normal-native-start", "UserPromptSubmit", "normal-native");
+    let ambiguous = run(
+        &fixture.root,
+        &["learning", "boundaries"],
+        &[("--native-artifact", &artifact)],
+        true,
+    );
+    assert_eq!(ambiguous["ambiguous"], true);
+    assert_eq!(ambiguous["native_input"]["source_sha256"], digest);
+    let matched = run(
+        &fixture.root,
+        &["learning", "boundaries", "--turn-hash", &turn],
+        &[("--native-artifact", &artifact)],
+        true,
+    );
+    assert_eq!(
+        matched["boundaries"][0]["boundary_id"],
+        "normal-native-start"
+    );
+    assert_eq!(matched["boundaries"][0]["native_boundary_matched"], true);
+    assert_eq!(matched["coverage_complete"], true);
+    assert_eq!(matched["native_input"]["source_sha256"], digest);
+    assert_eq!(matched["native_input"]["bytes_read"], original.len());
+    assert_eq!(matched["native_input"]["records_scanned"], 4);
+    assert_eq!(matched["native_input"]["source_mutation_performed"], false);
+    assert_eq!(
+        matched["native_input"]["source_authenticity_verified"],
+        false
+    );
+    assert!(matched["lookup_budget"]["bytes_read"].as_u64().unwrap() < 4096);
+    assert!(!matched.to_string().contains("private-native-"));
+    let input = fixture.root.join("normal-native-start-input.json");
+    private_json(
+        &input,
+        &json!({"kind":"groundline-learning-task-start-input","schema":1,
+            "scope":{"unit_hash":hash(b"normal-native"),"cohort_sha256":hash(b"cohort"),
+                "phase":"implementation","task_category":"code-change",
+                "criterion":{"sha256":hash(b"defined-test-command"),"version":"v1"},"target_id":"workflow",
+                "runtime":{"family":"codex_cli","version":"fixture-1","evidence_sha256":digest}},
+            "boundary_id":"normal-native-start","criterion_change_kind":"unknown","criterion_change_evidence_sha256":null}),
+    );
+    let started = run(
+        &fixture.root,
+        &["learning", "task-start"],
+        &[("--input", &input), ("--native-artifact", &artifact)],
+        true,
+    );
+    assert_eq!(started["status"], "STARTED");
+    assert_eq!(started["native_boundary_matched"], true);
+    let task: Value = serde_json::from_slice(
+        &fs::read(
+            fixture
+                .learning
+                .join(format!("{}.json", started["task_sha256"].as_str().unwrap())),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(task["native"]["artifact_sha256"], digest);
+    assert_eq!(task["boundary_environment_matched"], true);
+    let (finished, _, receipt) = fixture.finalize_task("normal-native", &started, &artifact);
+    assert_eq!(finished["status"], "FINALIZED");
+    assert_eq!(
+        finished["reconciliation"]["quality_inferred_from_boundaries"],
+        false
+    );
+    let outcome: Value = serde_json::from_slice(
+        &fs::read(fixture.learning.join(format!(
+            "{}.json",
+            finished["outcome_sha256"].as_str().unwrap()
+        )))
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(outcome["native"]["artifact_sha256"], digest);
+    let delivery: Value = serde_json::from_slice(&fs::read(receipt).unwrap()).unwrap();
+    assert_eq!(delivery["verification"]["status"], "unknown");
+    assert_eq!(delivery["resources"]["complete"], false);
+    assert_eq!(fs::read(&artifact).unwrap(), original);
+    assert_eq!(
+        fs::metadata(&artifact).unwrap().permissions().mode() & 0o777,
+        0o644
+    );
+    assert_eq!(
+        fs::metadata(&directory).unwrap().permissions().mode() & 0o777,
+        0o755
+    );
+}
+
+#[test]
+fn continuous_learning_rejects_unsafe_invalid_and_over_budget_native_sources_before_start() {
+    let fixture = Fixture::new().continuous();
+    fixture.boundary("native-check-start", "UserPromptSubmit", "native-check");
+    let input = fixture.root.join("native-check-start-input.json");
+    private_json(
+        &input,
+        &json!({"kind":"groundline-learning-task-start-input","schema":1,
+            "scope":{"unit_hash":hash(b"native-check"),"cohort_sha256":hash(b"cohort"),
+                "phase":"implementation","task_category":"code-change",
+                "criterion":{"sha256":hash(b"defined-test-command"),"version":"v1"},"target_id":"workflow","runtime":null},
+            "boundary_id":"native-check-start","criterion_change_kind":"unknown","criterion_change_evidence_sha256":null}),
+    );
+    let mut before: Vec<_> = fs::read_dir(&fixture.learning)
+        .unwrap()
+        .map(|v| v.unwrap().file_name())
+        .collect();
+    before.sort();
+    let directory = fixture.root.join("native-sessions");
+    fs::create_dir(&directory).unwrap();
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o755)).unwrap();
+    let artifact = directory.join("native.jsonl");
+    let valid = b"{\"type\":\"session_meta\",\"payload\":{\"id\":\"fixture-owner\"}}\n{\"type\":\"turn_context\",\"payload\":{\"turn_id\":\"native-check\"}}\n";
+    fs::write(&artifact, valid).unwrap();
+    fs::set_permissions(&artifact, fs::Permissions::from_mode(0o644)).unwrap();
+    let check = |path: &Path, expected: &str| {
+        assert_eq!(
+            run(
+                &fixture.root,
+                &["learning", "task-start"],
+                &[("--input", &input), ("--native-artifact", path)],
+                false
+            )["error"],
+            expected,
+        );
+    };
+    fs::set_permissions(&artifact, fs::Permissions::from_mode(0o664)).unwrap();
+    check(&artifact, "learning_native_artifact_owner_required");
+    assert_eq!(
+        fs::metadata(&artifact).unwrap().permissions().mode() & 0o777,
+        0o664
+    );
+    fs::set_permissions(&artifact, fs::Permissions::from_mode(0o644)).unwrap();
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o775)).unwrap();
+    check(&artifact, "learning_native_artifact_owner_required");
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o755)).unwrap();
+    let linked = directory.join("linked.jsonl");
+    std::os::unix::fs::symlink(&artifact, &linked).unwrap();
+    check(&linked, "learning_invalid_native_artifact");
+    fs::remove_file(&linked).unwrap();
+    fs::hard_link(&artifact, &linked).unwrap();
+    check(&linked, "learning_native_artifact_owner_required");
+    fs::remove_file(&linked).unwrap();
+    for (bytes, expected) in [
+        (b"{private-invalid-native-record}\n".as_slice(), "learning_invalid_native_artifact"),
+        (b"\xff\n".as_slice(), "learning_invalid_native_artifact"),
+        (b"{\"type\":\"session_meta\",\"payload\":{\"id\":\"another-owner\"}}\n{\"type\":\"turn_context\",\"payload\":{\"turn_id\":\"native-check\"}}\n".as_slice(), "learning_native_boundary_mismatch"),
+        (b"{\"type\":\"session_meta\",\"payload\":{\"id\":\"fixture-owner\"}}\n{\"type\":\"turn_context\",\"payload\":{\"turn_id\":\"another-turn\"}}\n".as_slice(), "learning_native_boundary_mismatch"),
+    ] {
+        fs::write(&artifact, bytes).unwrap();
+        check(&artifact, expected);
+        assert_eq!(fs::read(&artifact).unwrap(), bytes);
+    }
+    let limited = directory.join("limited.jsonl");
+    let sparse = fs::File::create(&limited).unwrap();
+    sparse.set_len(512 * 1024 * 1024 + 1).unwrap();
+    drop(sparse);
+    fs::set_permissions(&limited, fs::Permissions::from_mode(0o644)).unwrap();
+    check(&limited, "learning_native_artifact_byte_limit_exceeded");
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&limited)
+        .unwrap()
+        .set_len(64 * 1024 * 1024 + 1)
+        .unwrap();
+    check(&limited, "learning_native_artifact_line_limit_exceeded");
+    let mut turns =
+        String::from("{\"type\":\"session_meta\",\"payload\":{\"id\":\"fixture-owner\"}}\n");
+    for n in 0..4097 {
+        turns.push_str(&format!(
+            "{{\"type\":\"turn_context\",\"payload\":{{\"turn_id\":\"turn-{n}\"}}}}\n"
+        ));
+    }
+    fs::write(&artifact, turns).unwrap();
+    check(&artifact, "learning_native_artifact_turn_limit_exceeded");
+    fs::write(&artifact, valid).unwrap();
+    fs::set_permissions(&input, fs::Permissions::from_mode(0o644)).unwrap();
+    check(&artifact, "learning_private_regular_input_required");
+    let mut after: Vec<_> = fs::read_dir(&fixture.learning)
+        .unwrap()
+        .map(|v| v.unwrap().file_name())
+        .collect();
+    after.sort();
+    assert_eq!(after, before);
+    assert_eq!(fs::read(&artifact).unwrap(), valid);
+}
+
+#[test]
 fn continuous_learning_archives_boundary_queue_and_retains_exact_native_references() {
     let fixture = Fixture::new().continuous();
     let artifact = fixture.native_artifact("queued");
