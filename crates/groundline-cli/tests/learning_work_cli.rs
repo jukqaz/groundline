@@ -29,17 +29,69 @@ fn private_tree(path: &Path, parent: &Path) {
         fs::set_permissions(directory, fs::Permissions::from_mode(0o700)).unwrap();
     }
 }
+fn strip_fixture_debug(path: &Path) {
+    let mut command = Command::new("strip");
+    #[cfg(target_os = "linux")]
+    command.arg("--strip-debug");
+    #[cfg(target_os = "macos")]
+    command.arg("-S");
+    let output = command.arg(path).output().unwrap();
+    assert!(
+        output.status.success(),
+        "private fixture debug strip failed"
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "private fixture strip emitted stdout"
+    );
+}
 fn executable() -> &'static Path {
     static INSTALLED: OnceLock<(tempfile::TempDir, PathBuf)> = OnceLock::new();
     let (_, path) = INSTALLED.get_or_init(|| {
         let directory = tempfile::tempdir().unwrap();
         fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700)).unwrap();
         let path = directory.path().canonicalize().unwrap().join("groundline");
-        fs::copy(env!("CARGO_BIN_EXE_groundline"), &path).unwrap();
+        let original = Path::new(env!("CARGO_BIN_EXE_groundline"));
+        fs::copy(original, &path).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        // GNU debug builds can exceed the release Core's 64 MiB pin bound.
+        // Remove debug information only from the owner-private fixture copy.
+        const MAX_CORE_BYTES: u64 = 64 * 1024 * 1024;
+        if fs::metadata(&path).unwrap().len() > MAX_CORE_BYTES {
+            let before = fs::metadata(original).unwrap();
+            let original_sha = hash(&fs::read(original).unwrap());
+            strip_fixture_debug(&path);
+            let after = fs::metadata(original).unwrap();
+            assert_eq!((after.dev(), after.ino()), (before.dev(), before.ino()));
+            assert_eq!(hash(&fs::read(original).unwrap()), original_sha);
+        }
+        assert!(fs::metadata(&path).unwrap().len() <= MAX_CORE_BYTES);
         (directory, path)
     });
     path
+}
+
+#[test]
+fn stripped_private_fixture_preserves_the_cargo_binary_and_current_version() {
+    let directory = tempfile::tempdir().unwrap();
+    fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700)).unwrap();
+    let original = Path::new(env!("CARGO_BIN_EXE_groundline"));
+    let before = fs::metadata(original).unwrap();
+    let original_sha = hash(&fs::read(original).unwrap());
+    let copy = directory.path().join("groundline");
+    fs::copy(original, &copy).unwrap();
+    fs::set_permissions(&copy, fs::Permissions::from_mode(0o755)).unwrap();
+    strip_fixture_debug(&copy);
+    let version = Command::new(&copy).arg("--version").output().unwrap();
+    assert!(version.status.success());
+    assert_eq!(
+        version.stdout,
+        format!("groundline {}\n", env!("CARGO_PKG_VERSION")).as_bytes()
+    );
+    assert!(fs::metadata(copy).unwrap().len() <= 64 * 1024 * 1024);
+    let after = fs::metadata(original).unwrap();
+    assert_eq!((after.dev(), after.ino()), (before.dev(), before.ino()));
+    assert_eq!(hash(&fs::read(original).unwrap()), original_sha);
 }
 fn run(root: &Path, args: &[&str], paths: &[(&str, &Path)], success: bool) -> Value {
     let mut command = Command::new(executable());
