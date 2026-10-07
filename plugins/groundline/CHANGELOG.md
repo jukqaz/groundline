@@ -1,5 +1,10 @@
 # GroundLine Core changes
 
+## 2026.1007.5
+
+- 배포·설치·훅의 지원 대상을 Apple Silicon macOS(ARM64)와 Linux(ARM64·x86-64)로 줄였습니다. Intel macOS 패키지를 배포하지 않으며 실제 Intel 설치는 변경 전에 거절합니다. Apple Silicon의 Rosetta shell은 ARM64 패키지를 선택합니다.
+- 정상 Codex 원본의 권한을 보존하면서 대용량 native JSONL을 읽는 학습 경로를 수정했습니다. 비공개 상태의 접근 규약과 변경 감지는 유지합니다.
+
 ## 2026.10.07-c (`2026.1007.3`)
 
 - 기기별 opt-in으로 완료 기준·직접 결과를 보존하고 적합한 후속 결과를 자동 연결합니다.

@@ -1,3 +1,5 @@
+use groundline_runtime::platform::SUPPORTED_TARGETS;
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use super::XtaskError;
@@ -5,6 +7,24 @@ use super::package::regular_bytes;
 
 fn text(path: &Path) -> Result<String, XtaskError> {
     String::from_utf8(regular_bytes(path)?).map_err(|_| XtaskError::InvalidSource)
+}
+
+fn release_matrices_match_supported_targets(workflow: &str) -> bool {
+    let Ok(document) = serde_saphyr::from_str::<serde_json::Value>(workflow) else {
+        return false;
+    };
+    let expected = SUPPORTED_TARGETS.iter().copied().collect::<BTreeSet<_>>();
+    ["native-setup", "artifacts"].iter().all(|job| {
+        let Some(rows) = document["jobs"][*job]["strategy"]["matrix"]["include"].as_array() else {
+            return false;
+        };
+        rows.len() == SUPPORTED_TARGETS.len()
+            && rows
+                .iter()
+                .filter_map(|row| row["target"].as_str())
+                .collect::<BTreeSet<_>>()
+                == expected
+    })
 }
 
 fn external_action_is_pinned(line: &str) -> bool {
@@ -325,6 +345,7 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
         || !actions_are_pinned(&rust)
         || !public_build_metadata_is_bounded(&rust)
         || !native_delivery_checks_are_required(&rust)
+        || !release_matrices_match_supported_targets(&rust)
         || !clickhouse_schema_reset_is_scoped(&rust)
         || !setup.contains("using: composite")
         || !setup.contains("rustup toolchain install")
@@ -364,8 +385,35 @@ mod tests {
     use super::{
         SCHEMA_RESET_ENV, actions_are_pinned, clickhouse_schema_reset_is_scoped,
         external_action_is_pinned, native_delivery_checks_are_required,
-        public_build_metadata_is_bounded, verify_ci_cost_contract,
+        public_build_metadata_is_bounded, release_matrices_match_supported_targets,
+        verify_ci_cost_contract,
     };
+
+    #[test]
+    fn release_and_native_matrices_require_the_exact_three_supported_targets() {
+        let workflow = include_str!("../../.github/workflows/rust.yml");
+        assert!(release_matrices_match_supported_targets(workflow));
+        for job in ["native-setup", "artifacts"] {
+            for change in ["intel", "missing", "duplicate"] {
+                let mut document: serde_json::Value = serde_saphyr::from_str(workflow).unwrap();
+                let rows = document["jobs"][job]["strategy"]["matrix"]["include"]
+                    .as_array_mut()
+                    .unwrap();
+                match change {
+                    "intel" => rows[0]["target"] = "x86_64-apple-darwin".into(),
+                    "missing" => {
+                        rows.remove(0);
+                    }
+                    _ => {
+                        rows[1] = rows[0].clone();
+                    }
+                }
+                assert!(!release_matrices_match_supported_targets(
+                    &document.to_string()
+                ));
+            }
+        }
+    }
 
     #[test]
     fn schema_reset_requires_the_disposable_clickhouse_step_only() {

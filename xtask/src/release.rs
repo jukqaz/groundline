@@ -229,12 +229,17 @@ mod tests {
     use super::expected_artifacts;
 
     #[test]
-    fn stable_release_requires_exactly_two_four_target_artifact_sets() {
+    fn stable_release_requires_exactly_two_three_target_artifact_sets() {
         let expected = expected_artifacts();
-        assert_eq!(expected.len(), 24);
+        assert_eq!(expected.len(), 18);
         assert!(expected.contains("plugins/groundline/bin/aarch64-unknown-linux-musl/groundline"));
         assert!(expected.contains(
-            "plugins/groundline-insights/bin/x86_64-apple-darwin/groundline-insights.sha256"
+            "plugins/groundline-insights/bin/aarch64-apple-darwin/groundline-insights.sha256"
         ));
+        assert!(
+            !expected
+                .iter()
+                .any(|path| path.contains("x86_64-apple-darwin"))
+        );
     }
 }

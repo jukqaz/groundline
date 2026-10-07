@@ -15,7 +15,7 @@ git clone --branch stable --single-branch https://github.com/jukqaz/groundline.g
 bash groundline-install/install.sh --profile core
 ```
 
-Supported hosts are macOS and Linux on ARM64 and x86-64. macOS prefers the
+Supported hosts are Apple Silicon macOS (ARM64) and Linux on ARM64 and x86-64. macOS prefers the
 App-bundled executable when present; Linux uses the resolved Codex executable.
 Use `--codex /absolute/path/to/codex` for an explicit runtime. Preflight checks
 required native commands before package changes. Keep the same intended `CODEX_HOME`.
@@ -56,8 +56,9 @@ groundline setup --catalog /owner-private/native-models.json --apply
 
 The Core command requires Core to be installed. Resolve `groundline` and
 `groundline-insights` from the native plugin cache's `bin/<target>/` if they are
-not on PATH. Targets are `aarch64-apple-darwin`, `x86_64-apple-darwin`,
-`aarch64-unknown-linux-musl`, and `x86_64-unknown-linux-musl`. See
+not on PATH. Targets are `aarch64-apple-darwin`, `aarch64-unknown-linux-musl`, and
+`x86_64-unknown-linux-musl`. Intel macOS is unsupported; an Apple Silicon host
+running a translated shell still selects the ARM64 package. See
 [Insights setup](#add-insights-in-the-same-flow) for collection activation.
 
 ## Update an existing installation

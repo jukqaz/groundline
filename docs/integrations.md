@@ -1,7 +1,7 @@
 # Integrations and installation profiles
 
-GroundLine provides independent Core and Insights plugins for macOS and Linux
-on ARM64 and x86-64. Use the [installation guide](installation.md) for commands,
+GroundLine provides independent Core and Insights plugins for Apple Silicon macOS (ARM64)
+and Linux on ARM64 and x86-64. Use the [installation guide](installation.md) for commands,
 updates, and recovery. There is no separate GroundLine Desktop app.
 
 ## Choose a profile

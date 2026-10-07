@@ -44,7 +44,7 @@ groundline provider-smoke --plugin-root /path/to/installed/groundline --require-
 groundline doctor --plugin-root /path/to/installed/groundline --json
 ```
 
-macOS/Linux의 ARM64·x86_64를 지원합니다. 실행 파일은 설치된 `bin/<target>`에서
+Apple Silicon macOS(ARM64)와 Linux(ARM64·x86_64)를 지원합니다. 실행 파일은 설치된 `bin/<target>`에서
 [명령 경로 안내](references/platform-commands.md)에 따라 찾습니다. shell `PATH`
 등록은 보장하지 않으며 소스 태그에는 실행 파일이 없습니다.
 

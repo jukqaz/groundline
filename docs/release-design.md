@@ -29,7 +29,7 @@ Codex의 지원되는 기능을 필요한 작업에 우선 사용합니다. Grou
 
 Core-only, Insights-only, combined 설치를 유지합니다. Core는 Insights가 없어도 직접
 capture와 결과 평가를 수행할 수 있고, 자동 경계 관측의 부족은 coverage로 표시합니다.
-지원 배포 대상은 macOS/Linux의 ARM64·x86-64 네 조합입니다.
+지원 배포 대상은 Apple Silicon macOS(ARM64)와 Linux(ARM64·x86-64)의 세 조합입니다.
 
 ## Codex 기능을 사용하는 위치
 

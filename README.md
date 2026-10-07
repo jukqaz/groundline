@@ -14,7 +14,7 @@ remain intact; environment changes follow the user's explicit choices and scope.
 
 The plugins install independently. Insights connects to the owner's service;
 installing it does not enroll anyone in the maintainer's infrastructure.
-Supported hosts: **macOS and Linux, ARM64 and x86_64**.
+Supported hosts: **Apple Silicon macOS (ARM64) and Linux (ARM64 or x86_64)**.
 
 ## Install and update
 

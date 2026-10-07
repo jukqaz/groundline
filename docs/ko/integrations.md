@@ -1,6 +1,6 @@
 # 연동과 설치 프로필
 
-GroundLine은 macOS·Linux의 ARM64·x86-64에서 독립적인 Codex 플러그인 두 개를
+GroundLine은 Apple Silicon macOS(ARM64)와 Linux(ARM64·x86-64)에서 독립적인 Codex 플러그인 두 개를
 제공합니다. [설치 안내](../installation.md)에 설치·업데이트·복구 명령을 모았습니다.
 별도 GroundLine Desktop 앱은 없습니다.
 

@@ -62,7 +62,7 @@ enum Command {
         #[arg(long)]
         output: PathBuf,
     },
-    /// Verify the exact four-target package set before release promotion.
+    /// Verify the exact three-target package set before release promotion.
     VerifyPackageSet {
         #[arg(long, value_enum)]
         product: Product,
@@ -721,11 +721,15 @@ mod tests {
     }
 
     #[test]
-    fn package_rejects_retired_windows_targets_before_creating_output() {
+    fn package_rejects_intel_macos_and_retired_windows_before_creating_output() {
         let root = tempdir().unwrap();
         let binary = root.path().join("input-binary");
         fs::write(&binary, b"bounded-test-binary").unwrap();
-        for target in ["aarch64-pc-windows-msvc", "x86_64-pc-windows-msvc"] {
+        for target in [
+            "x86_64-apple-darwin",
+            "aarch64-pc-windows-msvc",
+            "x86_64-pc-windows-msvc",
+        ] {
             let output = root.path().join(target);
             assert!(matches!(
                 package_binary(Product::Core, target, &binary, &output),
@@ -796,6 +800,15 @@ mod tests {
 
         verify_package_set(&dist, env!("CARGO_PKG_VERSION"), Product::Core)
             .expect("valid package set");
+        for unsupported in ["x86_64-apple-darwin", "x86_64-pc-windows-msvc"] {
+            let extra = dist.join(unsupported);
+            fs::create_dir(&extra).unwrap();
+            assert!(matches!(
+                verify_package_set(&dist, env!("CARGO_PKG_VERSION"), Product::Core),
+                Err(XtaskError::InvalidPackageSet)
+            ));
+            fs::remove_dir(extra).unwrap();
+        }
         for target in SUPPORTED_TARGETS {
             let executable = super::executable_name(Product::Core, target).unwrap();
             let path = dist.join(target).join(format!("{executable}.sha256"));

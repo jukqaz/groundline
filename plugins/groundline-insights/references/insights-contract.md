@@ -12,7 +12,7 @@ changes no global Codex settings, and routes no models.
 
 Supported runtime families are `codex_app` and `codex_cli`. Supported execution
 modes are `desktop`, `local_headless`, and `remote_headless`. Supported platforms
-are macOS and Linux on ARM64 and x86-64.
+are Apple Silicon macOS (ARM64) and Linux on ARM64 and x86-64.
 
 Codex App/CLI are the only sources. HTTPS is the default transport; Tailnet is
 optional. Docker Compose is the generic self-hosting path and TrueNAS an optional
@@ -353,7 +353,7 @@ Release qualification covers:
    rejection;
 6. API-owned ClickHouse migrations, enrollment, accepted and duplicate upload,
    report generation, every Grafana query, and authenticated collector deletion;
-7. macOS and Linux packages on ARM64 and x86-64;
+7. Apple Silicon macOS (ARM64) and Linux packages on ARM64 and x86-64;
 8. source privacy scanning, pinned CI actions, bounded timeouts, and exact stable
    artifact promotion.
 

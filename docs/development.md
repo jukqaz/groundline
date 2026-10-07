@@ -3,7 +3,7 @@
 Use [Contributing](../CONTRIBUTING.md) for build checks and
 [architecture](architecture.md) for ownership. Dependency versions and features
 belong in Cargo.toml/Cargo.lock; historical investigations are not current setup
-instructions. Support macOS and Linux on ARM64 and x86_64.
+instructions. Support Apple Silicon macOS (ARM64) and Linux on ARM64 and x86_64.
 
 ## Parsing and dependencies
 

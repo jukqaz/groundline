@@ -326,14 +326,14 @@ fn verify_insights(root: &Path) -> Result<(), XtaskError> {
             .and_then(Value::as_str)
             .ok_or(XtaskError::InvalidSource)?;
         let fields = command.as_object().ok_or(XtaskError::InvalidSource)?;
+        let expected = format!(
+            r#"g=''; case "$(uname -s 2>/dev/null):$(uname -m 2>/dev/null)" in Darwin:arm64) g='aarch64-apple-darwin';; Darwin:x86_64) if [ "$(sysctl -in hw.optional.arm64 2>/dev/null)" = 1 ]; then g='aarch64-apple-darwin'; fi;; Linux:aarch64|Linux:arm64) g='aarch64-unknown-linux-musl';; Linux:x86_64|Linux:amd64) g='x86_64-unknown-linux-musl';; esac; if [ -n "$g" ] && [ -x "${{PLUGIN_ROOT}}/bin/$g/groundline-insights" ]; then "${{PLUGIN_ROOT}}/bin/$g/groundline-insights" checkpoint {trigger} --plugin-root "${{PLUGIN_ROOT}}" >/dev/null 2>&1 || true; fi; exit 0"#
+        );
         if command.get("type").and_then(Value::as_str) != Some("command")
             || command.get("timeout").and_then(Value::as_u64) != Some(3)
             || fields.keys().map(String::as_str).collect::<BTreeSet<_>>()
                 != ["command", "timeout", "type"].into_iter().collect()
-            || !unix.contains("groundline-insights")
-            || !unix.contains(" checkpoint ")
-            || !unix.contains(trigger)
-            || unix.contains("worker run-once")
+            || unix != expected
         {
             return Err(XtaskError::InvalidSource);
         }
@@ -458,6 +458,16 @@ mod tests {
         .unwrap();
         std::fs::write(&path, serde_json::to_vec(&hooks).unwrap()).unwrap();
         verify_insights(root.path()).unwrap();
+        let canonical = hooks["hooks"]["SessionStart"][0]["hooks"][0]["command"].clone();
+        hooks["hooks"]["SessionStart"][0]["hooks"][0]["command"] = serde_json::json!(
+            canonical.as_str().unwrap().replace(
+                "if [ \"$(sysctl -in hw.optional.arm64 2>/dev/null)\" = 1 ]; then g='aarch64-apple-darwin'; fi",
+                "g='x86_64-apple-darwin'"
+            )
+        );
+        std::fs::write(&path, serde_json::to_vec(&hooks).unwrap()).unwrap();
+        assert!(verify_insights(root.path()).is_err());
+        hooks["hooks"]["SessionStart"][0]["hooks"][0]["command"] = canonical;
         hooks["hooks"]["SessionStart"][0]["hooks"][0]["commandWindows"] =
             serde_json::json!("retired command");
         std::fs::write(&path, serde_json::to_vec(&hooks).unwrap()).unwrap();

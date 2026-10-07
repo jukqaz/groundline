@@ -46,7 +46,7 @@ groundline provider-smoke --plugin-root /path/to/installed/groundline --require-
 groundline doctor --plugin-root /path/to/installed/groundline --json
 ```
 
-Packages support macOS/Linux on ARM64 and x86_64. Resolve the installed executable
+Packages support Apple Silicon macOS (ARM64) and Linux on ARM64 and x86_64. Resolve the installed executable
 from `bin/<target>` using [platform commands](references/platform-commands.md);
 installation does not promise a shell `PATH` entry. Source tags contain no binaries.
 

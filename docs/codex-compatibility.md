@@ -3,7 +3,7 @@
 GroundLine follows observable Codex contracts rather than maintaining a second
 model catalog, permission policy, context manager, or plugin updater. A newer
 Codex version does not by itself require a GroundLine release. Supported hosts
-are macOS and Linux on ARM64 and x86-64. Historical Windows observations remain
+are Apple Silicon macOS (ARM64) and Linux on ARM64 and x86-64. Historical Windows observations remain
 readable without Windows runtime support.
 
 ## Boundaries that change independently

@@ -41,7 +41,7 @@ activity is pending. Setup grants no hook trust and fabricates no delivery recei
 
 A changed hook hash requires Codex review. GroundLine never trusts itself, and
 `plugin list` proves neither hook trust nor dispatch. Resolve `groundline-insights`
-from the installed `bin/<target>` directory: macOS/Linux ARM64 and x86_64 are
+from the installed `bin/<target>` directory: Apple Silicon macOS (ARM64) and Linux ARM64/x86_64 are
 supported, but shell `PATH` registration is not promised.
 
 ## Owner configuration

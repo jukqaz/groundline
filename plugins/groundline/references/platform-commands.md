@@ -11,11 +11,11 @@ verified execution platform:
 | System | Architecture | Relative executable |
 | --- | --- | --- |
 | macOS | ARM64 | `bin/aarch64-apple-darwin/groundline` |
-| macOS | x86_64 | `bin/x86_64-apple-darwin/groundline` |
 | Linux | ARM64 | `bin/aarch64-unknown-linux-musl/groundline` |
 | Linux | x86_64 | `bin/x86_64-unknown-linux-musl/groundline` |
 
-Use the native host architecture, not an emulated shell's architecture. Check
+Intel macOS is unsupported. On Apple Silicon, a Rosetta shell still uses the
+ARM64 package. Use the native host architecture, not an emulated shell's architecture. Check
 that the file exists and is executable before invoking it. If the installed
 artifact is missing, report that lane unavailable; do not silently run a source
 build or an unrelated binary on `PATH`.

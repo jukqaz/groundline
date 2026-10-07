@@ -35,8 +35,8 @@ Core는 함께 설치되지 않으며 소스 태그에는 실행 파일이 없�
 추가 조치 또는 첫 활동 대기이며 setup은 hook trust를 부여하거나 전송 성공을 꾸며내지 않습니다.
 
 변경된 hook hash는 Codex에서 다시 검토해야 합니다. GroundLine은 자신을 신뢰
-처리하지 않으며 `plugin list`도 trust·실행 증거가 아닙니다. macOS/Linux의
-ARM64·x86_64를 지원합니다. 실행 파일은 설치된 `bin/<target>/groundline-insights`에서
+처리하지 않으며 `plugin list`도 trust·실행 증거가 아닙니다. Apple Silicon macOS(ARM64)와
+Linux(ARM64·x86_64)를 지원합니다. 실행 파일은 설치된 `bin/<target>/groundline-insights`에서
 찾으며 shell `PATH` 등록은 보장하지 않습니다.
 
 ## Owner 설정

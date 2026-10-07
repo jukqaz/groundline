@@ -146,7 +146,7 @@ fn installed_versions(command: &mut Command) -> BTreeMap<String, (String, bool)>
 }
 
 #[test]
-#[ignore = "requires GROUNDLINE_NATIVE_CODEX and GROUNDLINE_NATIVE_INSIGHTS_BINARY; CI runs this on four native hosts"]
+#[ignore = "requires GROUNDLINE_NATIVE_CODEX and GROUNDLINE_NATIVE_INSIGHTS_BINARY; CI runs this on the three supported native hosts"]
 fn real_codex_upgrades_metadata_repeats_and_preserves_settings_and_consent() {
     let codex =
         PathBuf::from(std::env::var_os("GROUNDLINE_NATIVE_CODEX").expect("real Codex path"));

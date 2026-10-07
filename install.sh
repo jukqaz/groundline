@@ -82,6 +82,20 @@ trap finish EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+# Reject unsupported hardware before invoking Codex or changing installation state.
+case "$(uname -s)/$(uname -m)" in
+  Darwin/arm64) INSTALL_TARGET=aarch64-apple-darwin ;;
+  Darwin/x86_64)
+    if [[ "$(sysctl -in hw.optional.arm64 2>/dev/null || true)" == 1 ]]; then INSTALL_TARGET=aarch64-apple-darwin
+    else
+      echo 'Intel Macs are unsupported; use Apple Silicon macOS or Linux ARM64/x86-64.' >&2
+      stage preflight FAIL 1; exit 1
+    fi ;;
+  Linux/aarch64|Linux/arm64) INSTALL_TARGET=aarch64-unknown-linux-musl ;;
+  Linux/x86_64) INSTALL_TARGET=x86_64-unknown-linux-musl ;;
+  *) echo 'Unsupported platform; use Apple Silicon macOS or Linux ARM64/x86-64.' >&2; stage preflight FAIL 1; exit 1 ;;
+esac
+
 # Native JSON is parsed with jq, never shell text matching or config.toml edits.
 marketplace() {
   local value
@@ -211,15 +225,6 @@ if ! command -v git >/dev/null || ! command -v jq >/dev/null || [[ -z "$INSTALL_
   echo 'Install Git, jq, and a Codex runtime with plugin, debug models, and doctor support; use --codex to select it.' >&2
   stage preflight FAIL 1; exit 1
 fi
-case "$(uname -s)/$(uname -m)" in
-  Darwin/arm64) INSTALL_TARGET=aarch64-apple-darwin ;;
-  Darwin/x86_64)
-    if [[ "$(sysctl -in hw.optional.arm64 2>/dev/null || true)" == 1 ]]; then INSTALL_TARGET=aarch64-apple-darwin
-    else INSTALL_TARGET=x86_64-apple-darwin; fi ;;
-  Linux/aarch64|Linux/arm64) INSTALL_TARGET=aarch64-unknown-linux-musl ;;
-  Linux/x86_64) INSTALL_TARGET=x86_64-unknown-linux-musl ;;
-  *) stage preflight FAIL 1; exit 1 ;;
-esac
 stage preflight PASS 0
 INSTALL_MARKETPLACE=$(marketplace) || { stage native_source FAIL 1; exit 1; }
 INSTALL_PREVIOUS_PLUGINS=$(installed_plugins) || { stage native_source FAIL 1; exit 1; }

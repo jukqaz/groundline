@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       build_release_artifacts:
-        description: Build both products for all four supported targets
+        description: Build both products for all three supported targets
         required: true
         default: false
         type: boolean
@@ -365,9 +365,6 @@ jobs:
           - runner: macos-latest
             target: aarch64-apple-darwin
             codex_sha256: 341c4a08f9ce1935b3007376dc2a3d50a0a89112930e9a474ae61367218f6e8a
-          - runner: macos-15-intel
-            target: x86_64-apple-darwin
-            codex_sha256: bb3983d45f53cae150c7798993748be75cdd9774c60d1f284c09dd28a919e069
           - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
             codex_sha256: 91e3fafe5ff845a8f685a05d04919146fb30fdc9245af1a42a2f7f239959e90c
@@ -440,8 +437,6 @@ jobs:
         include:
           - runner: macos-latest
             target: aarch64-apple-darwin
-          - runner: macos-15-intel
-            target: x86_64-apple-darwin
           - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
           - runner: ubuntu-24.04
@@ -560,12 +555,12 @@ jobs:
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
         run: |
-          chmod 0755 packages/core/{aarch64-apple-darwin,x86_64-apple-darwin,aarch64-unknown-linux-musl,x86_64-unknown-linux-musl}/groundline
-          chmod 0755 packages/insights/{aarch64-apple-darwin,x86_64-apple-darwin,aarch64-unknown-linux-musl,x86_64-unknown-linux-musl}/groundline-insights
+          chmod 0755 packages/core/{aarch64-apple-darwin,aarch64-unknown-linux-musl,x86_64-unknown-linux-musl}/groundline
+          chmod 0755 packages/insights/{aarch64-apple-darwin,aarch64-unknown-linux-musl,x86_64-unknown-linux-musl}/groundline-insights
           cargo run --locked -p xtask -- verify-package-set --product core --root packages/core --version "${RELEASE_VERSION#v}" --json
           cargo run --locked -p xtask -- verify-package-set --product insights --root packages/insights --version "${RELEASE_VERSION#v}" --json
           mkdir release-assets
-          for target in aarch64-apple-darwin aarch64-unknown-linux-musl x86_64-apple-darwin x86_64-unknown-linux-musl; do
+          for target in aarch64-apple-darwin aarch64-unknown-linux-musl x86_64-unknown-linux-musl; do
             tar -czf "release-assets/groundline-${target}.tar.gz" -C packages/core "$target"
             tar -czf "release-assets/groundline-insights-${target}.tar.gz" -C packages/insights "$target"
           done
@@ -732,7 +727,7 @@ jobs:
           fetch-depth: 0
       - name: Select the moving Rust stable channel
         uses: ./.github/actions/setup-rust-stable
-      - name: Assemble both exact four-target packages
+      - name: Assemble both exact three-target packages
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: groundline-*
@@ -746,8 +741,8 @@ jobs:
           mkdir -p plugins/groundline/bin plugins/groundline-insights/bin
           mv distribution/core/* plugins/groundline/bin/
           mv distribution/insights/* plugins/groundline-insights/bin/
-          chmod 0755 plugins/groundline/bin/{aarch64-apple-darwin,x86_64-apple-darwin,aarch64-unknown-linux-musl,x86_64-unknown-linux-musl}/groundline
-          chmod 0755 plugins/groundline-insights/bin/{aarch64-apple-darwin,x86_64-apple-darwin,aarch64-unknown-linux-musl,x86_64-unknown-linux-musl}/groundline-insights
+          chmod 0755 plugins/groundline/bin/{aarch64-apple-darwin,aarch64-unknown-linux-musl,x86_64-unknown-linux-musl}/groundline
+          chmod 0755 plugins/groundline-insights/bin/{aarch64-apple-darwin,aarch64-unknown-linux-musl,x86_64-unknown-linux-musl}/groundline-insights
           rm -rf distribution
           cargo run --locked -p xtask -- verify-source --root . --json
           cargo run --locked -p xtask -- verify-package-set --product core --root plugins/groundline/bin --version "${RELEASE_TAG#v}" --json
