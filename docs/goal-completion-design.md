@@ -47,6 +47,13 @@ outcome과 readiness를 사용한다.
 영구적인 입력·소유권 오류와 충분한 native 근거가 없는 작업은 대기로 유지하며,
 worker 실행 자체를 업무 완료·비용 관측·수락 근거로 사용하지 않는다.
 
+통계 수집기의 `audit_failed`는 audit 읽기와 event 계약 검증을 구분하는 고정
+`last_collection_failure`를 로컬 상태·조회에 보존한다. 원문 오류·SQL·경로·자격증명은
+저장하지 않는다. 성공 뒤에도 마지막 관측 실패 정보를 유지하며, 원래 기록에 없던
+단계는 null로 남긴다. 이 진단은 일시적·영구적 원인 판정이 아니다. 기존 900초 수집
+간격·3회 실패 상한과 불변 window 재시도를 유지하고 모든 실패의 즉시 재시도로
+확대하지 않는다.
+
 ## readiness가 말하는 범위
 
 readiness는 CLI가 이미 검증한 active record와 참조된 archive의 제한된 closure 및

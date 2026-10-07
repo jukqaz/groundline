@@ -83,7 +83,7 @@ pub enum StateError {
     #[error("tailnet_not_connected")]
     TailnetDisconnected,
     #[error("audit_failed")]
-    AuditFailed,
+    AuditFailed(CollectionFailure),
     #[error("collection_incomplete")]
     AuditIncomplete,
     #[error("collection_operator_action_required")]
@@ -153,7 +153,7 @@ impl StateError {
             Self::Disabled
             | Self::LocalState
             | Self::UnsupportedState
-            | Self::AuditFailed
+            | Self::AuditFailed(_)
             | Self::AuditIncomplete
             | Self::CollectionPaused
             | Self::ApiUpgradeRequired
@@ -169,6 +169,101 @@ impl StateError {
             | Self::CollectorRetired
             | Self::DeviceIdentityConflict
             | Self::OutboxCapacity => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CollectionFailureStage {
+    AuditRead,
+    EventBuild,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CollectionFailureCode {
+    StateDatabaseNotFound,
+    UnsupportedStateDatabase,
+    StateDatabaseUnavailable,
+    AuditInputUnavailable,
+    AuditFailed,
+    InvalidVersion,
+    InvalidCollectionTrigger,
+    InvalidAudit,
+    InvalidConsentTimestamp,
+    InvalidBasicEvent,
+}
+
+/// Fixed local diagnostics, never a transient/permanent classification or a
+/// copy of SQLite, JSON-validation, path, or provider error text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CollectionFailure {
+    failure_stage: CollectionFailureStage,
+    error_code: CollectionFailureCode,
+}
+
+impl CollectionFailure {
+    fn audit_read(error: crate::audit_store::AuditStoreError) -> StateError {
+        use crate::audit_store::AuditStoreError;
+        let error_code = match error {
+            AuditStoreError::DatabaseNotFound => CollectionFailureCode::StateDatabaseNotFound,
+            AuditStoreError::UnsupportedDatabase => CollectionFailureCode::UnsupportedStateDatabase,
+            AuditStoreError::DatabaseUnavailable => CollectionFailureCode::StateDatabaseUnavailable,
+            AuditStoreError::InputUnavailable => CollectionFailureCode::AuditInputUnavailable,
+            AuditStoreError::AuditFailed => CollectionFailureCode::AuditFailed,
+        };
+        StateError::AuditFailed(Self {
+            failure_stage: CollectionFailureStage::AuditRead,
+            error_code,
+        })
+    }
+
+    fn event_build(error: groundline_contracts::ContractError) -> StateError {
+        let error_code = match error.0.as_str() {
+            "invalid_version" => CollectionFailureCode::InvalidVersion,
+            "invalid_collection_trigger" => CollectionFailureCode::InvalidCollectionTrigger,
+            "invalid_audit" => CollectionFailureCode::InvalidAudit,
+            "invalid_consent_timestamp" => CollectionFailureCode::InvalidConsentTimestamp,
+            "invalid_basic_event" => CollectionFailureCode::InvalidBasicEvent,
+            _ => CollectionFailureCode::AuditFailed,
+        };
+        StateError::AuditFailed(Self {
+            failure_stage: CollectionFailureStage::EventBuild,
+            error_code,
+        })
+    }
+
+    fn valid(self) -> bool {
+        use CollectionFailureCode::*;
+        match self.failure_stage {
+            CollectionFailureStage::AuditRead => matches!(
+                self.error_code,
+                StateDatabaseNotFound
+                    | UnsupportedStateDatabase
+                    | StateDatabaseUnavailable
+                    | AuditInputUnavailable
+                    | AuditFailed
+            ),
+            CollectionFailureStage::EventBuild => matches!(
+                self.error_code,
+                InvalidVersion
+                    | InvalidCollectionTrigger
+                    | InvalidAudit
+                    | InvalidConsentTimestamp
+                    | InvalidBasicEvent
+                    | AuditFailed
+            ),
+        }
+    }
+}
+
+impl StateError {
+    fn collection_failure(&self) -> Option<CollectionFailure> {
+        match self {
+            Self::AuditFailed(failure) => Some(*failure),
+            _ => None,
         }
     }
 }
@@ -242,6 +337,7 @@ struct Status {
     pending_event_count: u64,
     tailnet_status: String,
     last_trigger: String,
+    last_collection_failure: Option<CollectionFailure>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1358,6 +1454,9 @@ fn valid_current_status(status: &Status) -> bool {
             .is_none_or(|value| parse_timestamp(value).is_ok())
         && valid_tailnet_status(&status.tailnet_status)
         && valid_status_trigger(&status.last_trigger)
+        && status
+            .last_collection_failure
+            .is_none_or(CollectionFailure::valid)
 }
 
 fn read_stored_status(path: &Path) -> Result<Status, StateError> {
@@ -1621,6 +1720,11 @@ fn status_with_tailnet_at(
         "delivery_confirmation":confirmation,
         "tailnet_required":tailnet_required,"tailnet":tailnet,"raw_content_emitted":false,"private_paths_emitted":false,"secret_value_printed":false,
     });
+    result["last_collection_failure"] = json!(
+        previous
+            .as_ref()
+            .and_then(|status| status.last_collection_failure)
+    );
     result["collection_scope"] = json!({
         "source":"selected_local_codex_app_or_cli_state",
         "orchestration_location":"unknown","account_wide_coverage":"unobserved",
@@ -1674,6 +1778,16 @@ fn persist_cycle_status(
     now: DateTime<Utc>,
     update: StatusUpdate<'_>,
 ) -> Result<(), StateError> {
+    persist_cycle_status_with_failure(directory, previous, now, update, None)
+}
+
+fn persist_cycle_status_with_failure(
+    directory: &Path,
+    previous: Option<&Status>,
+    now: DateTime<Utc>,
+    update: StatusUpdate<'_>,
+    collection_failure: Option<CollectionFailure>,
+) -> Result<(), StateError> {
     activity_history::cycle(directory, &update, now);
     write_status(
         directory,
@@ -1693,6 +1807,10 @@ fn persist_cycle_status(
             pending_event_count: update.pending_event_count,
             tailnet_status: update.tailnet_status,
             last_trigger: update.trigger.to_owned(),
+            // A successful retry must not erase the only observation of why
+            // the previous attempt failed. Existing unobserved stages stay null.
+            last_collection_failure: collection_failure
+                .or_else(|| previous.and_then(|status| status.last_collection_failure)),
         },
     )
 }
@@ -1851,7 +1969,7 @@ pub async fn run_once(
                     Some(identity.runtime_family.as_str()),
                     false,
                 )
-                .map_err(|_| StateError::AuditFailed)
+                .map_err(CollectionFailure::audit_read)
             },
         ) {
             Ok(end) => {
@@ -1859,7 +1977,7 @@ pub async fn run_once(
             }
             Err(error) => {
                 record_delivery_retry(&directory, now, &error)?;
-                persist_cycle_status(
+                persist_cycle_status_with_failure(
                     &directory,
                     previous.as_ref(),
                     now,
@@ -1872,6 +1990,7 @@ pub async fn run_once(
                         trigger,
                         successful: false,
                     },
+                    error.collection_failure(),
                 )?;
                 return Err(error);
             }
@@ -2558,6 +2677,7 @@ mod tests {
             pending_event_count: 0,
             tailnet_status: "connected".to_owned(),
             last_trigger: "session_end_hook".to_owned(),
+            last_collection_failure: None,
         };
         write_status(&directory, &stored).expect("write stale status");
         let stale = status_with_tailnet_at(
@@ -2605,6 +2725,7 @@ mod tests {
             pending_event_count: 0,
             tailnet_status: "connected".to_owned(),
             last_trigger: "session_end_hook".to_owned(),
+            last_collection_failure: None,
         };
 
         assert!(!collection_is_due(
@@ -2643,6 +2764,125 @@ mod tests {
     }
 
     #[test]
+    fn collection_failure_status_preserves_fixed_last_failure_and_unobserved_stages() {
+        use super::{CollectionFailure, persist_cycle_status_with_failure};
+        use crate::audit_store::AuditStoreError;
+        let home = tempdir().unwrap();
+        configure_profile(home.path(), &profile("")).unwrap();
+        enable(home.path()).unwrap();
+        native_store(home.path());
+        let directory = state_directory(home.path()).unwrap();
+        let now = Utc::now();
+        let update = |successful| StatusUpdate {
+            result_code: if successful { "pass" } else { "audit_failed" },
+            collected_through_utc: None,
+            uploaded_count: 0,
+            pending_event_count: 0,
+            tailnet_status: "not_required".into(),
+            trigger: "manual",
+            successful,
+        };
+        persist_cycle_status(&directory, None, now, update(false)).unwrap();
+        // A .3 failure without an observed stage cannot acquire one by inference.
+        let path = directory.join(STATUS_FILE);
+        let mut unobserved: Value = read_json(&path, true).unwrap();
+        unobserved
+            .as_object_mut()
+            .unwrap()
+            .remove("last_collection_failure");
+        write_json(&path, &unobserved).unwrap();
+        assert_eq!(
+            current_status(&directory)
+                .unwrap()
+                .unwrap()
+                .last_collection_failure,
+            None
+        );
+        let view =
+            status_with_tailnet_at(home.path(), json!({"tailnet_connected":true}), now).unwrap();
+        assert_eq!(view["last_collection_failure"], Value::Null);
+
+        for (error, code) in [
+            (
+                AuditStoreError::DatabaseNotFound,
+                "state_database_not_found",
+            ),
+            (
+                AuditStoreError::UnsupportedDatabase,
+                "unsupported_state_database",
+            ),
+            (
+                AuditStoreError::DatabaseUnavailable,
+                "state_database_unavailable",
+            ),
+            (AuditStoreError::InputUnavailable, "audit_input_unavailable"),
+            (AuditStoreError::AuditFailed, "audit_failed"),
+        ] {
+            let error = CollectionFailure::audit_read(error);
+            let previous = current_status(&directory).unwrap().unwrap();
+            persist_cycle_status_with_failure(
+                &directory,
+                Some(&previous),
+                now,
+                update(false),
+                error.collection_failure(),
+            )
+            .unwrap();
+            let view = status_with_tailnet_at(home.path(), json!({"tailnet_connected":true}), now)
+                .unwrap();
+            assert_eq!(
+                view["last_collection_failure"],
+                json!({"failure_stage":"audit_read","error_code":code})
+            );
+            assert!(!error.requires_operator_retry());
+            assert!(!error.network_performed());
+        }
+        let unknown = CollectionFailure::event_build(groundline_contracts::ContractError(
+            "PRIVATE_RAW_SQL_OR_VALIDATION /private/credential prompt=PRIVATE".into(),
+        ));
+        let previous = current_status(&directory).unwrap().unwrap();
+        persist_cycle_status_with_failure(
+            &directory,
+            Some(&previous),
+            now,
+            update(false),
+            unknown.collection_failure(),
+        )
+        .unwrap();
+        let failed = current_status(&directory).unwrap().unwrap();
+        let expected = json!({"failure_stage":"event_build","error_code":"audit_failed"});
+        assert_eq!(
+            serde_json::to_value(failed.last_collection_failure).unwrap(),
+            expected
+        );
+        persist_cycle_status(&directory, Some(&failed), now, update(true)).unwrap();
+        let view =
+            status_with_tailnet_at(home.path(), json!({"tailnet_connected":true}), now).unwrap();
+        assert_eq!(view["last_check_result_code"], "pass");
+        assert_eq!(view["last_collection_failure"], expected);
+        let stored = std::fs::read_to_string(&path).unwrap();
+        assert!(!stored.contains("PRIVATE"));
+        assert!(!stored.contains("/private/credential"));
+        assert!(!view.to_string().contains("PRIVATE"));
+
+        // The stored diagnostic is one strict stage/code contract; no raw or
+        // invented codes and no audit-read/event-build category substitution.
+        let valid: Value = read_json(&path, true).unwrap();
+        for failure in [
+            json!({"failure_stage":"audit_read","error_code":"invalid_basic_event"}),
+            json!({"failure_stage":"event_build","error_code":"PRIVATE"}),
+            json!({"failure_stage":"event_build","error_code":"audit_failed","private":"PRIVATE"}),
+        ] {
+            let mut invalid = valid.clone();
+            invalid["last_collection_failure"] = failure;
+            write_json(&path, &invalid).unwrap();
+            let original = std::fs::read(&path).unwrap();
+            assert!(current_status(&directory).is_err());
+            assert_eq!(std::fs::read(&path).unwrap(), original);
+        }
+    }
+
+    #[test]
     fn rejects_previous_no_network_consent_without_conversion() {
         assert_unsupported_state_is_preserved(
             CONSENT_FILE,
@@ -2677,6 +2917,7 @@ mod tests {
             pending_event_count: 0,
             tailnet_status: "connected".to_owned(),
             last_trigger: "manual".to_owned(),
+            last_collection_failure: None,
         };
         write_status(&directory, &status).unwrap();
         for file in [CONSENT_FILE, POLICY_FILE, STATUS_FILE] {

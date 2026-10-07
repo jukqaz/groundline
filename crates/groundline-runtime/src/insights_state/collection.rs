@@ -167,7 +167,7 @@ pub(super) fn stage(
                     generation,
                     trigger,
                 )
-                .map_err(|_| StateError::AuditFailed)?,
+                .map_err(CollectionFailure::event_build)?,
             );
         }
         // Persist exact bytes before enqueue. A crash must replay the same event,
@@ -283,7 +283,117 @@ mod tests {
 
     fn audit(root: &Path, start: DateTime<Utc>, end: DateTime<Utc>) -> Result<Value, StateError> {
         collect_audit(root, start, end, Some("codex_cli"), false)
-            .map_err(|_| StateError::AuditFailed)
+            .map_err(CollectionFailure::audit_read)
+    }
+
+    #[test]
+    fn audit_read_failure_keeps_fixed_diagnostic_window_and_cadence_through_recovery() {
+        let (_temp, root, rollout, identity, consent) = fixture();
+        let directory = state_directory(&root).unwrap();
+        let cursor = at(0).to_rfc3339();
+        std::fs::remove_file(root.join("state_5.sqlite")).unwrap();
+        let error = stage(
+            &directory,
+            Some(&cursor),
+            at(10),
+            &identity,
+            &consent,
+            Source {
+                generation: 7,
+                trigger: "user_prompt_submit_hook",
+            },
+            |start, end| audit(&root, start, end),
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "audit_failed");
+        assert_eq!(
+            serde_json::to_value(error.collection_failure()).unwrap(),
+            json!({"failure_stage":"audit_read","error_code":"state_database_not_found"})
+        );
+        assert!(!error.requires_operator_retry());
+        record_delivery_retry(&directory, at(10), &error).unwrap();
+        persist_cycle_status_with_failure(
+            &directory,
+            None,
+            at(10),
+            StatusUpdate {
+                result_code: "audit_failed",
+                collected_through_utc: Some(cursor.clone()),
+                uploaded_count: 0,
+                pending_event_count: 0,
+                tailnet_status: "not_required".into(),
+                trigger: "user_prompt_submit_hook",
+                successful: false,
+            },
+            error.collection_failure(),
+        )
+        .unwrap();
+        let failed = current_status(&directory).unwrap().unwrap();
+        assert_eq!(
+            failed.last_collected_through_utc.as_deref(),
+            Some(cursor.as_str())
+        );
+        for trigger in ["stop_hook", "session_end_hook"] {
+            assert!(!collection_is_due(trigger, Some(&failed), at(11), 900));
+            assert!(collection_is_due(trigger, Some(&failed), at(910), 900));
+        }
+        assert_eq!(pending_events(&directory, 0).unwrap().observed_count, 0);
+        let window = read(&directory).unwrap().unwrap();
+        assert_eq!(window.attempts, 1);
+        assert!(!window.prepared);
+        assert_eq!(parse_timestamp(&window.start_utc).unwrap(), at(0));
+        assert_eq!(parse_timestamp(&window.end_utc).unwrap(), at(10));
+
+        let db = Connection::open(root.join("state_5.sqlite")).unwrap();
+        db.execute_batch("CREATE TABLE threads (rollout_path TEXT, source TEXT, has_user_event INTEGER, updated_at INTEGER)").unwrap();
+        db.execute(
+            "INSERT INTO threads VALUES (?1,'cli',1,?2)",
+            params![rollout.to_str(), at(20).timestamp()],
+        )
+        .unwrap();
+        drop(db);
+        write_usage(&rollout, 5, 12);
+        let end = stage(
+            &directory,
+            Some(&cursor),
+            at(40),
+            &identity,
+            &consent,
+            Source {
+                generation: 7,
+                trigger: "manual",
+            },
+            |start, end| {
+                assert_eq!((start, end), (at(0), at(10)));
+                audit(&root, start, end)
+            },
+        )
+        .unwrap();
+        assert_eq!(parse_timestamp(&end).unwrap(), at(10));
+        assert_eq!(read(&directory).unwrap().unwrap().attempts, 2);
+        persist_cycle_status(
+            &directory,
+            Some(&failed),
+            at(40),
+            StatusUpdate {
+                result_code: "pass",
+                collected_through_utc: Some(end.clone()),
+                uploaded_count: 1,
+                pending_event_count: 0,
+                tailnet_status: "not_required".into(),
+                trigger: "manual",
+                successful: true,
+            },
+        )
+        .unwrap();
+        let recovered = current_status(&directory).unwrap().unwrap();
+        assert_eq!(recovered.last_result_code, "pass");
+        assert_eq!(
+            recovered.last_collection_failure,
+            failed.last_collection_failure
+        );
+        finish_committed(&directory, Some(&end)).unwrap();
+        assert!(read(&directory).unwrap().is_none());
     }
 
     #[test]
@@ -429,7 +539,12 @@ mod tests {
                 Ok(result)
             },
         );
-        assert!(matches!(result, Err(StateError::AuditFailed)));
+        let error = result.unwrap_err();
+        assert_eq!(error.to_string(), "audit_failed");
+        assert_eq!(
+            serde_json::to_value(error.collection_failure()).unwrap(),
+            json!({"failure_stage":"event_build","error_code":"invalid_basic_event"})
+        );
         assert_eq!(pending_events(&dir, 0).unwrap().observed_count, 0);
         assert!(!read(&dir).unwrap().unwrap().prepared);
         assert!(!dir.join(STATUS_FILE).exists());
