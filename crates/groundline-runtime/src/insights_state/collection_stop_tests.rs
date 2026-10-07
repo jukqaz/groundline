@@ -324,6 +324,229 @@ async fn rejected_upload_never_creates_a_server_confirmation() {
     assert!(delivery_confirmation::read(&directory).unwrap().is_none());
 }
 
+#[tokio::test]
+async fn user_prompt_submit_preserves_state_and_stop_collects_the_original_window() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let home = setup(&format!("http://{}", listener.local_addr().unwrap()));
+    let directory = state_directory(home.path()).unwrap();
+    let now = Utc::now();
+    let (identity, _) = initialize(&directory, now).unwrap();
+    let start = (now - chrono::Duration::minutes(40)).to_rfc3339_opts(SecondsFormat::Millis, true);
+    let end = (now - chrono::Duration::minutes(20)).to_rfc3339_opts(SecondsFormat::Millis, true);
+    let source = if identity.runtime_family == "codex_app" {
+        "vscode"
+    } else {
+        "cli"
+    };
+    let sessions = home.path().join("sessions");
+    std::fs::create_dir(&sessions).unwrap();
+    let rollout = sessions.join("active.jsonl");
+    let records = [
+        json!({"timestamp":start,"type":"session_meta","payload":{"id":"collection-owner"}}),
+        json!({"timestamp":(now - chrono::Duration::minutes(30)).to_rfc3339(),
+            "type":"event_msg","payload":{"type":"token_count", "info":{
+                "total_token_usage":{"total_tokens":7}}}}),
+    ];
+    std::fs::write(
+        &rollout,
+        records
+            .iter()
+            .map(Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n",
+    )
+    .unwrap();
+    let db = rusqlite::Connection::open(home.path().join("state_5.sqlite")).unwrap();
+    db.execute_batch("CREATE TABLE threads (rollout_path TEXT, source TEXT, has_user_event INTEGER, updated_at INTEGER)").unwrap();
+    db.execute(
+        "INSERT INTO threads VALUES (?1,?2,1,?3)",
+        rusqlite::params![rollout.to_str(), source, now.timestamp()],
+    )
+    .unwrap();
+    drop(db);
+    // Preserve the window of an earlier failed hook. A supported Stop must
+    // retry those exact timestamps rather than rewrite its collection history.
+    write_json(
+        &directory.join("collection-window.json"),
+        &json!({"schema_version":1,"start_utc":start,"end_utc":end,
+            "attempts":1,"prepared":false,"event":null}),
+    )
+    .unwrap();
+    persist_cycle_status_with_failure(
+        &directory,
+        None,
+        now - chrono::Duration::minutes(20),
+        StatusUpdate {
+            result_code: "audit_failed",
+            collected_through_utc: Some(start.clone()),
+            uploaded_count: 0,
+            pending_event_count: 0,
+            tailnet_status: "not_required".into(),
+            trigger: "user_prompt_submit_hook",
+            successful: false,
+        },
+        Some(CollectionFailure {
+            failure_stage: CollectionFailureStage::EventBuild,
+            error_code: CollectionFailureCode::InvalidCollectionTrigger,
+        }),
+    )
+    .unwrap();
+    record_delivery_retry(
+        &directory,
+        now - chrono::Duration::minutes(20),
+        &StateError::UploadFailed,
+    )
+    .unwrap();
+    crate::checkpoint::capture_trigger(home.path(), "session_start_hook").unwrap();
+    crate::checkpoint::claim_triggers(home.path()).unwrap();
+    crate::checkpoint::capture_trigger(home.path(), "stop_hook").unwrap();
+    let lock = CycleLock::acquire(&directory).unwrap();
+    let preserved = [
+        IDENTITY_FILE,
+        CONSENT_FILE,
+        POLICY_FILE,
+        STATUS_FILE,
+        RETRY_FILE,
+        LOCK_FILE,
+        COLLECTION_CONTROL_LOCK,
+        "activity-history.json",
+        "collection-window.json",
+        "hook-captures/stop_hook.json",
+        "hook-capture-claims/session_start_hook.json",
+    ];
+    let before = preserved.map(|file| std::fs::read(directory.join(file)).unwrap());
+    let lock_bytes = std::fs::read(directory.join(LOCK_FILE)).unwrap();
+    for _ in 0..2 {
+        let result = run_once(Path::new("."), home.path(), "user_prompt_submit_hook")
+            .await
+            .unwrap();
+        assert_eq!(result["result_code"], "not_due");
+        assert_eq!(result["network_performed"], false);
+        assert_eq!(result["mutation_performed"], false);
+        assert_eq!(
+            std::fs::read(directory.join(LOCK_FILE)).unwrap(),
+            lock_bytes
+        );
+    }
+    drop(lock);
+    let result = run_once(Path::new("."), home.path(), "user_prompt_submit_hook")
+        .await
+        .unwrap();
+    assert_eq!(result["result_code"], "not_due");
+    for (file, original) in preserved.into_iter().zip(before) {
+        assert_eq!(
+            std::fs::read(directory.join(file)).unwrap(),
+            original,
+            "{file}"
+        );
+    }
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), listener.accept())
+            .await
+            .is_err()
+    );
+
+    let server = tokio::spawn(async move {
+        let (health, _) = request(&listener, "get /healthz ").await;
+        respond(
+            health,
+            json!({"storage_ready":true,
+            "ingest_capabilities":groundline_contracts::insights::ingest_capabilities()}),
+        )
+        .await;
+        let (enrollment, body) = request(&listener, "post /v1/enroll ").await;
+        respond(
+            enrollment,
+            json!({"status":"PASS",
+            "collector_instance_id":body["collector_instance_id"],"current_generation":7}),
+        )
+        .await;
+        let (upload, event) = request(&listener, "post /v1/events ").await;
+        respond(upload, json!({"status":"PASS","outcome":"accepted"})).await;
+        (listener, event)
+    });
+    let result = run_once(Path::new("."), home.path(), "stop_hook")
+        .await
+        .unwrap();
+    let (listener, event) = server.await.unwrap();
+    assert_eq!(result["result_code"], "pass");
+    assert_eq!(result["uploaded_count"], 1);
+    assert_eq!(event["source"]["collection_trigger"], "stop_hook");
+    assert_eq!(
+        parse_timestamp(event["period"]["start_utc"].as_str().unwrap()).unwrap(),
+        parse_timestamp(&start).unwrap()
+    );
+    assert_eq!(
+        parse_timestamp(event["period"]["end_utc"].as_str().unwrap()).unwrap(),
+        parse_timestamp(&end).unwrap()
+    );
+    assert_eq!(event["metrics"]["root"]["usage"]["total_tokens"], 7);
+    let status = current_status(&directory).unwrap().unwrap();
+    assert_eq!(status.last_trigger, "stop_hook");
+    assert_eq!(
+        parse_timestamp(status.last_collected_through_utc.as_deref().unwrap()).unwrap(),
+        parse_timestamp(&end).unwrap()
+    );
+    assert_eq!(
+        status.last_collection_failure.unwrap().error_code,
+        CollectionFailureCode::InvalidCollectionTrigger
+    );
+    assert!(collection::read(&directory).unwrap().is_none());
+    assert_eq!(pending_events(&directory, 0).unwrap().observed_count, 0);
+    assert_eq!(
+        delivery_confirmation::read(&directory)
+            .unwrap()
+            .unwrap()
+            .event_count,
+        1
+    );
+
+    // A due delivery retry with a valid outbox must also stay untouched at
+    // UserPromptSubmit; otherwise delivery would advance Stop's idle cadence.
+    enqueue(&directory, &event).unwrap();
+    record_delivery_retry(
+        &directory,
+        now - chrono::Duration::minutes(2),
+        &StateError::UploadFailed,
+    )
+    .unwrap();
+    let pending = pending_events(&directory, 16).unwrap();
+    assert_eq!(pending.observed_count, 1);
+    let event_path = &pending.batch[0].0;
+    let event_bytes = std::fs::read(event_path).unwrap();
+    let retry_bytes = std::fs::read(directory.join(RETRY_FILE)).unwrap();
+    let status_bytes = std::fs::read(directory.join(STATUS_FILE)).unwrap();
+    let lock_bytes = std::fs::read(directory.join(LOCK_FILE)).unwrap();
+    assert!(delivery_is_due(
+        "user_prompt_submit_hook",
+        read_delivery_retry(&directory).unwrap().as_ref(),
+        Utc::now()
+    ));
+    let result = run_once(Path::new("."), home.path(), "user_prompt_submit_hook")
+        .await
+        .unwrap();
+    assert_eq!(result["network_performed"], false);
+    assert_eq!(std::fs::read(event_path).unwrap(), event_bytes);
+    assert_eq!(
+        std::fs::read(directory.join(RETRY_FILE)).unwrap(),
+        retry_bytes
+    );
+    assert_eq!(
+        std::fs::read(directory.join(STATUS_FILE)).unwrap(),
+        status_bytes
+    );
+    assert_eq!(
+        std::fs::read(directory.join(LOCK_FILE)).unwrap(),
+        lock_bytes
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), listener.accept())
+            .await
+            .is_err()
+    );
+}
+
 #[test]
 fn terminated_worker_releases_cycle_lock_without_a_stale_timeout() {
     const CHILD_HOME: &str = "GROUNDLINE_TEST_CYCLE_LOCK_HOME";

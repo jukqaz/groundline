@@ -1410,6 +1410,9 @@ fn collection_is_due(
     now: DateTime<Utc>,
     minimum_interval_seconds: u64,
 ) -> bool {
+    if trigger == "user_prompt_submit_hook" {
+        return false;
+    }
     if matches!(trigger, "manual" | "history_sync") {
         return true;
     }
@@ -1822,6 +1825,16 @@ pub async fn run_once(
 ) -> Result<Value, StateError> {
     if !valid_status_trigger(trigger) {
         return Err(StateError::LocalState);
+    }
+    // This hook observes the native learning start boundary. It is not a
+    // collection trigger, and must not claim another hook or advance collection
+    // cadence by delivering an existing outbox. The CLI consumes learning first.
+    if trigger == "user_prompt_submit_hook" {
+        return Ok(json!({
+            "status":"PASS","result_code":"not_due","uploaded_count":0,
+            "network_performed":false,"mutation_performed":false,
+            "raw_content_emitted":false,"private_paths_emitted":false,"secret_value_printed":false,
+        }));
     }
     let directory = state_directory(codex_home)?;
     if !policy_enabled(&directory)? {
@@ -2732,6 +2745,33 @@ mod tests {
             "session_end_hook",
             Some(&status),
             now,
+            900
+        ));
+        for trigger in [
+            "session_start_hook",
+            "stop_hook",
+            "post_compact_hook",
+            "session_end_hook",
+        ] {
+            assert!(collection_is_due(trigger, None, now, 900));
+            assert!(!collection_is_due(trigger, Some(&status), now, 900));
+            assert!(collection_is_due(
+                trigger,
+                Some(&status),
+                now + chrono::Duration::seconds(301),
+                900
+            ));
+        }
+        assert!(!collection_is_due(
+            "user_prompt_submit_hook",
+            None,
+            now,
+            900
+        ));
+        assert!(!collection_is_due(
+            "user_prompt_submit_hook",
+            Some(&status),
+            now + chrono::Duration::hours(1),
             900
         ));
         assert!(collection_is_due("manual", Some(&status), now, 900));

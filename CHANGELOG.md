@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.10.08-e (`2026.1008.5`)
+
+- 실제 native 종료 뒤 작업 결과와 소유 응답 비용을 자동 연결하고, pending·누락 비용·부분 자료를 readiness에서 구분합니다.
+- 종료 worker의 제한된 결과 읽기·일시 대기 재시도와 감사 읽기/event 계약의 고정 실패 진단을 보존합니다.
+- `UserPromptSubmit`는 학습 경계만 기록합니다. 통계 계약이 지원하지 않는 trigger가 시작 감사에 들어가 실패하거나 종료 수집을 지연시키지 않도록 상태·cursor·window·delivery를 보존합니다.
+- 통계는 지원 native 훅과 operator 경로의 기존 900초 간격·3회 상한으로 동작합니다. wire 계약·서버 schema·기본 권한을 확대하지 않습니다.
+- 지원 대상은 Apple Silicon macOS와 Linux ARM64/x86-64이며 설치 검증과 자연 업무의 개선 효과를 구분합니다.
+
 ## 2026.10.08-b (`2026.1008.2`)
 
 - 실제 검증 결과를 `learning assess`로 제출하고 matching native 종료 뒤 소유 응답 비용과 작업 결과를 연결합니다. 별도 회고 모델 호출은 없습니다.

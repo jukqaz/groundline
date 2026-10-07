@@ -97,7 +97,7 @@ fn native_stdin_learning_capture_is_independent_of_owner_collection_consent() {
 }
 
 #[test]
-fn boundary_failure_does_not_suppress_existing_activity_wakeup_capture() {
+fn boundary_failure_does_not_suppress_supported_stop_wakeup_capture() {
     let home = tempdir().unwrap();
     let directory = learning_profile(home.path());
     let profile = directory.join("profile.json");
@@ -111,18 +111,14 @@ fn boundary_failure_does_not_suppress_existing_activity_wakeup_capture() {
     let output = run_stdin(
         &[
             "checkpoint",
-            "user_prompt_submit_hook",
+            "stop_hook",
             "--codex-home",
             path_argument(home.path()),
         ],
         b"{\"prompt\":\"PRIVATE_INPUT_SENTINEL\"}",
     );
     assert!(output.status.success());
-    assert!(
-        activity
-            .join("hook-captures/user_prompt_submit_hook.json")
-            .is_file()
-    );
+    assert!(activity.join("hook-captures/stop_hook.json").is_file());
     assert!(!directory.join("boundaries").exists());
     assert!(output.stdout.is_empty());
     assert!(output.stderr.is_empty());

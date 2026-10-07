@@ -54,6 +54,12 @@ worker 실행 자체를 업무 완료·비용 관측·수락 근거로 사용하
 간격·3회 실패 상한과 불변 window 재시도를 유지하고 모든 실패의 즉시 재시도로
 확대하지 않는다.
 
+`UserPromptSubmit`는 native 학습 경계만 기록하고 통계 worker의 상태·잠금·cursor·
+window·delivery에는 진입하지 않는다. 통계 event 계약이 지원하지 않는 이 trigger를
+다른 trigger로 가장하지 않는다. 실제 통계 수집은 지원되는 SessionStart·Stop·
+PostCompact·SessionEnd와 명시 operator 경로에서 기존 간격과 불변 window를 유지한다.
+시작 훅이 `last_check`를 갱신해 종료 훅의 수집을 지연시키는 동작도 차단한다.
+
 ## readiness가 말하는 범위
 
 readiness는 CLI가 이미 검증한 active record와 참조된 archive의 제한된 closure 및

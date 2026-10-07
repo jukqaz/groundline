@@ -62,6 +62,11 @@ fn capture_lock(codex_home: &Path) -> Result<std::fs::File, CheckpointError> {
 }
 
 pub fn capture_trigger(codex_home: &Path, trigger: &str) -> Result<(), CheckpointError> {
+    // UserPromptSubmit is captured independently by native learning. It must
+    // not create an Insights collection marker or take its capture lock.
+    if trigger == "user_prompt_submit_hook" {
+        return Ok(());
+    }
     let path = capture_path(codex_home, trigger)?;
     let _lock = capture_lock(codex_home)?;
     let mut value = serde_json::to_vec_pretty(&json!({
@@ -319,5 +324,23 @@ mod tests {
         let home = tempdir().expect("temporary Codex home");
         assert!(capture_trigger(home.path(), "unknown").is_err());
         assert!(!home.path().join("groundline/insights").exists());
+    }
+
+    #[test]
+    fn user_prompt_submit_has_no_collection_marker_and_preserves_stop_capture() {
+        let home = tempdir().unwrap();
+        assert!(super::valid_trigger("user_prompt_submit_hook"));
+        capture_trigger(home.path(), "user_prompt_submit_hook").unwrap();
+        assert!(!home.path().join("groundline").exists());
+        capture_trigger(home.path(), "stop_hook").unwrap();
+        let stop = capture_path(home.path(), "stop_hook").unwrap();
+        let before = std::fs::read(&stop).unwrap();
+        capture_trigger(home.path(), "user_prompt_submit_hook").unwrap();
+        assert_eq!(std::fs::read(stop).unwrap(), before);
+        assert!(
+            !capture_path(home.path(), "user_prompt_submit_hook")
+                .unwrap()
+                .exists()
+        );
     }
 }
