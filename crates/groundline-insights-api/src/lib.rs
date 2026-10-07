@@ -3807,6 +3807,7 @@ mod tests {
             );
         }
         let response = router
+            .clone()
             .oneshot(local_request(
                 Method::GET,
                 "/v3/reports/weekly?days=7",
@@ -3833,6 +3834,23 @@ mod tests {
             "SELECT count() FROM groundline.model_usage WHERE event_id={id:UUID} AND model_family='sol' AND attributed=1 FORMAT TabSeparated",
             &[("id",legacy_sol["event_id"].as_str().unwrap().to_owned())],None
         ).await.unwrap(), b"1\n", "legacy Sol must not be reclassified into 6.1");
+        // Retire only this fixture's collectors after verifying preserved
+        // attribution. Its 128 dimensions must not fill later global caps.
+        boundary_collectors.push(collector_id);
+        for id in boundary_collectors {
+            let response = router
+                .clone()
+                .oneshot(local_request(
+                    Method::DELETE,
+                    &format!("/v1/collectors/{id}"),
+                    &"a".repeat(32),
+                    None,
+                    &[("x-groundline-delete-confirm", id.to_string())],
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+        }
     }
 
     #[tokio::test]
