@@ -13,7 +13,8 @@ use groundline_contracts::learning::continuous::{
     Boundary, BoundaryTarget, LearningProfile, bytes_sha256,
 };
 use rustix::fs::{
-    AtFlags, Mode, OFlags, RenameFlags, mkdirat, open, openat, renameat, renameat_with, unlinkat,
+    AtFlags, Mode, OFlags, RenameFlags, fcntl_getfl, fcntl_setfl, mkdirat, open, openat, renameat,
+    renameat_with, unlinkat,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
@@ -29,6 +30,13 @@ const MAX_TARGET_BYTES: u64 = 256 * 1024;
 const MAX_TARGET_TOTAL_BYTES: u64 = 1024 * 1024;
 const MAX_OPERATION_TOTAL_BYTES: u64 = 1024 * 1024;
 const MAX_CORE_BYTES: u64 = 64 * 1024 * 1024;
+// Core's consume readout contains at most 1,000 active assessments and bounded
+// readiness/category aggregates. Keep a separate ceiling for this projection;
+// it is never a transcript or a copy of the 16 MiB learning record store.
+const MAX_CORE_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
+const MAX_CORE_ATTEMPTS: u8 = 4;
+const CORE_RETRY_DELAY: Duration = Duration::from_millis(100);
+const MAX_CORE_READOUT_ENTRIES: usize = 1000;
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
@@ -887,6 +895,286 @@ struct StatusSlot {
     unknown_snapshot_count: u64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum CoreStatus {
+    Consumed,
+    Pending,
+    Unconfigured,
+    Disabled,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum PendingReason {
+    LearningStateBusy,
+    LearningBoundaryBusy,
+    LearningProfileBusy,
+    ActualNativeEndOrArtifactRequired,
+    LearningResponseSourceChanged,
+    CorePendingOther,
+}
+
+impl PendingReason {
+    fn from_core(reason: &str) -> Self {
+        match reason {
+            "learning_state_busy" => Self::LearningStateBusy,
+            "learning_boundary_busy" => Self::LearningBoundaryBusy,
+            "learning_profile_busy" => Self::LearningProfileBusy,
+            "actual_native_end_or_artifact_required" => Self::ActualNativeEndOrArtifactRequired,
+            "learning_response_source_changed" => Self::LearningResponseSourceChanged,
+            _ => Self::CorePendingOther,
+        }
+    }
+
+    fn retryable(self) -> bool {
+        self != Self::CorePendingOther
+    }
+}
+
+#[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum AssessmentStatus {
+    Pending,
+    Finalized,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CoreAssessment {
+    status: AssessmentStatus,
+    reason: Option<String>,
+    retry_safe: Option<bool>,
+    mutation_performed: Option<bool>,
+    assessment_sha256: Option<String>,
+    task_sha256: String,
+    outcome_sha256: Option<String>,
+    native_response_proof_sha256: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CoreReadout {
+    kind: String,
+    schema: u8,
+    status: CoreStatus,
+    native_activation: String,
+    network_performed: bool,
+    mutation_performed: bool,
+    raw_content_emitted: bool,
+    private_paths_emitted: bool,
+    reason: Option<String>,
+    retry_safe: Option<bool>,
+    archived_boundary_count: Option<u64>,
+    archived_record_count: Option<u64>,
+    resumed_finalize_count: Option<u64>,
+    assessments: Option<Vec<CoreAssessment>>,
+    reconciliations: Option<Vec<serde::de::IgnoredAny>>,
+    readiness: Option<serde::de::IgnoredAny>,
+    quality_inferred_from_boundaries: Option<bool>,
+    capacity: Option<serde::de::IgnoredAny>,
+}
+
+struct CoreObservation {
+    status: CoreStatus,
+    pending_assessment_count: Option<u64>,
+    finalized_assessment_count: Option<u64>,
+    final_reason: Option<PendingReason>,
+    retryable: bool,
+}
+
+impl CoreReadout {
+    fn observation(self) -> Result<CoreObservation, BoundaryError> {
+        let invalid = || BoundaryError("core_output_invalid");
+        if self.kind != "groundline-learning-result"
+            || self.schema != 1
+            || self.native_activation != "UNVERIFIED"
+            || self.network_performed
+            || self.raw_content_emitted
+            || self.private_paths_emitted
+        {
+            return Err(invalid());
+        }
+        match self.status {
+            CoreStatus::Pending => {
+                if self.mutation_performed || self.assessments.is_some() {
+                    return Err(invalid());
+                }
+                let reason = PendingReason::from_core(self.reason.as_deref().ok_or_else(invalid)?);
+                Ok(CoreObservation {
+                    status: self.status,
+                    pending_assessment_count: None,
+                    finalized_assessment_count: None,
+                    final_reason: Some(reason),
+                    retryable: self.retry_safe == Some(true) && reason.retryable(),
+                })
+            }
+            CoreStatus::Consumed => {
+                let rows = self.assessments.ok_or_else(invalid)?;
+                let resumed = self.resumed_finalize_count.ok_or_else(invalid)?;
+                if rows.len() > MAX_CORE_READOUT_ENTRIES
+                    || resumed > MAX_CORE_READOUT_ENTRIES as u64
+                    || self.archived_boundary_count.is_none()
+                    || self.archived_record_count.is_none()
+                    || self.readiness.is_none()
+                    || self.capacity.is_none()
+                    || self.quality_inferred_from_boundaries != Some(false)
+                    || self
+                        .reconciliations
+                        .as_ref()
+                        .is_none_or(|v| v.len() > MAX_CORE_READOUT_ENTRIES)
+                    || self.reason.is_some()
+                    || self.retry_safe.is_some()
+                {
+                    return Err(invalid());
+                }
+                let mut pending = 0;
+                let mut finalized = resumed;
+                let mut reason = None;
+                let mut retryable = true;
+                for row in rows {
+                    if !groundline_contracts::learning::digest(&row.task_sha256)
+                        || row
+                            .assessment_sha256
+                            .as_deref()
+                            .is_none_or(|hash| !groundline_contracts::learning::digest(hash))
+                    {
+                        return Err(invalid());
+                    }
+                    match row.status {
+                        AssessmentStatus::Finalized => {
+                            if row.mutation_performed != Some(true)
+                                || row.reason.is_some()
+                                || row.retry_safe.is_some()
+                                || row.outcome_sha256.as_deref().is_none_or(|hash| {
+                                    !groundline_contracts::learning::digest(hash)
+                                })
+                                || row
+                                    .native_response_proof_sha256
+                                    .as_deref()
+                                    .is_none_or(|hash| {
+                                        !groundline_contracts::learning::digest(hash)
+                                    })
+                            {
+                                return Err(invalid());
+                            }
+                            finalized += 1;
+                        }
+                        AssessmentStatus::Pending => {
+                            if row.mutation_performed.is_some()
+                                || row.outcome_sha256.is_some()
+                                || row.native_response_proof_sha256.is_some()
+                            {
+                                return Err(invalid());
+                            }
+                            pending += 1;
+                            let current = PendingReason::from_core(
+                                row.reason.as_deref().ok_or_else(invalid)?,
+                            );
+                            retryable &= row.retry_safe == Some(true) && current.retryable();
+                            // An unknown/permanent reason takes precedence over
+                            // a transient reason. Never copy arbitrary Core text.
+                            if reason.is_none() || !current.retryable() {
+                                reason = Some(current);
+                            }
+                        }
+                    }
+                }
+                Ok(CoreObservation {
+                    status: self.status,
+                    pending_assessment_count: Some(pending),
+                    finalized_assessment_count: Some(finalized),
+                    final_reason: reason,
+                    retryable: pending > 0 && retryable,
+                })
+            }
+            CoreStatus::Unconfigured | CoreStatus::Disabled => {
+                if self.mutation_performed || self.assessments.is_some() || self.reason.is_some() {
+                    return Err(invalid());
+                }
+                Ok(CoreObservation {
+                    status: self.status,
+                    pending_assessment_count: None,
+                    finalized_assessment_count: None,
+                    final_reason: None,
+                    retryable: false,
+                })
+            }
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkerStatusSlot {
+    kind: String,
+    schema: u8,
+    result_code: String,
+    observed_at_utc: String,
+    core_status: Option<CoreStatus>,
+    core_counts_scope: String,
+    consume_attempt_count: u8,
+    retry_count: u8,
+    pending_assessment_count: Option<u64>,
+    finalized_assessment_count: Option<u64>,
+    last_retry_reason: Option<PendingReason>,
+    final_reason: Option<PendingReason>,
+    source_verified: bool,
+    native_activation: String,
+    network_performed: bool,
+}
+
+fn read_worker_status(directory: &Directory) -> Result<Option<WorkerStatusSlot>, BoundaryError> {
+    let value: Option<WorkerStatusSlot> =
+        directory.json("worker-status.json", MAX_PROFILE_BYTES)?;
+    if let Some(v) = &value
+        && (v.kind != "groundline-learning-worker-status"
+            || v.schema != 1
+            || v.source_verified
+            || v.network_performed
+            || v.native_activation != "UNVERIFIED"
+            || v.core_counts_scope != "last_core_attempt"
+            || chrono::DateTime::parse_from_rfc3339(&v.observed_at_utc).is_err()
+            || v.consume_attempt_count > MAX_CORE_ATTEMPTS
+            || v.retry_count != v.consume_attempt_count.saturating_sub(1)
+            || (v.retry_count == 0) != v.last_retry_reason.is_none()
+            || v.last_retry_reason
+                .is_some_and(|reason| !reason.retryable())
+            || v.pending_assessment_count
+                .is_some_and(|count| count > MAX_CORE_READOUT_ENTRIES as u64)
+            || v.finalized_assessment_count
+                .is_some_and(|count| count > 2 * MAX_CORE_READOUT_ENTRIES as u64)
+            || ![
+                "unavailable",
+                "unsafe_local_state",
+                "changed",
+                "oversize",
+                "busy",
+                "invalid_state",
+                "invalid_profile",
+                "core_unavailable",
+                "core_pin_mismatch",
+                "core_spawn_failed",
+                "core_consume_failed",
+                "core_consume_timeout",
+                "core_output_invalid",
+                "core_output_oversize",
+                "consumed",
+                "pending",
+                "not_enabled",
+            ]
+            .contains(&v.result_code.as_str())
+            || (v.result_code == "consumed"
+                && (v.core_status != Some(CoreStatus::Consumed)
+                    || v.pending_assessment_count != Some(0)
+                    || v.final_reason.is_some()))
+            || (v.result_code == "pending" && v.final_reason.is_none()))
+    {
+        return Err(BoundaryError("invalid_state"));
+    }
+    Ok(value)
+}
+
 fn read_status(
     directory: &Directory,
     name: &str,
@@ -1016,11 +1304,7 @@ pub fn status(home: &Path) -> Value {
             "capture-status.json",
             "groundline-learning-boundary-capture-status",
         )?;
-        let worker = read_status(
-            &directory,
-            "worker-status.json",
-            "groundline-learning-worker-status",
-        )?;
+        let worker = read_worker_status(&directory)?;
         let mut count = 0;
         let mut incomplete = 0;
         let mut unknown = 0;
@@ -1123,6 +1407,97 @@ pub async fn consume(home: &Path) -> Value {
     consume_with_limit(home, Duration::from_secs(10)).await
 }
 
+struct CoreChild(std::process::Child);
+
+impl Drop for CoreChild {
+    fn drop(&mut self) {
+        // Also covers pipe errors, oversized output and an inherited pipe that
+        // remains open after the direct child exits. Never leave Core running.
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+async fn core_attempt(
+    profile: &LearningProfile,
+    home: &Path,
+    pin: &File,
+    deadline: Instant,
+) -> Result<CoreObservation, BoundaryError> {
+    if Instant::now() >= deadline {
+        return Err(BoundaryError("core_consume_timeout"));
+    }
+    let mut child = CoreChild(
+        Command::new(&profile.core_executable)
+            .args(["learning", "consume", "--codex-home"])
+            .arg(home)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|_| BoundaryError("core_spawn_failed"))?,
+    );
+    let mut stdout = child.0.stdout.take().ok_or(BoundaryError("unavailable"))?;
+    let flags = fcntl_getfl(&stdout).map_err(|_| BoundaryError("unavailable"))?;
+    fcntl_setfl(&stdout, flags | OFlags::NONBLOCK).map_err(|_| BoundaryError("unavailable"))?;
+    let mut bytes = Vec::new();
+    let mut exit = None;
+    let mut eof = false;
+    loop {
+        if Instant::now() >= deadline {
+            return Err(BoundaryError("core_consume_timeout"));
+        }
+        // Drain while Core is alive so a readout larger than the pipe buffer
+        // cannot prevent its exit. A bound applies before any JSON allocation.
+        while !eof {
+            let mut buffer = [0_u8; 8192];
+            match stdout.read(&mut buffer) {
+                Ok(0) => eof = true,
+                Ok(count) => {
+                    if bytes.len() + count > MAX_CORE_OUTPUT_BYTES {
+                        return Err(BoundaryError("core_output_oversize"));
+                    }
+                    bytes.extend_from_slice(&buffer[..count]);
+                    if Instant::now() >= deadline {
+                        return Err(BoundaryError("core_consume_timeout"));
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => return Err(BoundaryError("unavailable")),
+            }
+        }
+        if exit.is_none() {
+            exit = io(child.0.try_wait())?;
+        }
+        if let Some(exit) = exit
+            && eof
+        {
+            // Keep the verified inode through each attempt and reject a path
+            // replacement even if its bytes still match the profile's SHA.
+            let current = checked_core(profile)?;
+            let before = io(pin.metadata())?;
+            let after = io(current.metadata())?;
+            if (before.dev(), before.ino()) != (after.dev(), after.ino()) {
+                return Err(BoundaryError("core_pin_mismatch"));
+            }
+            if Instant::now() >= deadline {
+                return Err(BoundaryError("core_consume_timeout"));
+            }
+            if !exit.success() {
+                return Err(BoundaryError("core_consume_failed"));
+            }
+            let readout: CoreReadout =
+                serde_json::from_slice(&bytes).map_err(|_| BoundaryError("core_output_invalid"))?;
+            return readout.observation();
+        }
+        tokio::time::sleep(
+            Duration::from_millis(20).min(deadline.saturating_duration_since(Instant::now())),
+        )
+        .await;
+    }
+}
+
 async fn consume_with_limit(home: &Path, limit: Duration) -> Value {
     let observation: Result<Option<(Directory, LearningProfile)>, BoundaryError> = (|| {
         let Some(directory) = learning_directory(home)? else {
@@ -1141,45 +1516,60 @@ async fn consume_with_limit(home: &Path, limit: Duration) -> Value {
         Ok(None) => return json!({"result_code":"not_enabled","network_performed":false}),
         Err(error) => return json!({"result_code":error.0,"network_performed":false}),
     };
+    let deadline = Instant::now() + limit;
+    let mut attempts = 0;
+    let mut last_retry_reason = None;
+    let mut last_observation = None;
     let result = async {
         let _lock = directory.lock("consume.lock", true)?;
         let pin = checked_core(&profile)?;
-        let mut child = Command::new(&profile.core_executable)
-            .args(["learning", "consume", "--codex-home"])
-            .arg(home)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|_| BoundaryError("core_spawn_failed"))?;
-        // Retain the verified inode while the child runs; detect path changes
-        // before treating the consumer result as an observation.
-        let deadline = Instant::now() + limit;
         loop {
-            if let Some(exit) = io(child.try_wait())? {
-                let current = checked_core(&profile)?;
-                let before = io(pin.metadata())?;
-                let after = io(current.metadata())?;
-                if (before.dev(), before.ino()) != (after.dev(), after.ino()) {
-                    return Err(BoundaryError("core_pin_mismatch"));
-                }
-                return if exit.success() {
-                    Ok("consumed")
-                } else {
-                    Err(BoundaryError("core_consume_failed"))
-                };
-            }
             if Instant::now() >= deadline {
-                let _ = child.kill();
-                let _ = child.wait();
                 return Err(BoundaryError("core_consume_timeout"));
             }
-            tokio::time::sleep(Duration::from_millis(20)).await;
+            if attempts > 0 {
+                // A pin may change between the bounded retries. Check before
+                // spawning again as well as after the process has terminated.
+                let current = checked_core(&profile)?;
+                if io(pin.metadata())?.ino() != io(current.metadata())?.ino()
+                    || io(pin.metadata())?.dev() != io(current.metadata())?.dev()
+                {
+                    return Err(BoundaryError("core_pin_mismatch"));
+                }
+                last_retry_reason = last_observation
+                    .as_ref()
+                    .and_then(|observation: &CoreObservation| observation.final_reason);
+            }
+            attempts += 1;
+            let observation = core_attempt(&profile, home, &pin, deadline).await?;
+            let result_code = match observation.status {
+                CoreStatus::Unconfigured | CoreStatus::Disabled => "not_enabled",
+                CoreStatus::Pending => "pending",
+                CoreStatus::Consumed if observation.pending_assessment_count != Some(0) => {
+                    "pending"
+                }
+                CoreStatus::Consumed => "consumed",
+            };
+            let retry = observation.retryable && attempts < MAX_CORE_ATTEMPTS;
+            last_observation = Some(observation);
+            if !retry {
+                return Ok(result_code);
+            }
+            if deadline.saturating_duration_since(Instant::now()) <= CORE_RETRY_DELAY {
+                return Ok(result_code);
+            }
+            tokio::time::sleep(CORE_RETRY_DELAY).await;
         }
     }
     .await;
     let value = json!({"kind":"groundline-learning-worker-status","schema":1,
         "result_code":result.unwrap_or_else(|error| error.0),"observed_at_utc":now(),
+        "core_status":last_observation.as_ref().map(|v| v.status),"core_counts_scope":"last_core_attempt",
+        "consume_attempt_count":attempts,"retry_count":attempts.saturating_sub(1),
+        "pending_assessment_count":last_observation.as_ref().and_then(|v| v.pending_assessment_count),
+        "finalized_assessment_count":last_observation.as_ref().and_then(|v| v.finalized_assessment_count),
+        "last_retry_reason":last_retry_reason,
+        "final_reason":last_observation.as_ref().and_then(|v| v.final_reason),
         "network_performed":false,"source_verified":false,"native_activation":"UNVERIFIED"});
     if let Ok(bytes) = serialized(&value) {
         let _ = directory.write("worker-status.json", &bytes, true);
@@ -1214,6 +1604,52 @@ mod tests {
             .write("profile.json", &serialized(&profile).unwrap(), false)
             .unwrap();
         (home, profile)
+    }
+
+    fn consume_readout(assessments: Vec<Value>) -> Value {
+        json!({"kind":"groundline-learning-result","schema":1,"status":"CONSUMED",
+            "native_activation":"UNVERIFIED","network_performed":false,
+            "mutation_performed":!assessments.is_empty(),"raw_content_emitted":false,
+            "private_paths_emitted":false,"archived_boundary_count":0,"archived_record_count":0,
+            "resumed_finalize_count":0,"assessments":assessments,"reconciliations":[],
+            "readiness":{},"capacity":{},"quality_inferred_from_boundaries":false})
+    }
+
+    fn pending_readout(reason: &str) -> Value {
+        json!({"kind":"groundline-learning-result","schema":1,"status":"PENDING",
+            "native_activation":"UNVERIFIED","network_performed":false,
+            "mutation_performed":false,"raw_content_emitted":false,"private_paths_emitted":false,
+            "reason":reason,"retry_safe":true})
+    }
+
+    fn pending_assessment(reason: &str) -> Value {
+        json!({"status":"PENDING","assessment_sha256":"a".repeat(64),
+            "task_sha256":"b".repeat(64),"reason":reason,"retry_safe":true})
+    }
+
+    fn finalized_assessment() -> Value {
+        json!({"status":"FINALIZED","assessment_sha256":"a".repeat(64),
+            "task_sha256":"b".repeat(64),"outcome_sha256":"c".repeat(64),
+            "native_response_proof_sha256":"d".repeat(64),"mutation_performed":true})
+    }
+
+    fn emit_readout(value: &Value) -> String {
+        format!(
+            "cat <<'GROUNDLINE_TEST_READOUT'\n{}\nGROUNDLINE_TEST_READOUT\n",
+            serde_json::to_string_pretty(value).unwrap()
+        )
+    }
+
+    fn configure_core(home: &Path, profile: &mut LearningProfile, script: &str) {
+        let core = Path::new(&profile.core_executable);
+        std::fs::write(core, format!("#!/bin/sh\n{script}")).unwrap();
+        std::fs::set_permissions(core, std::fs::Permissions::from_mode(0o700)).unwrap();
+        profile.core_sha256 = bytes_sha256(&std::fs::read(core).unwrap());
+        learning_directory(home)
+            .unwrap()
+            .unwrap()
+            .write("profile.json", &serialized(profile).unwrap(), true)
+            .unwrap();
     }
 
     fn payload(event: &str, turn: &str) -> Vec<u8> {
@@ -1665,7 +2101,10 @@ mod tests {
         let core = Path::new(&configured.core_executable);
         std::fs::write(
             core,
-            b"#!/bin/sh\n[ \"$1\" = learning ] && [ \"$2\" = consume ]\n",
+            format!(
+                "#!/bin/sh\n[ \"$1\" = learning ] && [ \"$2\" = consume ] || exit 1\n{}",
+                emit_readout(&consume_readout(vec![]))
+            ),
         )
         .unwrap();
         std::fs::set_permissions(core, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -1677,7 +2116,13 @@ mod tests {
         directory
             .write("profile.json", &serialized(&configured).unwrap(), true)
             .unwrap();
-        assert_eq!(consume(home.path()).await["result_code"], "consumed");
+        let observed = consume(home.path()).await;
+        assert_eq!(observed["result_code"], "consumed");
+        assert_eq!(observed["core_status"], "CONSUMED");
+        assert_eq!(observed["consume_attempt_count"], 1);
+        assert_eq!(observed["pending_assessment_count"], 0);
+        assert_eq!(observed["finalized_assessment_count"], 0);
+        assert_eq!(status(home.path())["last_worker"], observed);
         assert!(!home.path().join("groundline/insights").exists());
         let _lock = directory.lock("consume.lock", true).unwrap();
         assert_eq!(consume(home.path()).await["result_code"], "busy");
@@ -1703,15 +2148,209 @@ mod tests {
         assert_eq!(timeout["result_code"], "core_consume_timeout");
         let lock = directory.lock("consume.lock", false).unwrap();
         drop(lock);
-        std::fs::write(core, b"#!/bin/sh\nexit 0\n").unwrap();
-        configured.core_sha256 = bytes_sha256(&std::fs::read(core).unwrap());
-        directory
-            .write("profile.json", &serialized(&configured).unwrap(), true)
-            .unwrap();
+        configure_core(
+            home.path(),
+            &mut configured,
+            &emit_readout(&consume_readout(vec![])),
+        );
         assert_eq!(
             consume_with_limit(home.path(), Duration::from_secs(1)).await["result_code"],
             "consumed"
         );
+    }
+
+    #[tokio::test]
+    async fn transient_exit_zero_pending_retries_and_records_the_actual_finalization() {
+        for reason in [
+            "learning_boundary_busy",
+            "learning_state_busy",
+            "learning_profile_busy",
+        ] {
+            let (home, mut profile) = fixture();
+            let script = format!(
+                "if [ ! -e \"$4/first-attempt\" ]; then\n  : > \"$4/first-attempt\"\n{}else\n{}fi\n",
+                emit_readout(&pending_readout(reason)),
+                emit_readout(&consume_readout(vec![finalized_assessment()]))
+            );
+            configure_core(home.path(), &mut profile, &script);
+            let observed = consume(home.path()).await;
+            assert_eq!(observed["result_code"], "consumed", "{observed}");
+            assert_eq!(observed["core_counts_scope"], "last_core_attempt");
+            assert_eq!(observed["consume_attempt_count"], 2);
+            assert_eq!(observed["retry_count"], 1);
+            assert_eq!(observed["last_retry_reason"], reason);
+            assert_eq!(observed["final_reason"], Value::Null);
+            assert_eq!(observed["pending_assessment_count"], 0);
+            assert_eq!(observed["finalized_assessment_count"], 1);
+            assert_eq!(status(home.path())["last_worker"], observed);
+        }
+    }
+
+    #[tokio::test]
+    async fn native_wait_retries_are_bounded_and_pending_is_never_reported_as_consumed() {
+        for reason in [
+            "actual_native_end_or_artifact_required",
+            "learning_response_source_changed",
+        ] {
+            let (home, mut profile) = fixture();
+            configure_core(
+                home.path(),
+                &mut profile,
+                &emit_readout(&consume_readout(vec![pending_assessment(reason)])),
+            );
+            let observed = consume(home.path()).await;
+            assert_eq!(observed["result_code"], "pending", "{observed}");
+            assert_eq!(observed["core_status"], "CONSUMED");
+            assert_eq!(observed["consume_attempt_count"], MAX_CORE_ATTEMPTS);
+            assert_eq!(observed["retry_count"], MAX_CORE_ATTEMPTS - 1);
+            assert_eq!(observed["final_reason"], reason);
+            assert_eq!(observed["pending_assessment_count"], 1);
+            assert_eq!(observed["finalized_assessment_count"], 0);
+            assert_eq!(status(home.path())["last_worker"], observed);
+        }
+    }
+
+    #[tokio::test]
+    async fn permanent_or_mixed_pending_does_not_retry_or_persist_arbitrary_reason_text() {
+        for rows in [
+            vec![pending_assessment("ownership_conflict")],
+            vec![pending_assessment("PRIVATE_REASON /private/credentials")],
+            vec![
+                pending_assessment("actual_native_end_or_artifact_required"),
+                pending_assessment("verification_evidence_changed"),
+            ],
+        ] {
+            let (home, mut profile) = fixture();
+            configure_core(
+                home.path(),
+                &mut profile,
+                &emit_readout(&consume_readout(rows)),
+            );
+            let observed = consume(home.path()).await;
+            assert_eq!(observed["result_code"], "pending");
+            assert_eq!(observed["consume_attempt_count"], 1);
+            assert_eq!(observed["retry_count"], 0);
+            assert_eq!(observed["last_retry_reason"], Value::Null);
+            assert_eq!(observed["final_reason"], "core_pending_other");
+            let stored =
+                std::fs::read_to_string(home.path().join("groundline/learning/worker-status.json"))
+                    .unwrap();
+            for raw in [
+                "PRIVATE_REASON",
+                "/private/credentials",
+                "ownership_conflict",
+                "verification_evidence_changed",
+            ] {
+                assert!(!stored.contains(raw));
+            }
+            assert_eq!(status(home.path())["last_worker"], observed);
+        }
+    }
+
+    #[tokio::test]
+    async fn malformed_or_oversized_output_is_rejected_privately_without_a_pipe_hang() {
+        for script in [
+            "printf '%s' 'PRIVATE_RAW_OUTPUT /private/credentials'\n".to_owned(),
+            format!(
+                "{}printf '%s' 'PRIVATE_TRAILING_RAW'\n",
+                emit_readout(&consume_readout(vec![]))
+            ),
+            format!("head -c {} /dev/zero\n", MAX_CORE_OUTPUT_BYTES + 1),
+        ] {
+            let (home, mut profile) = fixture();
+            let expected = if script.contains("head -c") {
+                "core_output_oversize"
+            } else {
+                "core_output_invalid"
+            };
+            configure_core(home.path(), &mut profile, &script);
+            let observed = consume_with_limit(home.path(), Duration::from_secs(2)).await;
+            assert_eq!(observed["result_code"], expected, "{observed}");
+            assert_eq!(observed["consume_attempt_count"], 1);
+            assert_eq!(observed["core_status"], Value::Null);
+            let stored =
+                std::fs::read_to_string(home.path().join("groundline/learning/worker-status.json"))
+                    .unwrap();
+            assert!(!stored.contains("PRIVATE_"));
+            assert!(!stored.contains("/private/credentials"));
+            assert_eq!(status(home.path())["last_worker"], observed);
+            drop(
+                learning_directory(home.path())
+                    .unwrap()
+                    .unwrap()
+                    .lock("consume.lock", false)
+                    .unwrap(),
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn streaming_readout_larger_than_the_pipe_buffer_and_resumed_finalization_are_observed() {
+        let (home, mut profile) = fixture();
+        let mut value = consume_readout(vec![finalized_assessment()]);
+        value["readiness"] =
+            json!({"ignored_bounded_projection":"PRIVATE_READINESS".repeat(12_000)});
+        value["resumed_finalize_count"] = json!(2);
+        configure_core(home.path(), &mut profile, &emit_readout(&value));
+        let observed = consume_with_limit(home.path(), Duration::from_secs(2)).await;
+        assert_eq!(observed["result_code"], "consumed", "{observed}");
+        assert_eq!(observed["finalized_assessment_count"], 3);
+        assert!(!observed.to_string().contains("PRIVATE_READINESS"));
+    }
+
+    #[tokio::test]
+    async fn same_bytes_core_replacement_is_rejected_after_execution() {
+        let (home, mut profile) = fixture();
+        let script = format!(
+            "cp \"$0\" \"$0.replacement\"\nmv \"$0.replacement\" \"$0\"\n{}",
+            emit_readout(&consume_readout(vec![finalized_assessment()]))
+        );
+        configure_core(home.path(), &mut profile, &script);
+        let observed = consume(home.path()).await;
+        assert_eq!(observed["result_code"], "core_pin_mismatch");
+        assert_eq!(observed["finalized_assessment_count"], Value::Null);
+        assert_eq!(observed["consume_attempt_count"], 1);
+        drop(
+            learning_directory(home.path())
+                .unwrap()
+                .unwrap()
+                .lock("consume.lock", false)
+                .unwrap(),
+        );
+    }
+
+    #[test]
+    fn worker_status_rejects_unknown_fields_codes_and_inconsistent_attempt_metadata() {
+        let (home, _) = fixture();
+        let directory = learning_directory(home.path()).unwrap().unwrap();
+        let valid = json!({"kind":"groundline-learning-worker-status","schema":1,"result_code":"pending",
+            "observed_at_utc":now(),"core_status":"CONSUMED","core_counts_scope":"last_core_attempt","consume_attempt_count":4,"retry_count":3,
+            "pending_assessment_count":1,"finalized_assessment_count":0,"last_retry_reason":"learning_boundary_busy",
+            "final_reason":"actual_native_end_or_artifact_required","source_verified":false,
+            "native_activation":"UNVERIFIED","network_performed":false});
+        directory
+            .write("worker-status.json", &serialized(&valid).unwrap(), true)
+            .unwrap();
+        assert!(read_worker_status(&directory).unwrap().is_some());
+        for (field, value) in [
+            ("private", json!("PRIVATE_STATUS")),
+            ("result_code", json!("invented_success")),
+            ("core_counts_scope", json!("all_worker_attempts")),
+            ("retry_count", json!(0)),
+            ("consume_attempt_count", json!(5)),
+            ("result_code", json!("consumed")),
+            ("final_reason", json!("PRIVATE_REASON")),
+        ] {
+            let mut invalid = valid.clone();
+            invalid[field] = value;
+            directory
+                .write("worker-status.json", &serialized(&invalid).unwrap(), true)
+                .unwrap();
+            assert_eq!(
+                read_worker_status(&directory).err().unwrap().0,
+                "invalid_state"
+            );
+        }
     }
 
     #[test]

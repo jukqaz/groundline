@@ -1,5 +1,9 @@
 # GroundLine Core changes
 
+## 2026.1008.3
+
+- Insights의 종료 worker 수정과 패키지 버전을 맞춥니다. 결과·비용 연결, 후보 평가·적용·복구 계약은 유지합니다.
+
 ## 2026.1008.2
 
 - 직접 검증 evidence를 assessment로 보존하고 실제 native 종료 뒤 기존 receipt/finalize 경로에 연결합니다.

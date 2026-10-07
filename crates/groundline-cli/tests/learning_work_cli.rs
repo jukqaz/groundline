@@ -517,6 +517,55 @@ fn assessment_waits_for_real_end_then_automatically_links_original_evidence_and_
     }
 }
 
+#[tokio::test]
+async fn actual_core_worker_observes_closed_cost_without_llm_and_keeps_finalization_idempotent() {
+    let fixture = Fixture::new();
+    let started = fixture.start("actual-background-consumer");
+    let (_, _, evidence) = fixture.assessment(&started, "verified");
+    fixture.capture_boundary("Stop");
+    fixture.finish_native(true);
+    let original_source = fs::read(&fixture.source).unwrap();
+    let original_evidence = fs::read(&evidence).unwrap();
+    let worker = groundline_runtime::learning_boundary::consume(&fixture.home).await;
+    assert_eq!(worker["result_code"], "consumed", "{worker}");
+    assert_eq!(worker["core_status"], "CONSUMED");
+    assert_eq!(worker["consume_attempt_count"], 1);
+    assert_eq!(worker["pending_assessment_count"], 0);
+    assert_eq!(worker["finalized_assessment_count"], 1);
+    assert_eq!(worker["network_performed"], false);
+    assert_eq!(
+        groundline_runtime::learning_boundary::status(&fixture.home)["last_worker"],
+        worker
+    );
+    let receipt = fixture.receipt();
+    assert_eq!(receipt["resources"]["complete"], true);
+    assert_eq!(receipt["resources"]["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(receipt["resources"]["entries"][0]["total_tokens"], 105);
+    assert_eq!(receipt["effective"]["model"], "gpt-6.1-sol");
+    assert_eq!(receipt["effective"]["effort"], "medium");
+    assert_eq!(
+        receipt["verification"]["evidence_sha256"],
+        hash(&original_evidence)
+    );
+    assert_eq!(fs::read(&fixture.source).unwrap(), original_source);
+    assert_eq!(fs::read(evidence).unwrap(), original_evidence);
+    assert!(!fixture.home.join("groundline/insights").exists());
+    assert!(!worker.to_string().contains(fixture.root.to_str().unwrap()));
+    assert!(!worker.to_string().contains("fixture-owner"));
+    fixture.append_later_turn();
+    let again = groundline_runtime::learning_boundary::consume(&fixture.home).await;
+    assert_eq!(again["result_code"], "consumed");
+    assert_eq!(again["finalized_assessment_count"], 0);
+    assert_eq!(fixture.records("groundline-learning-task-outcome").len(), 1);
+    assert_eq!(fixture.receipt(), receipt);
+    let patterns = run(&fixture.root, &["learning", "patterns"], &[], true);
+    assert_eq!(patterns["readiness"]["totals"]["task_outcome_count"], 1);
+    assert_eq!(
+        patterns["readiness"]["totals"]["assessment_pending_connection_count"],
+        0
+    );
+}
+
 #[test]
 fn stale_wrong_session_wrong_turn_and_hook_without_native_closure_remain_pending() {
     let fixture = Fixture::new();

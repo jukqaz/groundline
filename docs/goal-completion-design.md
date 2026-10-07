@@ -39,6 +39,14 @@ assessment 제출과 task-outcome 생성은 서로 다른 단계다. 직접 rece
 미관측 비용·모델·runtime·verification은 0이나 성공으로 채우지 않는다. 후보 본문은
 native Codex가 작성하며 적용은 기존 trial/adoption gate와 rollback 보호를 재사용한다.
 
+종료 훅의 detached worker는 Core 프로세스의 종료 코드와 소비 결과를 구분한다.
+결과 출력은 제한된 크기로 읽고 status·대기 이유·연결 건수만 비공개 상태에 보존한다.
+worker의 연결·대기 건수는 마지막 Core 시도 기준이며, 전체 작업 집계는 immutable
+outcome과 readiness를 사용한다.
+일시적인 잠금이나 실제 완료 기록 대기는 같은 제한 시간 안에서만 재시도한다.
+영구적인 입력·소유권 오류와 충분한 native 근거가 없는 작업은 대기로 유지하며,
+worker 실행 자체를 업무 완료·비용 관측·수락 근거로 사용하지 않는다.
+
 ## readiness가 말하는 범위
 
 readiness는 CLI가 이미 검증한 active record와 참조된 archive의 제한된 closure 및

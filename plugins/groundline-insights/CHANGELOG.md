@@ -1,5 +1,10 @@
 # GroundLine Insights changes
 
+## 2026.1008.3
+
+- 종료 worker에서 Core의 실제 소비 결과를 확인해 연결 대기를 완료로 표시하지 않습니다.
+- 일시적인 잠금·native 완료 기록 대기는 기존 제한 시간 안에서만 재시도하고, 대기 이유와 연결 건수를 원문 없이 보존합니다.
+
 ## 2026.1008.2
 
 - Core와 패키지 버전을 맞추고 기존 fail-open worker가 pending assessment를 소비하는 경로를 재사용합니다.

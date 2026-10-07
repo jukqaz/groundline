@@ -13,8 +13,8 @@ path = "src/main.rs"
 chrono.workspace = true
 clap.workspace = true
 dirs.workspace = true
-groundline-contracts = { version = "2026.1008.2", path = "../groundline-contracts", features = ["insights"] }
-groundline-runtime = { version = "2026.1008.2", path = "../groundline-runtime" }
+groundline-contracts = { version = "2026.1008.3", path = "../groundline-contracts", features = ["insights"] }
+groundline-runtime = { version = "2026.1008.3", path = "../groundline-runtime" }
 serde.workspace = true
 serde_json.workspace = true
 serde_path_to_error.workspace = true
@@ -27,12 +27,13 @@ uuid.workspace = true
 rustix.workspace = true
 
 [dev-dependencies]
-groundline-runtime = { version = "2026.1008.2", path = "../groundline-runtime", features = ["insights-state"] }
+groundline-runtime = { version = "2026.1008.3", path = "../groundline-runtime", features = ["insights-state"] }
 walkdir.workspace = true
 rusqlite.workspace = true
 divan.workspace = true
 proptest.workspace = true
 tempfile.workspace = true
+tokio.workspace = true
 
 [[bench]]
 name = "config_catalog"
