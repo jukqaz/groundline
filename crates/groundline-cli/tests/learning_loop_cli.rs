@@ -45,7 +45,15 @@ fn observation_state_sha256(state: &Path) -> String {
 }
 
 fn run(root: &Path, args: &[&str], paths: &[(&str, &Path)], success: bool) -> Value {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_groundline"));
+    // Cargo may hard-link its build/deps executables on Linux. Exercise a
+    // standalone installed file without relaxing the production pin checks.
+    let installed = root.join("installed-groundline");
+    if !installed.exists() {
+        fs::copy(env!("CARGO_BIN_EXE_groundline"), &installed).unwrap();
+        fs::set_permissions(&installed, fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(fs::metadata(&installed).unwrap().nlink(), 1);
+    }
+    let mut command = Command::new(installed);
     command.current_dir(root).args(args);
     command.env("CODEX_HOME", root.join("codex-home"));
     for (flag, path) in paths {
