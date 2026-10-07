@@ -1,7 +1,6 @@
 # Improve work from observed outcomes
 
-GroundLine connects observations, outcomes and current model guidance to workflow
-and personal environment improvement; native Codex owns execution.
+GroundLine connects observations to a comparison; native Codex owns execution.
 The objective is accepted work with less rework and appropriate total resource
 use. More features, more agents or higher effort are not independent objectives.
 
@@ -29,11 +28,9 @@ output needs it; this loop is not a prerequisite for ordinary implementation.
    cannot replace these direct results. Changing orchestration evaluates the
    whole orchestration, not only the root model.
 5. **Retain or revise with evidence.** Explain quality and resource changes and
-   uncertainty. For requested learning or environment alignment, use
-   [adaptive environment](adaptive-environment.md) to update only the authorized
-   personal scope, verify loading and connect later outcomes. Preserve explicit
-   settings and user edits; do not replay completed work to manufacture samples.
-   Reassess when the phase, model/runtime or demonstrated difficulty changes.
+   uncertainty. Use the next appropriate native lane; do not rewrite global
+   settings or replay completed work just to manufacture samples. Reassess when
+   the phase or demonstrated difficulty changes.
 
 For a requested benchmark, use [paired evaluation](usage-assessment.md). Read
 current official guidance when an actual model/runtime change or unresolved
@@ -42,6 +39,5 @@ because another week elapsed. Schedules require their own explicit request.
 
 There is one outcome-comparison path. The old fixed-rule personal trial writer
 is retired; existing private state can be inspected or recovered through
-[personal recovery](personal-recovery.md). Use [the learning loop](learning-loop.md) for capture, private outcome links,
-candidate readouts, official snapshots and portable environment bundles.
-Core does not maintain a parallel experiment scheduler or feature-usage score.
+[personal recovery](personal-recovery.md). Core does not maintain a parallel
+experiment scheduler, feature-usage score, or automatic learning service.

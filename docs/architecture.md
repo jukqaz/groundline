@@ -5,7 +5,7 @@ GroundLine은 사용 패턴·실제 작업 결과·현재 모델의 공식 지�
 실행·모델 적용·권한·에이전트·작업 관리는 Codex가 담당합니다.
 
 아래는 현재 구현 경계입니다. 개인 기준·기기 예외·실제 적용과 후속 결과를 연결하는
-[로컬 구현](adaptive-environment-implementation.md)과 [설계의 후속 범위](adaptive-environment-design.md)를 구분합니다.
+[로컬 구현](adaptive-environment-implementation.md)과 [다음 배포의 최종 범위](release-design.md)를 구분합니다.
 
 ```mermaid
 flowchart LR

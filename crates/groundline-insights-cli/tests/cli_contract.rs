@@ -1,6 +1,8 @@
 use std::fs;
+use std::io::Write;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -15,6 +17,115 @@ fn run(arguments: &[&str]) -> Output {
         .args(arguments)
         .output()
         .expect("execute GroundLine test binary")
+}
+
+fn run_stdin(arguments: &[&str], input: &[u8]) -> Output {
+    let mut child = Command::new(groundline())
+        .args(arguments)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(input).unwrap();
+    child.wait_with_output().unwrap()
+}
+
+fn learning_profile(home: &Path) -> std::path::PathBuf {
+    let canonical = fs::canonicalize(home).unwrap();
+    let directory = home.join("groundline/learning");
+    fs::create_dir_all(&directory).unwrap();
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+    let input = json!({"kind":"groundline-learning-profile","schema":1,"enabled":true,
+        "environment_state":canonical.join("environment"),"learning_state":canonical.join("records"),
+        "deliveries":canonical.join("deliveries"),"target_ids":["sample-skill"],"device_id":"device",
+        "core_executable":canonical.join("missing-core"),"core_sha256":"0".repeat(64)});
+    groundline_runtime::local_file::atomic_write_private(
+        &directory.join("profile.json"),
+        &serde_json::to_vec(&input).unwrap(),
+    )
+    .unwrap();
+    directory
+}
+
+#[test]
+fn native_stdin_learning_capture_is_independent_of_owner_collection_consent() {
+    let home = tempdir().unwrap();
+    let directory = learning_profile(home.path());
+    let input = serde_json::to_vec(&json!({"hook_event_name":"UserPromptSubmit",
+        "session_id":"native-parent-session","turn_id":"native-turn","model":"gpt-6.1-sol",
+        "permission_mode":"default","prompt":"PRIVATE_PROMPT_SENTINEL","cwd":"/PRIVATE_PATH_SENTINEL",
+        "transcript_path":"/PRIVATE_TRANSCRIPT_SENTINEL"})).unwrap();
+    let output = run_stdin(
+        &[
+            "checkpoint",
+            "user_prompt_submit_hook",
+            "--codex-home",
+            path_argument(home.path()),
+        ],
+        &input,
+    );
+    assert!(output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.is_empty());
+    let files: Vec<_> = fs::read_dir(directory.join("boundaries"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    assert_eq!(files.len(), 1);
+    let saved = fs::read_to_string(&files[0]).unwrap();
+    assert!(!saved.contains("PRIVATE_"));
+    assert!(!saved.contains("native-parent-session"));
+    assert!(!saved.contains("native-turn"));
+    let boundary: Value = serde_json::from_str(&saved).unwrap();
+    assert_eq!(boundary["event"], "UserPromptSubmit");
+    assert_eq!(boundary["payload_status"], "complete");
+    assert_eq!(boundary["source_verified"], false);
+    assert_eq!(boundary["native_activation"], "UNVERIFIED");
+    assert!(!home.path().join("groundline/insights").exists());
+    let report = parse_stdout(&run(&[
+        "worker",
+        "status",
+        "--codex-home",
+        path_argument(home.path()),
+    ]));
+    assert_eq!(report["collection_enabled"], false);
+    assert_eq!(report["learning_boundaries"]["state"], "enabled");
+    assert_eq!(report["learning_boundaries"]["boundary_count"], 1);
+    assert!(!report.to_string().contains("PRIVATE_"));
+    assert!(!report.to_string().contains(path_argument(home.path())));
+}
+
+#[test]
+fn boundary_failure_does_not_suppress_existing_activity_wakeup_capture() {
+    let home = tempdir().unwrap();
+    let directory = learning_profile(home.path());
+    let profile = directory.join("profile.json");
+    fs::set_permissions(&profile, fs::Permissions::from_mode(0o644)).unwrap();
+    let activity = groundline_runtime::insights::state_directory(home.path()).unwrap();
+    let policy = activity.join("owner-auto-policy.json");
+    groundline_runtime::local_file::atomic_write_private(&policy,&serde_json::to_vec(&json!({
+        "schema_version":1,"kind":"groundline-insights-owner-auto-policy","status":"active",
+        "automatic_activity_checkpoints":true,"collection_scope":"all_activity","diagnostic_enabled":false,
+        "trigger_mode":"native_hook_checkpoints","updated_at_utc":"2026-10-07T00:00:00Z"})).unwrap()).unwrap();
+    let output = run_stdin(
+        &[
+            "checkpoint",
+            "user_prompt_submit_hook",
+            "--codex-home",
+            path_argument(home.path()),
+        ],
+        b"{\"prompt\":\"PRIVATE_INPUT_SENTINEL\"}",
+    );
+    assert!(output.status.success());
+    assert!(
+        activity
+            .join("hook-captures/user_prompt_submit_hook.json")
+            .is_file()
+    );
+    assert!(!directory.join("boundaries").exists());
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.is_empty());
 }
 
 fn parse_stdout(output: &Output) -> Value {
@@ -517,7 +628,7 @@ fn provider_smoke_verifies_one_native_binary_package() {
     fs::create_dir(root.path().join("hooks")).unwrap();
     fs::write(
         root.path().join("hooks/hooks.json"),
-        br#"{"hooks":{"SessionStart":{"command":"groundline-insights checkpoint"},"Stop":{"command":"groundline-insights checkpoint"},"PostCompact":{"command":"groundline-insights checkpoint"},"SessionEnd":{"command":"groundline-insights checkpoint"}}}"#,
+        br#"{"hooks":{"SessionStart":{"command":"groundline-insights checkpoint"},"UserPromptSubmit":{"command":"groundline-insights checkpoint"},"Stop":{"command":"groundline-insights checkpoint"},"PostCompact":{"command":"groundline-insights checkpoint"},"SessionEnd":{"command":"groundline-insights checkpoint"}}}"#,
     )
     .unwrap();
 
@@ -533,6 +644,28 @@ fn provider_smoke_verifies_one_native_binary_package() {
     assert_eq!(result["status"], "PASS");
     assert_eq!(result["artifact_verified"], true);
     assert_eq!(result["python_runtime_required"], false);
+    assert_eq!(result["hook_event_count"], 5);
+    let hook_path = root.path().join("hooks/hooks.json");
+    let original_hooks = fs::read(&hook_path).unwrap();
+    let mut four_hooks: Value = serde_json::from_slice(&original_hooks).unwrap();
+    four_hooks["hooks"]
+        .as_object_mut()
+        .unwrap()
+        .remove("UserPromptSubmit");
+    fs::write(&hook_path, serde_json::to_vec(&four_hooks).unwrap()).unwrap();
+    let incomplete_hooks = run(&[
+        "provider-smoke",
+        "--plugin-root",
+        path_argument(root.path()),
+        "--require-installed",
+        "--json",
+    ]);
+    assert!(!incomplete_hooks.status.success());
+    assert_eq!(
+        parse_stdout(&incomplete_hooks)["error"],
+        "invalid_hook_manifest"
+    );
+    fs::write(&hook_path, original_hooks).unwrap();
 
     let checksum_path = binary
         .parent()

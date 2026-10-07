@@ -16,6 +16,13 @@ const CAPTURE_DIRECTORY: &str = "hook-captures";
 const CLAIM_DIRECTORY: &str = "hook-capture-claims";
 const CAPTURE_LOCK_FILE: &str = "hook-capture.lock";
 const MAX_CAPTURE_BYTES: u64 = 4 * 1024;
+const TRIGGERS: [&str; 5] = [
+    "session_start_hook",
+    "user_prompt_submit_hook",
+    "stop_hook",
+    "post_compact_hook",
+    "session_end_hook",
+];
 
 #[derive(Debug, Error)]
 pub enum CheckpointError {
@@ -100,18 +107,13 @@ fn capture_time(path: &Path, trigger: &str) -> Result<Option<String>, Checkpoint
     Ok(Some(value.captured_at_utc))
 }
 
-/// Inspect the existing eight bounded capture/claim slots without creating,
+/// Inspect the existing ten bounded capture/claim slots without creating,
 /// claiming or acknowledging anything. Markers do not authenticate native dispatch.
 pub fn capture_status(codex_home: &Path) -> Result<serde_json::Value, CheckpointError> {
     let mut pending = 0;
     let mut claimed = 0;
     let mut latest = None;
-    for trigger in [
-        "session_start_hook",
-        "stop_hook",
-        "post_compact_hook",
-        "session_end_hook",
-    ] {
+    for trigger in TRIGGERS {
         for (path, count) in [
             (capture_path(codex_home, trigger)?, &mut pending),
             (claim_path(codex_home, trigger)?, &mut claimed),
@@ -132,18 +134,14 @@ pub fn capture_status(codex_home: &Path) -> Result<serde_json::Value, Checkpoint
         "status":if pending > 0 {"pending"} else if claimed > 0 {"claimed"} else {"unobserved"},
         "pending_trigger_count":pending,"claimed_trigger_count":claimed,
         "latest_capture_at_utc":latest,"native_dispatch_verified":false,
-        "mutation_performed":false
+        "mutation_performed":false,
+        "learning_boundaries":crate::learning_boundary::status(codex_home)
     }))
 }
 
 pub fn claim_triggers(codex_home: &Path) -> Result<(), CheckpointError> {
     let _lock = capture_lock(codex_home)?;
-    for trigger in [
-        "session_start_hook",
-        "stop_hook",
-        "post_compact_hook",
-        "session_end_hook",
-    ] {
+    for trigger in TRIGGERS {
         let source = capture_path(codex_home, trigger)?;
         let claim = claim_path(codex_home, trigger)?;
         if claim.exists() {
@@ -178,12 +176,7 @@ pub fn claim_triggers(codex_home: &Path) -> Result<(), CheckpointError> {
 }
 
 pub fn acknowledge_claimed_triggers(codex_home: &Path) -> Result<(), CheckpointError> {
-    for trigger in [
-        "session_start_hook",
-        "stop_hook",
-        "post_compact_hook",
-        "session_end_hook",
-    ] {
+    for trigger in TRIGGERS {
         let path = claim_path(codex_home, trigger)?;
         if !path.exists() {
             continue;
@@ -200,10 +193,7 @@ pub fn acknowledge_claimed_triggers(codex_home: &Path) -> Result<(), CheckpointE
 }
 
 pub fn valid_trigger(trigger: &str) -> bool {
-    matches!(
-        trigger,
-        "session_start_hook" | "stop_hook" | "post_compact_hook" | "session_end_hook"
-    )
+    TRIGGERS.contains(&trigger)
 }
 
 pub fn spawn_worker(

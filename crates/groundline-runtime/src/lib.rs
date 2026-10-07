@@ -13,6 +13,8 @@ pub mod environment;
 pub mod insights;
 #[cfg(feature = "insights-state")]
 pub mod insights_state;
+#[cfg(feature = "insights-state")]
+pub mod learning_boundary;
 pub mod local_file;
 pub mod platform;
 #[cfg(feature = "audit-store")]

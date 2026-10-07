@@ -18,8 +18,101 @@ const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_ENTRIES: usize = 1000;
 const MAX_DIRECTORY_BYTES: usize = 16 * 1024 * 1024;
 
+mod continuous;
+pub(crate) use continuous::{
+    application_evaluations, authorize_application, default_application_check,
+};
+
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
+    /// Configure disabled owner-private learning; enable is a separate opt-in.
+    Configure {
+        #[arg(long)]
+        environment_state: PathBuf,
+        #[arg(long = "target", required = true)]
+        target_ids: Vec<String>,
+        #[arg(long)]
+        device_id: String,
+        #[arg(long)]
+        codex_home: Option<PathBuf>,
+        #[arg(long)]
+        state: Option<PathBuf>,
+        #[arg(long)]
+        deliveries: Option<PathBuf>,
+    },
+    /// Opt in to the configured native boundary and scoped outcome loop.
+    Enable {
+        #[arg(long)]
+        codex_home: Option<PathBuf>,
+    },
+    /// Stop new learning consumption while preserving private evidence.
+    Disable {
+        #[arg(long)]
+        codex_home: Option<PathBuf>,
+    },
+    /// Declare a native-authored task scope and criterion before doing the work.
+    TaskStart {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        native_artifact: Option<PathBuf>,
+        #[arg(long)]
+        criterion_evidence: Option<PathBuf>,
+        #[arg(long)]
+        codex_home: Option<PathBuf>,
+    },
+    /// Submit a direct result; automatically link it and reconcile candidates.
+    Finalize {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(
+            long,
+            conflicts_with = "manifest",
+            required_unless_present = "manifest"
+        )]
+        receipt: Option<PathBuf>,
+        #[arg(long, conflicts_with = "receipt", required_unless_present = "receipt")]
+        manifest: Option<PathBuf>,
+        #[arg(long)]
+        native_artifact: Option<PathBuf>,
+        #[arg(long)]
+        correction_evidence: Option<PathBuf>,
+        #[arg(long)]
+        codex_home: Option<PathBuf>,
+    },
+    /// Resume immutable boundary consumption and direct follow-up comparisons.
+    Consume {
+        #[arg(long)]
+        codex_home: Option<PathBuf>,
+    },
+    /// Reconcile applied candidates against scoped before/after outcomes.
+    Reconcile {
+        #[arg(long)]
+        codex_home: Option<PathBuf>,
+    },
+    /// Show deterministic repeated failure, correction, rework and cost gaps.
+    Patterns {
+        #[arg(long)]
+        codex_home: Option<PathBuf>,
+    },
+    /// List bounded boundary references matching an independent native session.
+    Boundaries {
+        #[arg(long)]
+        native_artifact: PathBuf,
+        #[arg(long)]
+        turn_hash: Option<String>,
+        #[arg(long)]
+        codex_home: Option<PathBuf>,
+    },
+    /// Bind an explicit scoped trial and rollback authorization to one plan.
+    AuthorizeTrial {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        evidence: PathBuf,
+        #[arg(long)]
+        state: PathBuf,
+    },
     /// Capture checked environment context before a scoped delivery completes.
     Capture {
         #[arg(long)]
@@ -279,13 +372,14 @@ impl State {
             lock.try_lock().map_err(|_| error("state_busy"))?;
         }
         let lock = lock.map(LockGuard);
-        let records = read_directory(&path, &directory, true)?
+        let mut records = read_directory(&path, &directory, true)?
             .into_iter()
             .map(|(_, value)| {
                 validate_record(&value)?;
                 Ok(value)
             })
             .collect::<Result<Vec<_>, ContractError>>()?;
+        continuous::load_archive_references(&path, &mut records, &[])?;
         validate_record_collection(&records)?;
         Ok(Self {
             path,
@@ -320,6 +414,13 @@ impl State {
             .any(|v| learning::content_sha256(v).ok().as_ref() == Some(&digest))
         {
             return Ok(false);
+        }
+        if let Some(previous) = continuous::archived_record(&self.path, &digest)? {
+            return if previous == *value {
+                Ok(false)
+            } else {
+                Err(error("archive_conflict"))
+            };
         }
         let mut updated = self.records.clone();
         updated.push(value.clone());
@@ -391,6 +492,14 @@ impl State {
         }
         let _ = unlinkat(&self.directory, temporary.as_str(), AtFlags::empty());
         result
+    }
+
+    fn append(&mut self, value: &Value) -> Result<bool, ContractError> {
+        let changed = self.save(value)?;
+        if !self.records.contains(value) {
+            self.records.push(value.clone());
+        }
+        Ok(changed)
     }
 }
 
@@ -518,11 +627,12 @@ fn validate_record(value: &Value) -> Result<(), ContractError> {
             }
             Ok(())
         }
-        _ => Err(error("unsupported_state")),
+        _ => continuous::validate_record(value),
     }
 }
 
 fn validate_record_collection(records: &[Value]) -> Result<(), ContractError> {
+    continuous::validate_collection(records)?;
     let analyses = records
         .iter()
         .filter(|record| {
@@ -708,6 +818,12 @@ fn capture(
 }
 
 fn write_draft(path: &Path, value: &Value, state: &State) -> Result<bool, ContractError> {
+    let mut bytes = serde_json::to_vec_pretty(value).map_err(|_| error("serialization_failed"))?;
+    bytes.push(b'\n');
+    write_bytes_draft(path, &bytes, state)
+}
+
+fn write_bytes_draft(path: &Path, bytes: &[u8], state: &State) -> Result<bool, ContractError> {
     let path = absolute(path)?;
     let parent_path = path.parent().ok_or_else(|| error("invalid_path"))?;
     let directory = directory_handle(parent_path, true)?;
@@ -724,8 +840,6 @@ fn write_draft(path: &Path, value: &Value, state: &State) -> Result<bool, Contra
         return Err(error("draft_outside_state_required"));
     }
     let name = path.file_name().ok_or_else(|| error("invalid_path"))?;
-    let mut bytes = serde_json::to_vec_pretty(value).map_err(|_| error("serialization_failed"))?;
-    bytes.push(b'\n');
     match openat(
         &directory,
         name,
@@ -756,7 +870,7 @@ fn write_draft(path: &Path, value: &Value, state: &State) -> Result<bool, Contra
     );
     let mut published = false;
     let result = (|| {
-        file.write_all(&bytes)
+        file.write_all(bytes)
             .and_then(|_| file.sync_all())
             .map_err(|_| error("output_write_failed"))?;
         if !private_for_current_user(&file)
@@ -990,6 +1104,24 @@ fn evaluate(
     let values: Vec<Value> = receipts.iter().map(|(_, v)| v.clone()).collect();
     delivery::validate_receipt_collection(&values)?;
     let state = State::open(state, false)?;
+    evaluate_records(
+        &input,
+        &receipts,
+        &operation,
+        &sha256(&operation_bytes),
+        &state,
+        &[],
+    )
+}
+
+fn evaluate_records(
+    input: &Value,
+    receipts: &[(String, Value)],
+    operation: &Value,
+    operation_sha256: &str,
+    state: &State,
+    additional_reasons: &[String],
+) -> Result<Value, ContractError> {
     let links: Vec<Value> = state
         .records
         .iter()
@@ -1005,7 +1137,19 @@ fn evaluate(
                 && v["proposal_id"] == input["proposal_id"]
         })
         .ok_or_else(|| error("candidate_missing"))?;
-    let mut result = learning::evaluate(&input, proposal, &links, &receipts, &operation)?;
+    let mut result = learning::evaluate(input, proposal, &links, receipts, operation)?;
+    if !additional_reasons.is_empty() {
+        result["status"] = json!("INCONCLUSIVE");
+        let reasons = result["comparison_reasons"]
+            .as_array_mut()
+            .ok_or_else(|| error("invalid_evaluation"))?;
+        for reason in additional_reasons {
+            if !reasons.contains(&json!(reason)) {
+                reasons.push(json!(reason));
+            }
+        }
+        reasons.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
+    }
     let current: learning::Proposal =
         serde_json::from_value(proposal.clone()).map_err(|_| error("invalid_proposal"))?;
     let mut evidence_refs = current.evidence_refs.clone();
@@ -1068,9 +1212,9 @@ fn evaluate(
     let value = serde_json::to_value(EvaluationRecord {
         kind: "groundline-learning-evaluation-record".into(),
         schema: 1,
-        input: serde_json::from_value(input).map_err(|_| error("invalid_evaluation"))?,
+        input: serde_json::from_value(input.clone()).map_err(|_| error("invalid_evaluation"))?,
         proposal_sha256,
-        operation_sha256: sha256(&operation_bytes),
+        operation_sha256: operation_sha256.into(),
         result: result.clone(),
     })
     .map_err(|_| error("serialization_failed"))?;
@@ -1187,6 +1331,67 @@ fn status_with_operations(path: &Path, paths: &[PathBuf]) -> Result<Value, Contr
 
 pub(crate) fn run(command: Command) -> Result<Value, ContractError> {
     match command {
+        Command::Configure {
+            environment_state,
+            target_ids,
+            device_id,
+            codex_home,
+            state,
+            deliveries,
+        } => continuous::configure(
+            &environment_state,
+            &target_ids,
+            &device_id,
+            codex_home.as_deref(),
+            state.as_deref(),
+            deliveries.as_deref(),
+        ),
+        Command::Enable { codex_home } => continuous::enable(codex_home.as_deref(), true),
+        Command::Disable { codex_home } => continuous::enable(codex_home.as_deref(), false),
+        Command::TaskStart {
+            input,
+            native_artifact,
+            criterion_evidence,
+            codex_home,
+        } => continuous::task_start(
+            &input,
+            native_artifact.as_deref(),
+            criterion_evidence.as_deref(),
+            codex_home.as_deref(),
+        ),
+        Command::Finalize {
+            input,
+            receipt,
+            manifest,
+            native_artifact,
+            correction_evidence,
+            codex_home,
+        } => continuous::finalize(
+            &input,
+            receipt.as_deref(),
+            manifest.as_deref(),
+            native_artifact.as_deref(),
+            correction_evidence.as_deref(),
+            codex_home.as_deref(),
+        ),
+        Command::Consume { codex_home } | Command::Reconcile { codex_home } => {
+            continuous::consume(codex_home.as_deref())
+        }
+        Command::Patterns { codex_home } => continuous::patterns(codex_home.as_deref()),
+        Command::Boundaries {
+            native_artifact,
+            turn_hash,
+            codex_home,
+        } => continuous::boundaries(
+            &native_artifact,
+            turn_hash.as_deref(),
+            codex_home.as_deref(),
+        ),
+        Command::AuthorizeTrial {
+            input,
+            evidence,
+            state,
+        } => continuous::authorize_trial(&input, &evidence, &state),
         Command::Capture {
             environment_state,
             target,
@@ -1320,6 +1525,8 @@ mod tests {
         let applied = environment::run(EnvironmentCommand::Apply {
             state_dir: environment_state.clone(),
             proposal_id: "workflow-change".into(),
+            learning_state: None,
+            intent: None,
             json: true,
         })
         .unwrap();

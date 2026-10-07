@@ -43,7 +43,7 @@ For a new release, use its reviewed distribution and installer. Preserve deliber
 ## Adoption proof
 
 Verify independently: native source/result, installed listing, new binary
-checksum, exactly four effective hooks, user review of changed trust hashes,
+checksum, exactly five effective hooks, user review of changed trust hashes,
 private schema-7 profile/credential readiness, current-version lifecycle receipt,
 and accepted upload. Missing lanes remain `UNVERIFIED`; restart the App only if
 fresh-task/hook evidence stays stale after refresh.

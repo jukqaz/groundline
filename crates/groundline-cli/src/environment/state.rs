@@ -11,6 +11,8 @@ use uuid::Uuid;
 const MAX_TARGETS: usize = 64;
 const MAX_REVISIONS: usize = 64;
 
+mod tracking;
+
 #[cfg(test)]
 thread_local! {
     static AFTER_ROLLBACK_PREPARE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
@@ -364,6 +366,9 @@ impl Store {
     }
     fn current(&self) -> Result<Current, ContractError> {
         let head = self.head()?.ok_or_else(|| error("not_registered"))?;
+        self.snapshot(head)
+    }
+    fn snapshot(&self, head: Head) -> Result<Current, ContractError> {
         contract(&head.kind, head.schema, "groundline-environment-head")?;
         let snapshots = self.artifacts("snapshots", false)?;
         let baseline: Baseline = parse(&artifact(
@@ -918,8 +923,20 @@ pub(super) fn run(command: Command) -> Result<Value, ContractError> {
         Command::Apply {
             state_dir,
             proposal_id,
+            learning_state,
+            intent,
             ..
-        } => apply(&state_dir, &proposal_id),
+        } => apply_checked(
+            &state_dir,
+            &proposal_id,
+            learning_state.as_deref(),
+            intent.as_deref(),
+        ),
+        Command::Status {
+            state_dir,
+            learning_state,
+            ..
+        } => tracking::status(&state_dir, learning_state.as_deref()),
         Command::Rollback {
             state_dir,
             operation_id,
@@ -1182,6 +1199,14 @@ fn plan(state_dir: &Path, proposal_input: &Path) -> Result<Value, ContractError>
 }
 
 fn plan_proposal(state_dir: &Path, proposal: Proposal) -> Result<Value, ContractError> {
+    plan_proposal_with_bundle(state_dir, proposal, None)
+}
+
+fn plan_proposal_with_bundle(
+    state_dir: &Path,
+    proposal: Proposal,
+    bundle: Option<(&Bundle, &str)>,
+) -> Result<Value, ContractError> {
     contract(
         &proposal.kind,
         proposal.schema,
@@ -1200,6 +1225,11 @@ fn plan_proposal(state_dir: &Path, proposal: Proposal) -> Result<Value, Contract
     let store = Store::open(state_dir, false)?;
     let _lock = store.root.lock()?;
     let current = store.current()?;
+    if let Some((bundle, _)) = bundle
+        && CommonBaseline::from_local(&current.baseline) != *bundle.baseline()
+    {
+        return Err(error("bundle_not_imported_at_current_revision"));
+    }
     if current.head.revision != proposal.basis_revision
         || current.baseline.source_revision != proposal.source_revision
         || current.baseline.authority_ref != proposal.authority_ref
@@ -1270,6 +1300,12 @@ fn plan_proposal(state_dir: &Path, proposal: Proposal) -> Result<Value, Contract
     store.check(&plan)?;
     let raw = bytes(&plan)?;
     let digest = hash(&raw);
+    // Sidecars must be durable before the plan becomes consumable by apply.
+    // Identical writes are retry-safe; partial sidecars never authorize targets.
+    let common_change_ref = tracking::bind_plan(&store, &current, &plan, &digest)?;
+    if let Some((bundle, bundle_sha256)) = bundle {
+        tracking::bind_bundle(&store, &plan, &digest, bundle_sha256, bundle)?;
+    }
     store
         .artifacts("plans", true)?
         .write(&format!("{}.json", plan.proposal_id), &raw, false)?;
@@ -1278,6 +1314,8 @@ fn plan_proposal(state_dir: &Path, proposal: Proposal) -> Result<Value, Contract
     result["basis_revision"] = json!(plan.basis_revision);
     result["source_revision"] = json!(plan.source_revision);
     result["plan_sha256"] = json!(digest);
+    result["common_change_ref"] = json!(common_change_ref);
+    result["device_sha256"] = json!(hash(plan.device_id.as_bytes()));
     result["status"] = json!("PLANNED");
     result["mutation_performed"] = json!(false);
     result["private_plan_saved"] = json!(true);
@@ -1555,10 +1593,28 @@ fn summary(op: &Operation, operation: &str, mutation: bool, receipt_saved: bool)
     result
 }
 
+#[cfg(test)]
 fn apply(state_dir: &Path, proposal_id: &str) -> Result<Value, ContractError> {
+    apply_checked(state_dir, proposal_id, None, None)
+}
+
+fn apply_checked(
+    state_dir: &Path,
+    proposal_id: &str,
+    learning_state: Option<&Path>,
+    intent: Option<&str>,
+) -> Result<Value, ContractError> {
     let store = Store::open(state_dir, false)?;
     let _lock = store.root.lock()?;
     let (plan, digest) = store.plan(proposal_id)?;
+    tracking::check_link(&store, &plan, &digest)?;
+    crate::learning::default_application_check(
+        state_dir,
+        proposal_id,
+        &digest,
+        learning_state,
+        intent,
+    )?;
     let current = store.check(&plan)?;
     for entry in &plan.entries {
         bound_plan_entry(&current, entry)?;
@@ -1697,6 +1753,48 @@ fn apply(state_dir: &Path, proposal_id: &str) -> Result<Value, ContractError> {
 
 fn plan_for_operation(store: &Store, op: &Operation) -> Result<(Plan, Current), ContractError> {
     let (plan, digest) = store.plan(&op.proposal_id)?;
+    let current = store.check(&plan)?;
+    check_operation_plan(op, &plan, &digest, &current)?;
+    Ok((plan, current))
+}
+
+// Historical readout validates saved authority and bindings without claiming
+// that an old generation is the current target or permitting a stale write.
+fn plan_for_observed_operation(store: &Store, op: &Operation) -> Result<Plan, ContractError> {
+    let (plan, digest) = store.plan(&op.proposal_id)?;
+    let snapshots = store.artifacts("snapshots", false)?;
+    let baseline: Baseline = parse(&artifact(
+        &snapshots,
+        &format!("baseline-{}.json", plan.baseline_sha256),
+        &plan.baseline_sha256,
+    )?)?;
+    let current = store.snapshot(Head {
+        kind: "groundline-environment-head".into(),
+        schema: 1,
+        revision: plan.basis_revision.clone(),
+        parent_revision: baseline.parent_revision,
+        baseline_sha256: plan.baseline_sha256.clone(),
+        bindings_sha256: plan.bindings_sha256.clone(),
+        registry_sha256: plan.registry_sha256.clone(),
+    })?;
+    if current.baseline.authority_revision != plan.authority_revision
+        || current.baseline.exception_revision != plan.exception_revision
+        || current.baseline.authority_ref != plan.authority_ref
+        || current.baseline.source_revision != plan.source_revision
+        || current.registry.device_id != plan.device_id
+    {
+        return Err(error("operation_authority_mismatch"));
+    }
+    check_operation_plan(op, &plan, &digest, &current)?;
+    Ok(plan)
+}
+
+fn check_operation_plan(
+    op: &Operation,
+    plan: &Plan,
+    digest: &str,
+    current: &Current,
+) -> Result<(), ContractError> {
     if digest != op.plan_sha256
         || op.baseline_sha256 != plan.baseline_sha256
         || op.registry_sha256 != plan.registry_sha256
@@ -1704,7 +1802,6 @@ fn plan_for_operation(store: &Store, op: &Operation) -> Result<(Plan, Current), 
     {
         return Err(error("operation_plan_mismatch"));
     }
-    let current = store.check(&plan)?;
     if op.basis_revision != plan.basis_revision
         || op.authority_revision != plan.authority_revision
         || op.exception_revision != plan.exception_revision
@@ -1715,7 +1812,7 @@ fn plan_for_operation(store: &Store, op: &Operation) -> Result<(Plan, Current), 
         return Err(error("operation_authority_mismatch"));
     }
     for e in &plan.entries {
-        bound_plan_entry(&current, e)?;
+        bound_plan_entry(current, e)?;
     }
     if op.entries.len() != plan.entries.len() {
         return Err(error("operation_plan_entry_mismatch"));
@@ -1757,7 +1854,7 @@ fn plan_for_operation(store: &Store, op: &Operation) -> Result<(Plan, Current), 
             }
         }
     }
-    Ok((plan, current))
+    Ok(())
 }
 fn actual_matches(
     read: &Option<ReadFile>,
@@ -2317,6 +2414,7 @@ fn export_bundle(
     result["status"] = json!(if written { "EXPORTED" } else { "NO_CHANGE" });
     result["desired_revision"] = json!(current.head.revision);
     result["bundle_sha256"] = json!(hash(&raw));
+    result["common_change_ref"] = json!(CommonBaseline::from_local(&current.baseline).digest()?);
     result["payload_sha256"] = json!(bundle.payload_sha256);
     result["private_bundle_saved"] = json!(true);
     result["mutation_performed"] = json!(false);
@@ -2391,6 +2489,7 @@ fn inspect_bundle(
     result["desired_revision"] = json!(baseline.revision);
     result["exception_revision"] = json!(baseline.exception_revision);
     result["bundle_sha256"] = json!(expected_sha256);
+    result["common_change_ref"] = json!(bundle.baseline().digest()?);
     result["entries"] = json!(bundle_observations(&baseline, &registry));
     result["mutation_performed"] = json!(false);
     result["latest_remote_revision_verified"] = json!(false);
@@ -2426,6 +2525,7 @@ fn import_bundle(
     )?;
     result["operation"] = json!("import");
     result["bundle_sha256"] = json!(expected_sha256);
+    result["common_change_ref"] = json!(bundle.baseline().digest()?);
     result["targets_written"] = json!(false);
     result["latest_remote_revision_verified"] = json!(false);
     Ok(result)
@@ -2450,9 +2550,10 @@ fn plan_bundle(
         basis_revision: current.head.revision,
         source_revision: current.baseline.source_revision,
         authority_ref: current.baseline.authority_ref,
-        changes: bundle.payload.contents,
+        changes: bundle.payload.contents.clone(),
     };
-    let mut result = plan_proposal(state_dir, proposal)?;
+    let mut result =
+        plan_proposal_with_bundle(state_dir, proposal, Some((&bundle, expected_sha256)))?;
     result["bundle_sha256"] = json!(expected_sha256);
     Ok(result)
 }
@@ -2542,12 +2643,22 @@ pub(super) fn learning_context(state_dir: &Path, target_id: &str) -> Result<Valu
         return Err(error("context_changed_during_read"));
     }
     let observed_at_utc = chrono::Utc::now().to_rfc3339();
+    let common_baseline_sha256 = CommonBaseline::from_local(&current.baseline).digest()?;
+    let observation_state_sha256 = hash(&bytes(&json!({
+        "state_identity": [store.root.binding.dev, store.root.binding.ino],
+        "baseline_sha256": current.head.baseline_sha256,
+        "bindings_sha256": current.head.bindings_sha256,
+        "registry_sha256": current.head.registry_sha256,
+        "operations": operation_observations,
+    }))?);
     let provenance_sha256 = hash(&bytes(&json!({"head":current.head,"target_id":target_id,
         "parent_binding":parent.binding,"leaf":leaf,"skill_revision":digest,
         "operation":operation.as_ref().map(|op| (&op.operation_id, &op.plan_sha256)),
         "operation_sha256":operation.as_ref().and_then(|op| operation_observations.get(&format!("{}.json", op.operation_id)))}))?);
     let result = json!({"environment_revision":operation.as_ref().map(|op| &op.plan_sha256),
         "source_revision":current.baseline.source_revision,"target_id":target_id,"skill_revision":digest,
+        "baseline_sha256":common_baseline_sha256,"planning_revision":current.head.revision,
+        "observation_state_sha256":observation_state_sha256,
         "observed_at_utc":observed_at_utc,
         "provenance_sha256":provenance_sha256,"native_activation":"UNVERIFIED"});
     #[cfg(test)]

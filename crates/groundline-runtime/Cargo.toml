@@ -38,6 +38,8 @@ insights-state = [
   "insights-client",
   "tailnet-probe",
   "groundline-contracts/audit",
+  "groundline-contracts/efficiency",
+  "groundline-contracts/integrity",
   "dep:tokio",
 ]
 

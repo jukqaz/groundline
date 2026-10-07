@@ -202,3 +202,24 @@ private 원문·로컬 경로·영수증은 이 문서나 Insights 업로드 범
 업무 결과의 의미와 완전한 자원은 실제 관측이 필요합니다. 이 연결의 구현·회귀·설치와
 자연 업무의 품질·비용 효과, 다른 기기의 native 활성은 별도 증거입니다. 요청하지 않은
 자동 분석기나 주기 작업을 추가하지 않습니다.
+
+
+## 2026.1007.3 지속 개선 연결
+
+명시적으로 활성화한 private learning profile은 기기별 등록 환경과 결과 저장소를
+연결한다. Insights 5개 native hook은 원문 없이 당시 경계와 작은 target 관측을 저장하고,
+Core의 task-start/finalize는 명시 완료 기준과 실제 delivery를 sidecar에 연결한다.
+consume/reconcile은 적합한 후속 결과를 기존 evaluator로 보내며 같은 입력은 재처리하지
+않는다. 실패·미연결·unknown과 INCONCLUSIVE는 성공으로 바꾸지 않는다.
+
+`environment status`는 공통 baseline digest를 common_change_ref로 사용해 기기별
+plan SHA·operation 원문 SHA·평가 SHA를 연결한다. bundle의 공통 식별자가 같아도
+기기별 plan, 파일 digest, 예외와 native 활성·효과 관측은 별개다. 과거 plan에 연결
+기록이 없으면 unlinked로 표시하며 현재 기준으로 과거 근거를 다시 쓰지 않는다.
+
+학습 candidate 적용은 trial/adoption을 구분한다. 정확한 scope·plan·복구 권한 근거가
+있는 trial만 허용하고 hold/reject와 근거 없는 adoption은 거절한다. 명시적으로
+학습과 무관한 환경 수리와 rollback은 기존 파일 안전성 계약을 재사용한다.
+
+호출 계약과 native 후속 확인은 [learning loop](../plugins/groundline/references/learning-loop.md),
+실제 배포 완료 기준은 [release design](release-design.md)에서 확인한다.

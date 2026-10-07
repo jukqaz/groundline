@@ -100,7 +100,16 @@ pub fn provider_smoke(root: &Path, require_installed: bool) -> Result<Value, Con
         .get("hooks")
         .and_then(Value::as_object)
         .map_or(0, serde_json::Map::len);
-    if hook_count != 4
+    if hook_count != 5
+        || [
+            "SessionStart",
+            "UserPromptSubmit",
+            "Stop",
+            "PostCompact",
+            "SessionEnd",
+        ]
+        .iter()
+        .any(|event| hooks_value["hooks"].get(event).is_none())
         || hook_text.contains(".py")
         || hook_text.contains("python")
         || !hook_text.contains("groundline-insights")

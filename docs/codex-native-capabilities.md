@@ -1,6 +1,7 @@
 # Codex 기능을 지속 개선과 환경 통일에 연결하기
 
-2026-10-06 공식 문서 조사. GroundLine은 Codex가 제공하는 기능을 우선 사용하고
+2026-10-06 공식 문서 조사, 2026-10-07 공식 관측과 여러 기기 수집의 경계 보완.
+GroundLine은 Codex가 제공하는 기능을 우선 사용하고
 사용 패턴·작업 결과·환경 검증에 필요한 연결을 보완합니다. 아래 표는 발동 조건과
 설계상의 사용 위치이며 모든 기능이 현재 계정/기기/작업에서 활성화됐다는 목록은 아닙니다.
 
@@ -24,7 +25,48 @@
 | context compaction·usage | 컨텍스트 압박·중복 설명·장기 작업 비용 분석 | native usage/compaction 관측과 결과 연결. native context 관리 유지, API cache 옵션을 Codex TOML로 옮기지 않음 | [App Server](https://learn.chatgpt.com/docs/app-server#trigger-thread-compaction) |
 | 파일·artifact preview·작업용 dependency | 사용 패턴 보고서와 개선안을 검토 가능한 결과로 제공 | 필요한 표·차트·파일을 만들고 실제 렌더링과 수치를 확인. App preview와 CLI의 파일 생성/경로 보고를 구분 | [Work with files](https://learn.chatgpt.com/docs/artifacts-viewer) |
 | hooks·native trust | Insights의 결과 수집·정의 변경 뒤 활성 확인 | event 지원·정의 hash·trust·실제 실행을 구분. Core는 hook-free 유지, 턴마다 LLM 분석을 실행하지 않음 | [Hooks](https://learn.chatgpt.com/docs/hooks) |
+| OTel·native token notifications | 모델·토큰·도구 실행 관측의 입력 | 해당 runtime의 실제 필드·coverage·연결·개인정보 범위를 검증. 같은 사용량을 기존 audit와 중복 합산하지 않음 | [Telemetry](https://learn.chatgpt.com/docs/config-file/config-advanced#observability-and-telemetry), [App Server](https://learn.chatgpt.com/docs/app-server) |
 | sandbox·rules·approvals·auto-review | 원래 요청한 작업의 권한 경계와 실제 실패 진단 | command network·MCP·browser·앱 승인을 구분. 이미 승인된 범위의 좁은 규칙과 native 정책 사용 | [Security](https://learn.chatgpt.com/docs/agent-approvals-security), [Auto-review](https://learn.chatgpt.com/docs/sandboxing/auto-review) |
+
+## Codex 기능 우선의 고정 기준
+
+같은 목적에 필요한 정보·권한·실행 결과를 제공하는 native 기능을 우선 사용합니다.
+설정 해석은 native config, 지침 발견은 skills/plugins, 실행·위임·작업 격리는
+native agents/worktrees, 재실행 계기는 요청된 native 자동화에 맡깁니다.
+GroundLine은 여러 기기의 관측 통합, 개인 환경 revision과 직접 결과의 연결,
+개선 후보·적용·복구·후속 평가를 기존 Core/Insights 안에서 보완합니다.
+기능 사용 횟수를 늘리는 대신 필요한 작업의 품질·시간·전체 비용으로 유용성을 판단합니다.
+
+현재 지원되는 structured interface의 실제 필드와 coverage를 먼저 비교합니다.
+필요한 과거 기록·응답 소유권·비용 연결이 부족하면 기존 제한된 native reader를 유지하고
+부족한 부분을 명시합니다. 공식 API라는 이유로 필요한 관측을 버리거나 모든 수집원을
+상시 병행하지 않습니다. 동일 관측은 식별자와 범위가 확인될 때만 중복을 제거하며,
+연결이 확인되지 않은 수치는 합산하지 않고 coverage 차이로 남깁니다.
+
+## 공식 관측과 여러 기기의 기록
+
+OTel은 각 실행 기기의 신규 이벤트를 설정한 endpoint로 내보내는 기능입니다.
+각 기기에서 같은 수신 서버에 보내도록 구성하면 이후 관측을 중앙에 모을 수 있습니다.
+이는 계정 전체의 다른 컴퓨터 기록을 조회하거나 이전 기록을 소급 수집하는 기능의
+근거가 아닙니다. 과거 기록은 해당 기기의 지원되는 stored-thread interface와 기존
+history reader/backfill 경로에서 확인하며, 실제 접근 가능 범위와 누락을 표시합니다.
+
+여러 기기의 수집기와 공통 Insights 서버·ClickHouse 경로를 유지합니다. 기기별 수집
+identity·cursor·대기 전송·ACK·재시도를 보존하고 환경 기준 전달과 관측 전송을 구분합니다.
+환경 통일을 위해 native 세션·DB·인증·cache를 기기 사이에 복사하지 않습니다.
+현재 중앙 전송 계약의 사용량 집계를 대화 원문이나 직접 업무 결과 전체의 동기화로
+해석하지 않으며, 집계만으로 개인 개선 효과를 판정하지 않습니다.
+
+OTel을 편입하려면 실제 수신 규격, 필요한 필드, 기존 집계와의 중복 및 개인정보 처리를
+검증해야 합니다. 현재 Insights API의 주소를 OTLP endpoint로 지정하는 것만으로 호환을
+가정하지 않습니다. `log_user_prompt = false`도 tool result snippet의 제거를 보장하지
+않으므로 기존 원문 비전송 경계를 함께 검증합니다. 새 수신기 도입을 기본 전제로 두지 않습니다.
+
+App Server의 `thread/read`는 저장된 thread를 재개하지 않고 읽는 공식 경로입니다.
+event stream과 token notification은 연결된 runtime의 범위를 확인해야 합니다.
+별도 app-server를 시작하는 것만으로 기존 App의 모든 이벤트를 관측한다고 주장하거나
+학습 증거 확보를 위해 실제 작업을 resume/start하지 않습니다. 필요한 native 기능의
+지원·읽기·실제 hook 실행·중앙 ACK를 각 기기의 App/PATH에서 별도로 확인합니다.
 
 ## 환경 기준에 보존할 기능 근거
 

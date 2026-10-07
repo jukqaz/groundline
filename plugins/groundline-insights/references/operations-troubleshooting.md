@@ -111,8 +111,8 @@ The status command cannot authenticate native dispatch: manually invoked hook
 commands can create the same markers. Inspect Codex's effective hook support and
 trusted hash, then a fresh native event and its durable handling. A pending
 marker is not a processed capture; a historical `last_hook_at_utc` is not proof
-that all four events ran. Capture inspection is read-only and bounded to the
-existing eight slots; unreadable markers report unavailable without clearing them.
+that all five events ran. Capture inspection is read-only and bounded to the
+ten wake-up slots; unreadable markers report unavailable without clearing them.
 
 Observations older than the current activation are `before_current_activation`,
 missing timestamps are `unobserved`, and old/future timestamps remain stale or

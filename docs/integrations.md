@@ -51,7 +51,7 @@ activity selection, missing sources, and imported or shared histories.
 
 | Surface | Status | Contract |
 | --- | --- | --- |
-| Codex App | Built in | Four fail-open lifecycle checkpoints after explicit activation |
+| Codex App | Built in | Five fail-open lifecycle checkpoints after explicit activation |
 | Codex CLI | Built in | Desktop, local headless, and remote headless runtime metadata |
 | HTTPS | Default transport | Owner-selected HTTPS origin with certificate verification and no redirects |
 | Tailscale/Tailnet | Optional transport | Tailnet IPv4 or `*.ts.net`; only these endpoints require a local Tailnet probe |

@@ -1,10 +1,12 @@
 # 사용 경험과 모델 변화에 따른 Codex 환경 개선
 
 상태: 2026-10-06 재설계 및 [로컬 구현](adaptive-environment-implementation.md).
+2026-10-07 보완: Codex 기능 우선과 여러 기기의 기록 수집 경계를 명확히 합니다.
 설계 기준과 구현·설치·활성·후속 효과의 검증을 구분합니다.
 이 문서는 자동 학습·환경 동기화가 이미 동작한다는 설명이 아닙니다.
 공식 자료와 유사 프로젝트 조사에 따른 우선순위·구현 완료 기준은
 [개선사항](adaptive-environment-improvements.md)에 정리합니다.
+다음 배포의 고정 범위와 완료 기준은 [배포판 최종 설계](release-design.md)를 따릅니다.
 
 ## 목적과 완료 기준
 
@@ -30,13 +32,13 @@ GroundLine의 목표는 사용 패턴과 실제 작업 결과를 분석하고, �
 
 | 영역 | 현재 구현 | 추가할 연결 |
 | --- | --- | --- |
-| 사용 관측 | native audit, root/child 소유·중복·미관측 처리, Insights 집계 | 작업 결과와 당시 환경 revision 연결 |
-| 모델 패턴 | [PR #57](https://github.com/jukqaz/groundline/pull/57)의 실제 ID·effort·응답·토큰·coverage | 해당 PR 병합 후 패턴을 비교 보고서의 설명 자료로 연결 |
-| 결과 기록 | `efficiency record-delivery`의 증거 hash, 완료/실패/unknown, 재작업·자원 | 환경/공식 지침 revision, 명시 정정과 결과 근거의 연결 |
-| 비교 | `efficiency route --deliveries`, phase/cohort의 직접 결과 비교 | 후보 채택·적용·후속 결과의 지속 기록, 모델/환경 변화에 따른 분리 |
-| 설정 변경 | `setup`, `config-repair`의 preview·백업·재읽기·적용 | 개인 공통 기준, 기기 예외, 관리 범위, 환경 변경 영수증 |
-| 복구 | 설치 source rollback, 폐기된 개인 trial의 status/rollback | 새 환경 변경의 충돌 감지·부분 복구·실제 활성 재확인 |
-| 모델 변화 | 현재 native catalog의 모델·effort 지원 확인 | 공식 문서 변경과 검토된 지침 revision 연결 |
+| 사용 관측 | native audit, root/child 소유·중복·미관측 처리, Insights 집계 | 요청 전 개별 경계와 당시 snapshot 보존 |
+| 모델 패턴 | 실제 ID·effort·응답·토큰·coverage의 관측 | 작업 단위의 소유 비용과 직접 결과 연결 |
+| 결과 기록 | delivery receipt와 capture/prepare/link의 당시 revision·정정 sidecar | 완료 기준 digest·native 경계 refs 검증 |
+| 비교·후속 | route/evaluate와 candidate·decide/status, 지정 refs의 평가 | 적합한 후속 결과 선택·평가 입력 digest별 소비 |
+| 설정·환경 | setup/config-repair, 개인 기준·기기 bindings, plan/apply, private bundle 전달 | 공통 변경 ref와 기기별 plan/operation/평가 연결 |
+| 복구·활성 | CAS·백업·PREPARED·부분 recover/rollback, App/PATH native metadata 관측 | 실제 hook 실행·다기기 활성과 새 연결의 왕복 검증 |
+| 모델 변화 | 현재 native catalog 확인, 공식 text snapshot의 sources check·변경/무변경 억제 | 관련 변경을 후보와 다음 직접 결과에 연결 |
 
 현재 `personal`은 기존 상태 복구 전용입니다. 새 학습 상태를 폐기된 trial 형식에
 추가하거나 기존 상태를 자동 변환하지 않습니다. 기존 route의 표본 수·개선율
@@ -81,7 +83,9 @@ GroundLine은 native 설정 우선순위를 재구현하거나 별도 실행기�
 | `verification`, `rollback_ref` | 적용 검사, 반증 조건, 되돌릴 기준 |
 | `followup_refs`, `status` | 이후 결과와 관측/적용/효과 확인 상태 |
 
-이 필드들은 추가 구현 계약이며 현재 CLI 입력 형식은 아닙니다.
+이 표는 의미상의 연결 기준입니다. 구현된 CLI 형식은
+[구현 계약](adaptive-environment-implementation.md)을 따르며 완료 기준·native 경계와
+기기별 후속 소비의 추가 연결은 [배포 범위](release-design.md)에 한정합니다.
 보고서에는 원문 대신 범위와 확인된 의미만 남깁니다. 로그·외부 자료의 문자열을
 검증 없이 관리 지침이나 실행 코드로 승격하지 않습니다.
 
@@ -173,6 +177,17 @@ Goal/continuity, compaction/usage, hooks/trust와 권한을 필요에 따라 선
 기능을 새로 발견하면 실제 host/계정의 지원과 관련 작업의 필요를 확인합니다.
 기존 [capability routing](../plugins/groundline/references/capability-routing.md)을 사용하며
 모든 작업에 기능 체크리스트나 추가 실행 계층을 강제하지 않습니다.
+
+공식 structured 관측은 필요한 필드·coverage·실제 연결을 확인한 범위에서 먼저 사용합니다.
+각 기기의 과거 기록과 누락된 관측은 기존 native reader/backfill로 보완하고,
+기기별 수집·재전송·중앙 ACK와 공통 서버 집계는 유지합니다. OTel export나 App Server
+접속을 계정 전체의 과거 기록 조회로 해석하지 않습니다. 동일 사용량의 소유권과 식별
+범위를 확인해 중복을 처리하고, 현재 집계를 대화 원문·직접 결과 전체의 동기화로 간주하지 않습니다.
+
+필수 연결은 기존 구조 안에서 구현합니다. 작업 경계·완료 기준과 당시 환경·소유 비용을
+묶고, 조건에 맞는 다음 직접 결과를 기존 평가기에 연결합니다. Codex가 설정을 해석하고
+실행·위임·hook trust를 관리하며, GroundLine은 여러 기기의 패턴·환경 차이·개선 효과를
+설명합니다. 새 공식 기능은 이 책임 경계를 유지한 채 필요한 부분에 편입합니다.
 
 ## 현재 설정 개선과 구현 순서
 

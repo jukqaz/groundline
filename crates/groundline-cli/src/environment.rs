@@ -40,6 +40,20 @@ pub(crate) enum Command {
         state_dir: PathBuf,
         #[arg(long)]
         proposal_id: String,
+        /// Private learning state for a candidate trial or evidence-based adoption.
+        #[arg(long)]
+        learning_state: Option<PathBuf>,
+        #[arg(long, requires = "learning_state", value_parser = ["trial", "adoption"])]
+        intent: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Follow the common change through this device's plans, operations and evaluations.
+    Status {
+        #[arg(long)]
+        state_dir: PathBuf,
+        #[arg(long)]
+        learning_state: Option<PathBuf>,
         #[arg(long)]
         json: bool,
     },

@@ -15,7 +15,7 @@ See [audit scope](references/weekly-usage-audit.md) and
 [private delivery receipts](references/delivery-evidence.md).
 
 Source qualification checks package boundaries, Core's zero hooks, Insights'
-four hooks, pinned CI actions, and private markers. Release qualification also
+five hooks, pinned CI actions, and private markers. Release qualification also
 verifies all four native targets. Neither proves live dispatch.
 
 ## Reporting

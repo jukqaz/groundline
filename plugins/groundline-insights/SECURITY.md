@@ -7,7 +7,7 @@ formats, limits, transactions, and recovery.
 
 ## Current boundaries
 
-- Four fail-open lifecycle wrappers invoke only an existing packaged binary,
+- Five fail-open lifecycle wrappers invoke only an existing packaged binary,
   read no hook input, emit no output, and never download/build code.
 - The collector reads bounded Codex state read-only and writes atomic private
   state. Strict aggregates exclude prompts, responses, transcripts, commands,

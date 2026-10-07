@@ -226,6 +226,150 @@ fn private_root() -> tempfile::TempDir {
 }
 
 #[test]
+fn common_change_tracks_different_device_plans_and_operations_without_copying_effect() {
+    let temp = private_root();
+    let root = temp.path().canonicalize().unwrap();
+    let a = Device::new(&root, "device-a", "exception-a1");
+    let b = Device::new(&root, "device-b", "exception-b7");
+    a.seed("baseline-1", None, 1, "exception-a1");
+    let (bundle, digest) = a.export("bundle.json", true);
+    b.import(&bundle, &digest, None, None);
+    let a_plan = a.plan(&bundle, &digest, "a1");
+    let b_plan = b.plan(&bundle, &digest, "b1");
+    assert_eq!(a_plan["common_change_ref"], b_plan["common_change_ref"]);
+    assert_ne!(a_plan["plan_sha256"], b_plan["plan_sha256"]);
+    assert_ne!(a_plan["device_sha256"], b_plan["device_sha256"]);
+    a.apply("a1", None);
+    b.apply("b1", None);
+    for device in [&a, &b] {
+        let status = run(
+            &device.root,
+            &["status", "--state-dir", arg(&device.state)],
+            None,
+        );
+        assert_eq!(status["common_change_ref"], a_plan["common_change_ref"]);
+        assert_eq!(status["other_devices_verified"], false);
+        assert_eq!(status["unlinked_plan_count"], 0);
+        let changes = status["changes"].as_array().unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0]["common_change_ref"], a_plan["common_change_ref"]);
+        assert_eq!(changes[0]["bundle"]["bundle_sha256"], digest);
+        let operations = changes[0]["operations"].as_array().unwrap();
+        assert_eq!(operations.len(), 1);
+        assert_eq!(operations[0]["status"], "APPLIED");
+        assert_eq!(operations[0]["native_activation"], "UNVERIFIED");
+        assert_eq!(operations[0]["effect_verified"], false);
+        assert!(operations[0]["evaluations"].as_array().unwrap().is_empty());
+        let repeated = run(
+            &device.root,
+            &["status", "--state-dir", arg(&device.state)],
+            None,
+        );
+        assert_eq!(repeated, status);
+    }
+}
+
+#[test]
+fn status_keeps_old_operation_after_common_baseline_advances() {
+    let temp = private_root();
+    let root = temp.path().canonicalize().unwrap();
+    let a = Device::new(&root, "device-a", "exception-a1");
+    let b = Device::new(&root, "device-b", "exception-b7");
+    a.seed("baseline-1", None, 1, "exception-a1");
+    let (bundle, digest) = a.export("bundle1.json", true);
+    b.import(&bundle, &digest, None, None);
+    let old_plan = b.plan(&bundle, &digest, "b1");
+    b.apply("b1", None);
+    a.seed("baseline-2", Some("baseline-1"), 2, "exception-a1");
+    let (bundle2, digest2) = a.export("bundle2.json", true);
+    b.import(
+        &bundle2,
+        &digest2,
+        Some(("baseline-1", "exception-b7")),
+        None,
+    );
+    let status = run(&b.root, &["status", "--state-dir", arg(&b.state)], None);
+    assert_eq!(status["desired_revision"], "baseline-2");
+    assert_ne!(status["common_change_ref"], old_plan["common_change_ref"]);
+    assert_eq!(
+        status["changes"][0]["common_change_ref"],
+        old_plan["common_change_ref"]
+    );
+    assert_eq!(status["changes"][0]["operations"][0]["status"], "APPLIED");
+    assert_eq!(
+        status["changes"][0]["operations"][0]["effect_verified"],
+        false
+    );
+    b.apply("b1", Some("environment_stale_basis_or_authority"));
+    assert_eq!(fs::read_to_string(&b.workflow).unwrap(), "Workflow v1\n");
+}
+
+#[test]
+fn interrupted_tracking_never_exposes_an_applicable_plan_and_retry_completes() {
+    for sidecar in ["change-links", "bundle-links"] {
+        let temp = private_root();
+        let root = temp.path().canonicalize().unwrap();
+        let a = Device::new(&root, "device-a", "exception-a1");
+        a.seed("baseline-1", None, 1, "exception-a1");
+        let (bundle, digest) = a.export("bundle.json", true);
+        let directory = a.state.join(sidecar);
+        fs::create_dir(&directory).unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o500)).unwrap();
+        fs::create_dir(a.state.join("plans")).unwrap();
+        fs::set_permissions(a.state.join("plans"), fs::Permissions::from_mode(0o700)).unwrap();
+        run(
+            &a.root,
+            &[
+                "plan-bundle",
+                "--state-dir",
+                arg(&a.state),
+                "--bundle",
+                arg(&bundle),
+                "--bundle-sha256",
+                &digest,
+                "--proposal-id",
+                "a1",
+            ],
+            Some("environment_owner_or_link_contract"),
+        );
+        assert!(!a.state.join("plans/a1.json").exists());
+        a.apply("a1", Some("environment_plan_missing"));
+        assert_eq!(
+            fs::read_to_string(&a.workflow).unwrap(),
+            "Before device-a\n"
+        );
+        fs::set_permissions(directory, fs::Permissions::from_mode(0o700)).unwrap();
+        a.plan(&bundle, &digest, "a1");
+        a.apply("a1", None);
+        assert_eq!(fs::read_to_string(&a.workflow).unwrap(), "Workflow v1\n");
+    }
+}
+
+#[test]
+fn altered_common_change_link_fails_without_changing_targets() {
+    let temp = private_root();
+    let root = temp.path().canonicalize().unwrap();
+    let a = Device::new(&root, "device-a", "exception-a1");
+    a.seed("baseline-1", None, 1, "exception-a1");
+    let (bundle, digest) = a.export("bundle.json", true);
+    a.plan(&bundle, &digest, "a1");
+    let path = a.state.join("change-links/a1.json");
+    let mut link: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    link["common_change_ref"] = json!("0".repeat(64));
+    write_json(&path, &link);
+    run(
+        &a.root,
+        &["status", "--state-dir", arg(&a.state)],
+        Some("environment_change_link_binding_mismatch"),
+    );
+    a.apply("a1", Some("environment_change_link_binding_mismatch"));
+    assert_eq!(
+        fs::read_to_string(&a.workflow).unwrap(),
+        "Before device-a\n"
+    );
+}
+
+#[test]
 fn two_devices_round_trip_preserves_local_exceptions_user_edits_and_partial_rollback() {
     let temp = private_root();
     let root = temp.path().canonicalize().unwrap();

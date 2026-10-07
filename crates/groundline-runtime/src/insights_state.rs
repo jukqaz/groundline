@@ -1301,6 +1301,7 @@ fn valid_status_trigger(trigger: &str) -> bool {
         "manual"
             | "history_sync"
             | "session_start_hook"
+            | "user_prompt_submit_hook"
             | "stop_hook"
             | "post_compact_hook"
             | "session_end_hook"

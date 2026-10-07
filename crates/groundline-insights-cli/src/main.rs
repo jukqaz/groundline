@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand};
 use groundline_contracts::{ContractError, insights};
 use groundline_runtime::local_file::open_bounded_regular_file;
 use groundline_runtime::{
-    checkpoint, insights as insights_runtime, insights_state, platform, tailnet,
+    checkpoint, insights as insights_runtime, insights_state, learning_boundary, platform, tailnet,
 };
 use serde_json::{Value, json};
 
@@ -510,17 +510,33 @@ async fn run(cli: Cli) -> Result<(), ExitCode> {
                     codex_home,
                 },
         } => {
+            if !matches!(trigger.as_str(), "manual" | "history_sync")
+                && !checkpoint::valid_trigger(&trigger)
+            {
+                return Err(ExitCode::FAILURE);
+            }
+            let learning_home = codex_home
+                .clone()
+                .map(Ok)
+                .unwrap_or_else(insights_runtime::default_codex_home);
+            let learning = match &learning_home {
+                Ok(home) => learning_boundary::consume(home).await,
+                Err(_) => json!({"result_code":"unavailable","network_performed":false}),
+            };
             let result = match insights_state::resolve_roots(plugin_root, codex_home) {
                 Ok((root, home)) => insights_state::run_once(&root, &home, &trigger).await,
                 Err(error) => Err(error),
             };
             match result {
-                Ok(result) => {
+                Ok(mut result) => {
+                    result["learning_worker"] = learning;
                     emit(&result, true);
                     Ok(())
                 }
                 Err(error) => {
-                    emit(&state_failure(&error), true);
+                    let mut result = state_failure(&error);
+                    result["learning_worker"] = learning;
+                    emit(&result, true);
                     Err(ExitCode::FAILURE)
                 }
             }
@@ -563,8 +579,11 @@ async fn run(cli: Cli) -> Result<(), ExitCode> {
                 .unwrap_or_else(insights_runtime::default_codex_home);
             match home
                 .map_err(|_| insights_state::StateError::LocalState)
-                .and_then(|home| insights_state::status(&home))
-            {
+                .and_then(|home| {
+                    let mut result = insights_state::status(&home)?;
+                    result["learning_boundaries"] = learning_boundary::status(&home);
+                    Ok(result)
+                }) {
                 Ok(result) => {
                     emit(&result, true);
                     Ok(())
@@ -627,15 +646,22 @@ async fn run(cli: Cli) -> Result<(), ExitCode> {
                 .map(Ok)
                 .unwrap_or_else(insights_runtime::default_codex_home)
                 .map_err(|_| ExitCode::FAILURE)?;
-            match insights_state::checkpoint_enabled(&home) {
-                Ok(false) => Ok(()),
-                Ok(true) => checkpoint::capture_trigger(&home, &trigger)
-                    .and_then(|()| {
-                        checkpoint::spawn_worker(&trigger, plugin_root.as_deref(), Some(&home))
-                    })
-                    .map_err(|_| ExitCode::FAILURE),
-                Err(_) => Err(ExitCode::FAILURE),
+            // Independent local learning opt-in and owner-service consent.
+            // A boundary error must not suppress activity capture or its worker.
+            groundline_runtime::environment::Environment::current()
+                .map_err(|_| ExitCode::FAILURE)?;
+            let collect = insights_state::checkpoint_enabled(&home).unwrap_or(false);
+            let learn = learning_boundary::enabled(&home).unwrap_or(false);
+            if learn {
+                let _ = learning_boundary::capture(&home, &trigger, std::io::stdin().lock());
             }
+            if collect {
+                let _ = checkpoint::capture_trigger(&home, &trigger);
+            }
+            if collect || learn {
+                let _ = checkpoint::spawn_worker(&trigger, plugin_root.as_deref(), Some(&home));
+            }
+            Ok(())
         }
         Command::Platform { json: json_output } => {
             match platform::current_target().and_then(|target| {

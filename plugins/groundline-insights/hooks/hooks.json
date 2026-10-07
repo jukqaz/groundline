@@ -1,5 +1,5 @@
 {
-  "description": "Checkpoint redacted GroundLine activity across short, long-lived, resumed, compacted, and closed root Codex work.",
+  "description": "Checkpoint redacted GroundLine activity and owner-private learning boundaries across Codex lifecycle events.",
   "hooks": {
     "SessionStart": [
       {
@@ -7,6 +7,17 @@
           {
             "type": "command",
             "command": "g=''; case \"$(uname -s 2>/dev/null):$(uname -m 2>/dev/null)\" in Darwin:arm64) g='aarch64-apple-darwin';; Darwin:x86_64) g='x86_64-apple-darwin';; Linux:aarch64|Linux:arm64) g='aarch64-unknown-linux-musl';; Linux:x86_64|Linux:amd64) g='x86_64-unknown-linux-musl';; esac; if [ -n \"$g\" ] && [ -x \"${PLUGIN_ROOT}/bin/$g/groundline-insights\" ]; then \"${PLUGIN_ROOT}/bin/$g/groundline-insights\" checkpoint session_start_hook --plugin-root \"${PLUGIN_ROOT}\" >/dev/null 2>&1 || true; fi; exit 0",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "g=''; case \"$(uname -s 2>/dev/null):$(uname -m 2>/dev/null)\" in Darwin:arm64) g='aarch64-apple-darwin';; Darwin:x86_64) g='x86_64-apple-darwin';; Linux:aarch64|Linux:arm64) g='aarch64-unknown-linux-musl';; Linux:x86_64|Linux:amd64) g='x86_64-unknown-linux-musl';; esac; if [ -n \"$g\" ] && [ -x \"${PLUGIN_ROOT}/bin/$g/groundline-insights\" ]; then \"${PLUGIN_ROOT}/bin/$g/groundline-insights\" checkpoint user_prompt_submit_hook --plugin-root \"${PLUGIN_ROOT}\" >/dev/null 2>&1 || true; fi; exit 0",
             "timeout": 3
           }
         ]

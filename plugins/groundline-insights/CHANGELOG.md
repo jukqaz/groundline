@@ -1,5 +1,11 @@
 # GroundLine Insights changes
 
+## 2026.10.07-c (`2026.1007.3`)
+
+- 5개 fail-open native 훅에서 원문 없이 작은 비공개 작업 경계를 보존합니다.
+- 학습 opt-in과 수집 동의를 분리하고 worker에서 제한된 오프라인 소비를 실행합니다.
+- 중앙 스키마·수집기 identity·대기 전송·기존 데이터를 유지합니다.
+
 ## 2026.10.07-b (`2026.1007.2`)
 
 - Core와 후보 버전을 맞춥니다. Insights의 hook·수집·인증·저장소·ingest revision은 변경하지 않습니다.

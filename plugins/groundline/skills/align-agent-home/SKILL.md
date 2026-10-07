@@ -1,6 +1,6 @@
 ---
 name: align-agent-home
-description: Use for requested GroundLine installation, Codex environment alignment, or evidenced settings repair. Skip unrelated task setup.
+description: Use for requested GroundLine installation or verification, or explicit repair of evidenced Codex settings. Skip generic workflow reviews and unrelated task setup.
 ---
 
 # Install and verify GroundLine
@@ -12,12 +12,6 @@ catalog; no fixed GroundLine preset or automatic optimization writes settings.
 The distribution installer already runs setup; reuse its result.
 
 Choose only the affected verification route:
-
-- **Requested personal environment alignment:** use
-  [adaptive environment](../../references/adaptive-environment.md) to establish
-  common intent, host exceptions, scoped changes and actual App/PATH loading.
-  Use portable private bundles with local bindings for requested cross-device
-  alignment; retain the existing native settings repair paths.
 
 - **Package installation or verification:** resolve the installed executable through
   [platform commands](../../references/platform-commands.md) and use

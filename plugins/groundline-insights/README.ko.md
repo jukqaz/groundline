@@ -1,7 +1,7 @@
 # GroundLine Insights
 
 Insights는 Core와 독립적으로 설치하는 선택형 플러그인입니다. fail-open Codex
-hook 4개가 로컬 네이티브 App/CLI 활동을 제한된 집계로 읽어 비공개 outbox에 저장하고,
+hook 5개가 로컬 네이티브 App/CLI 활동을 제한된 집계로 읽어 비공개 outbox에 저장하고,
 운영자의 HTTPS API·ClickHouse·Grafana로 전송합니다. Tailnet 제한은 선택 사항이며,
 Core·추론 프록시·모델 카탈로그·추론 인증 정보는 필요하지 않습니다.
 
@@ -84,7 +84,7 @@ groundline-insights insights fetch-report \
 
 ## 운영 증거
 
-패키지 무결성, 활성 hook 4개, lifecycle 실행, 업로드 승인, ClickHouse 반영,
+패키지 무결성, 활성 hook 5개, lifecycle 실행, 업로드 승인, ClickHouse 반영,
 Grafana frame, 이미지 게시, 배포와 stable 승격은 각각 검증합니다. 관측하지 못한
 단계는 `UNVERIFIED`로 남깁니다. 운영 endpoint·credential·dataset 경로·receipt는
 공개 Git과 CI 밖에 둡니다.
@@ -96,3 +96,12 @@ preview이며 TrueNAS는 선택형 overlay입니다. 운영에는 fresh-host, im
 [연동 프로필](https://github.com/jukqaz/groundline/blob/main/docs/ko/integrations.md)을 참고하세요.
 
 License: MIT.
+
+
+## 선택적 비공개 학습 경계
+
+Core learning을 명시적으로 활성화한 경우 같은 5개 훅이 작은 native metadata와
+등록 대상 digest를 비공개로 기록합니다. prompt 원문·developer context 주입·
+성공 추정은 하지 않으며 기존 업로드 동의와 분리합니다. background worker는
+검증된 Core 오프라인 소비기를 제한된 시간 안에 실행할 수 있습니다. Insights-only와
+기존 중앙 전송 계약은 유지됩니다. 설정은 설치된 Core learning-loop 참조문을 따릅니다.

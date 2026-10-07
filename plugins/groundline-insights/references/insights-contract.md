@@ -5,7 +5,7 @@ state. Historical records remain readable where explicitly stated below.
 
 ## Ownership
 
-Core owns offline guidance and analysis. Insights independently owns four Codex
+Core owns offline guidance and analysis. Insights independently owns five Codex
 hooks, private collector state, HTTPS transport, the Rust/Axum API, ClickHouse,
 Grafana, and self-hosting tools. It installs no Core dependency or skills,
 changes no global Codex settings, and routes no models.
@@ -345,7 +345,7 @@ and receipts never contain either value.
 
 Release qualification covers:
 
-1. Core zero-hook and Insights four-hook package invariants;
+1. Core zero-hook and Insights five-hook package invariants;
 2. missing, wrong, and correct enrollment credentials;
 3. profile/secret separation and private permissions;
 4. strict event, report, platform, runtime, version, and size contracts;

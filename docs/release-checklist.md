@@ -28,7 +28,7 @@
    infrastructure compatibility profile first; never mix a partial candidate
    with the release-tested defaults implicitly.
 4. Validate both canonical manifests. Confirm Core has zero hooks and Insights
-   has exactly four fail-open hooks using `groundline-insights`. Confirm starter
+   has exactly five fail-open hooks using `groundline-insights`. Confirm starter
    prompts contain at most three nonempty entries of at most 128 characters
    each, and neither native CLI emits a manifest warning.
    Confirm public metadata and documentation describe Core-only, Insights-only,

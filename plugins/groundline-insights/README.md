@@ -1,6 +1,6 @@
 # GroundLine Insights
 
-Insights is an optional, independently installable companion to Core. Four
+Insights is an optional, independently installable companion to Core. Five
 fail-open Codex hooks collect bounded local native App/CLI activity into a private
 aggregate outbox for an owner-operated HTTPS API, ClickHouse, and Grafana.
 Tailnet restriction is optional. Core, inference proxies, model catalogs, and
@@ -92,7 +92,7 @@ Git, and logs.
 
 ## Evidence lanes
 
-Package integrity, four effective hooks, lifecycle dispatch, accepted upload,
+Package integrity, five effective hooks, lifecycle dispatch, accepted upload,
 ClickHouse visibility, Grafana query frames, image publication, deployment, and
 stable promotion are separate evidence. Unobserved lanes remain `UNVERIFIED`.
 Operational endpoints, credentials, dataset paths, and receipts stay outside
@@ -107,3 +107,13 @@ fresh-host, immutable-image, and external TLS evidence. See the
 and [integration profiles](https://github.com/jukqaz/groundline/blob/main/docs/integrations.md).
 
 License: MIT.
+
+
+## Optional private learning boundaries
+
+When Core learning is explicitly enabled, the same five fail-open lifecycle hooks
+record small private event metadata and registered target digests. They do not
+store prompt text, inject developer context, infer success or extend collection
+consent. The background worker can run the pinned Core offline consumer with a
+bounded timeout. Insights-only installation and its existing upload contract
+remain independent. See the installed Core learning-loop reference for setup.

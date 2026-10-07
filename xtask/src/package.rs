@@ -43,7 +43,13 @@ const CORE_SKILLS: &[&str] = &[
     "audit-agent-history",
     "optimize-codex-workflow",
 ];
-const HOOK_EVENTS: &[&str] = &["PostCompact", "SessionEnd", "SessionStart", "Stop"];
+const HOOK_EVENTS: &[&str] = &[
+    "PostCompact",
+    "SessionEnd",
+    "SessionStart",
+    "Stop",
+    "UserPromptSubmit",
+];
 
 #[derive(Debug, Deserialize)]
 struct PluginManifest {
@@ -302,6 +308,7 @@ fn verify_insights(root: &Path) -> Result<(), XtaskError> {
         ("Stop", "stop_hook"),
         ("PostCompact", "post_compact_hook"),
         ("SessionEnd", "session_end_hook"),
+        ("UserPromptSubmit", "user_prompt_submit_hook"),
     ] {
         let registrations = events
             .get(event)
@@ -415,7 +422,7 @@ pub fn verify_source(root: &Path) -> Result<Value, XtaskError> {
         "core_hook_count":0,
         "skill_metadata_and_links":true,
         "skill_behavior_evaluation":"not_run",
-        "insights_hook_count":4,
+        "insights_hook_count":5,
         "python_source_count":0,
         "private_marker_count":0,
         "moving_rust_stable":true,
@@ -434,7 +441,7 @@ mod tests {
     };
 
     #[test]
-    fn insights_source_accepts_four_unix_hooks_and_rejects_a_windows_command() {
+    fn insights_source_accepts_five_unix_hooks_and_rejects_a_windows_command() {
         let root = tempdir().unwrap();
         let plugin = root.path().join("plugins/groundline-insights");
         std::fs::create_dir_all(plugin.join(".codex-plugin")).unwrap();

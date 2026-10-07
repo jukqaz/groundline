@@ -20,7 +20,7 @@ marketplace 업데이트는 **이미 설치된 두 플러그인을 함께 갱신
 
 | 대상 | 상태 | 계약 |
 | --- | --- | --- |
-| Codex App | 내장 | 명시적 활성화 후 fail-open lifecycle checkpoint 4개 |
+| Codex App | 내장 | 명시적 활성화 후 fail-open lifecycle checkpoint 5개 |
 | Codex CLI | 내장 | desktop, local headless, remote headless 메타데이터 |
 | HTTPS | 기본 전송 경로 | 운영자 HTTPS origin, 인증서 검증 및 리다이렉트 거부 |
 | Tailscale/Tailnet | 선택형 전송 경로 | Tailnet IPv4 또는 `*.ts.net`; 해당 주소만 로컬 Tailnet 상태 확인 |

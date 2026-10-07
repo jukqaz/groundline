@@ -7,6 +7,8 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
+pub mod continuous;
+
 pub const MAX_EVIDENCE_REFS: usize = 64;
 
 fn error(code: &str) -> ContractError {
