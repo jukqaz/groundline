@@ -7,6 +7,7 @@ use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 fn hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
@@ -44,15 +45,25 @@ fn observation_state_sha256(state: &Path) -> String {
     hash(&bytes)
 }
 
-fn run(root: &Path, args: &[&str], paths: &[(&str, &Path)], success: bool) -> Value {
+fn installed_executable() -> &'static Path {
+    static INSTALLED: OnceLock<(tempfile::TempDir, PathBuf)> = OnceLock::new();
     // Cargo may hard-link its build/deps executables on Linux. Exercise a
     // standalone installed file without relaxing the production pin checks.
-    let installed = root.join("installed-groundline");
-    if !installed.exists() {
+    // Complete the single writable copy before any parallel test can spawn it.
+    let (_, installed) = INSTALLED.get_or_init(|| {
+        let directory = tempfile::tempdir().unwrap();
+        fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        let installed = directory.path().canonicalize().unwrap().join("groundline");
         fs::copy(env!("CARGO_BIN_EXE_groundline"), &installed).unwrap();
         fs::set_permissions(&installed, fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(fs::metadata(&installed).unwrap().nlink(), 1);
-    }
+        (directory, installed)
+    });
+    installed
+}
+
+fn run(root: &Path, args: &[&str], paths: &[(&str, &Path)], success: bool) -> Value {
+    let installed = installed_executable();
     let mut command = Command::new(installed);
     command.current_dir(root).args(args);
     command.env("CODEX_HOME", root.join("codex-home"));
