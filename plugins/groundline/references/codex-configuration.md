@@ -185,7 +185,8 @@ MCP headers, and environment values out of source and diagnostic output. Trust
 records alone do not prove activation. Core has no lifecycle hooks; optional
 Insights uses its own reviewed hook and explicit collection-consent contract.
 
-Sources checked 2026-09-28:
+Configuration sources were previously checked on 2026-09-28. Instruction-scope
+and skill-authoring sources were rechecked on 2026-10-11:
 - [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)
 - [Scoped project instructions](https://learn.chatgpt.com/docs/agent-configuration/agents-md)
 - [Skill triggers and progressive disclosure](https://learn.chatgpt.com/docs/build-skills)
