@@ -1,5 +1,11 @@
 # GroundLine Core changes
 
+## 2026.1011.1 (unreleased)
+
+- 기대 동작과 요청 범위, 새 발견의 처리, 현행 보호를 보존하는 클리닝 판단을 기존 task continuity 지침에 보완합니다.
+- 명시적 전체 수정의 완료와 실제 revision·artifact에 연결된 검증·인계·종료 보고를 명확히 합니다. 작은 작업에 별도 문서나 확인 절차를 강제하지 않습니다.
+- 구조·패키지·설치 검증은 실제 모델 행동의 비회귀 증거와 구분합니다.
+
 ## 2026.1008.5
 
 - `UserPromptSubmit`는 native 학습 경계만 기록하고 통계 상태·window·outbox·잠금에 진입하지 않습니다.

@@ -1,5 +1,9 @@
 # GroundLine Insights changes
 
+## 2026.1011.1 (unreleased)
+
+- Core 공통 지침 후보와 패키지 버전을 맞춥니다. 이번 변경에서 수집·동의·훅·전송·서버 계약과 기본 설정은 수정하지 않습니다.
+
 ## 2026.1008.5
 
 - `UserPromptSubmit`는 native 학습 경계만 기록하고 통계 상태·window·outbox·잠금에 진입하지 않습니다.
