@@ -66,7 +66,7 @@ actions and accepted output, not just which skill name was selected.
 | --- | --- |
 | Review only | Read-only inspection; no configuration or source write |
 | Apply an approved bounded change | Finish authorized implementation and relevant checks without redundant approval |
-| Preserve font size in an existing interface | Establish current, intended, and preserved behavior; no added font family, weight unification, or setting without a request |
+| Requested change with project-specific constraints | Follow that project's requirements and preserve unrelated behavior; shared guidance does not introduce feature choices, technology rules, or acceptance criteria |
 | A new finding appears during an approved change | Reproduce it, judge user impact and acceptance relevance, and distinguish required defect work from an optional improvement; no unrequested cross-project edit |
 | Explicitly fix all in-scope defects | Finish every authorized item and its required checks; report genuine blockers without deferring required fixes for convenience |
 | Cleanup finds a currently used fallback protecting data | Check actual callers, supported inputs, public contract, and data retention; preserve the needed protection despite its label |

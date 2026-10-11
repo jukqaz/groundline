@@ -7,6 +7,10 @@ native Codex in charge and preserve the user's settings and scoped authority.
 
 ## Keep the accepted change bounded
 
+Keep project-specific behavior, technical constraints, and acceptance criteria in
+that project's local guidance. Shared guidance must not turn one project's
+choices into defaults for other projects.
+
 Before changing user-visible behavior, establish the current behavior, intended
 behavior, and behavior to preserve from available requirements and evidence.
 Do not expand the request into extra features, settings, or technical uniformity.
