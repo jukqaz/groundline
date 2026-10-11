@@ -5,11 +5,23 @@ lane context, long-task recovery, verification reuse, or large-output handling.
 It is not a mandatory plan, ledger, review cohort, or new execution layer. Keep
 native Codex in charge and preserve the user's settings and scoped authority.
 
-## Keep the accepted change bounded
+## Resolve shared and project guidance
 
 Keep project-specific behavior, technical constraints, and acceptance criteria in
 that project's local guidance. Shared guidance must not turn one project's
 choices into defaults for other projects.
+
+Use the instruction chain supplied by native Codex. Inspect relevant scoped
+guidance when needed; preserve its owning layer instead of collecting or merging
+every instruction file. Product features, architecture, compatibility, test
+commands, release policy, and presentation conventions belong to the project.
+GroundLine command formats and installation rules apply to GroundLine operations.
+
+Read a matching skill's entry before following it, then load only the reference
+needed for the selected operation. A link makes detail available; it does not
+require loading every linked document or invoking every available skill.
+
+## Keep the accepted change bounded
 
 Before changing user-visible behavior, establish the current behavior, intended
 behavior, and behavior to preserve from available requirements and evidence.
@@ -33,10 +45,10 @@ evidence establishes that it is outside the current contract.
 
 A short prompt can still fork the full conversation. Inspect the active spawn
 interface before choosing context controls. Where it exposes `fork_turns`, use
-`none` for an independent task whose necessary context fits in the brief, a
-supported recent-turn selection for shared recent decisions, or full history
-when the work needs it. Other clients may expose different controls or none;
-do not invent a field or claim an unobserved context reduction.
+`none` for an independent task whose necessary context fits in the brief, or
+`all` when the work needs inherited history and those values are supported.
+Other clients may expose different controls or none; do not invent a field,
+unsupported history option or unobserved context reduction.
 
 Include the goal, worktree and base revision or dirty fingerprint, owned files
 or output, constraints, acceptance check, and necessary interfaces, decisions
@@ -70,6 +82,12 @@ requested; a handoff does not replace native state or extend authority.
 
 ## Reuse valid verification
 
+Choose checks from the project's requirements, changed behavior and actual risk.
+Use its existing verification path when suitable. A command proves only the
+outcome it checks; add runtime or user acceptance evidence when that outcome is
+required. Shared guidance does not prescribe a framework, test-first policy,
+full-suite run or fixed report shape for every change.
+
 Keep the result tied to the checked revision or artifact, relevant inputs and
 runtime/environment. Identify the actual binary/artifact checked; a PASS from a
 different binary cannot qualify changed source. Reuse a passing check while
@@ -80,6 +98,12 @@ review the changed diff and affected findings before repeating broader review.
 Do not cap necessary implementation or verification to meet a savings target.
 Once required acceptance checks pass, close the accepted scope; optional new
 findings do not restart completed reviews.
+
+When a check fails, read the actual error and distinguish invocation, environment
+and product failures. Trace the relevant cause and test a focused hypothesis
+with the smallest credible check. Retry after a changed condition or under a
+bounded transient-retry policy; preserve unresolved evidence instead of layering
+speculative fixes or weakening acceptance checks.
 
 ## Keep large output inspectable
 
@@ -100,9 +124,9 @@ does not authorize transcript upload.
 ## State what the evidence proves
 
 For multi-step completion, connect each delivered result to what its evidence
-proves and the remaining required proof or next action and owner. Keep automated
-checks, device/runtime observations, deployment, approval, and publication
-separate when relevant. Claim only the requested outcomes actually established;
+proves and the remaining required proof or next action and owner. Keep evidence
+for distinct required outcomes separate; a passed check does not establish an
+unobserved outcome. Claim only the requested outcomes actually established;
 small tasks need no extra document, template, or empty fields.
 
 Keep discovery, enabled/trusted state, actual invocation and requested outcome

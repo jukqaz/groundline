@@ -17,7 +17,7 @@ GroundLine은 Codex가 제공하는 기능을 우선 사용하고
 | native review·diff·GitHub PR/checks | 지침/환경 코드 변경, 검토 피드백, 개선 근거 연결 | 실제 diff·결함·CI 결과 확인. 패널 생성과 리뷰 수행을 구분하고 같은 변경의 반복 리뷰를 강제하지 않음 | [Code review](https://learn.chatgpt.com/docs/code-review) |
 | native 실행·대기·terminal | inspect/plan/apply와 명령 결과 검증 | 직접 도구와 실제 실행 handle 사용. 시작을 완료로 기록하지 않고 기존 작업을 기다림 | [Long-running work](https://learn.chatgpt.com/docs/long-running-work), [App Server](https://learn.chatgpt.com/docs/app-server) |
 | MCP·서비스 connector | GitHub 관리·공식 자료·권한 있는 구조화 데이터 접근 | 정확한 tool·계정·인증·범위 확인, 저장 후 재읽기. plugin 등록만으로 연결 성공을 추정하지 않음 | [MCP](https://learn.chatgpt.com/docs/extend/mcp) |
-| Browser·기존 Chrome 연결 | 로컬 웹 결과와 로그인 웹 경로 검증 | 로컬 웹은 Browser, 로그인 웹은 사용자 Chrome. 실제 세션·화면·저장 결과 확인 | [Browser](https://learn.chatgpt.com/docs/browser) |
+| Browser·사용자가 선택한 브라우저 연결 | 요청한 웹 경로와 현재 세션의 동작 검증 | 현재 도구와 사용자 선택에 맞는 브라우저를 사용. 실제 세션·화면·저장 결과 확인 | [Browser](https://learn.chatgpt.com/docs/browser) |
 | Computer Use | native API가 설명하지 못하는 로컬 앱 화면·동작 확인 | 해당 앱과 macOS 접근/화면 권한 확인. 요청한 UI 경로에서 실제 결과 확인 | [Computer Use](https://learn.chatgpt.com/docs/computer-use) |
 | Remote·handoff·notification | 대상 기기의 적용/검증과 완료·판단 필요 상태 복귀 | 연결된 host에서 실행됐는지 확인. 기기별 영수증 유지, 의미 있는 변화·실패·결정 필요 상태만 알림 | [Remote engineering](https://learn.chatgpt.com/blog/mastering-codex-remote-for-engineering) |
 | scheduled task·chat follow-up | 공식 변경·환경 차이·적용 후 결과의 후속 확인 | 사용자가 요청한 일정·변경 범위에서 native 자동화 사용. host 실행 조건과 분석 비용 확인 | [Automations](https://learn.chatgpt.com/docs/automations) |

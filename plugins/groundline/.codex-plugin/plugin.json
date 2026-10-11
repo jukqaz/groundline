@@ -36,7 +36,7 @@
     "defaultPrompt": [
       "Use $groundline:align-agent-home to install and verify GroundLine while preserving my settings.",
       "Use $groundline:audit-agent-history to inspect bounded usage evidence.",
-      "Use $groundline:optimize-codex-workflow to choose GPT-6 models, effort and delegation using delivered outcomes."
+      "Use $groundline:optimize-codex-workflow to improve the requested workflow while preserving my model and effort choices."
     ],
     "websiteURL": "https://github.com/jukqaz/groundline",
     "privacyPolicyURL": "https://github.com/jukqaz/groundline/blob/main/docs/privacy.md",

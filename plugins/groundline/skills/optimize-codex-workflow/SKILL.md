@@ -1,88 +1,52 @@
 ---
 name: optimize-codex-workflow
-description: Use for requested Codex workflow improvement, model/effort selection, or delivery quality/resource comparison. Skip routine implementation and delegation.
+description: Use for requested Codex workflow improvements, model or effort selection, and quality/resource comparisons. Skip ordinary implementation and delegation.
 ---
 
-# Task selection and workflow assessment
+# Improve the requested Codex workflow
 
-Keep native Codex in charge of execution. Preserve current and explicit
-model/effort choices and permissions; ordinary work and delegation inherit them.
-Propose model/effort changes only for a requested model/effort selection or
-optimization. Use the active host catalog and user choices, not a fixed model
-allowlist. Historical records remain intact; empirical commands retain their
-documented input contracts.
+Identify the requested outcome and the concrete friction from available evidence.
+Preserve explicit settings, authority and completed work. Follow the target
+project's requirements; shared workflow guidance supplies no project feature,
+technology, compatibility or release policy.
 
-Prioritize accepted work and required verification. Select agents and native
-capabilities when their expected quality or time benefit justifies coordination
-and total parent/child token cost. Use direct tools for bounded work and reduce
-duplicate reads, oversized handoffs and repeated reviews. Token savings must not
-leave required implementation or verification unfinished.
+## Read only the route needed
 
-## Choose the relevant route
-
-- **Requested model/effort selection or optimization plan:** use
+- **Workflow improvement:** use [the optimization loop](../../references/codex-optimization-loop.md)
+  and [task continuity](../../references/task-continuity.md) for scope, continuity,
+  verification and completion. Consult [capability routing](../../references/capability-routing.md)
+  only for a relevant native capability. A request for action includes bounded
+  implementation and verification; an assessment-only request remains read-only.
+- **Requested model/effort selection:** use
   [model and effort guidance](../../references/model-effort-routing.md).
-  Propose model and effort independently using the active host's supported range.
-  Bundled metadata does not prove account access. Reassess at a meaningful phase
-  change within that request, not every turn. A proposal is not an effective change.
-  Descriptive history can inform a plan without an evidence packet, usage audit
-  or comparison quota. State proposed choices as task judgments, not measured wins.
-- **Independent implementation or research lanes:** use bounded native subagents
-  when the user or applicable project guidance authorizes delegation, useful root
-  work can continue, and results can be integrated.
-  Give each lane a concrete output, compact relevant context, acceptance checks
-  and disjoint edit ownership. Inherit model/effort unless a requested selection
-  or optimization authorizes a different choice; respect no-delegation policies.
-  Avoid duplicate checks, same-file edits and recursive fan-out. Integrate and
-  verify returned work; reuse existing agents and waitable operations when useful.
-  When lane context or handoff needs definition, use
-  [task continuity](../../references/task-continuity.md). A compact prompt alone
-  does not limit inherited history or prove lower total token use.
-  Keep small sequential work local; an assessment-only request remains advisory.
-- **Empirical comparison of an existing choice, or preparing an `efficiency route`
-  packet:** use [evidence routing](../../references/evidence-routing.md).
-  Matched direct outcomes support a measured replacement; aggregates alone do not.
-  Read this contract for that operation, not merely because a planning brief
-  mentions conversation history or ClickHouse. Missing outcomes leave the
-  comparison inconclusive without blocking ordinary authorized work.
-- **Workflow review or product improvement:** use [the optimization loop](../../references/codex-optimization-loop.md).
-  Use [capability routing](../../references/capability-routing.md) for relevant
-  skills, callable services, UI surfaces, running handles, isolation, or continuity.
-  Confirm access and scoped authority, execute, then verify the requested result.
-  Discovery and invocation are separate from success. Feature selection needs
-  no routing packet, weekly scan, comparison quota, or automatic delegation.
-  For a requested quality/resource benchmark, use
-  [usage assessment](../../references/usage-assessment.md).
+  Preserve current choices until an authorized change is made through supported
+  native controls. Ordinary workflow work and delegation inherit settings.
+- **Quality/resource comparison or an `efficiency route` packet:** use
+  [usage assessment](../../references/usage-assessment.md) and
+  [evidence routing](../../references/evidence-routing.md). Compare matched actual
+  outcomes; missing evidence stays inconclusive without stopping other authorized
+  work. Load [delivery evidence](../../references/delivery-evidence.md) when an
+  actual receipt is needed. Descriptive planning requires no comparison quota.
+- **Requested usage-driven adaptation or an already enabled private learning
+  profile for meaningful owned work:** use
+  [the learning loop](../../references/learning-loop.md) for that scoped operation.
+  Keep project observations within their applicable scope and reuse verification.
+  A workflow request alone does not enable collection, hooks or ongoing learning.
 
 Resolve references from this installed plugin. Read
-[command resolution](../../references/platform-commands.md) only when a CLI is needed.
+[command resolution](../../references/platform-commands.md) only when a CLI is
+needed. GroundLine command and data contracts apply to their named operations;
+they are not prerequisites for ordinary implementation.
 
-## Preserve completion and evidence
+## Deliver and verify
 
-Carry the goal, user corrections, authority, completed checks and remaining
-acceptance work across phases. Pass only decision-relevant context to children.
-Use [task continuity](../../references/task-continuity.md) for scope and discovery
-decisions, cleanup, handoffs, or verification reuse; small tasks need no ledger.
-After steering or compaction, resume existing work and inspect any running
-operation before starting another. A service authentication or permission gap
-requires its normal supported path, not a model change or wider permissions.
-A request to verify runtime behavior, appearance or deployment may close an
-existing acceptance gap; it is not automatically rework or a model failure.
-Model/effort escalation proposals require a requested selection or optimization
-and demonstrated reasoning difficulty, not permission/network failures.
+Use supported native tools and independent authorized lanes only when they help
+the accepted result. A discovered capability is not proof of access, invocation
+or success. Inspect a running operation before starting a replacement, and carry
+user corrections and remaining required work through steering or compaction.
 
-For enabled owner-private observations of meaningful work, use
-[the learning loop](../../references/learning-loop.md) to declare its criterion
-once before work and submit existing verification evidence after the check.
-The offline consumer waits for a matching native end and connects actual owned
-costs; submission alone is not a completed outcome. Skip routine tasks and
-duplicate evidence runs. For independently prepared receipts, use
-[delivery evidence](../../references/delivery-evidence.md). Separate proposed,
-requested and observed effective selections;
-include failures and unknowns. Do not replay completed work to fill a sample quota.
-Keep conversation text, credentials and private provider state out of reports.
-
-Report the choice or change, its evidence and the remaining verification gap
-concisely. A task judgment is not a measured optimum; a successful synthetic
-test is not proof of live quality, activation or savings. No global setting,
-scheduled task, new chat or permission expansion is implied by this skill.
+Keep one owning reference for each rule and read specialist detail when its
+trigger applies. Report the concrete change, what the evidence proves and any
+remaining acceptance gap. A task judgment or structural check does not prove
+better live model quality or savings. Global settings, new chats, Goals,
+schedules and permission changes remain subject to the user's actual request.

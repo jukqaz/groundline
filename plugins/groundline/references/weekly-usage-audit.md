@@ -34,11 +34,10 @@ failure reason codes, and the proposed single workflow change. Keep source
 validation, installed runtime validation, and user-visible behavior as separate
 evidence lanes.
 
-Use the actual App runtime first. On macOS inspect bundle metadata and the
-`Contents/Resources/codex-cli/bin/codex` executable in standard Applications
-locations (or `Contents/Resources/codex` in an older verified bundle);
-product display names do not determine bundle paths, and Codex may ship inside
-ChatGPT.app. Only fall back to PATH CLI when the App runtime cannot be verified,
+Use the actual App runtime first and resolve its CLI through
+[platform commands](platform-commands.md); display names and historical internal
+paths do not establish the current executable. Only fall back to PATH CLI when
+the App runtime cannot be verified,
 and label that evidence scope. Do not treat a CLI feature flag as active App
 behavior or a manual invocation as proof of a scheduled trigger.
 

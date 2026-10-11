@@ -5,6 +5,11 @@ Native Codex acquires evidence, authors the candidate and performs the task.
 GroundLine validates private records offline. Run only the affected part of the
 loop; ordinary work does not need a per-task audit or review gate.
 
+Keep the observation and proposed change bound to their applicable project and
+target. Project behavior, technical choices and acceptance rules belong to local
+guidance; one project's outcome does not establish a shared default. Native
+Codex reviews the intended scope before applying or transporting a candidate.
+
 ## Opt in to ongoing observations on one device
 
 After registering the owner's managed targets, configure the private profile
@@ -19,7 +24,8 @@ The learning commands read and write only the registered owner-private state.
 In workspace mode, that home directory may be outside the tool's writable
 scope; even a boundary lookup opens its coordination lock. Before recording,
 use native `request_permissions` for the profile's learning directory when
-needed, then run the command with the granted scope. Keep the current model,
+needed and exposed by the active runtime, or its supported exact-action approval
+path, then run the command with the granted scope. Keep the current model,
 reviewer and sandbox settings. Do not weaken global permissions, bypass a
 rejection, or silently treat a failed record as completed work.
 

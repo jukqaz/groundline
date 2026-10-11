@@ -47,9 +47,11 @@ differs from the App's bundled executable.
 On macOS, use the actual application bundle metadata and its bundled executable;
 the display name does not determine the `.app` directory name. Inspect the
 standard system/user Applications directories narrowly and match the application's
-bundle identifier before resolving `Contents/Resources/codex-cli/bin/codex`
-(or `Contents/Resources/codex` in an older verified bundle). Do not declare the
-App absent after checking one guessed directory. Capture resolved paths privately;
+bundle identifier. Resolve the CLI from the installed bundle's actual layout and
+relevant executable metadata; a nested CLI application and a standalone bundled
+executable can have different paths. Verify command help and version before use.
+Do not turn a previously observed internal bundle path into a fixed default or
+declare the App absent after checking one guessed directory. Capture paths privately;
 report the executable's version and whether it is App-bundled or PATH-resolved.
 
 Use only checks needed for the decision. Do not dump prompt input, environment

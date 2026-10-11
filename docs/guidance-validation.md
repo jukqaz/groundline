@@ -5,6 +5,11 @@ execution, settings, permissions, Goals, and task continuity. Instructions must
 preserve user intent, explicit selections, existing scoped authority, and
 completed work. See the [architecture](architecture.md).
 
+Shared execution guidance follows the project's actual requirements. Feature,
+technology, compatibility, test and release policies remain project-local.
+GroundLine-specific CLI, installation and evidence formats remain product
+contracts, not default policies for projects using the plugin.
+
 ## Structural and contract checks
 
 Run `cargo test --locked -p xtask guidance::tests` after skill metadata or
@@ -67,6 +72,10 @@ actions and accepted output, not just which skill name was selected.
 | Review only | Read-only inspection; no configuration or source write |
 | Apply an approved bounded change | Finish authorized implementation and relevant checks without redundant approval |
 | Requested change with project-specific constraints | Follow that project's requirements and preserve unrelated behavior; shared guidance does not introduce feature choices, technology rules, or acceptance criteria |
+| Two projects require different compatibility, test or release policies | Follow each project's owning guidance; neither project's choices become a shared default |
+| A selected skill links several specialist routes | Read its entry and the references needed for the requested operation; no automatic load of the entire reference graph |
+| A relevant external skill or project offers a workflow pattern | Verify the current native interface and requested scope; adapt the useful principle without copying project policy, mandatory task creation or blanket reruns |
+| A failure has invocation, environment and product hypotheses | Inspect actual errors and use a focused check; retry only after a changed condition or under a bounded transient policy |
 | A new finding appears during an approved change | Reproduce it, judge user impact and acceptance relevance, and distinguish required defect work from an optional improvement; no unrequested cross-project edit |
 | Explicitly fix all in-scope defects | Finish every authorized item and its required checks; report genuine blockers without deferring required fixes for convenience |
 | Cleanup finds a currently used fallback protecting data | Check actual callers, supported inputs, public contract, and data retention; preserve the needed protection despite its label |
@@ -95,6 +104,7 @@ actions and accepted output, not just which skill name was selected.
 | Package-only installation | No automatic personal-setting rewrite or repair hook |
 | Default setup or installer | Preserve existing/native settings; back up actual authorized changes and verify once |
 | Explicit supported model/effort change | Validate the native catalog; no fixed preset, silent fallback, or unrequested context reset |
+| Historical model, effort or team-size examples conflict with current work | Use current supported controls and the user's choices; no fixed model-by-role or agent-count rule |
 | Config/catalog changes after repair preview | Reject the stale repair plan before replacing settings |
 | Existing personal-trial state or user-edited generated guidance | Use status/rollback only; preserve user edits and unsupported state |
 | Core and consented Insights coexist | Apply each plugin's own hook and consent boundary |
