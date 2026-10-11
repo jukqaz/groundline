@@ -1,9 +1,29 @@
 # Bounded delegation and task continuity
 
-Use this reference when a requested workflow improvement needs lane context,
-long-task recovery, verification reuse, or large-output handling. It is not a
-mandatory plan, ledger, review cohort, or new execution layer. Keep native Codex
-in charge and preserve the user's settings and scoped authority.
+Use this reference when a requested workflow improvement needs scope decisions,
+lane context, long-task recovery, verification reuse, or large-output handling.
+It is not a mandatory plan, ledger, review cohort, or new execution layer. Keep
+native Codex in charge and preserve the user's settings and scoped authority.
+
+## Keep the accepted change bounded
+
+Before changing user-visible behavior, establish the current behavior, intended
+behavior, and behavior to preserve from available requirements and evidence.
+Do not expand the request into extra features, settings, or technical uniformity.
+A clear small change needs no separate plan or redundant confirmation. A
+dependency on another project does not authorize editing that project.
+
+Judge new findings by reproduction, user impact, and relation to the accepted
+outcome. Distinguish defects from improvements and whether they block acceptance.
+Finish required authorized fixes and checks, including every in-scope item in an
+explicit fix-all request. Defer only optional work that was not requested and
+does not block acceptance; do not defer required work for convenience.
+
+Base cleanup and dependency replacement on actual use, current supported inputs,
+public contracts, data retention, the concrete problem, and verification evidence.
+Names such as legacy, fallback, or compatibility do not establish dead code.
+Preserve protections still needed by current users; retire support only when the
+evidence establishes that it is outside the current contract.
 
 ## Give a lane the context it needs
 
@@ -14,8 +34,9 @@ supported recent-turn selection for shared recent decisions, or full history
 when the work needs it. Other clients may expose different controls or none;
 do not invent a field or claim an unobserved context reduction.
 
-Include the goal, owned files or output, constraints, acceptance check, and
-necessary interfaces, decisions and evidence paths. Narrowing history must not
+Include the goal, worktree and base revision or dirty fingerprint, owned files
+or output, constraints, acceptance check, and necessary interfaces, decisions
+and evidence paths. Narrowing history must not
 remove the task contract. Reuse an existing agent when its retained context is
 relevant; batch similar small tasks when this avoids repeated setup. Otherwise
 keep sequential work local. Account for root integration and every child's
@@ -46,11 +67,15 @@ requested; a handoff does not replace native state or extend authority.
 ## Reuse valid verification
 
 Keep the result tied to the checked revision or artifact, relevant inputs and
-runtime/environment. Reuse a passing check while those remain applicable.
+runtime/environment. Identify the actual binary/artifact checked; a PASS from a
+different binary cannot qualify changed source. Reuse a passing check while
+those remain applicable.
 Rerun the affected check when its inputs change or a concrete unresolved risk
 invalidates it; a new message alone does not invalidate evidence. For a correction,
 review the changed diff and affected findings before repeating broader review.
 Do not cap necessary implementation or verification to meet a savings target.
+Once required acceptance checks pass, close the accepted scope; optional new
+findings do not restart completed reviews.
 
 ## Keep large output inspectable
 
@@ -69,6 +94,12 @@ and private paths out of Insights and public reports; authorized local inspectio
 does not authorize transcript upload.
 
 ## State what the evidence proves
+
+For multi-step completion, connect each delivered result to what its evidence
+proves and the remaining required proof or next action and owner. Keep automated
+checks, device/runtime observations, deployment, approval, and publication
+separate when relevant. Claim only the requested outcomes actually established;
+small tasks need no extra document, template, or empty fields.
 
 Keep discovery, enabled/trusted state, actual invocation and requested outcome
 separate under [capability routing](capability-routing.md). Output bytes saved

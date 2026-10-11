@@ -61,8 +61,8 @@ Resolve references from this installed plugin. Read
 
 Carry the goal, user corrections, authority, completed checks and remaining
 acceptance work across phases. Pass only decision-relevant context to children.
-For a long or resumed task that needs a handoff or verification reuse, use
-[task continuity](../../references/task-continuity.md); small tasks need no ledger.
+Use [task continuity](../../references/task-continuity.md) for scope and discovery
+decisions, cleanup, handoffs, or verification reuse; small tasks need no ledger.
 After steering or compaction, resume existing work and inspect any running
 operation before starting another. A service authentication or permission gap
 requires its normal supported path, not a model change or wider permissions.

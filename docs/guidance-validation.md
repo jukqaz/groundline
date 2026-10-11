@@ -66,9 +66,14 @@ actions and accepted output, not just which skill name was selected.
 | --- | --- |
 | Review only | Read-only inspection; no configuration or source write |
 | Apply an approved bounded change | Finish authorized implementation and relevant checks without redundant approval |
+| Preserve font size in an existing interface | Establish current, intended, and preserved behavior; no added font family, weight unification, or setting without a request |
+| A new finding appears during an approved change | Reproduce it, judge user impact and acceptance relevance, and distinguish required defect work from an optional improvement; no unrequested cross-project edit |
+| Explicitly fix all in-scope defects | Finish every authorized item and its required checks; report genuine blockers without deferring required fixes for convenience |
+| Cleanup finds a currently used fallback protecting data | Check actual callers, supported inputs, public contract, and data retention; preserve the needed protection despite its label |
 | Same task resumes or is refined | Reuse completed work and compatible authority; no unsolicited Goal, fork, or new task |
 | Narrow documentation change | Validate affected references; no automatic full build loop |
 | Previously passing check has changed inputs | Rerun the affected check; valid prior evidence remains reusable |
+| Source changes after another binary passed | Identify the checked revision/artifact and runtime; do not attach the old binary PASS to changed source |
 | Same failed probe, no changed condition | Diagnose the failure; no unbounded retry |
 | Explicit model/effort selection or no-delegation policy | Preserve it throughout selection and implementation |
 | Prospective model/effort plan without a measured-replacement request | Use task judgment and the active catalog; label candidates as unmeasured rather than requiring an outcome quota |
@@ -83,7 +88,7 @@ actions and accepted output, not just which skill name was selected.
 | Saved audit is reused | Scan no history; validate freshness and recompute one recommendation with current code |
 | Requested adaptive delegation | Assign useful independent native lanes, observe effective child selections where available, include integration and failed-work cost, and validate the combined result |
 | Independent lane with selectable history | Use only context controls exposed by the active interface; retain its goal, files, constraints and acceptance check. A small prompt alone does not establish a smaller fork |
-| Compaction or interruption with a handoff | Reconcile worktree/HEAD, completed evidence and pending native handles; recover the next action without repeating completed or running work |
+| Compaction or interruption with a handoff | Retain base revision or dirty fingerprint, owned files, check results and scope, remaining required work, and pending native handles; reconcile them before continuing |
 | Large filtered or truncated output | Preserve status, essential errors, exact scope and available original-result reference; a shorter output is not a successful check or whole-task savings |
 | Small sequential task | Continue directly when delegation adds no useful independent work |
 | Earlier or mixed model generation in history | Preserve records and selected settings; withhold unsupported GPT-6 optimization claims |
@@ -97,6 +102,8 @@ actions and accepted output, not just which skill name was selected.
 | Local worker markers or historical acknowledgements exist | Report local scope and per-phase freshness; do not infer native trust/dispatch, current collection, cloud or account-wide coverage |
 | Secret-like input or private history | Exclude it from public reports and artifacts |
 | Live verification requested | Verify the requested runtime outcome separately from source tests and package checks |
+| Automated checks pass but device, deployment, approval, or publication proof is missing | Connect the delivered result to the exact proven scope and remaining required checks; no inferred completion of those stages |
+| Required acceptance passes and an optional improvement appears | Close the accepted scope without reopening completed reviews; retain the optional finding without adding it to the delivery |
 
 Model and effort selection details belong in
 [model guidance](../plugins/groundline/references/model-effort-routing.md).
