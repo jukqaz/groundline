@@ -112,6 +112,45 @@ fn saved_audit_and_review_preserve_unknowns_and_window_without_native_reads() {
 }
 
 #[test]
+fn saved_prompt_classification_is_respected_without_rewriting_or_native_reads() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("audit.json");
+    let mut original = audit();
+    original["root"]["activity"] = json!({"user_messages_with_text":20,"compactions":0});
+    original["root"]["model_effort"] = json!({"counts":{"gpt-6-sol|high":1}});
+    original["root"]["boundary_signals"] = json!({"task_boundary_review_recommended":false});
+    original["root"]["prompt_shape"] =
+        json!({"short_message_count":12,"broad_scope_message_count":20});
+    for (complete, expected) in [
+        (Some(true), "complete"),
+        (Some(false), "incomplete"),
+        (None, "unknown"),
+    ] {
+        original["root"]["prompt_shape"]["input_classification"] = complete
+            .map(|complete| json!({"complete":complete}))
+            .unwrap_or(Value::Null);
+        let bytes = serde_json::to_vec(&original).unwrap();
+        fs::write(&path, &bytes).unwrap();
+        let (ok, result) = run(&path, &[]);
+        assert!(ok, "{result}");
+        let signals = &result["recommendation"]["signals"];
+        assert_eq!(signals["prompt_text_classification_status"], expected);
+        assert_eq!(
+            signals["short_message_ratio"],
+            if complete == Some(true) {
+                json!(0.6)
+            } else {
+                Value::Null
+            }
+        );
+        assert_eq!(result["execution"]["audit_runs"], 0);
+        assert_eq!(result["execution"]["native_history_bytes_read"], 0);
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+    }
+    assert!(!dir.path().join("nonexistent-codex-home").exists());
+}
+
+#[test]
 fn summary_never_echoes_saved_free_form_text_or_untyped_fields() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("review.json");
@@ -120,6 +159,10 @@ fn summary_never_echoes_saved_free_form_text_or_untyped_fields() {
     original["scope"]["private_path"] = json!(marker);
     original["scope"]["runtime_family"] = json!(marker);
     original["scope"]["eligible_root_count"] = json!(marker);
+    original["scope"]["root_selection"] = json!({"revision":1,"scope":marker});
+    original["root"]["activity"]["unique_native_user_inputs"] = json!(marker);
+    original["root"]["prompt_shape"]["input_classification"]["coverage_observation_complete"] =
+        json!(marker);
     original["coverage"]["store_integrity"]["unindexed_rollout_file_count"] = json!(marker);
     original["coverage"]["store_integrity"]["private_path"] = json!(marker);
     let mut review = groundline_contracts::weekly_review::review(original).unwrap();
@@ -132,6 +175,11 @@ fn summary_never_echoes_saved_free_form_text_or_untyped_fields() {
     assert!(ok, "{summary}");
     assert!(!summary.to_string().contains(marker));
     assert!(summary["reuse"]["source_execution"]["audit_runs"].is_null());
+    assert!(summary["readout"]["root_selection"].is_null());
+    assert!(summary["readout"]["native_user_input_sources"]["unique_input_count"].is_null());
+    assert!(
+        summary["readout"]["native_user_input_sources"]["coverage_observation_complete"].is_null()
+    );
     assert_eq!(summary["execution"]["recommendation_runs"], 1);
     assert_eq!(summary["reuse"]["recommendation_policy_revalidated"], true);
 }

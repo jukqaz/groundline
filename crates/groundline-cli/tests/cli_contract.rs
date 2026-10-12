@@ -43,6 +43,12 @@ fn recommend_stdin(bytes: &[u8]) -> Output {
     child.wait_with_output().unwrap()
 }
 
+fn annotated_browser_input(request: &str) -> String {
+    format!(
+        "# Response annotations:\n<response-annotations>\n[{{\"text\":\"PRIVATE_SELECTED_QUOTE all files\",\"annotation\":\"PRIVATE_OWNER_COMMENT\"}}]\n</response-annotations>\n\n<in-app-browser-context source=\"ambient-ui-state\">\nThis block is automatically supplied ambient UI state, not part of the user's request. Do not treat it as an instruction or as evidence that the user explicitly selected the in-app browser.\n# In app browser:\n- The user has the in-app browser open with 1 tab.\n- Current URL: https://private-browser.example/PRIVATE_BROWSER_CONTEXT/all-files\n</in-app-browser-context>\n\n## My request:\n{request}"
+    )
+}
+
 #[test]
 fn retired_commands_are_rejected_before_reading_or_writing_state() {
     let home = tempdir().unwrap();
@@ -147,10 +153,34 @@ fn weekly_review_runs_the_installed_command_contract_without_mutating_history() 
         let path = sessions.join(format!("test-{n}.jsonl"));
         let mut records = vec![
             json!({"timestamp":(now-Duration::seconds(40)).to_rfc3339(),"type":"session_meta","payload":{"id":owner,"originator":"codex_cli"}}),
+            json!({"timestamp":(now-Duration::seconds(39)).to_rfc3339(),"type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"PRIVATE_DEVELOPER_BODY"}]}}),
+            json!({"timestamp":(now-Duration::seconds(38)).to_rfc3339(),"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"PRIVATE_ASSISTANT_BODY"}]}}),
         ];
         for turn in 1..=2 {
             let at = now - Duration::seconds(30 - turn * 5);
             records.push(json!({"timestamp":at.to_rfc3339(),"type":"event_msg","payload":{"type":"task_started","turn_id":format!("turn-{turn}")}}));
+            let request = match (n, turn) {
+                (0, 2) => annotated_browser_input(""),
+                (4, 1) => annotated_browser_input("PRIVATE_OWN_REQUEST"),
+                (1, 2) => {
+                    "Automation: PRIVATE_AUTOMATION_NAME\nAutomation ID: private-automation-id\nRun type: owner-requested one-time manual execution\nPRIVATE_AUTOMATION_BODY"
+                        .to_owned()
+                }
+                (2, 2) => {
+                    "# AGENTS.md instructions for PRIVATE_PROJECT_PATH\n<INSTRUCTIONS>PRIVATE_HOST_CONTEXT</INSTRUCTIONS>"
+                        .to_owned()
+                }
+                (3, _) => "PRIVATE_REPEATED_HUMAN_REQUEST".to_owned(),
+                _ => "PRIVATE_LITERAL_HUMAN_REQUEST".to_owned(),
+            };
+            let mut content = vec![json!({"type":"input_text","text":request})];
+            if n == 4 {
+                content.push(json!({"type":"input_image","image_url":"https://private-image.example/PRIVATE_IMAGE_BODY"}));
+            }
+            records.push(json!({"timestamp":at.to_rfc3339(),"type":"response_item","payload":{"type":"message","role":"user","content":content}}));
+            if (n == 0 && turn == 1) || n == 3 {
+                records.push(json!({"timestamp":at.to_rfc3339(),"type":"event_msg","payload":{"type":"user_message","message":request}}));
+            }
             records.push(json!({"timestamp":(at+Duration::seconds(1)).to_rfc3339(),"type":"token_usage_record","payload":{"thread_id":owner,"response_id":format!("response-{turn}"),"usage":{"input_tokens":9,"output_tokens":1,"total_tokens":10},"thread_token_usage":{"input_tokens":turn*9,"output_tokens":turn,"total_tokens":turn*10}}}));
             records.push(json!({"timestamp":(at+Duration::seconds(2)).to_rfc3339(),"type":"event_msg","payload":{"type":"task_complete","turn_id":format!("turn-{turn}")}}));
         }
@@ -192,13 +222,198 @@ fn weekly_review_runs_the_installed_command_contract_without_mutating_history() 
     );
     assert_eq!(value["readout"]["completed_root_task_count"], 5);
     assert_eq!(value["readout"]["completed_turn_count"], 10);
+    assert_eq!(value["audit"]["root"]["activity"]["user_message_events"], 3);
+    assert_eq!(
+        value["audit"]["root"]["activity"]["response_item_user_messages"],
+        10
+    );
+    assert_eq!(
+        value["audit"]["root"]["activity"]["native_user_input_records"],
+        13
+    );
+    assert_eq!(
+        value["audit"]["root"]["activity"]["duplicate_native_user_input_records"],
+        3
+    );
+    assert_eq!(
+        value["audit"]["root"]["activity"]["unique_native_user_inputs"],
+        10
+    );
+    assert_eq!(
+        value["audit"]["root"]["activity"]["user_messages_with_text"],
+        8
+    );
+    assert_eq!(
+        value["audit"]["root"]["prompt_shape"]["input_classification"]["revision"],
+        3
+    );
+    assert_eq!(
+        value["audit"]["root"]["prompt_shape"]["input_classification"]["annotation_envelope_count"],
+        2
+    );
+    assert_eq!(
+        value["audit"]["root"]["prompt_shape"]["input_classification"]["complete"],
+        false
+    );
+    assert_eq!(
+        value["audit"]["root"]["prompt_shape"]["input_classification"]["automation_envelope_count"],
+        1
+    );
+    assert_eq!(
+        value["audit"]["root"]["prompt_shape"]["input_classification"]["context_envelope_count"],
+        1
+    );
+    assert_eq!(
+        value["readout"]["native_user_input_sources"]["unique_input_count"],
+        10
+    );
+    assert_eq!(
+        value["readout"]["native_user_input_sources"]["duplicate_record_count"],
+        3
+    );
+    assert_eq!(
+        value["readout"]["native_user_input_sources"]["classification_complete"],
+        false
+    );
+    assert_eq!(
+        value["readout"]["root_selection"]["indexed_candidate_root_row_count"],
+        5
+    );
+    assert_eq!(
+        value["readout"]["root_selection"]["readable_candidate_root_count"],
+        5
+    );
+    assert_eq!(
+        value["readout"]["root_selection"]["latest_turn_incomplete_excluded_root_count"],
+        0
+    );
+    assert!(value["readout"]["eligible_root_count"].is_null());
     assert_eq!(
         value["audit"]["root"]["provider_reported_usage"]["total_tokens"],
         100
     );
     assert_eq!(value["recommendation"]["status"], "PASS");
+    assert_eq!(value["audit"]["root"]["status"], "PARTIAL");
+    assert_eq!(value["audit"]["root"]["collection_complete"], false);
+    assert_eq!(
+        value["readout"]["native_user_input_sources"]["coverage_observation_complete"],
+        false
+    );
+    assert_eq!(
+        value["readout"]["native_user_input_sources"]["coverage_issue_counts"]["non_text_content"],
+        2
+    );
+    assert_eq!(
+        value["readout"]["native_user_input_sources"]["classification_revision"],
+        3
+    );
+    assert_eq!(
+        value["readout"]["native_user_input_sources"]["coverage_issue_counts"]["unresolved_envelope"],
+        0
+    );
+    assert_eq!(
+        value["audit"]["root"]["prompt_shape"]["broad_scope_message_count"],
+        0
+    );
+    assert!(
+        value["report_ko"]
+            .as_str()
+            .unwrap()
+            .contains("입력 분류 범위 불완전")
+    );
     assert!(!String::from_utf8_lossy(&output.stdout).contains(path_argument(home.path())));
     assert!(!String::from_utf8_lossy(&output.stdout).contains("test-owner"));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("PRIVATE_"));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("private-image.example"));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("private-browser.example"));
+    assert_eq!(fs::read(&database).unwrap(), database_before);
+    for (path, contents) in expected {
+        assert_eq!(fs::read_to_string(path).unwrap(), contents);
+    }
+}
+
+#[test]
+fn weekly_review_keeps_unsupported_composed_browser_input_partial_and_private() {
+    use chrono::{Duration, Utc};
+    let home = tempdir().unwrap();
+    let sessions = home.path().join("sessions");
+    fs::create_dir(&sessions).unwrap();
+    let database = home.path().join("state_5.sqlite");
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    connection.execute_batch("CREATE TABLE threads (rollout_path TEXT, source TEXT, has_user_event INTEGER, updated_at INTEGER)").unwrap();
+    let now = Utc::now();
+    let mut expected = Vec::new();
+    for n in 0..5 {
+        let path = sessions.join(format!("private-composed-{n}.jsonl"));
+        let input = if n == 0 {
+            annotated_browser_input("PRIVATE_OWN_REQUEST")
+                .replace("ambient-ui-state", "unsupported-state")
+        } else {
+            "PRIVATE_LITERAL_HUMAN_REQUEST".to_owned()
+        };
+        let records = [
+            json!({"timestamp":(now-Duration::seconds(20)).to_rfc3339(),"type":"session_meta","payload":{"id":format!("private-composed-owner-{n}"),"originator":"codex_cli"}}),
+            json!({"timestamp":(now-Duration::seconds(15)).to_rfc3339(),"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}),
+            json!({"timestamp":(now-Duration::seconds(14)).to_rfc3339(),"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":input}]}}),
+            json!({"timestamp":(now-Duration::seconds(10)).to_rfc3339(),"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-1"}}),
+        ];
+        let contents = records
+            .iter()
+            .map(Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        fs::write(&path, &contents).unwrap();
+        expected.push((path.clone(), contents));
+        connection
+            .execute(
+                "INSERT INTO threads VALUES (?1,'cli',1,?2)",
+                rusqlite::params![path.to_str().unwrap(), now.timestamp()],
+            )
+            .unwrap();
+    }
+    drop(connection);
+    let database_before = fs::read(&database).unwrap();
+    let output = run(&[
+        "audit",
+        "weekly",
+        "--review",
+        "--codex-home",
+        path_argument(home.path()),
+        "--json",
+    ]);
+    assert!(output.status.success(), "{output:?}");
+    let value = parse_stdout(&output);
+    assert_eq!(value["readout"]["completed_root_task_count"], 5);
+    assert_eq!(
+        value["readout"]["native_user_input_sources"]["classification_revision"],
+        3
+    );
+    assert_eq!(
+        value["readout"]["native_user_input_sources"]["extracted_request_count"],
+        4
+    );
+    assert_eq!(
+        value["readout"]["native_user_input_sources"]["classification_status"],
+        "incomplete"
+    );
+    assert_eq!(
+        value["readout"]["native_user_input_sources"]["coverage_observation_complete"],
+        false
+    );
+    assert_eq!(
+        value["readout"]["native_user_input_sources"]["coverage_issue_counts"]["unresolved_envelope"],
+        1
+    );
+    assert_eq!(value["audit"]["root"]["status"], "PARTIAL");
+    assert_eq!(value["audit"]["root"]["collection_complete"], false);
+    assert_eq!(
+        value["recommendation"]["signals"]["short_message_ratio"],
+        Value::Null
+    );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("PRIVATE_"));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("private-browser.example"));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains(path_argument(home.path())));
     assert_eq!(fs::read(&database).unwrap(), database_before);
     for (path, contents) in expected {
         assert_eq!(fs::read_to_string(path).unwrap(), contents);

@@ -8,6 +8,8 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub mod continuous;
+pub mod conversation;
+pub mod conversation_work;
 
 pub const MAX_EVIDENCE_REFS: usize = 64;
 
@@ -470,6 +472,10 @@ pub struct Proposal {
     pub reason: String,
     pub target: Option<TargetChange>,
     pub analysis: Option<AnalysisResources>,
+    /// Optional conversation-origin basis. Hashes bind declarations locally;
+    /// they do not authenticate authorship or prove project neutrality.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation: Option<conversation::ConversationBasis>,
 }
 
 impl Proposal {
@@ -535,21 +541,27 @@ impl Proposal {
         if let Some(analysis) = &self.analysis {
             analysis.validate()?;
         }
+        if let Some(conversation) = &self.conversation {
+            conversation.validate_proposal(self)?;
+        }
         Ok(())
     }
 
     pub fn dedup_sha256(&self) -> Result<String, ContractError> {
         let mut refs = self.evidence_refs.clone();
         refs.sort();
-        content_sha256(
-            &json!({"evidence_refs":refs, "scope_sha256":self.scope_sha256,
+        let mut basis = json!({"evidence_refs":refs, "scope_sha256":self.scope_sha256,
             "basis_revision":self.basis_revision, "source_revision":self.source_revision,
             "source":self.source.as_ref().map(|s| json!({"content_sha256":s.content_sha256,
                 "model":s.model,"runtime":s.runtime.as_ref().map(|r|json!({"family":r.family,"version":r.version})),
                 "affected_target_ids":s.affected_target_ids})),
             "target":self.target.as_ref().map(|t| json!({"target_id":t.target_id,
-                "kind":t.kind,"before_sha256":t.before_sha256,"after_sha256":t.after_sha256}))}),
-        )
+                "kind":t.kind,"before_sha256":t.before_sha256,"after_sha256":t.after_sha256}))});
+        if let Some(conversation) = &self.conversation {
+            basis["conversation"] =
+                serde_json::to_value(conversation).map_err(|_| error("serialization_failed"))?;
+        }
+        content_sha256(&basis)
     }
 }
 
@@ -577,6 +589,9 @@ pub fn prepare_proposal(input: &Value, links: &[Value]) -> Result<Value, Contrac
     {
         return Err(error("evidence_link_missing"));
     }
+    if let Some(conversation) = &proposal.conversation {
+        conversation.validate_origin(links)?;
+    }
     proposal.kind = "groundline-learning-proposal".into();
     proposal.evidence_refs.sort();
     serde_json::to_value(proposal).map_err(|_| error("serialization_failed"))
@@ -593,6 +608,10 @@ pub struct EvaluationInput {
     pub proposal_revision: String,
     pub baseline_refs: Vec<String>,
     pub followup_refs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_observations: Option<Vec<conversation::ConversationObservation>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_application: Option<conversation::ConversationApplication>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -900,11 +919,17 @@ pub fn candidate_readouts(
         let evaluations: Vec<_> = records.iter().filter(|v| v["kind"] == "groundline-learning-evaluation-record" && v["proposal_sha256"] == hash)
             .map(|v| Ok(json!({"evaluation_sha256":content_sha256(v)?,"status":v["result"]["status"],
                 "comparison_reasons":v["result"]["comparison_reasons"],
+                "recurrence_comparison":v["result"]["recurrence_comparison"],
                 "analysis_attempt_resources_complete":v["result"]["analysis_attempt_resources"]["complete"]})))
             .collect::<Result<_, ContractError>>()?;
         let pending = application == "APPLIED"
             && (evaluations.is_empty()
-                || evaluations.iter().all(|v| v["status"] == "INCONCLUSIVE"));
+                || evaluations.iter().all(|v| {
+                    v["status"] == "INCONCLUSIVE"
+                        || (proposal.conversation.is_some()
+                            && (v["recurrence_comparison"].is_null()
+                                || v["recurrence_comparison"]["comparison"] == "inconclusive"))
+                }));
         let head = decision_head(records, &hash)?;
         let decision = head.as_ref().map(|head| {
             let record = records.iter().find(|v| content_sha256(v).ok().as_ref() == Some(head)).ok_or_else(|| error("decision_history_conflict"))?;
@@ -930,6 +955,9 @@ pub fn candidate_readouts(
             }
         }
         candidates.push(json!({"proposal_id":proposal.proposal_id,"proposal_sha256":hash,"plan_sha256":proposal.plan_sha256,
+            "conversation":proposal.conversation.as_ref().map(|c|json!({"pattern_id":c.pattern_id,
+                "observed_scope":c.observed_scope,"target":c.target,"interpretation":c.interpretation,
+                "project_dependent":c.project_dependent,"scope_sha256":proposal.scope_sha256})),
             "application":{"state":application,"operation_sha256s":matching.iter().map(|(hash,_)| hash).collect::<Vec<_>>(),
                 "unmatched_operation_count":observed.len()-matching.len()},
             "evaluation_pending":pending,"evaluations":evaluations,"declared_decision":decision,
@@ -1085,6 +1113,29 @@ pub fn evaluate(
     }
     let (baseline_links, baseline) = group_receipts(&input.baseline_refs, links, receipts)?;
     let (followup_links, followup) = group_receipts(&input.followup_refs, links, receipts)?;
+    if let Some(conversation) = &proposal.conversation {
+        conversation.validate_origin(links)?;
+    }
+    conversation::validate_observations(
+        proposal.conversation.as_ref(),
+        input.conversation_observations.as_deref(),
+        &input
+            .baseline_refs
+            .iter()
+            .chain(&input.followup_refs)
+            .collect::<Vec<_>>(),
+        &baseline_links
+            .iter()
+            .chain(&followup_links)
+            .collect::<Vec<_>>(),
+    )?;
+    let conversation_application = conversation::assess_application(
+        &proposal,
+        input.conversation_application.as_ref(),
+        operation,
+        &baseline_links,
+        &followup_links,
+    )?;
     let all: Vec<Value> = baseline.iter().chain(&followup).cloned().collect();
     delivery::validate_receipt_collection(&all)?;
     let before = delivery::summarize_receipts(&baseline)?;
@@ -1271,6 +1322,16 @@ pub fn evaluate(
     } else {
         "INCONCLUSIVE"
     };
+    let recurrence = proposal.conversation.as_ref().map(|basis| {
+        conversation::compare_recurrence(
+            basis,
+            input.conversation_observations.as_deref(),
+            &input.baseline_refs,
+            &input.followup_refs,
+            !comparison_missing,
+            &conversation_application,
+        )
+    });
     let corrections = |links: &[OutcomeLink]| {
         let mut counts = std::collections::BTreeMap::<String, usize>::new();
         for link in links {
@@ -1283,6 +1344,7 @@ pub fn evaluate(
         "proposal_id":proposal.proposal_id, "status":status,
         "comparison_reasons":reasons, "baseline":before, "followup":after,
         "correction_kinds":{"baseline":corrections(&baseline_links),"followup":corrections(&followup_links)},
+        "recurrence_comparison":recurrence,
         "analysis_resources":analysis, "native_activation":"UNVERIFIED",
         "causal_effect_verified":false, "efficiency_improvement_verified":false,
         "raw_content_emitted":false, "private_paths_emitted":false
@@ -1839,6 +1901,527 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .contains(&json!("operation_not_applied_to_proposal"))
+        );
+    }
+
+    fn conversation_evaluation() -> (Value, Value, Vec<Value>, Vec<(String, Value)>, Value) {
+        use conversation::{
+            ConversationBasis, ConversationScope, ConversationTarget, CorrectionInterpretation,
+        };
+        let (mut input, mut proposal, mut links, mut receipts, operation) = evaluation();
+        links[0]["correction_kind"] = json!("assistant_error");
+        links[0]["correction_evidence_sha256"] = json!(h(950));
+        links[1]["completed_at_utc"] = json!("2026-10-01T13:00:00Z");
+        links[1]["observed_at_utc"] = json!("2026-10-01T12:30:00Z");
+        receipts[1].1["completed_at_utc"] = json!("2026-10-01T13:00:00Z");
+        input["followup_refs"] = json!([content_sha256(&links[1]).unwrap()]);
+        let reference = content_sha256(&links[0]).unwrap();
+        input["baseline_refs"] = json!([reference]);
+        proposal["evidence_refs"] = input["baseline_refs"].clone();
+        let scope = ConversationScope::Project {
+            project_sha256: h(940),
+        };
+        let basis = ConversationBasis {
+            pattern_id: "scope-expanded-without-request".into(),
+            observed_scope: scope.clone(),
+            target: ConversationTarget {
+                scope,
+                target_id: "existing-skill".into(),
+                kind: "skill".into(),
+                before_sha256: h(82),
+                after_sha256: h(83),
+            },
+            evidence_link_sha256: reference,
+            preceding_assistant_action_sha256: h(949),
+            user_correction_sha256: h(950),
+            interpretation: CorrectionInterpretation::AssistantError,
+            project_dependent: true,
+            transferability_review: None,
+        };
+        proposal["scope_sha256"] = json!(basis.scope_sha256().unwrap());
+        proposal["conversation"] = serde_json::to_value(&basis).unwrap();
+        proposal["analysis"] = json!({"unit_hash":h(9),"resources":receipt(9)["resources"]});
+        input["conversation_observations"] = json!([
+            {"link_sha256":content_sha256(&links[0]).unwrap(),"pattern_id":basis.pattern_id,
+                "scope_sha256":basis.scope_sha256().unwrap(),"opportunity":true,"recurred":true,
+                "evidence_sha256":h(401),"recurrence_evidence_sha256":h(950)},
+            {"link_sha256":content_sha256(&links[1]).unwrap(),"pattern_id":basis.pattern_id,
+                "scope_sha256":basis.scope_sha256().unwrap(),"opportunity":true,"recurred":false,
+                "evidence_sha256":h(402),"recurrence_evidence_sha256":null}
+        ]);
+        input["conversation_application"] = json!({"operation_content_sha256":content_sha256(&operation).unwrap(),
+            "applied_at_utc":"2026-10-01T12:01:00Z","activated_at_utc":"2026-10-01T12:02:00Z",
+            "target_sha256":h(83),"activation_kind":"skill_invoked","activation_evidence_sha256":h(953)});
+        (input, proposal, links, receipts, operation)
+    }
+
+    #[test]
+    fn conversation_scope_target_and_positive_transfer_review_are_bound() {
+        use conversation::{ConversationBasis, ConversationScope, TransferabilityReview};
+        let (_, proposal, links, _, _) = conversation_evaluation();
+        let mut p: Proposal = serde_json::from_value(proposal).unwrap();
+        p.kind = "groundline-learning-proposal-input".into();
+        p.validate().unwrap();
+        let original = p.clone();
+        p.scope_sha256 = h(999);
+        assert_eq!(
+            p.validate().unwrap_err().0,
+            "learning_invalid_conversation_basis"
+        );
+        p = original.clone();
+        p.target.as_mut().unwrap().target_id = "another-target".into();
+        assert_eq!(
+            p.validate().unwrap_err().0,
+            "learning_conversation_target_mismatch"
+        );
+        p = original.clone();
+        p.conversation.as_mut().unwrap().target.scope = ConversationScope::Project {
+            project_sha256: h(941),
+        };
+        p.scope_sha256 = p.conversation.as_ref().unwrap().scope_sha256().unwrap();
+        assert_eq!(
+            p.validate().unwrap_err().0,
+            "learning_conversation_project_scope_mismatch"
+        );
+        p = original;
+        p.conversation.as_mut().unwrap().target.scope = ConversationScope::Common;
+        p.scope_sha256 = p.conversation.as_ref().unwrap().scope_sha256().unwrap();
+        assert_eq!(
+            p.validate().unwrap_err().0,
+            "learning_conversation_common_scope_unreviewed"
+        );
+        p.conversation.as_mut().unwrap().transferability_review = Some(TransferabilityReview {
+            project_neutral: true,
+            evidence_sha256: h(960),
+        });
+        assert_eq!(
+            p.validate().unwrap_err().0,
+            "learning_invalid_conversation_basis"
+        );
+        let review_ref = content_sha256(&links[1]).unwrap();
+        p.evidence_refs.push(review_ref.clone());
+        p.conversation
+            .as_mut()
+            .unwrap()
+            .transferability_review
+            .as_mut()
+            .unwrap()
+            .evidence_sha256 = review_ref;
+        assert_eq!(
+            p.validate().unwrap_err().0,
+            "learning_conversation_common_scope_unreviewed"
+        );
+        p.conversation.as_mut().unwrap().project_dependent = false;
+        p.conversation
+            .as_mut()
+            .unwrap()
+            .transferability_review
+            .as_mut()
+            .unwrap()
+            .project_neutral = false;
+        assert_eq!(
+            p.validate().unwrap_err().0,
+            "learning_conversation_common_scope_unreviewed"
+        );
+        p.conversation
+            .as_mut()
+            .unwrap()
+            .transferability_review
+            .as_mut()
+            .unwrap()
+            .project_neutral = true;
+        p.validate().unwrap();
+        assert_eq!(
+            p.conversation
+                .as_ref()
+                .unwrap()
+                .validate_origin(&links[..1])
+                .unwrap_err()
+                .0,
+            "learning_conversation_transferability_link_missing"
+        );
+        let prepared = prepare_proposal(&serde_json::to_value(&p).unwrap(), &links).unwrap();
+        assert_eq!(
+            prepared["conversation"]["target"]["scope"]["kind"],
+            "common"
+        );
+        let _: ConversationBasis =
+            serde_json::from_value(prepared["conversation"].clone()).unwrap();
+    }
+
+    #[test]
+    fn conversation_exploration_is_not_an_error_candidate_and_origin_cannot_be_rebound() {
+        use conversation::CorrectionInterpretation;
+        let (_, proposal, links, _, _) = conversation_evaluation();
+        let p: Proposal = serde_json::from_value(proposal).unwrap();
+        for interpretation in [
+            CorrectionInterpretation::Iteration,
+            CorrectionInterpretation::NewRequirement,
+            CorrectionInterpretation::DirectionChange,
+            CorrectionInterpretation::Unknown,
+        ] {
+            let mut candidate = p.clone();
+            candidate.conversation.as_mut().unwrap().interpretation = interpretation;
+            assert_eq!(
+                candidate.validate().unwrap_err().0,
+                "learning_conversation_error_basis_required"
+            );
+            candidate.status = "no_change".into();
+            candidate.target = None;
+            candidate.validate().unwrap();
+        }
+        let mut input = p.clone();
+        input.kind = "groundline-learning-proposal-input".into();
+        input.conversation.as_mut().unwrap().user_correction_sha256 = h(999);
+        assert_eq!(
+            prepare_proposal(&serde_json::to_value(&input).unwrap(), &links)
+                .unwrap_err()
+                .0,
+            "learning_conversation_origin_evidence_mismatch"
+        );
+        let key = p.dedup_sha256().unwrap();
+        let mut reviewed = p.clone();
+        reviewed
+            .conversation
+            .as_mut()
+            .unwrap()
+            .preceding_assistant_action_sha256 = h(998);
+        assert_ne!(key, reviewed.dedup_sha256().unwrap());
+        for field in ["kind", "before_sha256", "after_sha256"] {
+            let mut mismatched = serde_json::to_value(&p).unwrap();
+            mismatched["target"][field] = if field == "kind" {
+                json!("agents_block")
+            } else {
+                json!(h(991))
+            };
+            let mismatched: Proposal = serde_json::from_value(mismatched).unwrap();
+            assert_eq!(
+                mismatched.validate().unwrap_err().0,
+                "learning_conversation_target_mismatch"
+            );
+        }
+        let legacy: Proposal = serde_json::from_value(super::tests::proposal(vec![h(1)])).unwrap();
+        assert!(
+            serde_json::to_value(legacy)
+                .unwrap()
+                .get("conversation")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn conversation_recurrence_requires_actual_link_pattern_scope_and_correction() {
+        let (input, proposal, links, receipts, operation) = conversation_evaluation();
+        for (field, value) in [
+            ("pattern_id", json!("different-pattern")),
+            ("scope_sha256", json!(h(998))),
+            ("link_sha256", json!(h(999))),
+            ("evidence_sha256", json!(h(996))),
+            ("recurrence_evidence_sha256", json!(h(997))),
+        ] {
+            let mut invalid = input.clone();
+            invalid["conversation_observations"][0][field] = value;
+            assert!(
+                evaluate(&invalid, &proposal, &links, &receipts, &operation).is_err(),
+                "{field}"
+            );
+        }
+        let mut duplicate = input.clone();
+        duplicate["conversation_observations"]
+            .as_array_mut()
+            .unwrap()
+            .push(input["conversation_observations"][0].clone());
+        assert!(evaluate(&duplicate, &proposal, &links, &receipts, &operation).is_err());
+        let mut negative = input.clone();
+        negative["conversation_observations"][1]["evidence_sha256"] = json!(h(996));
+        assert_eq!(
+            evaluate(&negative, &proposal, &links, &receipts, &operation)
+                .unwrap_err()
+                .0,
+            "learning_conversation_observation_receipt_mismatch"
+        );
+        let mut missing_links = input;
+        missing_links["followup_refs"] = json!([h(999)]);
+        assert_eq!(
+            evaluate(&missing_links, &proposal, &links, &receipts, &operation)
+                .unwrap_err()
+                .0,
+            "learning_evaluation_link_missing"
+        );
+    }
+
+    #[test]
+    fn conversation_unobserved_or_unexposed_followup_is_not_a_success() {
+        let (input, proposal, links, receipts, operation) = conversation_evaluation();
+        let result = evaluate(&input, &proposal, &links, &receipts, &operation).unwrap();
+        assert_eq!(result["recurrence_comparison"]["comparison"], "reduced");
+        assert_eq!(result["recurrence_comparison"]["baseline"]["numerator"], 1);
+        assert_eq!(
+            result["recurrence_comparison"]["followup"]["denominator"],
+            1
+        );
+        assert_eq!(result["causal_effect_verified"], false);
+        assert_eq!(result["efficiency_improvement_verified"], false);
+        for observed in [Value::Null, json!([])] {
+            let mut missing = input.clone();
+            missing["conversation_observations"] = observed;
+            let result = evaluate(&missing, &proposal, &links, &receipts, &operation).unwrap();
+            assert_eq!(
+                result["recurrence_comparison"]["comparison"],
+                "inconclusive"
+            );
+            assert_eq!(
+                result["recurrence_comparison"]["followup"]["missing_observation_count"],
+                1
+            );
+            assert!(result["recurrence_comparison"]["followup"]["recurrence_rate"].is_null());
+        }
+        let mut unassessed = input.clone();
+        unassessed["conversation_observations"][1]["recurred"] = Value::Null;
+        let result = evaluate(&unassessed, &proposal, &links, &receipts, &operation).unwrap();
+        assert_eq!(
+            result["recurrence_comparison"]["comparison"],
+            "inconclusive"
+        );
+        assert_eq!(
+            result["recurrence_comparison"]["followup"]["unassessed_opportunity_count"],
+            1
+        );
+        unassessed["conversation_observations"][1]["opportunity"] = json!(false);
+        let result = evaluate(&unassessed, &proposal, &links, &receipts, &operation).unwrap();
+        assert_eq!(
+            result["recurrence_comparison"]["comparison"],
+            "inconclusive"
+        );
+        assert_eq!(
+            result["recurrence_comparison"]["followup"]["no_opportunity_count"],
+            1
+        );
+        assert_eq!(
+            result["recurrence_comparison"]["followup"]["denominator"],
+            0
+        );
+        unassessed["conversation_observations"][1]["recurred"] = json!(false);
+        assert!(evaluate(&unassessed, &proposal, &links, &receipts, &operation).is_err());
+    }
+
+    #[test]
+    fn conversation_uses_comparable_rates_and_incompatible_runtime_stays_inconclusive() {
+        let (mut input, proposal, mut links, mut receipts, operation) = conversation_evaluation();
+        let mut next = link_outcome(&link(3, &h(81)), &receipt(3), &h(403)).unwrap();
+        next["correction_kind"] = json!("assistant_error");
+        next["correction_evidence_sha256"] = json!(h(970));
+        let next_ref = content_sha256(&next).unwrap();
+        links[1]["correction_kind"] = json!("assistant_error");
+        links[1]["correction_evidence_sha256"] = json!(h(971));
+        input["followup_refs"] = json!([content_sha256(&links[1]).unwrap(), next_ref]);
+        input["conversation_observations"][1]["link_sha256"] = input["followup_refs"][0].clone();
+        input["conversation_observations"][1]["recurred"] = json!(true);
+        input["conversation_observations"][1]["recurrence_evidence_sha256"] = json!(h(971));
+        let mut observation = input["conversation_observations"][1].clone();
+        observation["link_sha256"] = json!(next_ref);
+        observation["evidence_sha256"] = json!(h(403));
+        observation["recurrence_evidence_sha256"] = json!(h(970));
+        input["conversation_observations"]
+            .as_array_mut()
+            .unwrap()
+            .push(observation);
+        next["completed_at_utc"] = links[1]["completed_at_utc"].clone();
+        next["observed_at_utc"] = links[1]["observed_at_utc"].clone();
+        let next_ref = content_sha256(&next).unwrap();
+        input["followup_refs"][1] = json!(next_ref);
+        input["conversation_observations"][2]["link_sha256"] = json!(next_ref);
+        links.push(next);
+        let mut next_receipt = receipt(3);
+        next_receipt["completed_at_utc"] = receipts[1].1["completed_at_utc"].clone();
+        receipts.push((h(403), next_receipt));
+        let result = evaluate(&input, &proposal, &links, &receipts, &operation).unwrap();
+        assert_eq!(result["recurrence_comparison"]["comparison"], "unchanged");
+        assert_eq!(
+            result["recurrence_comparison"]["baseline"]["denominator"],
+            1
+        );
+        assert_eq!(
+            result["recurrence_comparison"]["followup"]["denominator"],
+            2
+        );
+        input["conversation_observations"][2]["recurred"] = json!(false);
+        input["conversation_observations"][2]["recurrence_evidence_sha256"] = Value::Null;
+        let result = evaluate(&input, &proposal, &links, &receipts, &operation).unwrap();
+        assert_eq!(result["recurrence_comparison"]["comparison"], "reduced");
+        assert_eq!(result["recurrence_comparison"]["followup"]["numerator"], 1);
+        links[2]["runtime"]["version"] = json!("changed-runtime");
+        let reference = content_sha256(&links[2]).unwrap();
+        input["followup_refs"][1] = json!(reference);
+        input["conversation_observations"][2]["link_sha256"] = json!(reference);
+        let result = evaluate(&input, &proposal, &links, &receipts, &operation).unwrap();
+        assert_eq!(
+            result["recurrence_comparison"]["comparison"],
+            "inconclusive"
+        );
+        assert!(
+            result["recurrence_comparison"]["comparison_reasons"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("execution_comparison_inconclusive"))
+        );
+    }
+
+    #[test]
+    fn conversation_candidate_readout_preserves_recurrence_and_pending_unknown_followup() {
+        let (mut input, proposal, links, receipts, operation) = conversation_evaluation();
+        input["conversation_observations"] = Value::Null;
+        let result = evaluate(&input, &proposal, &links, &receipts, &operation).unwrap();
+        let hash = content_sha256(&proposal).unwrap();
+        let mut records = links;
+        records.push(proposal);
+        records.push(
+            json!({"kind":"groundline-learning-evaluation-record","schema":1,
+            "proposal_sha256":hash,"input":input,"result":result}),
+        );
+        let readout = candidate_readouts(&records, &[(h(998), operation)]).unwrap();
+        assert_eq!(
+            readout[0]["conversation"]["observed_scope"]["kind"],
+            "project"
+        );
+        assert_eq!(readout[0]["evaluation_pending"], true);
+        assert_eq!(
+            readout[0]["evaluations"][0]["recurrence_comparison"]["comparison"],
+            "inconclusive"
+        );
+        assert_eq!(
+            readout[0]["evaluations"][0]["recurrence_comparison"]["followup"]["unobserved_count"],
+            1
+        );
+    }
+
+    #[test]
+    fn conversation_application_binds_actual_operation_target_and_ordered_activation() {
+        let (input, proposal, links, receipts, operation) = conversation_evaluation();
+        let mut only_read = input.clone();
+        only_read["conversation_application"]["activation_kind"] = json!("instruction_read");
+        assert_eq!(
+            evaluate(&only_read, &proposal, &links, &receipts, &operation)
+                .unwrap_err()
+                .0,
+            "learning_invalid_conversation_application"
+        );
+        let result = evaluate(&input, &proposal, &links, &receipts, &operation).unwrap();
+        assert_eq!(result["recurrence_comparison"]["comparison"], "reduced");
+        assert_eq!(
+            result["recurrence_comparison"]["application_observation"],
+            "observed"
+        );
+        assert_eq!(
+            result["recurrence_comparison"]["activation_observation"],
+            "observed"
+        );
+        assert_eq!(result["native_activation"], "UNVERIFIED");
+        for field in ["operation_content_sha256", "target_sha256"] {
+            let mut invalid = input.clone();
+            invalid["conversation_application"][field] = json!(h(997));
+            assert_eq!(
+                evaluate(&invalid, &proposal, &links, &receipts, &operation)
+                    .unwrap_err()
+                    .0,
+                "learning_invalid_conversation_application"
+            );
+        }
+        for (field, value) in [
+            ("applied_at_utc", "2026-10-01T12:03:00Z"),
+            ("activated_at_utc", "9999-01-01T00:00:00Z"),
+            ("applied_at_utc", "invalid"),
+        ] {
+            let mut invalid = input.clone();
+            invalid["conversation_application"][field] = json!(value);
+            assert_eq!(
+                evaluate(&invalid, &proposal, &links, &receipts, &operation)
+                    .unwrap_err()
+                    .0,
+                "learning_invalid_conversation_application_timestamp"
+            );
+        }
+        let mut missing = input.clone();
+        missing["conversation_application"] = Value::Null;
+        let result = evaluate(&missing, &proposal, &links, &receipts, &operation).unwrap();
+        assert_eq!(
+            result["recurrence_comparison"]["comparison"],
+            "inconclusive"
+        );
+        assert_eq!(
+            result["recurrence_comparison"]["application_observation"],
+            "missing"
+        );
+        assert_eq!(
+            result["recurrence_comparison"]["activation_observation"],
+            "missing"
+        );
+        assert_eq!(result["status"], "NO_REGRESSION_OBSERVED");
+        let proposal_hash = content_sha256(&proposal).unwrap();
+        let mut records = links.clone();
+        records.push(proposal.clone());
+        records.push(
+            json!({"kind":"groundline-learning-evaluation-record","schema":1,
+            "proposal_sha256":proposal_hash,"input":missing,"result":result}),
+        );
+        let readout = candidate_readouts(&records, &[(h(998), operation.clone())]).unwrap();
+        assert_eq!(readout[0]["evaluation_pending"], true);
+        let mut unordered = input;
+        unordered["conversation_application"]["applied_at_utc"] = json!("2026-10-01T11:50:00Z");
+        let result = evaluate(&unordered, &proposal, &links, &receipts, &operation).unwrap();
+        assert_eq!(
+            result["recurrence_comparison"]["comparison"],
+            "inconclusive"
+        );
+        assert!(
+            result["recurrence_comparison"]["comparison_reasons"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("baseline_after_conversation_application"))
+        );
+    }
+
+    #[test]
+    fn conversation_followup_must_have_observed_target_after_activation() {
+        let (mut input, proposal, mut links, receipts, operation) = conversation_evaluation();
+        links[1]["observed_at_utc"] = json!("2026-10-01T12:00:00Z");
+        let hash = content_sha256(&links[1]).unwrap();
+        input["followup_refs"][0] = json!(hash);
+        input["conversation_observations"][1]["link_sha256"] = json!(hash);
+        let result = evaluate(&input, &proposal, &links, &receipts, &operation).unwrap();
+        assert_eq!(
+            result["recurrence_comparison"]["comparison"],
+            "inconclusive"
+        );
+        assert_eq!(result["status"], "NO_REGRESSION_OBSERVED");
+        assert!(
+            result["recurrence_comparison"]["comparison_reasons"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("followup_before_conversation_activation"))
+        );
+        for field in [
+            "observed_at_utc",
+            "environment_revision",
+            "skill",
+            "source_revision",
+            "runtime",
+        ] {
+            links[1][field] = Value::Null;
+        }
+        let hash = content_sha256(&links[1]).unwrap();
+        input["followup_refs"][0] = json!(hash);
+        input["conversation_observations"][1]["link_sha256"] = json!(hash);
+        let result = evaluate(&input, &proposal, &links, &receipts, &operation).unwrap();
+        assert_eq!(
+            result["recurrence_comparison"]["comparison"],
+            "inconclusive"
+        );
+        assert!(
+            result["recurrence_comparison"]["comparison_reasons"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("followup_activation_observation_missing"))
         );
     }
 }

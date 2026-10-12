@@ -2,7 +2,7 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
-use serde::de::{IgnoredAny, MapAccess, Visitor};
+use serde::de::{DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use serde_json::{Value, value::RawValue};
 use sha2::{Digest, Sha256};
@@ -201,6 +201,16 @@ impl<'a> Record<'a> {
                     let output = crate::audit::project_raw_tool_output(output, &fields)?;
                     fields.insert("output".to_owned(), output);
                 }
+                if kind.as_deref() == Some("response_item")
+                    && item == "message"
+                    && fields.get("role").and_then(Value::as_str) == Some("user")
+                    && let Some(content) = borrowed.get("content")
+                {
+                    fields.insert(
+                        "content".to_owned(),
+                        project_user_content(content, &mut remaining)?,
+                    );
+                }
                 Value::Object(fields)
             } else {
                 bounded_value(raw, &mut remaining)?
@@ -212,6 +222,158 @@ impl<'a> Record<'a> {
             return Err(projection_limit());
         }
         Ok(projected)
+    }
+}
+
+/// Borrow native content blocks and retain only audit-consumed text. Images,
+/// audio, unknown block bodies and malformed text values never materialize in
+/// this projection; safe type markers keep unavailable coverage observable.
+fn project_user_content(raw: &RawValue, remaining: &mut usize) -> serde_json::Result<Value> {
+    if !raw.get().trim_start().starts_with('[') {
+        *remaining = remaining.checked_sub(4).ok_or_else(projection_limit)?;
+        return Ok(Value::Null);
+    }
+    *remaining = remaining.checked_sub(2).ok_or_else(projection_limit)?;
+    let mut decoder = serde_json::Deserializer::from_str(raw.get());
+    let projected = UserContentSeed { remaining }.deserialize(&mut decoder)?;
+    decoder.end()?;
+    Ok(projected)
+}
+
+const MAX_USER_CONTENT_BLOCKS: usize = 1024;
+// Cover array punctuation and the largest retained fixed type/text marker.
+// Actual text bytes consume their own budget before Serde materializes them.
+const USER_CONTENT_MARKER_BUDGET: usize = 64;
+
+struct UserContentSeed<'a> {
+    remaining: &'a mut usize,
+}
+
+impl<'de> DeserializeSeed<'de> for UserContentSeed<'_> {
+    type Value = Value;
+
+    fn deserialize<D: Deserializer<'de>>(self, decoder: D) -> Result<Value, D::Error> {
+        struct ContentVisitor<'a> {
+            remaining: &'a mut usize,
+        }
+
+        impl<'de> Visitor<'de> for ContentVisitor<'_> {
+            type Value = Value;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a bounded native user content array")
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Value, A::Error> {
+                let mut projected = Vec::new();
+                while let Some(block) = seq.next_element::<&RawValue>()? {
+                    if projected.len() == MAX_USER_CONTENT_BLOCKS {
+                        return Err(serde::de::Error::custom(
+                            "native user content block limit exceeded",
+                        ));
+                    }
+                    *self.remaining = self
+                        .remaining
+                        .checked_sub(USER_CONTENT_MARKER_BUDGET)
+                        .ok_or_else(|| {
+                            serde::de::Error::custom("audit projection byte limit exceeded")
+                        })?;
+                    let marker = project_user_block(block, self.remaining)
+                        .map_err(serde::de::Error::custom)?;
+                    projected.push(marker);
+                }
+                Ok(Value::Array(projected))
+            }
+        }
+
+        decoder.deserialize_seq(ContentVisitor {
+            remaining: self.remaining,
+        })
+    }
+}
+
+fn project_user_block(block: &RawValue, remaining: &mut usize) -> serde_json::Result<Value> {
+    let fields = if block.get().trim_start().starts_with('{') {
+        Some(serde_json::from_str::<UserBlockFields<'_>>(block.get())?)
+    } else {
+        // The enclosing record already validated JSON syntax. Unsupported
+        // primitive block bodies need no decoding to emit a safe marker.
+        None
+    };
+    let kind = fields.as_ref().and_then(|fields| {
+        // Maintained native content kinds are short fixed strings. A large
+        // unknown kind needs no allocation merely to emit its safe marker.
+        fields
+            .kind
+            .filter(|raw| raw.get().len() <= 128)
+            .and_then(|raw| serde_json::from_str::<String>(raw.get()).ok())
+    });
+    Ok(match kind.as_deref() {
+        Some("input_text" | "text") => {
+            let text = fields.as_ref().and_then(|fields| fields.text);
+            let value = match text {
+                Some(text) if text.get().trim_start().starts_with('"') => {
+                    bounded_value(text, remaining)?
+                }
+                _ => Value::Null,
+            };
+            serde_json::json!({"type":kind.as_deref(),"text":value})
+        }
+        Some("input_image" | "image" | "input_audio" | "audio" | "input_video" | "video") => {
+            serde_json::json!({"type":kind.as_deref()})
+        }
+        _ => serde_json::json!({"type":"unsupported_content"}),
+    })
+}
+
+struct UserBlockFields<'a> {
+    kind: Option<&'a RawValue>,
+    text: Option<&'a RawValue>,
+}
+
+impl<'de> Deserialize<'de> for UserBlockFields<'de> {
+    fn deserialize<D: Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(field_identifier)]
+        enum Field {
+            #[serde(rename = "type")]
+            Kind,
+            #[serde(rename = "text")]
+            Text,
+            #[serde(other)]
+            Other,
+        }
+
+        struct BlockVisitor;
+
+        impl<'de> Visitor<'de> for BlockVisitor {
+            type Value = UserBlockFields<'de>;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a native user content block")
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut fields = UserBlockFields {
+                    kind: None,
+                    text: None,
+                };
+                while let Some(field) = map.next_key::<Field>()? {
+                    // Keep only two borrowed values, with native Value-like
+                    // last-key semantics. Unknown field names and bodies do
+                    // not form an allocated map while projecting each block.
+                    let value = map.next_value::<&RawValue>()?;
+                    match field {
+                        Field::Kind => fields.kind = Some(value),
+                        Field::Text => fields.text = Some(value),
+                        Field::Other => {}
+                    }
+                }
+                Ok(fields)
+            }
+        }
+
+        decoder.deserialize_map(BlockVisitor)
     }
 }
 
@@ -371,6 +533,7 @@ fn keep_payload_field(kind: Option<&str>, item: &str, name: &str) -> bool {
         Some("response_item") => {
             name == "type"
                 || match item {
+                    "message" => name == "role",
                     "function_call" | "custom_tool_call" | "local_shell_call"
                     | "tool_search_call" => {
                         matches!(name, "name" | "arguments" | "input" | "call_id")
@@ -544,6 +707,148 @@ mod tests {
                 .unwrap()
                 .audit_projection()
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn user_message_projection_retains_text_and_content_coverage_without_other_bodies() {
+        let body = "private image and unknown body".repeat(200_000);
+        let record = serde_json::json!({"type":"response_item","payload":{
+            "type":"message","role":"user","private_id":"private message id","content":[
+                {"type":"input_text","text":"confirm here"},
+                {"type":"text","text":"then continue"},
+                {"type":"input_image","image_url":body},
+                {"type":"input_audio","data":body},
+                {"type":"private unknown type","body":body},
+                {"type":"input_text","text":{"private":body}},
+                "private non-object block"
+            ]
+        }})
+        .to_string();
+        let projected = Record::parse(&record)
+            .unwrap()
+            .unwrap()
+            .audit_projection()
+            .unwrap();
+        assert!(projected.len() < 500);
+        for private in [
+            "private image and unknown body",
+            "private message id",
+            "private unknown type",
+            "private non-object block",
+        ] {
+            assert!(!projected.contains(private));
+        }
+        let value: Value = serde_json::from_str(&projected).unwrap();
+        assert_eq!(value["payload"]["role"], "user");
+        assert_eq!(value["payload"]["content"][0]["text"], "confirm here");
+        assert_eq!(value["payload"]["content"][1]["text"], "then continue");
+        assert_eq!(
+            value["payload"]["content"][2],
+            serde_json::json!({"type":"input_image"})
+        );
+        assert_eq!(
+            value["payload"]["content"][3],
+            serde_json::json!({"type":"input_audio"})
+        );
+        assert_eq!(
+            value["payload"]["content"][4]["type"],
+            "unsupported_content"
+        );
+        assert!(value["payload"]["content"][5]["text"].is_null());
+        assert_eq!(
+            value["payload"]["content"][6]["type"],
+            "unsupported_content"
+        );
+
+        let oversized = serde_json::json!({"type":"response_item","payload":{
+            "type":"message","role":"user","content":[{"type":"input_text","text":"x".repeat(5*1024*1024)}]
+        }}).to_string();
+        assert!(
+            Record::parse(&oversized)
+                .unwrap()
+                .unwrap()
+                .audit_projection()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn user_content_projection_enforces_streaming_block_and_marker_budgets() {
+        for kind in ["input_image", "unknown"] {
+            let content = serde_json::json!(vec![
+                serde_json::json!({"type":kind});
+                MAX_USER_CONTENT_BLOCKS
+            ]);
+            let record = serde_json::json!({"type":"response_item","payload":{
+                "type":"message","role":"user","content":content
+            }})
+            .to_string();
+            let projected = Record::parse(&record)
+                .unwrap()
+                .unwrap()
+                .audit_projection()
+                .unwrap();
+            let projected: Value = serde_json::from_str(&projected).unwrap();
+            assert_eq!(
+                projected["payload"]["content"].as_array().unwrap().len(),
+                MAX_USER_CONTENT_BLOCKS
+            );
+
+            let content = serde_json::json!(vec![
+                serde_json::json!({"type":kind});
+                MAX_USER_CONTENT_BLOCKS + 1
+            ]);
+            let record = serde_json::json!({"type":"response_item","payload":{
+                "type":"message","role":"user","content":content
+            }})
+            .to_string();
+            let error = Record::parse(&record)
+                .unwrap()
+                .unwrap()
+                .audit_projection()
+                .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("native user content block limit exceeded")
+            );
+        }
+
+        let raw = serde_json::value::RawValue::from_string(
+            r#"[{"type":"input_image"},{"type":"input_image"}]"#.to_owned(),
+        )
+        .unwrap();
+        let mut remaining = 2 + USER_CONTENT_MARKER_BUDGET;
+        let error = project_user_content(&raw, &mut remaining).unwrap_err();
+        assert_eq!(remaining, 0);
+        assert!(
+            error
+                .to_string()
+                .contains("audit projection byte limit exceeded")
+        );
+
+        let large_unknown_kind = serde_json::json!({"type":"response_item","payload":{
+            "type":"message","role":"user","content":[{"type":"private unknown kind\\".repeat(100_000)}]
+        }}).to_string();
+        let projected = Record::parse(&large_unknown_kind)
+            .unwrap()
+            .unwrap()
+            .audit_projection()
+            .unwrap();
+        assert!(projected.len() < 200);
+        assert!(!projected.contains("private unknown kind"));
+
+        let repeated = r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"unknown","type":"input_text","text":"old","te\u0078t":"keep here"}]}}"#;
+        let projected = Record::parse(repeated)
+            .unwrap()
+            .unwrap()
+            .audit_projection()
+            .unwrap();
+        let value: Value = serde_json::from_str(&projected).unwrap();
+        assert_eq!(
+            value["payload"]["content"][0],
+            serde_json::json!({"type":"input_text","text":"keep here"})
         );
     }
 }

@@ -26,6 +26,70 @@ pub(crate) use continuous::{
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
+    /// Capture the actual owning file before native Codex changes it.
+    CaptureConversationTarget {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        target: PathBuf,
+        #[arg(long)]
+        before_output: PathBuf,
+        #[arg(long)]
+        owner_project_root: Option<PathBuf>,
+        #[arg(long)]
+        state: PathBuf,
+    },
+    /// Review an actual conversation without requiring a predeclared task.
+    ReviewConversation {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        context_evidence: PathBuf,
+        #[arg(long)]
+        assistant_evidence: PathBuf,
+        #[arg(long)]
+        correction_evidence: PathBuf,
+        #[arg(long)]
+        criterion_evidence: PathBuf,
+        #[arg(long)]
+        state: PathBuf,
+    },
+    /// Record an already verified owning guideline or skill file change.
+    RecordConversationChange {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        target: PathBuf,
+        #[arg(long)]
+        before: PathBuf,
+        #[arg(long)]
+        verification_evidence: PathBuf,
+        #[arg(long)]
+        comparison_context_evidence: PathBuf,
+        #[arg(long)]
+        owner_project_root: Option<PathBuf>,
+        #[arg(long)]
+        scope_review_evidence: Option<PathBuf>,
+        #[arg(long)]
+        state: PathBuf,
+    },
+    /// Bind actual activation or a natural follow-up to a recorded change.
+    ObserveConversation {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        evidence: PathBuf,
+        #[arg(long)]
+        comparison_context_evidence: PathBuf,
+        #[arg(long)]
+        criterion_evidence: Option<PathBuf>,
+        #[arg(long)]
+        source_revision_evidence: Option<PathBuf>,
+        #[arg(long)]
+        recurrence_evidence: Option<PathBuf>,
+        #[arg(long)]
+        state: PathBuf,
+    },
     /// Configure disabled owner-private learning; enable is a separate opt-in.
     Configure {
         #[arg(long)]
@@ -173,6 +237,9 @@ pub(crate) enum Command {
         deliveries: PathBuf,
         #[arg(long)]
         operation: PathBuf,
+        /// Bind an explicit instruction-read or skill-invocation observation.
+        #[arg(long)]
+        activation_evidence: Option<PathBuf>,
         #[arg(long)]
         state: PathBuf,
     },
@@ -300,6 +367,165 @@ fn parse(bytes: &[u8]) -> Result<Value, ContractError> {
 
 fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
+}
+
+fn verify_conversation_evidence(
+    value: &Value,
+    field: &str,
+    path: &Path,
+) -> Result<(), ContractError> {
+    let expected = value[field]
+        .as_str()
+        .filter(|hash| learning::digest(hash))
+        .ok_or_else(|| error("invalid_conversation_evidence_digest"))?;
+    if sha256(&read_private(path)?) != expected {
+        return Err(error("conversation_evidence_mismatch"));
+    }
+    Ok(())
+}
+
+fn verify_optional_conversation_evidence(
+    value: &Value,
+    field: &str,
+    path: Option<&Path>,
+) -> Result<(), ContractError> {
+    match (value[field].as_str(), path) {
+        (Some(_), Some(path)) => verify_conversation_evidence(value, field, path),
+        (None, None) if value[field].is_null() => Ok(()),
+        _ => Err(error("conversation_evidence_required")),
+    }
+}
+
+/// The owning file can be repository-readable. All path components are bound
+/// without following symlinks, and the held parent and file must be owned by
+/// the caller and not writable by other users. This is a filesystem boundary,
+/// not a semantic judgment that the proposed text belongs to that project.
+fn read_conversation_target(path: &Path) -> Result<Vec<u8>, ContractError> {
+    let path = absolute(path)?;
+    let parent_path = path.parent().ok_or_else(|| error("invalid_path"))?;
+    let parent = directory_handle(parent_path, false)?;
+    let parent_metadata = parent.metadata().map_err(|_| error("invalid_directory"))?;
+    let uid = rustix::process::geteuid().as_raw();
+    if parent_metadata.uid() != uid || parent_metadata.mode() & 0o022 != 0 {
+        return Err(error("conversation_target_owner_required"));
+    }
+    let name = path.file_name().ok_or_else(|| error("invalid_path"))?;
+    let mut file = File::from(
+        openat(
+            &parent,
+            name,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
+            Mode::empty(),
+        )
+        .map_err(|_| error("invalid_conversation_target"))?,
+    );
+    let metadata = file
+        .metadata()
+        .map_err(|_| error("invalid_conversation_target"))?;
+    if !metadata.is_file()
+        || metadata.uid() != uid
+        || metadata.nlink() != 1
+        || metadata.mode() & 0o022 != 0
+        || metadata.len() == 0
+        || metadata.len() > MAX_FILE_BYTES
+    {
+        return Err(error("invalid_conversation_target"));
+    }
+    let mut bytes = Vec::new();
+    Read::by_ref(&mut file)
+        .take(MAX_FILE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| error("conversation_target_unavailable"))?;
+    let after = file
+        .metadata()
+        .map_err(|_| error("invalid_conversation_target"))?;
+    let current_parent = directory_handle(parent_path, false)?
+        .metadata()
+        .map_err(|_| error("invalid_directory"))?;
+    let current = File::from(
+        openat(
+            &parent,
+            name,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
+            Mode::empty(),
+        )
+        .map_err(|_| error("conversation_target_changed"))?,
+    )
+    .metadata()
+    .map_err(|_| error("conversation_target_changed"))?;
+    if metadata.dev() != current.dev()
+        || metadata.ino() != current.ino()
+        || parent_metadata.dev() != current_parent.dev()
+        || parent_metadata.ino() != current_parent.ino()
+        || metadata.len() != after.len()
+        || metadata.mtime() != after.mtime()
+        || metadata.mtime_nsec() != after.mtime_nsec()
+        || metadata.ctime() != after.ctime()
+        || metadata.ctime_nsec() != after.ctime_nsec()
+        || metadata.uid() != after.uid()
+        || metadata.mode() != after.mode()
+        || after.nlink() != 1
+        || bytes.len() as u64 != after.len()
+        || bytes.len() as u64 > MAX_FILE_BYTES
+    {
+        return Err(error("conversation_target_changed"));
+    }
+    Ok(bytes)
+}
+
+fn verify_conversation_project_root(
+    input: &Value,
+    target: &Path,
+    owner_project_root: Option<&Path>,
+) -> Result<(), ContractError> {
+    match (
+        input["target"]["scope"]["kind"].as_str(),
+        owner_project_root,
+    ) {
+        (Some("project"), Some(root)) => {
+            let root: PathBuf = absolute(root)?.components().collect();
+            let target: PathBuf = absolute(target)?.components().collect();
+            let directory = directory_handle(&root, false)?;
+            let metadata = directory
+                .metadata()
+                .map_err(|_| error("invalid_directory"))?;
+            if !target.starts_with(&root)
+                || target == root
+                || metadata.uid() != rustix::process::geteuid().as_raw()
+                || metadata.mode() & 0o022 != 0
+                || input["target"]["scope"]["project_sha256"]
+                    != sha256(root.as_os_str().as_encoded_bytes())
+            {
+                return Err(error("conversation_project_root_mismatch"));
+            }
+            Ok(())
+        }
+        (Some("common"), None) => Ok(()),
+        _ => Err(error("conversation_project_root_required")),
+    }
+}
+
+fn conversation_target_binding(
+    scope: &Value,
+    target: &Path,
+    owner_project_root: Option<&Path>,
+) -> Result<String, ContractError> {
+    verify_conversation_project_root(
+        &json!({"target":{"scope":scope}}),
+        target,
+        owner_project_root,
+    )?;
+    let target: PathBuf = absolute(target)?.components().collect();
+    let owner_root = owner_project_root
+        .map(absolute)
+        .transpose()?
+        .map(|path| path.components().collect::<PathBuf>());
+    // An atomic file replacement preserves this path identity. Leaf inode
+    // identity would reject ordinary editor saves and does not identify scope.
+    learning::content_sha256(
+        &json!({"kind":"groundline-learning-conversation-target-binding",
+        "schema":1,"target":target,"owner_project_root":owner_root,"scope":scope}),
+    )
 }
 
 fn binding_matches(path: &Path, directory: &File) -> bool {
@@ -639,12 +865,20 @@ fn validate_record(value: &Value) -> Result<(), ContractError> {
             }
             Ok(())
         }
+        Some(
+            "groundline-learning-conversation-review"
+            | "groundline-learning-conversation-snapshot"
+            | "groundline-learning-conversation-change"
+            | "groundline-learning-conversation-activation"
+            | "groundline-learning-conversation-observation",
+        ) => learning::conversation_work::validate_record(value),
         _ => continuous::validate_record(value),
     }
 }
 
 fn validate_record_collection(records: &[Value]) -> Result<(), ContractError> {
     continuous::validate_collection(records)?;
+    learning::conversation_work::validate_collection(records)?;
     let analyses = records
         .iter()
         .filter(|record| {
@@ -750,6 +984,195 @@ fn readout(status: &str, mutation: bool) -> Value {
     json!({"kind":"groundline-learning-result", "schema":1, "status":status,
         "native_activation":"UNVERIFIED", "network_performed":false,
         "mutation_performed":mutation, "raw_content_emitted":false, "private_paths_emitted":false})
+}
+
+fn save_conversation_record(input: &Value, path: &Path) -> Result<Value, ContractError> {
+    let mut record =
+        learning::conversation_work::build_record(input, &chrono::Utc::now().to_rfc3339())?;
+    let mut state = State::open(path, true)?;
+    let mut archived = continuous::compact_conversations(&mut state)?;
+    if let Some(previous) = continuous::restore_conversation_replay(&mut state, input)? {
+        record = previous;
+    }
+    // Exact retries retain the first observation clock and record digest. A
+    // changed input for the same logical review/work is rejected by the shared
+    // collection validator rather than overwriting the original evidence.
+    if let Some(previous) = state
+        .records
+        .iter()
+        .find(|previous| previous["kind"] == record["kind"] && previous["input"] == record["input"])
+    {
+        record = previous.clone();
+    }
+    let changed = state.append(&record)?;
+    archived += continuous::compact_conversations(&mut state)?;
+    let mut out = readout(if changed { "RECORDED" } else { "UNCHANGED" }, changed);
+    out["record_sha256"] = json!(learning::content_sha256(&record)?);
+    out["conversation_work"] = learning::conversation_work::readouts(&state.records)?;
+    out["evidence_authenticity_verified"] = json!(false);
+    out["semantic_scope_authenticity_verified"] = json!(false);
+    out["archive"] = continuous::conversation_archive_summary(&state)?;
+    out["archive"]["archived_record_count_this_write"] = json!(archived);
+    Ok(out)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConversationCaptureRequest {
+    kind: String,
+    schema: u8,
+    review_sha256: String,
+    scope: learning::conversation::ConversationScope,
+    target_id: String,
+    target_kind: String,
+}
+
+fn capture_conversation_target(
+    input_path: &Path,
+    target: &Path,
+    before_output: &Path,
+    owner_project_root: Option<&Path>,
+    state_path: &Path,
+) -> Result<Value, ContractError> {
+    let request: ConversationCaptureRequest = serde_json::from_slice(&read_private(input_path)?)
+        .map_err(|_| error("invalid_conversation_capture_request"))?;
+    if request.kind != "groundline-learning-conversation-capture-input" || request.schema != 1 {
+        return Err(error("invalid_conversation_capture_request"));
+    }
+    let scope = serde_json::to_value(request.scope).map_err(|_| error("serialization_failed"))?;
+    let binding = conversation_target_binding(&scope, target, owner_project_root)?;
+    let before = read_conversation_target(target)?;
+    let before_hash = sha256(&before);
+    let mut state = State::open(state_path, true)?;
+    let mut archived = continuous::compact_conversations(&mut state)?;
+    let mut input = json!({"kind":"groundline-learning-conversation-snapshot-input","schema":1,
+        "review_sha256":request.review_sha256,"scope":scope,"target_id":request.target_id,
+        "target_kind":request.target_kind,"before_sha256":before_hash,
+        "target_binding_sha256":binding,"captured_at_utc":chrono::Utc::now().to_rfc3339()});
+    continuous::restore_conversation_replay(&mut state, &input)?;
+    if let Some(prior) = state.records.iter().find(|record| {
+        record["kind"] == "groundline-learning-conversation-snapshot"
+            && [
+                "review_sha256",
+                "scope",
+                "target_id",
+                "target_kind",
+                "before_sha256",
+                "target_binding_sha256",
+            ]
+            .into_iter()
+            .all(|field| record["input"][field] == input[field])
+    }) {
+        input = prior["input"].clone();
+    }
+    let mut record =
+        learning::conversation_work::build_record(&input, &chrono::Utc::now().to_rfc3339())?;
+    if let Some(previous) = state
+        .records
+        .iter()
+        .find(|previous| previous["input"] == record["input"])
+    {
+        record = previous.clone();
+    }
+    let mut updated = state.records.clone();
+    updated.push(record.clone());
+    validate_record_collection(&updated)?;
+    write_bytes_draft(before_output, &before, &state)?;
+    let changed = state.append(&record)?;
+    archived += continuous::compact_conversations(&mut state)?;
+    let mut out = readout(if changed { "CAPTURED" } else { "UNCHANGED" }, changed);
+    out["snapshot_sha256"] = json!(learning::content_sha256(&record)?);
+    out["before_sha256"] = json!(before_hash);
+    out["target_binding_sha256"] = json!(binding);
+    out["captured_at_utc"] = input["captured_at_utc"].clone();
+    out["conversation_work"] = learning::conversation_work::readouts(&state.records)?;
+    out["archive"] = continuous::conversation_archive_summary(&state)?;
+    out["archive"]["archived_record_count_this_write"] = json!(archived);
+    Ok(out)
+}
+
+fn review_conversation(
+    input_path: &Path,
+    context: &Path,
+    assistant: &Path,
+    correction: &Path,
+    criterion: &Path,
+    state: &Path,
+) -> Result<Value, ContractError> {
+    let input = parse(&read_private(input_path)?)?;
+    if input["kind"] != "groundline-learning-conversation-review-input" {
+        return Err(error("invalid_conversation_review_input"));
+    }
+    for (field, path) in [
+        ("context_evidence_sha256", context),
+        ("preceding_assistant_action_sha256", assistant),
+        ("user_correction_sha256", correction),
+        ("criterion_sha256", criterion),
+    ] {
+        verify_conversation_evidence(&input, field, path)?;
+    }
+    save_conversation_record(&input, state)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn record_conversation_change(
+    input_path: &Path,
+    target: &Path,
+    before: &Path,
+    verification: &Path,
+    comparison_context: &Path,
+    owner_project_root: Option<&Path>,
+    scope_review: Option<&Path>,
+    state: &Path,
+) -> Result<Value, ContractError> {
+    let input = parse(&read_private(input_path)?)?;
+    if input["kind"] != "groundline-learning-conversation-change-input" {
+        return Err(error("invalid_conversation_change_input"));
+    }
+    if input["target_binding_sha256"]
+        != conversation_target_binding(&input["target"]["scope"], target, owner_project_root)?
+    {
+        return Err(error("conversation_target_binding_mismatch"));
+    }
+    if input["target"]["before_sha256"] != sha256(&read_private(before)?)
+        || input["target"]["after_sha256"] != sha256(&read_conversation_target(target)?)
+    {
+        return Err(error("conversation_target_digest_mismatch"));
+    }
+    verify_conversation_evidence(&input, "verification_evidence_sha256", verification)?;
+    verify_conversation_evidence(&input, "comparison_context_sha256", comparison_context)?;
+    verify_optional_conversation_evidence(
+        &input["transferability_review"],
+        "evidence_sha256",
+        scope_review,
+    )?;
+    save_conversation_record(&input, state)
+}
+
+fn observe_conversation(
+    input_path: &Path,
+    evidence: &Path,
+    comparison_context: &Path,
+    criterion: Option<&Path>,
+    source_revision: Option<&Path>,
+    recurrence: Option<&Path>,
+    state: &Path,
+) -> Result<Value, ContractError> {
+    let input = parse(&read_private(input_path)?)?;
+    if ![
+        "groundline-learning-conversation-activation-input",
+        "groundline-learning-conversation-observation-input",
+    ]
+    .contains(&input["kind"].as_str().unwrap_or(""))
+    {
+        return Err(error("invalid_conversation_observation_input"));
+    }
+    verify_conversation_evidence(&input, "evidence_sha256", evidence)?;
+    verify_conversation_evidence(&input, "comparison_context_sha256", comparison_context)?;
+    verify_optional_conversation_evidence(&input, "criterion_sha256", criterion)?;
+    verify_optional_conversation_evidence(&input, "source_revision_sha256", source_revision)?;
+    verify_optional_conversation_evidence(&input, "recurrence_evidence_sha256", recurrence)?;
+    save_conversation_record(&input, state)
 }
 
 fn context_observed_at(context: &Value) -> Result<&str, ContractError> {
@@ -1106,8 +1529,22 @@ fn evaluate(
     deliveries: &Path,
     operation: &Path,
     state: &Path,
+    activation_evidence: Option<&Path>,
 ) -> Result<Value, ContractError> {
     let input = parse(&read_private(input)?)?;
+    match (
+        input["conversation_application"]["activation_evidence_sha256"].as_str(),
+        activation_evidence,
+    ) {
+        (Some(expected), Some(path)) => {
+            if sha256(&read_private(path)?) != expected {
+                return Err(error("conversation_activation_evidence_mismatch"));
+            }
+        }
+        (Some(_), None) => return Err(error("conversation_activation_evidence_required")),
+        (None, Some(_)) => return Err(error("conversation_application_missing")),
+        (None, None) => {}
+    }
     let operation_bytes = read_private(operation)?;
     let operation = parse(&operation_bytes)?;
     crate::environment::validate_operation(&operation)?;
@@ -1126,6 +1563,56 @@ fn evaluate(
     )
 }
 
+fn conversation_work_conditions(input: &Value, records: &[Value]) -> Vec<String> {
+    let conversation = records.iter().any(|record| {
+        record["kind"] == "groundline-learning-proposal"
+            && record["proposal_id"] == input["proposal_id"]
+            && record["conversation"].is_object()
+    });
+    if !conversation {
+        return Vec::new();
+    }
+    let mut reasons = BTreeSet::new();
+    let mut criterion = None;
+    for reference in input["baseline_refs"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .chain(input["followup_refs"].as_array().into_iter().flatten())
+    {
+        let outcome = records.iter().find(|record| {
+            record["kind"] == "groundline-learning-task-outcome"
+                && record["link_sha256"] == *reference
+        });
+        let task = outcome.and_then(|outcome| {
+            records.iter().find(|record| {
+                record["kind"] == "groundline-learning-task-start"
+                    && learning::content_sha256(record).ok().as_deref()
+                        == outcome["task_sha256"].as_str()
+            })
+        });
+        let (Some(task), Some(outcome)) = (task, outcome) else {
+            reasons.insert("scoped_completion_criterion_unobserved".to_owned());
+            continue;
+        };
+        let condition = (&task["scope"]["criterion"], &task["scope"]["task_category"]);
+        if criterion.is_some_and(|expected| expected != condition) {
+            reasons.insert("completion_criterion_or_category_mismatch".to_owned());
+        } else {
+            criterion = Some(condition);
+        }
+        if task["boundary_environment_matched"] != true {
+            reasons.insert("boundary_environment_unverified".to_owned());
+        }
+        if task["native"]["boundary_matched"] != true
+            || outcome["native"]["boundary_matched"] != true
+        {
+            reasons.insert("native_boundary_unverified".to_owned());
+        }
+    }
+    reasons.into_iter().collect()
+}
+
 fn evaluate_records(
     input: &Value,
     receipts: &[(String, Value)],
@@ -1134,6 +1621,13 @@ fn evaluate_records(
     state: &State,
     additional_reasons: &[String],
 ) -> Result<Value, ContractError> {
+    let additional_reasons = additional_reasons
+        .iter()
+        .cloned()
+        .chain(conversation_work_conditions(input, &state.records))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
     let links: Vec<Value> = state
         .records
         .iter()
@@ -1152,10 +1646,25 @@ fn evaluate_records(
     let mut result = learning::evaluate(input, proposal, &links, receipts, operation)?;
     if !additional_reasons.is_empty() {
         result["status"] = json!("INCONCLUSIVE");
+        // Native task criteria and boundary evidence are checked in this layer,
+        // after the contract comparison. A descriptive recurrence result must
+        // not remain favorable when these work conditions cannot be matched.
+        if result["recurrence_comparison"].is_object() {
+            result["recurrence_comparison"]["comparison"] = json!("inconclusive");
+            let recurrence_reasons = result["recurrence_comparison"]["comparison_reasons"]
+                .as_array_mut()
+                .ok_or_else(|| error("invalid_evaluation"))?;
+            for reason in &additional_reasons {
+                if !recurrence_reasons.contains(&json!(reason)) {
+                    recurrence_reasons.push(json!(reason));
+                }
+            }
+            recurrence_reasons.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
+        }
         let reasons = result["comparison_reasons"]
             .as_array_mut()
             .ok_or_else(|| error("invalid_evaluation"))?;
-        for reason in additional_reasons {
+        for reason in &additional_reasons {
             if !reasons.contains(&json!(reason)) {
                 reasons.push(json!(reason));
             }
@@ -1281,6 +1790,15 @@ fn status_with_operations(path: &Path, paths: &[PathBuf]) -> Result<Value, Contr
             value["status"].as_str().unwrap_or("unknown").to_owned()
         } else if value["kind"] == "groundline-learning-duplicate-attempt" {
             "duplicate_analysis".to_owned()
+        } else if value["kind"]
+            .as_str()
+            .is_some_and(|kind| kind.starts_with("groundline-learning-conversation-"))
+        {
+            value["kind"]
+                .as_str()
+                .unwrap_or_default()
+                .trim_start_matches("groundline-learning-")
+                .to_owned()
         } else {
             value["result"]["status"]
                 .as_str()
@@ -1338,12 +1856,78 @@ fn status_with_operations(path: &Path, paths: &[PathBuf]) -> Result<Value, Contr
         "unobserved_analysis_count":state.records.iter().filter(|v| ["groundline-learning-proposal", "groundline-learning-duplicate-attempt"].contains(&v["kind"].as_str().unwrap_or("")) && v["analysis"].is_null()).count()});
     out["operation_observation_count"] = json!(operations.len());
     out["candidates"] = json!(learning::candidate_readouts(&state.records, &operations)?);
+    out["conversation_work"] = learning::conversation_work::readouts(&state.records)?;
     out["readiness"] = readiness::summarize(&state.records, &[])?;
+    out["archive"] = continuous::conversation_archive_summary(&state)?;
     Ok(out)
 }
 
 pub(crate) fn run(command: Command) -> Result<Value, ContractError> {
     match command {
+        Command::CaptureConversationTarget {
+            input,
+            target,
+            before_output,
+            owner_project_root,
+            state,
+        } => capture_conversation_target(
+            &input,
+            &target,
+            &before_output,
+            owner_project_root.as_deref(),
+            &state,
+        ),
+        Command::ReviewConversation {
+            input,
+            context_evidence,
+            assistant_evidence,
+            correction_evidence,
+            criterion_evidence,
+            state,
+        } => review_conversation(
+            &input,
+            &context_evidence,
+            &assistant_evidence,
+            &correction_evidence,
+            &criterion_evidence,
+            &state,
+        ),
+        Command::RecordConversationChange {
+            input,
+            target,
+            before,
+            verification_evidence,
+            comparison_context_evidence,
+            owner_project_root,
+            scope_review_evidence,
+            state,
+        } => record_conversation_change(
+            &input,
+            &target,
+            &before,
+            &verification_evidence,
+            &comparison_context_evidence,
+            owner_project_root.as_deref(),
+            scope_review_evidence.as_deref(),
+            &state,
+        ),
+        Command::ObserveConversation {
+            input,
+            evidence,
+            comparison_context_evidence,
+            criterion_evidence,
+            source_revision_evidence,
+            recurrence_evidence,
+            state,
+        } => observe_conversation(
+            &input,
+            &evidence,
+            &comparison_context_evidence,
+            criterion_evidence.as_deref(),
+            source_revision_evidence.as_deref(),
+            recurrence_evidence.as_deref(),
+            &state,
+        ),
         Command::Configure {
             environment_state,
             target_ids,
@@ -1446,7 +2030,14 @@ pub(crate) fn run(command: Command) -> Result<Value, ContractError> {
             deliveries,
             operation,
             state,
-        } => evaluate(&input, &deliveries, &operation, &state),
+            activation_evidence,
+        } => evaluate(
+            &input,
+            &deliveries,
+            &operation,
+            &state,
+            activation_evidence.as_deref(),
+        ),
         Command::Decide { input, state } => decide(&input, &state),
         Command::Status { state, operation } => status_with_operations(&state, &operation),
     }

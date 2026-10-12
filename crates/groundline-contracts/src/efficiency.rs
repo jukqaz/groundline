@@ -469,6 +469,25 @@ pub fn recommend_weekly_optimization(audit: &Value) -> Result<Value, ContractErr
     let short_messages = non_negative_int(prompt_shape, "short_message_count").min(message_count);
     let broad_messages =
         non_negative_int(prompt_shape, "broad_scope_message_count").min(message_count);
+    let prompt_classification = prompt_shape
+        .get("input_classification")
+        .and_then(|classification| classification.get("complete"))
+        .and_then(Value::as_bool);
+    let prompt_classification = if prompt_shape
+        .get("input_classification")
+        .and_then(|classification| classification.get("coverage_observation_complete"))
+        .and_then(Value::as_bool)
+        == Some(false)
+    {
+        Some(false)
+    } else {
+        prompt_classification
+    };
+    let prompt_classification_status = match prompt_classification {
+        Some(true) => "complete",
+        Some(false) => "incomplete",
+        None => "unknown",
+    };
     let model_counts = model_effort
         .get("counts")
         .and_then(Value::as_object)
@@ -521,7 +540,8 @@ pub fn recommend_weekly_optimization(audit: &Value) -> Result<Value, ContractErr
         "long_turn_ratio": bounded_ratio(long_turns, completed_turns),
         "repeated_call_ratio": bounded_ratio(repeated_calls, call_count),
         "nonzero_exit_ratio": bounded_ratio(nonzero_exits, call_count),
-        "short_message_ratio": if message_count > 0 { Some(bounded_ratio(short_messages, message_count)) } else { None },
+        "short_message_ratio": if message_count > 0 && prompt_classification == Some(true) { Some(bounded_ratio(short_messages, message_count)) } else { None },
+        "prompt_text_classification_status": prompt_classification_status,
         "broad_scope_message_count": broad_messages,
         "high_depth_effort_ratio": bounded_ratio(high_depth_contexts, turn_contexts),
         "verification_tool_calls": verification_calls,
@@ -789,7 +809,7 @@ mod tests {
                 "activity": {"compactions": 30, "user_messages_with_text": 20},
                 "model_effort": {"counts": {"gpt-6-sol|xhigh": 18, "gpt-6-sol|high": 2}},
                 "task_latency": {"completed_count": 10, "long_turn_count": 3},
-                "prompt_shape": {"short_message_count": 12, "broad_scope_message_count": 10},
+                "prompt_shape": {"short_message_count": 12, "broad_scope_message_count": 10, "input_classification":{"complete":true}},
                 "tools": {
                     "call_count": 100,
                     "by_category": {"verification": 10},
@@ -856,6 +876,56 @@ mod tests {
             );
             assert_eq!(result["signals"]["completed_root_count"], 10);
             assert_eq!(result["mutation_performed"], false);
+        }
+    }
+
+    #[test]
+    fn unresolved_or_unobserved_prompt_classification_cannot_trigger_scope_advice() {
+        let mut audit = weekly_audit();
+        audit["root"]["activity"]["compactions"] = json!(0);
+        audit["root"]["task_latency"]["long_turn_count"] = json!(0);
+        audit["root"]["tools"]["failure_signals"]["nonzero_exit"] = json!(0);
+        audit["root"]["tools"]["calls_in_exact_repeated_groups"] = json!(0);
+        audit["root"]["model_effort"]["counts"] = json!({"gpt-6-sol|high":20});
+        audit["root"]["boundary_signals"]["task_boundary_review_recommended"] = json!(false);
+        audit["root"]["prompt_shape"]["broad_scope_message_count"] = json!(20);
+        let observed = recommend_weekly_optimization(&audit).unwrap();
+        assert_eq!(
+            observed["recommended_change"]["code"],
+            "reconcile_in_current_task"
+        );
+        assert_eq!(observed["signals"]["short_message_ratio"], 0.6);
+        audit["root"]["prompt_shape"]["input_classification"]["coverage_observation_complete"] =
+            json!(false);
+        let uncovered = recommend_weekly_optimization(&audit).unwrap();
+        assert!(uncovered["signals"]["short_message_ratio"].is_null());
+        assert_eq!(
+            uncovered["signals"]["prompt_text_classification_status"],
+            "incomplete"
+        );
+        assert_eq!(
+            uncovered["recommended_change"]["code"],
+            "preserve_current_workflow"
+        );
+        for (complete, status) in [(Some(false), "incomplete"), (None, "unknown")] {
+            audit["root"]["prompt_shape"]["input_classification"] = complete
+                .map(|complete| json!({"complete":complete}))
+                .unwrap_or(serde_json::Value::Null);
+            let result = recommend_weekly_optimization(&audit).unwrap();
+            assert_eq!(
+                result["signals"]["short_message_ratio"],
+                serde_json::Value::Null
+            );
+            assert_eq!(
+                result["signals"]["prompt_text_classification_status"],
+                status
+            );
+            assert_eq!(result["signals"]["broad_scope_message_count"], 20);
+            assert_eq!(
+                result["recommended_change"]["code"],
+                "preserve_current_workflow"
+            );
+            assert_eq!(result["settings_changed"], false);
         }
     }
 

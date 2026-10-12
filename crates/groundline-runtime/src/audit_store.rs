@@ -230,10 +230,16 @@ fn latest_turn_completed(contents: &str) -> bool {
         .rev()
         .find_map(|line| {
             let record = Record::parse(line).ok()??;
+            let payload = record.value("payload").ok()??;
+            if record.string("type").as_deref() == Some("response_item")
+                && payload.get("type").and_then(Value::as_str) == Some("message")
+                && payload.get("role").and_then(Value::as_str) == Some("user")
+            {
+                return Some(false);
+            }
             if record.string("type").as_deref() != Some("event_msg") {
                 return None;
             }
-            let payload = record.value("payload").ok()??;
             match payload.get("type").and_then(Value::as_str)? {
                 "task_complete" => Some(true),
                 "task_started" | "user_message" | "turn_aborted" => Some(false),
@@ -362,11 +368,31 @@ pub fn collect_audit(
     let mut identities = BTreeMap::<String, usize>::new();
     let mut identity_unavailable = 0_u64;
     let mut duplicate_identity_excluded = 0_u64;
+    // These sequential filters describe indexed rows and readable logical
+    // rollouts, not a reconciled full-store denominator or additive partition.
+    let mut indexed_root_rows = 0_u64;
+    let mut index_clock_excluded_root_rows = 0_u64;
+    let mut nonvisible_excluded_root_rows = 0_u64;
+    let mut indexed_candidate_root_rows = 0_u64;
+    let mut no_window_records_excluded_roots = 0_u64;
+    let mut readable_candidate_roots = 0_u64;
+    let mut latest_turn_incomplete_excluded_roots = 0_u64;
     for row in rows {
-        if (row.recency_ms > 0 && row.recency_ms <= start_ms)
-            || (row.kind == ThreadKind::Root && !row.visible)
-        {
+        if row.kind == ThreadKind::Root {
+            indexed_root_rows = indexed_root_rows.saturating_add(1);
+        }
+        if row.recency_ms > 0 && row.recency_ms <= start_ms {
+            if row.kind == ThreadKind::Root {
+                index_clock_excluded_root_rows = index_clock_excluded_root_rows.saturating_add(1);
+            }
             continue;
+        }
+        if row.kind == ThreadKind::Root {
+            if !row.visible {
+                nonvisible_excluded_root_rows = nonvisible_excluded_root_rows.saturating_add(1);
+                continue;
+            }
+            indexed_candidate_root_rows = indexed_candidate_root_rows.saturating_add(1);
         }
         let normalized =
             crate::rollout::logical_path(&row.rollout).unwrap_or_else(|_| row.rollout.clone());
@@ -421,9 +447,18 @@ pub fn collect_audit(
             }
         };
         if !has_window_records(&contents, start, end) {
+            if row.kind == ThreadKind::Root {
+                no_window_records_excluded_roots =
+                    no_window_records_excluded_roots.saturating_add(1);
+            }
             continue;
         }
+        if row.kind == ThreadKind::Root {
+            readable_candidate_roots = readable_candidate_roots.saturating_add(1);
+        }
         if completed_only && row.kind == ThreadKind::Root && !latest_turn_completed(&contents) {
+            latest_turn_incomplete_excluded_roots =
+                latest_turn_incomplete_excluded_roots.saturating_add(1);
             continue;
         }
         if originator_missing {
@@ -526,6 +561,17 @@ pub fn collect_audit(
     } else {
         Value::from(1.0)
     };
+    let root_selection = json!({
+        "revision":1,"scope":"indexed_rows_and_window_candidates",
+        "counts_form_population_partition":false,"completed_only":completed_only,
+        "indexed_root_row_count":indexed_root_rows,
+        "index_clock_excluded_root_row_count":index_clock_excluded_root_rows,
+        "nonvisible_excluded_root_row_count":nonvisible_excluded_root_rows,
+        "indexed_candidate_root_row_count":indexed_candidate_root_rows,
+        "no_window_records_excluded_root_count":no_window_records_excluded_roots,
+        "readable_candidate_root_count":readable_candidate_roots,
+        "latest_turn_incomplete_excluded_root_count":latest_turn_incomplete_excluded_roots,
+    });
     let mut result = json!({
         "schema":1,"kind":kind,"status":status,"errors":[],"collection_complete":collection_complete,
         "scope":{
@@ -542,6 +588,7 @@ pub fn collect_audit(
             "read_budget_exhausted":total_bytes>=crate::rollout::MAX_AUDIT_SCAN_BYTES || retained_bytes>=crate::rollout::MAX_AUDIT_BYTES,
             "source_read_bytes":total_bytes,"retained_audit_bytes":retained_bytes,
             "originator_source_fallback_root_count":source_fallback,"delegated_truncated_count":0,"guardian_truncated_count":0,
+            "root_selection":root_selection,
         },
         "root":root_audit,"delegated":delegated_audit,"guardian":guardian_audit,
         "usage_source_contract":{"cumulative_total_preferred_per_rollout":true,"last_usage_sum_is_fallback_only":true,"window_delta_prevents_double_counting":true,"billing_inference_performed":false},
@@ -1131,6 +1178,48 @@ mod tests {
             assert!(!latest_turn_completed(&resumed));
             assert!(latest_turn_completed(&format!("{resumed}{completed}")));
         }
+        for role in ["user", "assistant", "developer"] {
+            let message = serde_json::json!({"type":"response_item","payload":{
+                "type":"message","role":role,"content":[{"type":"input_text","text":"resume"}]}});
+            let resumed = format!("{completed}{message}\n");
+            assert_eq!(latest_turn_completed(&resumed), role != "user");
+            assert!(latest_turn_completed(&format!("{resumed}{completed}")));
+        }
+    }
+
+    #[test]
+    fn missing_timestamps_remain_candidates_without_claiming_window_membership() {
+        let home = codex_home();
+        let sessions = home.path().join("sessions");
+        fs::create_dir(&sessions).unwrap();
+        let path = sessions.join("unknown-clock.jsonl");
+        let contents = "{\"type\":\"session_meta\",\"payload\":{\"id\":\"clock-owner\",\"originator\":\"codex_cli\"}}\n{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\"}}\n";
+        fs::write(&path, contents).unwrap();
+        fixture_database(home.path(), &path, "cli");
+        let result = collect_audit(
+            home.path(),
+            chrono::DateTime::from_timestamp(0, 0).unwrap(),
+            chrono::DateTime::from_timestamp(2, 0).unwrap(),
+            None,
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            result["scope"]["root_selection"]["readable_candidate_root_count"],
+            1
+        );
+        assert!(
+            result["scope"]["root_selection"]
+                .get("readable_window_root_count")
+                .is_none()
+        );
+        assert_eq!(result["root"]["status"], "PARTIAL");
+        assert_eq!(
+            result["coverage"]["recommendation_evidence_complete"],
+            false
+        );
+        assert!(result["coverage"]["eligible_root_count"].is_null());
+        assert_eq!(fs::read_to_string(path).unwrap(), contents);
     }
 
     #[test]
@@ -1150,7 +1239,7 @@ mod tests {
         fs::write(
             &resumed,
             format!(
-                "{completed}{{\"type\":\"event_msg\",\"payload\":{{\"type\":\"task_started\"}}}}\n"
+                "{completed}{{\"timestamp\":\"1970-01-01T00:00:01Z\",\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"user\",\"content\":[{{\"type\":\"input_text\",\"text\":\"new request\"}}]}}}}\n"
             ),
         )
         .unwrap();
@@ -1177,6 +1266,24 @@ mod tests {
         .unwrap();
         assert_eq!(result["scope"]["selected_root_count"], 1);
         assert_eq!(result["scope"]["unreadable_completed_root_count"], 1);
+        assert_eq!(
+            result["scope"]["root_selection"]["indexed_root_row_count"],
+            4
+        );
+        assert_eq!(
+            result["scope"]["root_selection"]["indexed_candidate_root_row_count"],
+            4
+        );
+        assert_eq!(
+            result["scope"]["root_selection"]["readable_candidate_root_count"],
+            2
+        );
+        assert_eq!(
+            result["scope"]["root_selection"]["latest_turn_incomplete_excluded_root_count"],
+            1
+        );
+        assert_eq!(result["scope"]["sample_sufficient"], false);
+        assert!(result["coverage"]["eligible_root_count"].is_null());
         assert_eq!(
             result["scope"]["duplicate_rollout_reference_excluded_count"],
             1
@@ -1345,9 +1452,13 @@ mod tests {
             )
             .unwrap();
         let after = collect_audit(home.path(), start, end, None, true).unwrap();
+        let mut expected_after = before.clone();
+        expected_after["scope"]["root_selection"]["indexed_root_row_count"] = Value::from(6);
+        expected_after["scope"]["root_selection"]["index_clock_excluded_root_row_count"] =
+            Value::from(1);
         assert_eq!(
-            before, after,
-            "out-of-window storage damage is a separate diagnostic"
+            expected_after, after,
+            "an old indexed row changes only the declared index filter counters"
         );
         assert_eq!(after["status"], "PASS");
         assert_eq!(after["coverage"]["recommendation_evidence_complete"], true);
