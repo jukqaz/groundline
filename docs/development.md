@@ -79,6 +79,30 @@ runtime rollout reader. [Weekly audit](../plugins/groundline/references/weekly-u
 defines public coverage semantics. Whole-store diagnostics are a separate request;
 audit changes must not rewrite native history, consent, cursors, or server events.
 
+Prompt-shape classification uses standard-library operations for fixed native
+envelope delimiters and the existing `serde_json` stream deserializer for typed
+annotation and question-answer arrays. Parsing the JSON value before its closing
+tag preserves tags inside quoted strings and skips copied questions and source
+quotes. A general XML/HTML parser is unnecessary for this fixed host grammar;
+unsupported or malformed recognized envelopes remain unresolved. Regression
+inputs cover automation, context, annotations, answers, literal tag mentions,
+English word boundaries, and original/projected record parity.
+The current annotation composition can include a tagged ambient-browser block
+before the own-request section. Consume its observed ordered host grammar and
+exclude its URL/tab state; preserve annotation comments even when the own request
+is empty. Unknown or truncated intervening content remains unresolved. Revision 3
+separates this coverage correction from older saved observations.
+
+User input supports both native event messages and response-item user text
+blocks using the existing Serde value types. Cross-origin exact-text pairs are
+matched only in a rollout-local input burst; same-origin and later-turn repeats
+remain separate. Projection retains user text temporarily for classification,
+while non-text and unsupported bodies become safe markers. Empty, unavailable
+or mixed-content input is incomplete. Runtime/CLI regressions must exercise the
+streaming projection, latest-user-message resume, source counts, representation
+deduplication and redacted output; direct parser tests alone cannot prove that
+the installed collection path preserves those inputs.
+
 ## Performance evidence
 
 Use synthetic local inputs for parser benchmarks:

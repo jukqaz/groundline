@@ -6,10 +6,14 @@ Do not run every example as a routine preflight.
 For a skill inside the installed plugin, `GROUNDLINE_ROOT` is the directory two
 levels above its containing skill directory. A user-owned copy under
 `.agents/skills` or `.codex/skills` does not have that layout. For such a copy,
-use the actual Codex executable's `plugin list --marketplace groundline --json`
-and select exactly the installed `groundline@groundline` entry. Resolve its
-reported version under the active Codex home's
-`plugins/cache/groundline/groundline/<version>` directory. Respect `CODEX_HOME`
+use the actual Codex executable's `plugin list --json` and select the explicitly
+requested installation, or the single installed, enabled plugin named
+`groundline`. Preserve its reported marketplace name and exact version when
+resolving `plugins/cache/<marketplace>/groundline/<version>` in the active home.
+If more than one enabled Core is present, resolve that ambiguity rather than
+guessing by version or directory recency. A reviewed local Core candidate uses
+its own native marketplace identity; it does not impersonate the official Git
+channel. Respect `CODEX_HOME`
 when set; otherwise use the OS user's `.codex` directory. Do not guess a latest
 version, use the marketplace checkout as a runtime, or fall back to the current
 repository or another plugin's root.
@@ -29,7 +33,8 @@ that the file exists and is executable before invoking it. If the installed
 artifact is missing, report that lane unavailable; do not silently run a source
 build or an unrelated binary on `PATH`. Run that binary's
 `provider-smoke --plugin-root "$GROUNDLINE_ROOT" --require-installed --json`
-to verify the package and native installation before using a resolved copy.
+to verify the packaged binary before using a resolved copy. Correlate that root
+with the native plugin listing separately to establish its registration.
 An installed or enabled flag alone does not prove active hooks or loaded guidance.
 
 In skill examples, replace the bare `groundline` name with this absolute path.

@@ -10,10 +10,19 @@ and completion check without an audit or sample quota. Use
 [task continuity](task-continuity.md) only when delegation, recovery or large
 output needs it; this loop is not a prerequisite for ordinary implementation.
 
+For requested conversation-pattern improvement, use
+[conversation improvement](conversation-improvement.md). It connects a bounded
+sequence to an actual guidance or skill diff and a natural follow-up check.
+An authorized weekly improvement uses the same path after its single audit;
+an audit-only request does not authorize applying that change. Local history
+analysis and improvement do not depend on central Insights delivery.
+
 1. **Observe the relevant sample.** Reuse bounded native history and an authorized
    Insights report when they answer the question. Keep collection health and
    population coverage separate from the observed task sample. See
-   [weekly audit](weekly-usage-audit.md).
+   [weekly audit](weekly-usage-audit.md). Interpret conversation corrections in
+   context with native Codex rather than assigning failure from message length,
+   repetition, or lexical terms.
 2. **Plan for the next task.** Preserve current and inherited model/effort and
    delegation permissions. Use [model/effort guidance](model-effort-routing.md)
    and current native availability only for requested model/effort selection or
@@ -30,7 +39,9 @@ output needs it; this loop is not a prerequisite for ordinary implementation.
 5. **Retain or revise with evidence.** Explain quality and resource changes and
    uncertainty. Use the next appropriate native lane; do not rewrite global
    settings or replay completed work just to manufacture samples. Reassess when
-   the phase or demonstrated difficulty changes.
+   the phase or demonstrated difficulty changes. For guidance changes, follow
+   the exact applied revision through relevant natural opportunities; no
+   opportunity leaves the effect pending, rather than proving success.
 
 For a requested benchmark, use [paired evaluation](usage-assessment.md). Read
 current official guidance when an actual model/runtime change or unresolved

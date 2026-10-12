@@ -92,6 +92,13 @@ Keep the result tied to the checked revision or artifact, relevant inputs and
 runtime/environment. Identify the actual binary/artifact checked; a PASS from a
 different binary cannot qualify changed source. Reuse a passing check while
 those remain applicable.
+Compare current content with the checked bytes before treating verification as
+pending. Uncommitted changes can already be verified; a commit or clean working
+tree does not by itself prove verification. Keep explicitly requested Git work
+as a separate completion criterion.
+When conditions affect the outcome, keep them with the result. Normal-use and
+stress scenarios are distinct evidence; a pass in one does not erase a failure
+in the other. Changing timing or inputs does not by itself establish a fix.
 Rerun the affected check when its inputs change or a concrete unresolved risk
 invalidates it; a new message alone does not invalidate evidence. For a correction,
 review the changed diff and affected findings before repeating broader review.
@@ -128,6 +135,9 @@ proves and the remaining required proof or next action and owner. Keep evidence
 for distinct required outcomes separate; a passed check does not establish an
 unobserved outcome. Claim only the requested outcomes actually established;
 small tasks need no extra document, template, or empty fields.
+Keep completion reports within the accepted target. Include separately delegated
+project work when the user requests it or when it is an actual dependency of the
+accepted outcome; unrelated work does not make the requested project incomplete.
 
 Keep discovery, enabled/trusted state, actual invocation and requested outcome
 separate under [capability routing](capability-routing.md). Output bytes saved

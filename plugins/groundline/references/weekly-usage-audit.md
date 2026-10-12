@@ -2,11 +2,45 @@
 
 A scheduled review uses usage patterns and current Codex information to improve
 GroundLine and the owner's Codex environment, not merely to publish usage totals.
-Follow [the optimization loop](codex-optimization-loop.md) when that purpose is
-requested: evaluate the previous change, collect once, research relevant
-official changes, and select one bounded improvement with acceptance and rollback
-criteria. The native audit below is its evidence layer, not an automatic source,
+For conversation-driven improvement, follow
+[conversation improvement](conversation-improvement.md): inspect the previous
+change's natural follow-up, reuse one audit, read a bounded set of relevant
+user/assistant exchanges, interpret the correction, and implement a scoped
+guidance or skill change within existing authority. Use
+[the optimization loop](codex-optimization-loop.md) for relevant official updates
+and other workflow changes. The native audit below is its evidence layer, not an automatic source,
 configuration, or plugin updater. An audit-only request remains audit-only.
+
+## Connect the scheduled review to actual behavior
+
+Use the installed Core's [conversation route](conversation-improvement.md) and
+one existing owner-private learning state. Read `learning status` before proposing
+another change; its `conversation_work` and readiness identify the next missing
+stage. Native Codex interprets the necessary exchanges, submits
+`review-conversation`, records actual scoped changes, then submits distinct
+activation and natural observations with `observe-conversation`.
+The product owns the record, scope, evidence and follow-up contract. Keep the
+scheduler prompt to purpose, authorized targets and reporting; do not duplicate
+this workflow or maintain an automation-specific improvement ledger.
+Usage aggregates are supporting investigation evidence, not semantic labels or
+proof that an instruction improved. Follow the owning product reference for
+project/common boundaries, unknown opportunities and effect limits.
+
+The scheduled routine itself must perform the bounded contextual follow-up in
+that route before selecting another candidate. Use later-work timestamps and
+model metadata to locate evidence, then read the actual requirement, assistant
+action/tool result and feedback to assess the trigger and criterion behavior.
+Check exact target exposure and comparison conditions separately. Missing
+invocation or model comparability leaves effect claims inconclusive but does not
+replace this content review. Record unavailable context explicitly rather than
+reporting no opportunity from metadata alone.
+
+Local native audit, semantic review, source changes, installed activation and
+Insights upload are separate paths. A stale central upload does not invalidate a
+working local audit. If installed Core lacks the required product commands,
+report the missing version/stage and use the reviewed native update path.
+Do not claim a scheduler-owned fallback closed that product gap or enable
+collection/manufacture delivery evidence to make an optional bridge pass.
 
 Use `groundline audit weekly --days 7 --review --json` for one audit, one
 recommendation, and a deterministic Korean readout. Use `report_ko` and `readout`
@@ -48,8 +82,9 @@ required safe fields. Do not sort cache directories to guess the active version
 or search the entire Codex home. Read only the relevant GroundLine configuration
 tables if needed. Run the installed `provider-smoke --require-installed --json`
 once before claiming package integrity; a manifest alone proves no live hook or
-server receipt. Resolve one active root and read this reference and its audit
-skill from that same installation. Missing required files or commands are
+server receipt. Resolve one active root and read this reference and the matching
+`optimize-codex-workflow` route when present. Do not require retired skill names.
+Missing required files or commands are
 UNVERIFIED, not grounds to substitute a different cache or unpublished binary.
 
 Before execution, choose how the full redacted result will survive tool return:
@@ -88,9 +123,11 @@ private-artifact scope; it is not a new collector, ledger or uploaded transcript
 
 For the final weekly report, preserve `report_ko` task samples, completed turns,
 usage source, observed/selected rollouts, and unresolved reasons; cross-check
-`readout`. Add only the previous-change disposition, relevant verified update,
-and selected improvement with evidence, acceptance, rollback, and remaining
-UNVERIFIED lanes. Distinguish GroundLine product defects from personal choices.
+`readout`. Add the previous-change disposition, bounded semantic findings, relevant
+verified update, and selected improvement's scope, actual application/activation
+state, follow-up opportunities, recurrence/unknown counts, acceptance, rollback
+and remaining UNVERIFIED lanes. Distinguish GroundLine product defects, shared
+neutral principles and project-local requirements.
 Do not claim savings from a proposed change, a simulation, or a successful install.
 
 Codex's latest numeric `state_<n>.sqlite` is selected read-only and its thread
@@ -100,9 +137,25 @@ them. Streaming projection retains only audit fields. Decoded input is limited
 to 1 GiB per rollout and 8 GiB per invocation, with at most 512 MiB of retained
 audit records. Other runtimes are excluded after reading their metadata.
 These are read budgets, not estimates of disk occupancy or model tokens.
+Native user content projection is streamed and bounded to 1,024 blocks and the
+per-record byte budget. Excess fails explicitly without truncating or rewriting
+the native message; images and unsupported bodies are never emitted.
 
 A weekly sample requires the latest lifecycle event to complete the turn.
 Previous completed turns do not make a resumed or interrupted task complete.
+An incoming native user message also resumes a thread before `task_started` is
+written. `scope.root_selection` and the typed `readout.root_selection` distinguish
+indexed candidate rows, readable window candidates and roots excluded because the
+latest turn is incomplete. A readable candidate can have unresolved timestamps;
+it does not prove a record belongs in the window. These are sequential filters with different units,
+not an additive population partition or a full-history denominator. Missing
+diagnostics in a saved observation stay unavailable, rather than becoming zero.
+For authorized conversation-pattern improvement, also inspect the relevant
+owner-selected ongoing exchanges through native history tools when needed;
+their feedback can be useful without qualifying as a completed audit sample.
+Reuse bounded relevant evidence instead of expanding collection just to reach
+the statistical minimum. A small sample limits the aggregate recommendation;
+it does not by itself rule out a directly evidenced product defect or correction.
 Activity audits include ongoing work, with `completed_root_coverage=false` on
 export. Unreadable or unclassified inputs make the result `PARTIAL` and remain
 visible as aggregate counts. Weekly analysis reads only the relevant indexed
@@ -148,6 +201,38 @@ subset of output. Do not add these subsets again or treat token totals as bills.
 Zero observed prompt text leaves prompt-shape ratios unavailable, not proof of
 zero user instructions. Guardian outcome, risk, effort, and workspace attribution
 remain unavailable unless their explicit availability fields establish otherwise.
+
+`activity.user_message_events` retains the native event count.
+Native `response_item` user messages are also inspected; source counts and
+representation duplicates are separate from unique input and extracted requests.
+Exact cross-source copies within a rollout-local input burst count once. Repeated
+requests from one source and later turns stay separate; this is representation
+matching, not authenticated user identity or semantic deduplication.
+`user_messages_with_text` and `prompt_shape` measure only locally extracted
+conversation text: literal requests, annotation comments plus their own request,
+question answers, and the own-request section of file mentions. Recognized
+automation and context envelopes are counted separately, not as user requests.
+Question wording, selected source quotes, and host instructions are excluded.
+`prompt_shape.input_classification` records revision 3, bounded category and source
+counts, and `complete` for observed native inputs; an empty input sample is not
+complete. Malformed recognized envelopes, unsupported blocks and unavailable text remain
+explicitly unobserved. This is envelope classification, not authenticated author
+identity. Scope terms are lexical hints, not semantic scope or rework evidence.
+`coverage_observation_complete` separately reports known extraction holes; their
+typed `coverage_issue_counts` mark the component PARTIAL without inventing parser
+errors. A context-only or empty native sample has no such hole but still has no
+usable observed request text, so `complete` remains false.
+The recommendation reports prompt classification as complete, incomplete, or
+unknown and withholds short-message ratios unless classification is complete.
+Do not pool older whole-envelope statistics with normalized text as improvement
+evidence, or revision-1 event-only counts with message coverage. Revision 3
+recognizes the current tagged ambient-browser block between response annotations
+and their own-request section; browser state remains excluded. Revision-2 saved
+observations remain unchanged and may retain a hole for that composition.
+Saved reports and native history remain unchanged. Read
+`readout.native_user_input_sources` alongside selection diagnostics: input zero
+can reflect envelope exclusions, missing supported text or a completed-only
+sample, and does not mean the owner gave no instructions.
 
 `provider_reported_usage.token_field_availability` distinguishes source-observed
 components from partial numeric accumulators. A missing/null/invalid source field

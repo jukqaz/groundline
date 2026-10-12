@@ -33,6 +33,9 @@ suites cover these product boundaries:
 | --- | --- |
 | Audit and saved review | Bounded read-only collection, selected-window coverage, private output, zero history scans on saved review, one current recommendation recomputation, fixed diagnostic reason totals with unchanged verdicts, unknown legacy/mismatched diagnostics, rejection of unsafe diagnostic values |
 | Whole-store diagnostic | Separate metadata scope; no claim that its counts are the weekly task-window population |
+| Conversation input | Automation/context separated from conversation text, quoted questions/source excluded, unresolved envelopes preserved, source/projected parity, incomplete prompt ratios withheld |
+| Conversation-derived learning | Typed origin/destination scope and exact target revision binding, project-dependent common transfer and cross-project rejection, own-correction/preceding-action evidence, non-error steering kept separate, pattern/link ownership, assessed opportunities and unknowns, exact recurrence ratios with unchanged safety and causal limits |
+| Retrospective conversation work | Product-owned review without fake delivery, immutable pre-edit actual-target capture and path/scope binding, verified after bytes, separate activation, matched criterion/context opportunities, retry identity, completed-chain archives with unresolved chains retained, bounded active readout and provenance-only source revision |
 | Delivery recording and summary | Local artifact hashes, proposed/requested/effective selections, failed and unknown outcomes, owned resources, duplicate ownership, private write-once receipts and symlink rejection |
 | Empirical routing | Current schema and native catalog, matched GPT-6 outcomes, protected quality, rework and total resources, incomplete evidence, no guessed model/effort pair |
 | Existing personal state | Read-only status, bounded rollback, unsupported-state refusal, interrupted recovery and preservation of user edits; no new trial creation |
@@ -73,6 +76,14 @@ actions and accepted output, not just which skill name was selected.
 | Apply an approved bounded change | Finish authorized implementation and relevant checks without redundant approval |
 | Requested change with project-specific constraints | Follow that project's requirements and preserve unrelated behavior; shared guidance does not introduce feature choices, technology rules, or acceptance criteria |
 | Two projects require different compatibility, test or release policies | Follow each project's owning guidance; neither project's choices become a shared default |
+| A user correction is investigated | Inspect the preceding action and applicable requirement; distinguish assistant error, new requirements, direction change, normal iteration and unknown instead of classifying the user's words alone |
+| Conversation-derived candidate targets common guidance | Verify the owning target and reviewed transferability; project-dependent content stays local, and typed hashes bind declarations without authenticating neutrality |
+| Local audit works while Insights upload or an opt-in learning profile is unavailable | Continue the installed Core conversation route without fake delivery or enabling collection; an older Core missing that route needs a reviewed product update |
+| A weekly routine requests conversation-pattern improvement | Resolve the installed product, revisit its outstanding records, then use its scoped change and follow-up workflow; do not duplicate product logic or create a scheduler-owned ledger |
+| An arbitrary before file matches the declared hash | Reject it as actual-change proof without a prior immutable snapshot of the same owning target |
+| Completed conversation chains exceed the active window | Preserve them in the existing archive, retain unresolved chains and the recent completed window, and disclose the active readout scope |
+| An applied pattern had no relevant natural follow-up opportunities | Keep effects pending; no opportunity or unassessed evidence is not a zero recurrence result |
+| Recurrence decreases but activation, criteria, quality or resources are unknown | Report observed counts and missing conditions separately; do not claim overall quality, efficiency or causal improvement |
 | A selected skill links several specialist routes | Read its entry and the references needed for the requested operation; no automatic load of the entire reference graph |
 | A relevant external skill or project offers a workflow pattern | Verify the current native interface and requested scope; adapt the useful principle without copying project policy, mandatory task creation or blanket reruns |
 | A failure has invocation, environment and product hypotheses | Inspect actual errors and use a focused check; retry only after a changed condition or under a bounded transient policy |
@@ -82,6 +93,7 @@ actions and accepted output, not just which skill name was selected.
 | Same task resumes or is refined | Reuse completed work and compatible authority; no unsolicited Goal, fork, or new task |
 | Narrow documentation change | Validate affected references; no automatic full build loop |
 | Previously passing check has changed inputs | Rerun the affected check; valid prior evidence remains reusable |
+| Normal-use checks pass but another condition fails | Preserve both conditions and outcomes; changing timing or inputs is not proof that the failure was fixed |
 | Source changes after another binary passed | Identify the checked revision/artifact and runtime; do not attach the old binary PASS to changed source |
 | Same failed probe, no changed condition | Diagnose the failure; no unbounded retry |
 | Explicit model/effort selection or no-delegation policy | Preserve it throughout selection and implementation |

@@ -1,6 +1,6 @@
 ---
 name: optimize-codex-workflow
-description: Use for requested Codex workflow improvements, model or effort selection, and quality/resource comparisons. Skip ordinary implementation and delegation.
+description: Use for requested Codex workflow or conversation-pattern improvements, model or effort selection, and quality/resource comparisons. Skip ordinary implementation and delegation.
 ---
 
 # Improve the requested Codex workflow
@@ -12,6 +12,16 @@ technology, compatibility or release policy.
 
 ## Read only the route needed
 
+- **Conversation-pattern improvement or an authorized weekly improvement:** use
+  [conversation improvement](../../references/conversation-improvement.md) to
+  interpret actual exchanges, apply one scoped guidance or skill change, and
+  revisit it during natural follow-up work. Audit ratios locate evidence; they
+  do not classify corrections or prove improvement. Project-specific details
+  stay in project-local targets. Local analysis needs no Insights upload.
+  For completion or verification-reuse patterns, consult
+  [task continuity](../../references/task-continuity.md)'s owning guidance.
+  Put ordinary-work defaults in the applicable native `AGENTS.md` layer;
+  selecting a common principle does not make this skill run for all work.
 - **Workflow improvement:** use [the optimization loop](../../references/codex-optimization-loop.md)
   and [task continuity](../../references/task-continuity.md) for scope, continuity,
   verification and completion. Consult [capability routing](../../references/capability-routing.md)

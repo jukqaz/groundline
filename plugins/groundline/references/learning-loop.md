@@ -5,10 +5,24 @@ Native Codex acquires evidence, authors the candidate and performs the task.
 GroundLine validates private records offline. Run only the affected part of the
 loop; ordinary work does not need a per-task audit or review gate.
 
+For conversation-pattern analysis and guidance or skill improvement, start with
+[conversation improvement](conversation-improvement.md). Native Codex interprets
+the actual sequence and performs the scoped edit. Core records the review,
+captures the actual target before editing, validates the change and activation,
+and evaluates natural follow-up in its existing private learning state. Local
+analysis works without Insights upload or an enabled learning profile. The
+optional managed learning commands below preserve their separate evidence and
+authorization contracts. An older Core missing the conversation route needs a
+reviewed product update. Do not replace the product with a scheduler-owned
+ledger, enable collection or hooks merely for analysis, or ask the owner to fill
+out JSON.
+
 Keep the observation and proposed change bound to their applicable project and
 target. Project behavior, technical choices and acceptance rules belong to local
 guidance; one project's outcome does not establish a shared default. Native
 Codex reviews the intended scope before applying or transporting a candidate.
+Use the conversation reference's transferability test before promoting a shared
+principle; recurring projects alone do not establish a global policy.
 
 ## Opt in to ongoing observations on one device
 
@@ -213,6 +227,39 @@ retry or analysis measurements are not filled with zero. Use
 
 Keep the existing `learning propose`, `environment plan/apply`, and
 `learning evaluate` paths for the scoped candidate and its natural follow-up.
+
+A conversation-backed proposal can include the typed optional `conversation`
+basis: pattern identity, declared observation and target scope, target before/
+after digests, interpretation, and the preceding assistant action and actual
+user correction evidence hashes. It binds an existing assistant-error outcome
+link with the same correction evidence; a retrospective interpretation without
+that direct link cannot qualify. Common targets also need an explicit
+project-neutral transferability review linked to a retained outcome in the
+proposal's evidence references. The contract recomputes
+the canonical scope digest from those typed fields. This validates consistency
+of declared evidence and scope, not the interpretation, text neutrality, or real
+file ownership. Native Codex verifies the actual target, owner, and diff.
+
+Optional `conversation_observations` in the existing evaluation input bind each
+natural follow-up outcome link to the same pattern and scope digest, with an
+observed opportunity and nullable recurrence. Every observation binds the exact
+selected receipt digest; recurrence also binds that link's own correction
+evidence. Missing or irrelevant opportunities cannot prove reduced recurrence.
+Optional `conversation_application` binds the actual operation digest, applied
+and activated times, exact target revision and instruction-read or skill-invoked
+evidence. Supply `learning evaluate --activation-evidence <private-evidence-file>`
+when this object is present; the CLI verifies the original private bytes' digest.
+Missing application/activation, work before application, or a follow-up snapshot
+before activation stays inconclusive. Direct evaluation also checks actual scoped
+task criterion/category and native-boundary records; missing records remain
+unobserved, rather than being inferred from a shared cohort label.
+These are recorded local observations, not authenticated provider activation.
+Keep existing quality,
+comparability, cost, operation, and adoption requirements; conversation metadata
+does not replace them. If the installed commands or a valid outcome link are
+absent, mark this managed bridge unavailable and retain the native private
+diff/follow-up record. Do not fabricate a delivery or acceptance to enter it.
+
 Read its state with the actual apply/rollback operation records:
 
 ```console
