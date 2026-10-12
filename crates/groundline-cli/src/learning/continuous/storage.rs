@@ -53,6 +53,19 @@ fn refs(value: &Value) -> Vec<String> {
         Some("groundline-learning-assessment") => {
             add(&value["input"]["task_sha256"]);
         }
+        Some("groundline-learning-conversation-snapshot") => {
+            add(&value["input"]["review_sha256"]);
+        }
+        Some("groundline-learning-conversation-change") => {
+            add(&value["input"]["review_sha256"]);
+            add(&value["input"]["snapshot_sha256"]);
+        }
+        Some(
+            "groundline-learning-conversation-activation"
+            | "groundline-learning-conversation-observation",
+        ) => {
+            add(&value["input"]["change_sha256"]);
+        }
         Some("groundline-learning-trial-authorization") => add(&value["proposal_sha256"]),
         Some("groundline-learning-duplicate-attempt") => add(&value["duplicate_of_sha256"]),
         Some("groundline-learning-evaluation-record") => {
@@ -103,6 +116,15 @@ pub(in crate::learning) fn load_archive_references(
         .flat_map(refs)
         .chain(extra.iter().cloned())
         .collect();
+    for record in records
+        .iter()
+        .filter(|record| record["kind"] == "groundline-learning-conversation-review")
+    {
+        let root = record["input_sha256"]
+            .as_str()
+            .ok_or_else(|| error("invalid_conversation_work_record"))?;
+        queue.extend(conversation_member_refs(state, root)?);
+    }
     let mut total: usize = records
         .iter()
         .map(|v| {
@@ -129,6 +151,12 @@ pub(in crate::learning) fn load_archive_references(
             return Err(error("active_reference_limit_exceeded"));
         }
         queue.extend(refs(&value));
+        if value["kind"] == "groundline-learning-conversation-review" {
+            let root = value["input_sha256"]
+                .as_str()
+                .ok_or_else(|| error("invalid_conversation_work_record"))?;
+            queue.extend(conversation_member_refs(state, root)?);
+        }
         records.push(value);
     }
     Ok(())
@@ -282,8 +310,9 @@ pub(super) fn compact(
     state: &mut State,
     profile: &contract::LearningProfile,
 ) -> Result<usize, ContractError> {
+    let conversation_moved = compact_conversations(state)?;
     if state.records.len() < 400 {
-        return Ok(0);
+        return Ok(conversation_moved);
     }
     let hashes: BTreeMap<_, _> = state
         .records
@@ -300,6 +329,11 @@ pub(super) fn compact(
             "groundline-learning-decision",
             "groundline-learning-evaluation-record",
             "groundline-learning-trial-authorization",
+            "groundline-learning-conversation-review",
+            "groundline-learning-conversation-snapshot",
+            "groundline-learning-conversation-change",
+            "groundline-learning-conversation-activation",
+            "groundline-learning-conversation-observation",
         ]
         .contains(&value["kind"].as_str().unwrap_or(""))
         {
@@ -443,7 +477,284 @@ pub(super) fn compact(
         archive_file(&source, &destination, &bytes)?;
     }
     super::super::validate_record_collection(&state.records)?;
+    Ok(moved + conversation_moved)
+}
+
+fn conversation_parent_hash<'a>(input: &'a Value, records: &'a [Value]) -> Option<&'a str> {
+    input["review_sha256"].as_str().or_else(|| {
+        let change = input["change_sha256"].as_str()?;
+        records.iter().find(|record| learning::content_sha256(record).ok().as_deref() == Some(change))?
+            ["input"]["review_sha256"].as_str()
+    })
+}
+
+fn conversation_root_input(input: &Value, records: &[Value]) -> Result<String, ContractError> {
+    if input["kind"] == "groundline-learning-conversation-review-input" {
+        let parsed: learning::conversation_work::Input = serde_json::from_value(input.clone())
+            .map_err(|_| error("invalid_conversation_work_input"))?;
+        return learning::content_sha256(
+            &serde_json::to_value(parsed).map_err(|_| error("serialization_failed"))?,
+        );
+    }
+    let parent = conversation_parent_hash(input, records)
+        .ok_or_else(|| error("conversation_review_reference_missing"))?;
+    records
+        .iter()
+        .find(|record| learning::content_sha256(record).ok().as_deref() == Some(parent))
+        .and_then(|record| record["input_sha256"].as_str())
+        .map(str::to_owned)
+        .ok_or_else(|| error("conversation_review_reference_missing"))
+}
+
+fn conversation_key(input: &Value, records: &[Value]) -> Result<String, ContractError> {
+    let parent_key = |field: &str| -> Result<Value, ContractError> {
+        let hash = input[field]
+            .as_str()
+            .ok_or_else(|| error("invalid_conversation_work_input"))?;
+        let record = records
+            .iter()
+            .find(|record| learning::content_sha256(record).ok().as_deref() == Some(hash))
+            .ok_or_else(|| error("conversation_reference_missing"))?;
+        Ok(record["input_sha256"].clone())
+    };
+    let key = match input["kind"].as_str() {
+        Some("groundline-learning-conversation-review-input") => {
+            json!(["review", input["feedback_ref_sha256"], input["pattern_id"]])
+        }
+        Some("groundline-learning-conversation-snapshot-input") => json!([
+            "snapshot",
+            parent_key("review_sha256")?,
+            input["target_binding_sha256"],
+            input["captured_at_utc"]
+        ]),
+        Some("groundline-learning-conversation-change-input") => json!([
+            "change",
+            parent_key("review_sha256")?,
+            input["target"]["target_id"]
+        ]),
+        Some("groundline-learning-conversation-activation-input") => json!([
+            "activation",
+            parent_key("change_sha256")?,
+            input["evidence_sha256"]
+        ]),
+        Some("groundline-learning-conversation-observation-input") => json!([
+            "observation",
+            parent_key("change_sha256")?,
+            input["source_work_sha256"]
+        ]),
+        _ => return Err(error("invalid_conversation_work_input")),
+    };
+    learning::content_sha256(
+        &json!({"kind":"groundline-learning-conversation-archive-key","key":key}),
+    )
+}
+
+fn conversation_members_path(state: &Path, root: &str) -> Result<PathBuf, ContractError> {
+    if !learning::digest(root) {
+        return Err(error("invalid_archive_reference"));
+    }
+    Ok(state.join("archive/conversation-chains").join(root))
+}
+
+fn conversation_member_refs(state_path: &Path, root: &str) -> Result<Vec<String>, ContractError> {
+    let path = conversation_members_path(state_path, root)?;
+    if fs::symlink_metadata(&path).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound) {
+        return Ok(Vec::new());
+    }
+    let directory = directory_handle(&path, true)?;
+    let entries = read_directory(&path, &directory, false)?;
+    let mut extra = Vec::new();
+    for (_, index) in entries {
+        let hash = index["record_sha256"]
+            .as_str()
+            .filter(|hash| learning::digest(hash))
+            .ok_or_else(|| error("invalid_conversation_archive_index"))?;
+        if index["kind"] != "groundline-learning-conversation-archive-member"
+            || index["schema"] != 1
+            || index["root_input_sha256"] != root
+        {
+            return Err(error("invalid_conversation_archive_index"));
+        }
+        extra.push(hash.to_owned());
+    }
+    Ok(extra)
+}
+
+fn load_conversation_members(state: &mut State, root: &str) -> Result<(), ContractError> {
+    let extra = conversation_member_refs(&state.path, root)?;
+    load_archive_references(&state.path, &mut state.records, &extra)?;
+    super::super::validate_record_collection(&state.records)
+}
+
+/// Restore one checked chain by direct private indexes. This never scans all
+/// historical records or treats an archived exact retry as new observed work.
+pub(in crate::learning) fn restore_conversation_replay(
+    state: &mut State,
+    input: &Value,
+) -> Result<Option<Value>, ContractError> {
+    let extra: Vec<_> = ["review_sha256", "change_sha256", "snapshot_sha256"]
+        .into_iter()
+        .filter_map(|field| {
+            input[field]
+                .as_str()
+                .filter(|hash| learning::digest(hash))
+                .map(str::to_owned)
+        })
+        .collect();
+    load_archive_references(&state.path, &mut state.records, &extra)?;
+    let key = conversation_key(input, &state.records)?;
+    let path = input_index_path(&state.path, &key)?;
+    let Some(bytes) = optional_private(&path)? else {
+        if input["kind"] != "groundline-learning-conversation-review-input" {
+            let root = conversation_root_input(input, &state.records)?;
+            load_conversation_members(state, &root)?;
+        }
+        return Ok(None);
+    };
+    let index = parse(&bytes)?;
+    let hash = index["record_sha256"]
+        .as_str()
+        .filter(|hash| learning::digest(hash))
+        .ok_or_else(|| error("invalid_conversation_archive_index"))?;
+    let root = index["root_input_sha256"]
+        .as_str()
+        .filter(|hash| learning::digest(hash))
+        .ok_or_else(|| error("invalid_conversation_archive_index"))?;
+    if index["kind"] != "groundline-learning-conversation-archive-key"
+        || index["schema"] != 1
+        || index["key_sha256"] != key
+    {
+        return Err(error("invalid_conversation_archive_index"));
+    }
+    load_archive_references(&state.path, &mut state.records, &[hash.to_owned()])?;
+    load_conversation_members(state, root)?;
+    let record = state
+        .records
+        .iter()
+        .find(|record| learning::content_sha256(record).ok().as_deref() == Some(hash))
+        .ok_or_else(|| error("archive_record_missing"))?;
+    if conversation_key(&record["input"], &state.records)? != key
+        || conversation_root_input(&record["input"], &state.records)? != root
+        || index["input_sha256"] != record["input_sha256"]
+    {
+        return Err(error("invalid_conversation_archive_index"));
+    }
+    let parsed: learning::conversation_work::Input = serde_json::from_value(input.clone())
+        .map_err(|_| error("invalid_conversation_work_input"))?;
+    let normalized = serde_json::to_value(parsed).map_err(|_| error("serialization_failed"))?;
+    if record["input"] != normalized {
+        return Err(error("conversation_duplicate_conflict"));
+    }
+    Ok(Some(record.clone()))
+}
+
+pub(in crate::learning) fn compact_conversations(
+    state: &mut State,
+) -> Result<usize, ContractError> {
+    if state.records.len() < 400 {
+        return Ok(0);
+    }
+    let groups = learning::conversation_work::compactable_chain_hashes(&state.records)?;
+    let hashes: BTreeMap<_, _> = state
+        .records
+        .iter()
+        .map(|record| Ok((learning::content_sha256(record)?, record)))
+        .collect::<Result<_, ContractError>>()?;
+    let mut groups: Vec<_> = groups
+        .into_iter()
+        .map(|(root, members)| {
+            let latest = members
+                .iter()
+                .filter_map(|hash| hashes.get(hash))
+                .filter_map(|record| record["recorded_at_utc"].as_str())
+                .filter_map(|time| chrono::DateTime::parse_from_rfc3339(time).ok())
+                .max();
+            (latest, root, members)
+        })
+        .collect();
+    groups.sort();
+    let mut remove: BTreeSet<_> = groups
+        .into_iter()
+        .rev()
+        .skip(32)
+        .flat_map(|(_, _, members)| members)
+        .collect();
+    // A retained record's transitive references always win over eligibility.
+    loop {
+        let protected: BTreeSet<_> = hashes
+            .iter()
+            .filter(|(hash, _)| !remove.contains(*hash))
+            .flat_map(|(_, record)| refs(record))
+            .collect();
+        let before = remove.len();
+        remove.retain(|hash| !protected.contains(hash));
+        if remove.len() == before {
+            break;
+        }
+    }
+    if remove.is_empty() {
+        return Ok(0);
+    }
+    let archive = state.path.join("archive");
+    ensure_private_directory(&archive)?;
+    let inputs = archive.join("inputs");
+    ensure_private_directory(&inputs)?;
+    let chains = archive.join("conversation-chains");
+    ensure_private_directory(&chains)?;
+    for hash in &remove {
+        let record = hashes[hash];
+        let root = conversation_root_input(&record["input"], &state.records)?;
+        let key = conversation_key(&record["input"], &state.records)?;
+        let index_path = input_index_path(&state.path, &key)?;
+        ensure_private_directory(index_path.parent().ok_or_else(|| error("invalid_path"))?)?;
+        write_draft(
+            &index_path,
+            &json!({"kind":"groundline-learning-conversation-archive-key","schema":1,
+            "key_sha256":key,"root_input_sha256":root,"input_sha256":record["input_sha256"],"record_sha256":hash}),
+            state,
+        )?;
+        let members = conversation_members_path(&state.path, &root)?;
+        ensure_private_directory(&members)?;
+        write_draft(
+            &members.join(format!("{hash}.json")),
+            &json!({"kind":"groundline-learning-conversation-archive-member",
+            "schema":1,"root_input_sha256":root,"record_sha256":hash}),
+            state,
+        )?;
+    }
+    let mut moved = 0;
+    for hash in &remove {
+        let source = state.path.join(format!("{hash}.json"));
+        let Some(bytes) = optional_private(&source)? else {
+            continue;
+        };
+        let destination = record_path(&state.path, hash)?;
+        ensure_private_directory(destination.parent().ok_or_else(|| error("invalid_path"))?)?;
+        archive_file(&source, &destination, &bytes)?;
+        moved += 1;
+    }
+    state.records.retain(|record| {
+        learning::content_sha256(record).is_ok_and(|hash| !remove.contains(&hash))
+    });
+    super::super::validate_record_collection(&state.records)?;
     Ok(moved)
+}
+
+pub(in crate::learning) fn conversation_archive_summary(
+    state: &State,
+) -> Result<Value, ContractError> {
+    let mut referenced_cold = 0;
+    for record in &state.records {
+        let hash = learning::content_sha256(record)?;
+        if archived_record(&state.path, &hash)?.is_some() {
+            referenced_cold += 1;
+        }
+    }
+    Ok(
+        json!({"coverage_scope":"bounded_active_reference_closure","active_record_count":state.records.len(),
+        "referenced_archive_record_count":referenced_cold,"archived_history_count":null,
+        "historical_coverage_complete":false,"completed_chain_retention":32,"maintenance_threshold":400}),
+    )
 }
 
 pub(super) fn include_receipts(

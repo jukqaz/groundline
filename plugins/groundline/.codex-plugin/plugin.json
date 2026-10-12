@@ -1,7 +1,7 @@
 {
   "name": "groundline",
-  "version": "2026.1008.5",
-  "description": "Local Codex usage evidence and GPT-6 outcome comparisons.",
+  "version": "2026.1012.1",
+  "description": "Improve Codex behavior from scoped conversation feedback and actual follow-up.",
   "author": {
     "name": "GroundLine contributors",
     "url": "https://github.com/jukqaz/groundline"
@@ -24,8 +24,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "GroundLine",
-    "shortDescription": "Compare Codex work quality, usage, and model choices.",
-    "longDescription": "GroundLine connects bounded Codex usage observations with private delivery outcomes and GPT-6 model/effort comparisons. Three focused skills cover installation, history evidence, and task-scoped optimization. Core stays offline; optional Insights owns consented collection and network delivery. Native Codex owns execution, agents, worktrees, permissions, settings, and upgrades. Missing measurements remain unknown, and historical personal trials have status and recovery commands only.",
+    "shortDescription": "Improve Codex from conversation feedback and follow-up.",
+    "longDescription": "GroundLine connects contextual conversation feedback, scoped guidance or skill changes, activation, and natural follow-up in its private learning store. Native Codex interprets the original exchanges; Core validates evidence, project boundaries, actual target changes, and observable opportunities without inventing delivery or cost results. Bounded usage audits and direct outcome comparisons provide separate supporting evidence. Three focused skills cover installation, history evidence, and requested workflow improvement. Core stays offline; optional Insights owns consented aggregate upload. Codex owns execution, permissions, model settings, and upgrades.",
     "developerName": "GroundLine",
     "category": "Coding",
     "capabilities": [
@@ -36,7 +36,7 @@
     "defaultPrompt": [
       "Use $groundline:align-agent-home to install and verify GroundLine while preserving my settings.",
       "Use $groundline:audit-agent-history to inspect bounded usage evidence.",
-      "Use $groundline:optimize-codex-workflow to choose GPT-6 models, effort and delegation using delivered outcomes."
+      "Use $groundline:optimize-codex-workflow to improve scoped guidance from conversation feedback and check natural follow-up."
     ],
     "websiteURL": "https://github.com/jukqaz/groundline",
     "privacyPolicyURL": "https://github.com/jukqaz/groundline/blob/main/docs/privacy.md",

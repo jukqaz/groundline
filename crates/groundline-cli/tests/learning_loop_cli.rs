@@ -1360,12 +1360,16 @@ impl Fixture {
         linked["link_sha256"].as_str().unwrap().to_owned()
     }
 
-    fn propose(&self, evidence: &str) -> (String, String) {
+    fn proposal_input(&self, evidence: &str) -> (Value, String) {
+        self.proposal_input_at_revision(evidence, "baseline-1")
+    }
+
+    fn proposal_input_at_revision(&self, evidence: &str, basis_revision: &str) -> (Value, String) {
         let proposal = self.root.join("patch.json");
         private_json(
             &proposal,
             &json!({"kind":"groundline-environment-proposal","schema":1,
-            "proposal_id":"workflow-change","basis_revision":"baseline-1","source_revision":"source-1",
+            "proposal_id":"workflow-change","basis_revision":basis_revision,"source_revision":"source-1",
             "authority_ref":"user-request-1","changes":[{"target_id":"workflow","content":self.after}]}),
         );
         let plan = run(
@@ -1378,19 +1382,22 @@ impl Fixture {
             true,
         );
         let plan_sha = plan["plan_sha256"].as_str().unwrap().to_owned();
-        let candidate = self.root.join("candidate.json");
-        private_json(
-            &candidate,
-            &json!({"kind":"groundline-learning-proposal-input","schema":1,
+        let input = json!({"kind":"groundline-learning-proposal-input","schema":1,
             "proposal_id":"workflow-change","evidence_refs":[evidence],"scope_sha256":hash(b"workflow"),
-            "basis_revision":"baseline-1","source_revision":"source-1","source":null,
+            "basis_revision":basis_revision,"source_revision":"source-1","source":null,
             "plan_sha256":plan_sha,"status":"candidate","reason":"Observe one bounded transition",
             "target":{"target_id":"workflow","kind":"skill","change":"modify",
                 "before_sha256":hash(self.before.as_bytes()),"after_sha256":hash(self.after.as_bytes()),
                 "intended_trigger":"Same work","hypothesis":"Reduce friction","expected_result":"Direct outcome",
                 "falsification":"More rework","authority_ref":"user-request-1","rollback_ref":hash(self.before.as_bytes())},
-            "analysis":null}),
-        );
+            "analysis":null});
+        (input, plan_sha)
+    }
+
+    fn propose(&self, evidence: &str) -> (String, String) {
+        let (input, plan_sha) = self.proposal_input(evidence);
+        let candidate = self.root.join("candidate.json");
+        private_json(&candidate, &input);
         let proposed = run(
             &self.root,
             &["learning", "propose"],
@@ -1439,6 +1446,503 @@ impl Fixture {
         paths.extend(operations.iter().map(|p| ("--operation", *p)));
         run(&self.root, &["learning", "status"], &paths, true)
     }
+
+    // These observations and delivery receipts are synthetic CLI fixtures. The
+    // immutable links exercise local binding without claiming native activation
+    // or a measured improvement in a real conversation.
+    fn conversation_link(
+        &self,
+        id: &str,
+        runtime_version: Option<&str>,
+        correction: Option<&str>,
+    ) -> String {
+        let native = self.root.join(format!("{id}-native-observation.json"));
+        let native_sha = private_json(&native, &json!({"fixture_runtime":runtime_version}));
+        let observation = self.root.join(format!("{id}-observation.json"));
+        private_json(
+            &observation,
+            &json!({"kind":"groundline-learning-capture-input","schema":1,
+            "unit_hash":hash(id.as_bytes()),"cohort_sha256":hash(b"cohort"),"phase":"implementation",
+            "runtime":runtime_version.map(|version|json!({"family":"codex_cli","version":version,
+                "evidence_sha256":native_sha}))}),
+        );
+        let mut paths = vec![
+            ("--environment-state", self.environment.as_path()),
+            ("--observation", observation.as_path()),
+            ("--state", self.learning.as_path()),
+        ];
+        if runtime_version.is_some() {
+            paths.push(("--native-evidence", native.as_path()));
+        }
+        let captured = run(
+            &self.root,
+            &["learning", "capture", "--target", "workflow"],
+            &paths,
+            true,
+        );
+        let receipt = self.receipt(id, &chrono::Utc::now().to_rfc3339());
+        let mut receipt_value: Value =
+            serde_json::from_slice(&fs::read(&receipt).unwrap()).unwrap();
+        let selection = json!({"model":"gpt-6.1-sol","effort":"medium",
+            "evidence_sha256":hash(format!("{id}-selection").as_bytes())});
+        receipt_value["requested"] = selection.clone();
+        receipt_value["effective"] = selection.clone();
+        receipt_value["observed_selection_matches_requested"] = json!(true);
+        receipt_value["verification"]["status"] = json!("verified");
+        receipt_value["verification"]["evidence_kind"] = json!("runtime_check");
+        receipt_value["resources"] = json!({"complete":true,"wall_duration_ms":100,
+            "entries":[{"owner":"root","unit_hash":hash(id.as_bytes()),
+                "response_hash":hash(format!("{id}-response").as_bytes()),"effective":selection,
+                "input_tokens":7,"cached_input_tokens":0,"output_tokens":3,
+                "reasoning_output_tokens":1,"total_tokens":10}]});
+        private_json(&receipt, &receipt_value);
+        let draft = self.root.join(format!("{id}-link.json"));
+        run(
+            &self.root,
+            &[
+                "learning",
+                "prepare",
+                "--snapshot",
+                captured["snapshot_sha256"].as_str().unwrap(),
+            ],
+            &[
+                ("--receipt", &receipt),
+                ("--state", &self.learning),
+                ("--output", &draft),
+            ],
+            true,
+        );
+        if let Some(correction) = correction {
+            let mut input: Value = serde_json::from_slice(&fs::read(&draft).unwrap()).unwrap();
+            input["correction_kind"] = json!("assistant_error");
+            input["correction_evidence_sha256"] = json!(correction);
+            private_json(&draft, &input);
+        }
+        let linked = run(
+            &self.root,
+            &["learning", "link-outcome"],
+            &[
+                ("--input", &draft),
+                ("--receipt", &receipt),
+                ("--state", &self.learning),
+            ],
+            true,
+        );
+        linked["link_sha256"].as_str().unwrap().to_owned()
+    }
+}
+
+#[test]
+fn conversation_learning_binds_project_origin_and_tracks_actual_followup_opportunities() {
+    use groundline_contracts::learning::conversation::{
+        ConversationBasis, ConversationScope, ConversationTarget, CorrectionInterpretation,
+        TransferabilityReview,
+    };
+
+    let mut fixture = Fixture::new();
+    let initial = fixture.apply_independent_generation(&fixture.environment, "initial-generation");
+    fixture.before = fixture.after;
+    fixture.after =
+        "---\nname: workflow\ndescription: fixture\n---\nPreserve the requested scope.\n";
+    let correction = hash(b"Synthetic authored correction: keep this project workflow scoped.");
+    let before_link =
+        fixture.conversation_link("conversation-before", Some("fixture-1"), Some(&correction));
+    // Advance the desired baseline through the supported registration lineage;
+    // a candidate cannot bypass the environment's desired-content checks.
+    let baseline_path = fixture.root.join("baseline.json");
+    let mut baseline: Value = serde_json::from_slice(&fs::read(&baseline_path).unwrap()).unwrap();
+    baseline["revision"] = json!("baseline-2");
+    baseline["parent_revision"] = json!("baseline-1");
+    baseline["managed_targets"][0]["desired_sha256"] = json!(hash(fixture.after.as_bytes()));
+    private_json(&baseline_path, &baseline);
+    run(
+        &fixture.root,
+        &["environment", "register"],
+        &[
+            ("--state-dir", &fixture.environment),
+            ("--baseline", &baseline_path),
+            ("--bindings", &fixture.root.join("bindings.json")),
+        ],
+        true,
+    );
+    let (mut candidate, plan_sha) = fixture.proposal_input_at_revision(&before_link, "baseline-2");
+    let project = ConversationScope::Project {
+        project_sha256: hash(b"fixture-project"),
+    };
+    let basis = ConversationBasis {
+        pattern_id: "scope-expanded-without-request".into(),
+        observed_scope: project.clone(),
+        target: ConversationTarget {
+            scope: project,
+            target_id: "workflow".into(),
+            kind: "skill".into(),
+            before_sha256: hash(fixture.before.as_bytes()),
+            after_sha256: hash(fixture.after.as_bytes()),
+        },
+        evidence_link_sha256: before_link.clone(),
+        preceding_assistant_action_sha256: hash(b"Synthetic preceding assistant scope expansion."),
+        user_correction_sha256: correction.clone(),
+        interpretation: CorrectionInterpretation::AssistantError,
+        project_dependent: true,
+        transferability_review: None,
+    };
+    candidate["scope_sha256"] = json!(basis.scope_sha256().unwrap());
+    candidate["conversation"] = serde_json::to_value(&basis).unwrap();
+    let receipt: Value = serde_json::from_slice(
+        &fs::read(fixture.deliveries.join("conversation-before.json")).unwrap(),
+    )
+    .unwrap();
+    let mut resources = receipt["resources"].clone();
+    resources["entries"][0]["unit_hash"] = json!(hash(b"analysis"));
+    resources["entries"][0]["response_hash"] = json!(hash(b"analysis-response"));
+    candidate["analysis"] = json!({"unit_hash":hash(b"analysis"),"resources":resources});
+    let input = fixture.root.join("conversation-candidate.json");
+    let records_bytes = || {
+        fs::read_dir(&fixture.learning)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.extension().and_then(|extension| extension.to_str()) == Some("json")
+            })
+            .map(|path| {
+                (
+                    path.file_name().unwrap().to_owned(),
+                    fs::read(path).unwrap(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>()
+    };
+    let records_before = records_bytes();
+    for project_dependent in [true, false] {
+        let mut common = basis.clone();
+        common.target.scope = ConversationScope::Common;
+        common.project_dependent = project_dependent;
+        common.transferability_review = project_dependent.then(|| TransferabilityReview {
+            project_neutral: true,
+            evidence_sha256: before_link.clone(),
+        });
+        let mut invalid = candidate.clone();
+        invalid["scope_sha256"] = json!(common.scope_sha256().unwrap());
+        invalid["conversation"] = serde_json::to_value(common).unwrap();
+        private_json(&input, &invalid);
+        assert_eq!(
+            run(
+                &fixture.root,
+                &["learning", "propose"],
+                &[("--input", &input), ("--state", &fixture.learning)],
+                false,
+            )["error"],
+            "learning_conversation_common_scope_unreviewed"
+        );
+        assert_eq!(records_bytes(), records_before);
+        assert_eq!(
+            fs::read_to_string(fixture.root.join("skills/SKILL.md")).unwrap(),
+            fixture.before
+        );
+    }
+    let mut rebound = candidate.clone();
+    rebound["conversation"]["user_correction_sha256"] =
+        json!(hash(b"Unrelated synthetic correction"));
+    private_json(&input, &rebound);
+    assert_eq!(
+        run(
+            &fixture.root,
+            &["learning", "propose"],
+            &[("--input", &input), ("--state", &fixture.learning)],
+            false,
+        )["error"],
+        "learning_conversation_origin_evidence_mismatch"
+    );
+    assert_eq!(records_bytes(), records_before);
+    private_json(&input, &candidate);
+    let original_input = fs::read(&input).unwrap();
+    let proposed = run(
+        &fixture.root,
+        &["learning", "propose"],
+        &[("--input", &input), ("--state", &fixture.learning)],
+        true,
+    );
+    assert_eq!(proposed["status"], "PROPOSED");
+    let saved_path = fixture.learning.join(format!(
+        "{}.json",
+        proposed["proposal_sha256"].as_str().unwrap()
+    ));
+    let saved_bytes = fs::read(&saved_path).unwrap();
+    let saved: Value = serde_json::from_slice(&saved_bytes).unwrap();
+    assert_eq!(saved["conversation"], candidate["conversation"]);
+    assert_eq!(saved["scope_sha256"], basis.scope_sha256().unwrap());
+    assert_eq!(
+        run(
+            &fixture.root,
+            &["learning", "propose"],
+            &[("--input", &input), ("--state", &fixture.learning)],
+            true,
+        )["status"],
+        "DUPLICATE_SUPPRESSED"
+    );
+    assert_eq!(fs::read(&saved_path).unwrap(), saved_bytes);
+    assert_eq!(fs::read(&input).unwrap(), original_input);
+
+    let operation = fixture.apply();
+    let applied_at = chrono::Utc::now().to_rfc3339();
+    let operation_value: Value = serde_json::from_slice(&fs::read(&operation).unwrap()).unwrap();
+    let activation_evidence = fixture.root.join("synthetic-activation.json");
+    let activation_sha = private_json(
+        &activation_evidence,
+        &json!({"fixture_only":true,"activation":"skill_invoked","target":"workflow"}),
+    );
+    let activated_at = chrono::Utc::now().to_rfc3339();
+    assert_eq!(
+        fs::read_to_string(fixture.root.join("skills/SKILL.md")).unwrap(),
+        fixture.after
+    );
+    assert_eq!(
+        fixture.status(&[&operation])["candidates"][0]["evaluation_pending"],
+        true
+    );
+    let after_link = fixture.conversation_link("conversation-after", Some("fixture-1"), None);
+    let link_value = |reference: &str| -> Value {
+        serde_json::from_slice(
+            &fs::read(fixture.learning.join(format!("{reference}.json"))).unwrap(),
+        )
+        .unwrap()
+    };
+    let before_value = link_value(&before_link);
+    let after_value = link_value(&after_link);
+    let evaluation = fixture.root.join("conversation-evaluation.json");
+    let mut evaluation_input = json!({"kind":"groundline-learning-evaluation-input","schema":1,
+    "proposal_id":"workflow-change","baseline_revision":initial["plan_sha256"],
+    "proposal_revision":plan_sha,"baseline_refs":[before_link],"followup_refs":[after_link],
+        "conversation_application":{"operation_content_sha256":groundline_contracts::learning::content_sha256(&operation_value).unwrap(),
+            "applied_at_utc":applied_at,"activated_at_utc":activated_at,
+            "target_sha256":hash(fixture.after.as_bytes()),"activation_kind":"skill_invoked",
+            "activation_evidence_sha256":activation_sha},
+    "conversation_observations":[
+        {"link_sha256":before_link,"pattern_id":basis.pattern_id,"scope_sha256":basis.scope_sha256().unwrap(),
+                "opportunity":true,"recurred":true,"evidence_sha256":before_value["receipt_sha256"],
+            "recurrence_evidence_sha256":correction},
+        {"link_sha256":after_link,"pattern_id":basis.pattern_id,"scope_sha256":basis.scope_sha256().unwrap(),
+                "opportunity":true,"recurred":false,"evidence_sha256":after_value["receipt_sha256"],
+            "recurrence_evidence_sha256":null}
+    ]});
+    let evaluate = |input: &Value, success: bool| {
+        private_json(&evaluation, input);
+        let mut paths = vec![
+            ("--input", evaluation.as_path()),
+            ("--deliveries", fixture.deliveries.as_path()),
+            ("--operation", operation.as_path()),
+            ("--state", fixture.learning.as_path()),
+        ];
+        if input["conversation_application"].is_object() {
+            paths.push(("--activation-evidence", activation_evidence.as_path()));
+        }
+        run(&fixture.root, &["learning", "evaluate"], &paths, success)
+    };
+    let records_before = records_bytes();
+    private_json(&evaluation, &evaluation_input);
+    assert_eq!(
+        run(
+            &fixture.root,
+            &["learning", "evaluate"],
+            &[
+                ("--input", &evaluation),
+                ("--deliveries", &fixture.deliveries),
+                ("--operation", &operation),
+                ("--state", &fixture.learning),
+            ],
+            false,
+        )["error"],
+        "learning_conversation_activation_evidence_required"
+    );
+    let mut activation_rebound = evaluation_input.clone();
+    activation_rebound["conversation_application"]["activation_evidence_sha256"] =
+        json!(hash(b"Unrelated activation bytes"));
+    assert_eq!(
+        evaluate(&activation_rebound, false)["error"],
+        "learning_conversation_activation_evidence_mismatch"
+    );
+    assert_eq!(records_bytes(), records_before);
+    for (field, value, expected) in [
+        (
+            "pattern_id",
+            json!("unrelated-pattern"),
+            "learning_invalid_conversation_observation",
+        ),
+        (
+            "scope_sha256",
+            json!(hash(b"other-project")),
+            "learning_invalid_conversation_observation",
+        ),
+        (
+            "link_sha256",
+            json!(hash(b"unrelated-link")),
+            "learning_conversation_observation_link_missing",
+        ),
+        (
+            "evidence_sha256",
+            json!(hash(b"unrelated-receipt")),
+            "learning_conversation_observation_receipt_mismatch",
+        ),
+    ] {
+        let mut invalid = evaluation_input.clone();
+        invalid["conversation_observations"][1][field] = value;
+        assert_eq!(evaluate(&invalid, false)["error"], expected);
+        assert_eq!(records_bytes(), records_before);
+    }
+
+    let mut application_missing = evaluation_input.clone();
+    application_missing
+        .as_object_mut()
+        .unwrap()
+        .remove("conversation_application");
+    assert_eq!(
+        evaluate(&application_missing, true)["recurrence_comparison"]["comparison"],
+        "inconclusive"
+    );
+    assert_eq!(
+        fixture.status(&[&operation])["candidates"][0]["evaluation_pending"],
+        true
+    );
+    let mut baseline_after_application = evaluation_input.clone();
+    let too_early =
+        (chrono::DateTime::parse_from_rfc3339(before_value["observed_at_utc"].as_str().unwrap())
+            .unwrap()
+            - chrono::Duration::seconds(1))
+        .to_rfc3339();
+    baseline_after_application["conversation_application"]["applied_at_utc"] = json!(too_early);
+    baseline_after_application["conversation_application"]["activated_at_utc"] = json!(too_early);
+    assert_eq!(
+        evaluate(&baseline_after_application, true)["recurrence_comparison"]["comparison"],
+        "inconclusive"
+    );
+    let mut activation_after_followup = evaluation_input.clone();
+    activation_after_followup["conversation_application"]["activated_at_utc"] =
+        json!(chrono::Utc::now().to_rfc3339());
+    assert_eq!(
+        evaluate(&activation_after_followup, true)["recurrence_comparison"]["comparison"],
+        "inconclusive"
+    );
+    assert_eq!(
+        fixture.status(&[&operation])["candidates"][0]["evaluation_pending"],
+        true
+    );
+    let mut unexposed = evaluation_input.clone();
+    unexposed["conversation_observations"][1]["opportunity"] = json!(false);
+    unexposed["conversation_observations"][1]["recurred"] = Value::Null;
+    let unexposed_result = evaluate(&unexposed, true);
+    assert_eq!(
+        unexposed_result["recurrence_comparison"]["comparison"],
+        "inconclusive"
+    );
+    assert_eq!(
+        unexposed_result["recurrence_comparison"]["followup"]["denominator"],
+        0
+    );
+    assert_eq!(
+        unexposed_result["recurrence_comparison"]["followup"]["no_opportunity_count"],
+        1
+    );
+    assert_eq!(
+        fixture.status(&[&operation])["candidates"][0]["evaluation_pending"],
+        true
+    );
+
+    for (id, version, expected_reason) in [
+        (
+            "runtime-unavailable",
+            None,
+            "execution_observation_mismatch",
+        ),
+        (
+            "runtime-mismatched",
+            Some("fixture-2"),
+            "execution_observation_mismatch",
+        ),
+    ] {
+        let link = fixture.conversation_link(id, version, None);
+        let mut incomparable = evaluation_input.clone();
+        incomparable["followup_refs"] = json!([link]);
+        incomparable["conversation_observations"][1]["link_sha256"] = json!(link);
+        incomparable["conversation_observations"][1]["evidence_sha256"] =
+            link_value(&link)["receipt_sha256"].clone();
+        let result = evaluate(&incomparable, true);
+        assert_eq!(result["status"], "INCONCLUSIVE");
+        assert_eq!(
+            result["recurrence_comparison"]["comparison"],
+            "inconclusive"
+        );
+        assert!(
+            result["comparison_reasons"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(expected_reason))
+        );
+        assert_eq!(
+            fixture.status(&[&operation])["candidates"][0]["evaluation_pending"],
+            true
+        );
+    }
+
+    let result = evaluate(&evaluation_input, true);
+    // Manual captures provide declared opportunities, but do not replace
+    // native scoped task criteria or a verified followup behavior observation.
+    assert_eq!(result["status"], "INCONCLUSIVE");
+    assert_eq!(
+        result["recurrence_comparison"]["comparison"],
+        "inconclusive"
+    );
+    assert!(
+        result["comparison_reasons"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("scoped_completion_criterion_unobserved"))
+    );
+    assert_eq!(result["recurrence_comparison"]["baseline"]["numerator"], 1);
+    assert_eq!(
+        result["recurrence_comparison"]["baseline"]["denominator"],
+        1
+    );
+    assert_eq!(result["recurrence_comparison"]["followup"]["numerator"], 0);
+    assert_eq!(
+        result["recurrence_comparison"]["followup"]["denominator"],
+        1
+    );
+    for field in ["causal_effect_verified", "efficiency_improvement_verified"] {
+        assert_eq!(result[field], false);
+        assert_eq!(result["recurrence_comparison"][field], false);
+    }
+    assert_eq!(
+        result["recurrence_comparison"]["semantic_authenticity_verified"],
+        false
+    );
+    let status = fixture.status(&[&operation]);
+    let candidate = &status["candidates"][0];
+    assert_eq!(
+        candidate["conversation"]["target"]["scope"]["kind"],
+        "project"
+    );
+    assert_eq!(candidate["application"]["state"], "APPLIED");
+    assert_eq!(candidate["evaluation_pending"], true);
+    let readout = candidate["evaluations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|value| value["evaluation_sha256"] == result["evaluation_sha256"])
+        .unwrap();
+    assert_eq!(
+        readout["recurrence_comparison"],
+        result["recurrence_comparison"]
+    );
+    assert_eq!(fs::read(&saved_path).unwrap(), saved_bytes);
+    // Absence of a per-pattern observation is different from a measured zero.
+    evaluation_input
+        .as_object_mut()
+        .unwrap()
+        .remove("conversation_observations");
+    assert_eq!(
+        evaluate(&evaluation_input, true)["recurrence_comparison"]["comparison"],
+        "inconclusive"
+    );
 }
 
 #[test]

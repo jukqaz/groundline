@@ -11,6 +11,7 @@ mod attribution;
 mod command_category;
 mod continuation;
 mod tool_outcome;
+mod user_input;
 mod verification;
 
 const TOKEN_FIELDS: [&str; 6] = [
@@ -272,6 +273,7 @@ pub fn audit_rollouts(
     let mut transitions = 0_u64;
     let mut user_lengths = Vec::<u64>::new();
     let mut broad_scope_count = 0_u64;
+    let mut user_inputs = user_input::Inputs::default();
     let mut tool_names = BTreeMap::<String, u64>::new();
     let mut tool_categories = BTreeMap::<String, u64>::new();
     let mut other_command_reasons = BTreeMap::<String, u64>::new();
@@ -383,6 +385,7 @@ pub fn audit_rollouts(
         let mut rollout_compactions = 0_u64;
         let mut rollout_compaction_events = 0_u64;
         let mut rollout_broad_scope = 0_u64;
+        let mut input_burst = user_input::InputBurst::default();
 
         for (line_index, line) in contents.lines().enumerate() {
             if processed_records >= MAX_AUDIT_RECORDS {
@@ -477,6 +480,33 @@ pub fn audit_rollouts(
                     continue;
                 }
             };
+            input_burst.boundary(record_type, &payload);
+            if record_in_window {
+                let source = match record_type {
+                    "event_msg"
+                        if payload.get("type").and_then(Value::as_str) == Some("user_message") =>
+                    {
+                        Some(user_input::Source::Event)
+                    }
+                    "response_item"
+                        if payload.get("type").and_then(Value::as_str) == Some("message")
+                            && payload.get("role").and_then(Value::as_str) == Some("user") =>
+                    {
+                        Some(user_input::Source::Response)
+                    }
+                    _ => None,
+                };
+                if let Some(source) = source
+                    && let Some(message) =
+                        user_inputs.observe_native(source, &payload, &mut input_burst)
+                {
+                    user_lengths.push(message.length);
+                    if message.broad_scope {
+                        broad_scope_count = broad_scope_count.saturating_add(1);
+                        rollout_broad_scope = rollout_broad_scope.saturating_add(1);
+                    }
+                }
+            }
             // Contexts outside the selected window still identify an owned
             // response inside it. Never infer a response's model by proximity.
             if record_type == "turn_context" {
@@ -595,30 +625,6 @@ pub fn audit_rollouts(
                     increment(&mut event_counts, event_type)?;
                     if event_type == "context_compacted" {
                         rollout_compaction_events = rollout_compaction_events.saturating_add(1);
-                    }
-                }
-                if record_in_window
-                    && event_type == "user_message"
-                    && let Some(message) = payload.get("message").and_then(Value::as_str)
-                {
-                    let length = message.chars().count() as u64;
-                    user_lengths.push(length);
-                    let lowered = message.to_ascii_lowercase();
-                    if [
-                        "다 ",
-                        "전체",
-                        "완전",
-                        "모든",
-                        "everything",
-                        "all ",
-                        "entire",
-                        "completely",
-                    ]
-                    .iter()
-                    .any(|term| lowered.contains(term))
-                    {
-                        broad_scope_count = broad_scope_count.saturating_add(1);
-                        rollout_broad_scope = rollout_broad_scope.saturating_add(1);
                     }
                 }
                 if event_type == "task_started" {
@@ -872,8 +878,8 @@ pub fn audit_rollouts(
     Ok(json!({
         "schema": 1,
         "kind": "groundline-codex-session-audit",
-        "status": if errors.is_empty() { "PASS" } else { "PARTIAL" },
-        "collection_complete": errors.count == known_scope_exclusions,
+        "status": if errors.is_empty() && user_inputs.coverage_observation_complete() { "PASS" } else { "PARTIAL" },
+        "collection_complete": errors.count == known_scope_exclusions && user_inputs.coverage_observation_complete(),
         "error_count": errors.count,
         "scope_exclusion_count": known_scope_exclusions,
         "collection_issue_count": errors.count.saturating_sub(known_scope_exclusions),
@@ -888,6 +894,10 @@ pub fn audit_rollouts(
         },
         "activity": {
             "user_message_events": event_counts.get("user_message").copied().unwrap_or(0),
+            "response_item_user_messages": user_inputs.response_records(),
+            "native_user_input_records": user_inputs.record_count(),
+            "duplicate_native_user_input_records": user_inputs.duplicate_count(),
+            "unique_native_user_inputs": user_inputs.unique_count(),
             "user_messages_with_text": user_messages,
             "task_started": event_counts.get("task_started").copied().unwrap_or(0),
             "task_completed": event_counts.get("task_complete").copied().unwrap_or(0),
@@ -930,7 +940,8 @@ pub fn audit_rollouts(
             "long_turn_count": completed_durations.iter().filter(|duration| **duration >= duration_threshold).count(),
         },
         "prompt_shape": {
-            "availability": if user_messages > 0 { "observed_text_events" } else { "unavailable" },
+            "availability": if user_messages > 0 { "observed_native_text_inputs" } else { "unavailable" },
+            "input_classification": user_inputs.json(),
             "short_message_threshold_chars": 30,
             "short_message_count": short_messages,
             "broad_scope_message_count": broad_scope_count,
@@ -1629,6 +1640,474 @@ mod tests {
             let audit = audit_rollouts(&[&records], 0, 20, AuditWindow::default()).unwrap();
             assert_eq!(audit["tools"]["verification_success_count"], 0);
             assert_eq!(audit["tools"]["unclassified_command_call_count"], 1);
+        }
+    }
+
+    #[test]
+    fn native_input_envelopes_do_not_inflate_conversation_statistics() {
+        let annotations = json!([{
+            "text": "Review everything and all files. ".repeat(80),
+            "annotation": "여기만 고쳐줘",
+            "source": {"messageId": "synthetic-quote"}
+        }]);
+        let answers = json!([{
+            "question": "Should all components and the entire project change?",
+            "answer": "준비만 정리해",
+            "questionItemId": "synthetic-question"
+        }]);
+        let messages = [
+            "계속 진행해".to_owned(),
+            format!("# Response annotations:\nHost instructions.\n<response-annotations>\n{annotations}\n</response-annotations>\n\n## My request:\n관련 부분만 확인해"),
+            format!("<send_user_message_question_reply>\n{answers}\n</send_user_message_question_reply>"),
+            "<heartbeat>\n<automation_id>synthetic</automation_id>\n<instructions>Check everything in the entire project.</instructions>\n</heartbeat>".to_owned(),
+        ];
+        let records = messages
+            .iter()
+            .map(|message| {
+                json!({
+                    "type":"event_msg", "payload":{"type":"user_message","message":message}
+                })
+            })
+            .collect::<Vec<_>>();
+        let raw = lines(&records);
+        let projected = records
+            .iter()
+            .map(|record| {
+                Record::parse(&record.to_string())
+                    .unwrap()
+                    .unwrap()
+                    .audit_projection()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        for input in [&raw, &projected] {
+            let result = audit_rollouts(&[input], 0, 20, AuditWindow::default()).unwrap();
+            assert_eq!(result["activity"]["user_message_events"], 4);
+            assert_eq!(result["activity"]["user_messages_with_text"], 3);
+            assert_eq!(result["prompt_shape"]["short_message_count"], 3);
+            assert_eq!(result["prompt_shape"]["broad_scope_message_count"], 0);
+            assert_eq!(
+                result["prompt_shape"]["max_user_message_chars"],
+                "여기만 고쳐줘\n관련 부분만 확인해".chars().count()
+            );
+            assert_eq!(
+                result["prompt_shape"]["input_classification"]["automation_envelope_count"],
+                1
+            );
+            assert_eq!(
+                result["prompt_shape"]["input_classification"]["complete"],
+                true
+            );
+            assert!(!result.to_string().contains("synthetic-question"));
+            assert!(!result.to_string().contains("관련 부분"));
+        }
+    }
+
+    #[test]
+    fn native_input_classification_respects_window_and_conserves_usage_and_turns() {
+        let answers = json!([{"question":"change all files?","answer":"이어서 진행"}]);
+        let records = lines(&[
+            json!({"timestamp":at(0).to_rfc3339(),"type":"event_msg","payload":{"type":"user_message","message":"all files before window"}}),
+            cumulative(1, 20),
+            json!({"timestamp":at(2).to_rfc3339(),"type":"event_msg","payload":{"type":"task_started","turn_id":"synthetic-turn"}}),
+            json!({"timestamp":at(3).to_rfc3339(),"type":"event_msg","payload":{"type":"user_message","message":"<heartbeat><automation_id>synthetic</automation_id><instructions>all files</instructions></heartbeat>"}}),
+            json!({"timestamp":at(4).to_rfc3339(),"type":"event_msg","payload":{"type":"user_message","message":format!("<send_user_message_question_reply>{answers}</send_user_message_question_reply>")}}),
+            json!({"timestamp":at(5).to_rfc3339(),"type":"event_msg","payload":{"type":"task_complete","turn_id":"synthetic-turn","duration_ms":3000}}),
+            cumulative(6, 35),
+        ]);
+        let result = audit_rollouts(
+            &[&records],
+            0,
+            20,
+            AuditWindow {
+                start: Some(at(1)),
+                end: Some(at(7)),
+            },
+        )
+        .unwrap();
+        assert_eq!(result["activity"]["user_message_events"], 2);
+        assert_eq!(result["activity"]["user_messages_with_text"], 1);
+        assert_eq!(result["status"], "PASS");
+        assert_eq!(result["collection_complete"], true);
+        assert_eq!(result["error_count"], 0);
+        assert_eq!(result["collection_issue_count"], 0);
+        assert_eq!(result["activity"]["task_started"], 1);
+        assert_eq!(result["activity"]["task_completed"], 1);
+        assert_eq!(result["task_latency"]["median_ms"], 3000);
+        assert_eq!(result["provider_reported_usage"]["total_tokens"], 15);
+        assert_eq!(result["prompt_shape"]["broad_scope_message_count"], 0);
+        assert_eq!(
+            result["prompt_shape"]["input_classification"]["plain_text_count"],
+            0
+        );
+        assert_eq!(
+            result["prompt_shape"]["input_classification"]["automation_envelope_count"],
+            1
+        );
+        assert_eq!(
+            result["prompt_shape"]["input_classification"]["question_answer_envelope_count"],
+            1
+        );
+    }
+
+    #[test]
+    fn malformed_native_input_keeps_text_classification_unresolved() {
+        let records = lines(&[
+            json!({"type":"event_msg","payload":{"type":"user_message","message":"진행해"}}),
+            json!({"type":"event_msg","payload":{"type":"user_message","message":"<send_user_message_question_reply>[{broken entire project</send_user_message_question_reply>"}}),
+            json!({"type":"event_msg","payload":{"type":"user_message","message":"# Response annotations:\n<response-annotations>[{broken}]</response-annotations>"}}),
+        ]);
+        let result = audit_rollouts(&[&records], 0, 20, AuditWindow::default()).unwrap();
+        assert_eq!(result["activity"]["user_message_events"], 3);
+        assert_eq!(result["activity"]["user_messages_with_text"], 1);
+        assert_eq!(result["status"], "PARTIAL");
+        assert_eq!(result["collection_complete"], false);
+        assert_eq!(result["error_count"], 0);
+        assert_eq!(result["collection_issue_count"], 0);
+        assert_eq!(result["prompt_shape"]["broad_scope_message_count"], 0);
+        assert_eq!(
+            result["prompt_shape"]["input_classification"]["unresolved_envelope_count"],
+            2
+        );
+        assert_eq!(
+            result["prompt_shape"]["input_classification"]["complete"],
+            false
+        );
+    }
+
+    fn raw_and_projected_user_inputs(records: &[Value]) -> [String; 2] {
+        [
+            lines(records),
+            records
+                .iter()
+                .map(|record| {
+                    Record::parse(&record.to_string())
+                        .unwrap()
+                        .unwrap()
+                        .audit_projection()
+                        .unwrap()
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        ]
+    }
+
+    fn user_item(message: &str) -> Value {
+        json!({"type":"response_item","payload":{
+            "type":"message","role":"user","content":[{"type":"input_text","text":message}]
+        }})
+    }
+
+    fn user_event(message: &str) -> Value {
+        json!({"type":"event_msg","payload":{"type":"user_message","message":message}})
+    }
+
+    #[test]
+    fn native_response_user_text_blocks_are_observed_without_event_messages() {
+        let annotations = format!(
+            "# Response annotations:\n<response-annotations>{}</response-annotations>\n## My request:\n관련 부분만 확인해",
+            json!([{"text":"all files quoted source","annotation":"여기만 고쳐줘"}])
+        );
+        let records = [
+            json!({"type":"response_item","payload":{"type":"message","role":"user",
+                "content":[{"type":"input_text","text":"계속"},{"type":"text","text":"진행해"}]}}),
+            user_item(&annotations),
+            user_item(
+                "<send_user_message_question_reply>[{\"question\":\"all files?\",\"answer\":\"여기만\"}]</send_user_message_question_reply>",
+            ),
+            user_item("# Files mentioned by the user:\n## all-files.md\n## My request:\n확인해"),
+            user_item(
+                "<heartbeat><automation_id>synthetic</automation_id><instructions>all files</instructions></heartbeat>",
+            ),
+            user_item("<environment_context>all files</environment_context>"),
+            json!({"type":"response_item","payload":{"type":"message","role":"assistant",
+                "content":[{"type":"output_text","text":"all files assistant body"}]}}),
+        ];
+        for input in raw_and_projected_user_inputs(&records) {
+            let result = audit_rollouts(&[&input], 0, 20, AuditWindow::default()).unwrap();
+            assert_eq!(result["activity"]["user_message_events"], 0);
+            assert_eq!(result["activity"]["response_item_user_messages"], 6);
+            assert_eq!(result["activity"]["native_user_input_records"], 6);
+            assert_eq!(result["activity"]["unique_native_user_inputs"], 6);
+            assert_eq!(result["activity"]["user_messages_with_text"], 4);
+            assert_eq!(
+                result["prompt_shape"]["availability"],
+                "observed_native_text_inputs"
+            );
+            assert_eq!(result["prompt_shape"]["short_message_count"], 4);
+            assert_eq!(result["prompt_shape"]["broad_scope_message_count"], 0);
+            let classification = &result["prompt_shape"]["input_classification"];
+            assert_eq!(classification["complete"], true);
+            assert_eq!(classification["annotation_envelope_count"], 1);
+            assert_eq!(classification["question_answer_envelope_count"], 1);
+            assert_eq!(classification["file_request_envelope_count"], 1);
+            assert_eq!(classification["automation_envelope_count"], 1);
+            assert_eq!(classification["context_envelope_count"], 1);
+            assert!(!result.to_string().contains("quoted source"));
+            assert!(!result.to_string().contains("관련 부분"));
+        }
+    }
+
+    #[test]
+    fn owner_requested_manual_automation_does_not_enter_human_prompt_statistics() {
+        let manual = "Automation: GroundLine weekly check\nAutomation ID: synthetic\nRun type: owner-requested one-time manual execution\n\nCheck all files in the entire project.";
+        let records = [
+            user_item(manual),
+            user_event(manual),
+            user_item("이어서 확인해"),
+        ];
+        for input in raw_and_projected_user_inputs(&records) {
+            let result = audit_rollouts(&[&input], 0, 20, AuditWindow::default()).unwrap();
+            assert_eq!(result["activity"]["native_user_input_records"], 3);
+            assert_eq!(result["activity"]["duplicate_native_user_input_records"], 1);
+            assert_eq!(result["activity"]["unique_native_user_inputs"], 2);
+            assert_eq!(result["activity"]["user_messages_with_text"], 1);
+            assert_eq!(result["prompt_shape"]["short_message_count"], 1);
+            assert_eq!(result["prompt_shape"]["broad_scope_message_count"], 0);
+            assert_eq!(
+                result["prompt_shape"]["input_classification"]["automation_envelope_count"],
+                1
+            );
+            assert_eq!(
+                result["prompt_shape"]["input_classification"]["plain_text_count"],
+                1
+            );
+        }
+    }
+
+    #[test]
+    fn mirrored_native_user_inputs_pair_locally_and_repeated_turns_remain_distinct() {
+        for reversed in [false, true] {
+            let pair = if reversed {
+                [user_item("계속해"), user_event("계속해")]
+            } else {
+                [user_event("계속해"), user_item("계속해")]
+            };
+            let records = [
+                json!({"type":"event_msg","payload":{"type":"task_started","turn_id":"one"}}),
+                pair[0].clone(),
+                json!({"type":"turn_context","payload":{"turn_id":"one","model":"gpt-6.1-sol","effort":"max"}}),
+                pair[1].clone(),
+                json!({"type":"event_msg","payload":{"type":"task_complete","turn_id":"one"}}),
+                json!({"type":"event_msg","payload":{"type":"task_started","turn_id":"two"}}),
+                pair[0].clone(),
+                pair[1].clone(),
+                // Another same-origin request is another action, even with
+                // the same literal text inside this input burst.
+                pair[0].clone(),
+                pair[1].clone(),
+            ];
+            for input in raw_and_projected_user_inputs(&records) {
+                let result = audit_rollouts(&[&input], 0, 20, AuditWindow::default()).unwrap();
+                assert_eq!(result["activity"]["user_message_events"], 3);
+                assert_eq!(result["activity"]["response_item_user_messages"], 3);
+                assert_eq!(result["activity"]["native_user_input_records"], 6);
+                assert_eq!(result["activity"]["duplicate_native_user_input_records"], 3);
+                assert_eq!(result["activity"]["unique_native_user_inputs"], 3);
+                assert_eq!(result["activity"]["user_messages_with_text"], 3);
+                assert_eq!(result["prompt_shape"]["short_message_count"], 3);
+            }
+        }
+    }
+
+    #[test]
+    fn native_dedup_never_crosses_rollouts_turns_or_assistant_progress() {
+        let cases = [
+            vec![user_event("계속해"), user_event("계속해")],
+            vec![user_item("계속해"), user_item("계속해")],
+            vec![
+                user_event("계속해"),
+                json!({"type":"response_item","payload":{"type":"message","role":"assistant","content":[]}}),
+                user_item("계속해"),
+            ],
+            vec![
+                json!({"type":"turn_context","payload":{"turn_id":"one"}}),
+                user_event("계속해"),
+                json!({"type":"turn_context","payload":{"turn_id":"two"}}),
+                user_item("계속해"),
+            ],
+            vec![
+                user_event("계속해"),
+                json!({"type":"event_msg","payload":{"type":"task_started"}}),
+                user_item("계속해"),
+            ],
+        ];
+        for records in cases {
+            for input in raw_and_projected_user_inputs(&records) {
+                let result = audit_rollouts(&[&input], 0, 20, AuditWindow::default()).unwrap();
+                assert_eq!(result["activity"]["duplicate_native_user_input_records"], 0);
+                assert_eq!(result["activity"]["user_messages_with_text"], 2);
+            }
+        }
+        let first = lines(&[user_event("계속해")]);
+        let second = lines(&[user_item("계속해")]);
+        let result = audit_rollouts(&[&first, &second], 0, 20, AuditWindow::default()).unwrap();
+        assert_eq!(result["activity"]["duplicate_native_user_input_records"], 0);
+        assert_eq!(result["activity"]["user_messages_with_text"], 2);
+    }
+
+    #[test]
+    fn native_mixed_unsupported_and_unavailable_content_stays_partial_after_projection() {
+        let records = [
+            user_event("확인해"),
+            json!({"type":"response_item","payload":{"type":"message","role":"user","content":[
+                {"type":"input_text","text":"확인해"},
+                {"type":"input_image","image_url":"private image data"},
+                {"type":"private-unknown-kind","body":"private unsupported body"}
+            ]}}),
+            json!({"type":"response_item","payload":{"type":"message","role":"user","content":[
+                {"type":"input_text","text":7}
+            ]}}),
+            json!({"type":"response_item","payload":{"type":"message","role":"user","content":null}}),
+            json!({"type":"response_item","payload":{"type":"message","role":"user","content":[]}}),
+        ];
+        for input in raw_and_projected_user_inputs(&records) {
+            let result = audit_rollouts(&[&input], 0, 20, AuditWindow::default()).unwrap();
+            assert_eq!(result["activity"]["native_user_input_records"], 5);
+            assert_eq!(result["activity"]["duplicate_native_user_input_records"], 1);
+            assert_eq!(result["activity"]["user_messages_with_text"], 1);
+            let classification = &result["prompt_shape"]["input_classification"];
+            assert_eq!(classification["complete"], false);
+            assert_eq!(classification["coverage_observation_complete"], false);
+            assert_eq!(result["status"], "PARTIAL");
+            assert_eq!(result["collection_complete"], false);
+            assert_eq!(result["error_count"], 0);
+            assert_eq!(result["collection_issue_count"], 0);
+            assert_eq!(classification["non_text_content_block_count"], 1);
+            assert_eq!(classification["unsupported_content_block_count"], 2);
+            assert_eq!(classification["unavailable_text_count"], 2);
+            assert_eq!(classification["empty_text_count"], 1);
+            for private in [
+                "private image data",
+                "private unsupported body",
+                "private-unknown-kind",
+            ] {
+                assert!(!result.to_string().contains(private));
+            }
+        }
+    }
+
+    #[test]
+    fn no_human_text_is_unavailable_rather_than_complete_input_coverage() {
+        for records in [
+            vec![],
+            vec![user_item("")],
+            vec![user_event(" \n")],
+            vec![user_item(
+                "<environment_context>all files</environment_context>",
+            )],
+        ] {
+            for input in raw_and_projected_user_inputs(&records) {
+                let result = audit_rollouts(&[&input], 0, 20, AuditWindow::default()).unwrap();
+                assert_eq!(result["prompt_shape"]["availability"], "unavailable");
+                assert_eq!(
+                    result["prompt_shape"]["input_classification"]["complete"],
+                    false
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn native_extraction_holes_are_partial_without_invented_parser_errors() {
+        for (record, reason) in [
+            (
+                user_event(
+                    "<send_user_message_question_reply>[{broken}]</send_user_message_question_reply>",
+                ),
+                "unresolved_envelope",
+            ),
+            (
+                json!({"type":"event_msg","payload":{"type":"user_message","message":null}}),
+                "unavailable_text",
+            ),
+            (
+                json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"unknown","body":"private body"}]}}),
+                "unsupported_content",
+            ),
+            (
+                json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"확인해"},{"type":"input_image","image_url":"private pixels"}]}}),
+                "non_text_content",
+            ),
+            (user_item(" \n"), "empty_text"),
+        ] {
+            for input in raw_and_projected_user_inputs(&[record]) {
+                let result = audit_rollouts(&[&input], 0, 20, AuditWindow::default()).unwrap();
+                assert_eq!(result["status"], "PARTIAL");
+                assert_eq!(result["collection_complete"], false);
+                assert_eq!(result["error_count"], 0);
+                assert_eq!(result["collection_issue_count"], 0);
+                assert_eq!(result["errors"], json!([]));
+                let classification = &result["prompt_shape"]["input_classification"];
+                assert_eq!(classification["complete"], false);
+                assert_eq!(classification["coverage_observation_complete"], false);
+                assert!(
+                    classification["coverage_issue_counts"][reason]
+                        .as_u64()
+                        .unwrap()
+                        > 0
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn absent_human_sample_has_no_extraction_holes_but_is_not_usable_coverage() {
+        for records in [
+            vec![],
+            vec![user_item(
+                "<environment_context>all files</environment_context>",
+            )],
+            vec![user_item(
+                "Automation: weekly check\nAutomation ID: synthetic\nRun type: owner-requested one-time manual execution\n\nCheck all files.",
+            )],
+        ] {
+            for input in raw_and_projected_user_inputs(&records) {
+                let result = audit_rollouts(&[&input], 0, 20, AuditWindow::default()).unwrap();
+                assert_eq!(result["status"], "PASS");
+                assert_eq!(result["collection_complete"], true);
+                assert_eq!(result["error_count"], 0);
+                assert_eq!(result["collection_issue_count"], 0);
+                let classification = &result["prompt_shape"]["input_classification"];
+                assert_eq!(classification["coverage_observation_complete"], true);
+                assert_eq!(classification["complete"], false);
+                assert_eq!(classification["human_text_input_count"], 0);
+                assert_eq!(
+                    classification["coverage_issue_counts"],
+                    json!({
+                        "empty_text":0,"unresolved_envelope":0,"unavailable_text":0,
+                        "non_text_content":0,"unsupported_content":0,
+                    })
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn native_input_window_does_not_pair_unselected_records() {
+        let mut before = user_event("전체 확인해");
+        before["timestamp"] = json!(at(0).to_rfc3339());
+        let mut inside = user_item("전체 확인해");
+        inside["timestamp"] = json!(at(2).to_rfc3339());
+        let mut after = user_event("전체 확인해");
+        after["timestamp"] = json!(at(4).to_rfc3339());
+        for input in raw_and_projected_user_inputs(&[before, inside, after]) {
+            let result = audit_rollouts(
+                &[&input],
+                0,
+                20,
+                AuditWindow {
+                    start: Some(at(1)),
+                    end: Some(at(3)),
+                },
+            )
+            .unwrap();
+            assert_eq!(result["activity"]["user_message_events"], 0);
+            assert_eq!(result["activity"]["response_item_user_messages"], 1);
+            assert_eq!(result["activity"]["user_messages_with_text"], 1);
+            assert_eq!(result["activity"]["duplicate_native_user_input_records"], 0);
+            assert_eq!(result["prompt_shape"]["broad_scope_message_count"], 1);
         }
     }
 

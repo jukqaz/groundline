@@ -11,8 +11,8 @@ setting is involved.
 
 Carry the acceptance criteria and current phase into the lane handoff. Phases are
 `implementation`, `runtime_verification`, `visual_acceptance`, `deployment`,
-`research`, `review`, and `documentation`. For visual or subjective work, check a
-representative result against the agreed quality criteria before scaling out.
+`research`, `review`, and `documentation`. Use the relevant project's agreed
+acceptance criteria; a receipt format does not prescribe its production workflow.
 Pass forward decisions, evidence locations, completed checks and remaining work;
 do not replay the full parent conversation or repeat completed tests to fill a
 comparison quota.

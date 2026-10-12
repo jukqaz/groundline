@@ -1,14 +1,18 @@
 # GroundLine
 
-GroundLine uses local Codex activity and observed delivery outcomes to inform
-GPT-6 Astra, Sol, and Luna model, effort, and subagent choices. Codex owns
+GroundLine connects contextual conversation feedback to scoped guidance and skill
+changes, activation, and natural follow-up. Local activity and observed delivery
+outcomes support requested workflow improvements and model, effort, and subagent choices. Codex owns
 execution, settings, permissions, agents, worktrees, review, and upgrades.
 Historical records remain intact.
 
-The workflow is **audit → delivery → route**: activity describes a sample;
-matched direct outcomes support comparison. A proposal or passing synthetic test
-does not prove better quality or savings. See the
-[optimization loop](references/codex-optimization-loop.md).
+Conversation improvement follows **review → capture → change → activation →
+natural follow-up** in Core's existing private learning state. It needs no
+fabricated delivery or enabled background profile. Start with
+[conversation improvement](references/conversation-improvement.md).
+The separate **audit → delivery → route** path compares matched direct outcomes.
+A proposal, installed package, or passing synthetic test does not prove better
+behavior or savings. See the [optimization loop](references/codex-optimization-loop.md).
 
 ## Skills
 
@@ -16,10 +20,16 @@ does not prove better quality or savings. See the
 | --- | --- |
 | `align-agent-home` | Requested installation, configuration, and guidance alignment |
 | `audit-agent-history` | Explicit history inspection and redacted usage evidence |
-| `optimize-codex-workflow` | Task-scoped GPT-6 selection and workflow assessment |
+| `optimize-codex-workflow` | Conversation-pattern and workflow improvement, model/effort selection, and quality/resource comparison |
 
 Alignment and optimization are implicitly invocable; history inspection requires
 an explicit request. Planning, Goals, handoffs, and reviewed edits stay native.
+
+Shared guidance covers execution principles. Project behavior, technology,
+compatibility, acceptance and release choices stay in that project's guidance.
+Skills load only the references needed for their selected route. Empirical CLI
+comparisons retain their documented model and evidence contracts; those limits
+do not prescribe choices for other native Codex work.
 
 ## Install and upgrade
 

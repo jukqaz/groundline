@@ -1,7 +1,7 @@
 # GroundLine
 
-GroundLine connects Codex usage patterns, actual work outcomes and current
-official model guidance to improve a user's workflow and common Codex environment.
+GroundLine connects contextual Codex conversation patterns, actual guidance and
+skill changes, and natural follow-up to improve a user's workflow and common Codex environment.
 Codex owns execution, permissions, settings and agents. Historical observations
 remain intact; environment changes follow the user's explicit choices and scope.
 
@@ -9,7 +9,7 @@ remain intact; environment changes follow the user's explicit choices and scope.
 
 | Product | Purpose | Default |
 | --- | --- | --- |
-| [Core](plugins/groundline/README.md) | Local audits, delivery evidence, and workflow recommendations | Offline; no hooks |
+| [Core](plugins/groundline/README.md) | Conversation review, change and activation evidence, natural follow-up, local audits and outcome comparison | Offline; no hooks |
 | [Insights](plugins/groundline-insights/README.md) | Optional aggregate collection, ClickHouse, and Grafana | Collection off until configured and consented |
 
 The plugins install independently. Insights connects to the owner's service;
@@ -41,9 +41,12 @@ Release names use a date and daily sequence; see [versioning](docs/versioning.md
 
 - `$groundline:align-agent-home`: requested installation and configuration alignment.
 - `$groundline:audit-agent-history`: explicit history inspection.
-- `$groundline:optimize-codex-workflow`: task-scoped model/effort choices and workflow review.
+- `$groundline:optimize-codex-workflow`: conversation-pattern improvement and follow-up, model/effort choices, and workflow review.
 
-The evidence loop is **audit → delivery → route**. Start with the
+Conversation improvement follows **review → target capture → actual change →
+activation → natural follow-up**. The [product route](plugins/groundline/references/conversation-improvement.md)
+owns records, scope validation, and the next required action; a weekly routine
+calls that route. The separate evidence loop is **audit → delivery → route**. Start with the
 [CLI examples](docs/examples.md); record failed and incomplete work as well as
 successes. Weekly samples do not establish whole-history coverage, and aggregate
 usage alone cannot identify the best model or prove improvement.

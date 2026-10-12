@@ -1,21 +1,58 @@
 # Bounded delegation and task continuity
 
-Use this reference when a requested workflow improvement needs lane context,
-long-task recovery, verification reuse, or large-output handling. It is not a
-mandatory plan, ledger, review cohort, or new execution layer. Keep native Codex
-in charge and preserve the user's settings and scoped authority.
+Use this reference when a requested workflow improvement needs scope decisions,
+lane context, long-task recovery, verification reuse, or large-output handling.
+It is not a mandatory plan, ledger, review cohort, or new execution layer. Keep
+native Codex in charge and preserve the user's settings and scoped authority.
+
+## Resolve shared and project guidance
+
+Keep project-specific behavior, technical constraints, and acceptance criteria in
+that project's local guidance. Shared guidance must not turn one project's
+choices into defaults for other projects.
+
+Use the instruction chain supplied by native Codex. Inspect relevant scoped
+guidance when needed; preserve its owning layer instead of collecting or merging
+every instruction file. Product features, architecture, compatibility, test
+commands, release policy, and presentation conventions belong to the project.
+GroundLine command formats and installation rules apply to GroundLine operations.
+
+Read a matching skill's entry before following it, then load only the reference
+needed for the selected operation. A link makes detail available; it does not
+require loading every linked document or invoking every available skill.
+
+## Keep the accepted change bounded
+
+Before changing user-visible behavior, establish the current behavior, intended
+behavior, and behavior to preserve from available requirements and evidence.
+Do not expand the request into extra features, settings, or technical uniformity.
+A clear small change needs no separate plan or redundant confirmation. A
+dependency on another project does not authorize editing that project.
+
+Judge new findings by reproduction, user impact, and relation to the accepted
+outcome. Distinguish defects from improvements and whether they block acceptance.
+Finish required authorized fixes and checks, including every in-scope item in an
+explicit fix-all request. Defer only optional work that was not requested and
+does not block acceptance; do not defer required work for convenience.
+
+Base cleanup and dependency replacement on actual use, current supported inputs,
+public contracts, data retention, the concrete problem, and verification evidence.
+Names such as legacy, fallback, or compatibility do not establish dead code.
+Preserve protections still needed by current users; retire support only when the
+evidence establishes that it is outside the current contract.
 
 ## Give a lane the context it needs
 
 A short prompt can still fork the full conversation. Inspect the active spawn
 interface before choosing context controls. Where it exposes `fork_turns`, use
-`none` for an independent task whose necessary context fits in the brief, a
-supported recent-turn selection for shared recent decisions, or full history
-when the work needs it. Other clients may expose different controls or none;
-do not invent a field or claim an unobserved context reduction.
+`none` for an independent task whose necessary context fits in the brief, or
+`all` when the work needs inherited history and those values are supported.
+Other clients may expose different controls or none; do not invent a field,
+unsupported history option or unobserved context reduction.
 
-Include the goal, owned files or output, constraints, acceptance check, and
-necessary interfaces, decisions and evidence paths. Narrowing history must not
+Include the goal, worktree and base revision or dirty fingerprint, owned files
+or output, constraints, acceptance check, and necessary interfaces, decisions
+and evidence paths. Narrowing history must not
 remove the task contract. Reuse an existing agent when its retained context is
 relevant; batch similar small tasks when this avoids repeated setup. Otherwise
 keep sequential work local. Account for root integration and every child's
@@ -45,12 +82,35 @@ requested; a handoff does not replace native state or extend authority.
 
 ## Reuse valid verification
 
+Choose checks from the project's requirements, changed behavior and actual risk.
+Use its existing verification path when suitable. A command proves only the
+outcome it checks; add runtime or user acceptance evidence when that outcome is
+required. Shared guidance does not prescribe a framework, test-first policy,
+full-suite run or fixed report shape for every change.
+
 Keep the result tied to the checked revision or artifact, relevant inputs and
-runtime/environment. Reuse a passing check while those remain applicable.
+runtime/environment. Identify the actual binary/artifact checked; a PASS from a
+different binary cannot qualify changed source. Reuse a passing check while
+those remain applicable.
+Compare current content with the checked bytes before treating verification as
+pending. Uncommitted changes can already be verified; a commit or clean working
+tree does not by itself prove verification. Keep explicitly requested Git work
+as a separate completion criterion.
+When conditions affect the outcome, keep them with the result. Normal-use and
+stress scenarios are distinct evidence; a pass in one does not erase a failure
+in the other. Changing timing or inputs does not by itself establish a fix.
 Rerun the affected check when its inputs change or a concrete unresolved risk
 invalidates it; a new message alone does not invalidate evidence. For a correction,
 review the changed diff and affected findings before repeating broader review.
 Do not cap necessary implementation or verification to meet a savings target.
+Once required acceptance checks pass, close the accepted scope; optional new
+findings do not restart completed reviews.
+
+When a check fails, read the actual error and distinguish invocation, environment
+and product failures. Trace the relevant cause and test a focused hypothesis
+with the smallest credible check. Retry after a changed condition or under a
+bounded transient-retry policy; preserve unresolved evidence instead of layering
+speculative fixes or weakening acceptance checks.
 
 ## Keep large output inspectable
 
@@ -69,6 +129,15 @@ and private paths out of Insights and public reports; authorized local inspectio
 does not authorize transcript upload.
 
 ## State what the evidence proves
+
+For multi-step completion, connect each delivered result to what its evidence
+proves and the remaining required proof or next action and owner. Keep evidence
+for distinct required outcomes separate; a passed check does not establish an
+unobserved outcome. Claim only the requested outcomes actually established;
+small tasks need no extra document, template, or empty fields.
+Keep completion reports within the accepted target. Include separately delegated
+project work when the user requests it or when it is an actual dependency of the
+accepted outcome; unrelated work does not make the requested project incomplete.
 
 Keep discovery, enabled/trusted state, actual invocation and requested outcome
 separate under [capability routing](capability-routing.md). Output bytes saved

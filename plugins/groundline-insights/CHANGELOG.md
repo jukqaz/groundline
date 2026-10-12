@@ -1,5 +1,9 @@
 # GroundLine Insights changes
 
+## 2026.1012.1
+
+- Core 대화 개선 릴리스와 패키지 버전을 맞춥니다. 수집·동의·훅·전송·서버의 런타임 계약과 기본 설정은 유지합니다.
+
 ## 2026.1008.5
 
 - `UserPromptSubmit`는 native 학습 경계만 기록하고 통계 상태·window·outbox·잠금에 진입하지 않습니다.

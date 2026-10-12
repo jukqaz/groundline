@@ -18,6 +18,11 @@ sources and relevant plugins. Preserve native resolution and project ownership.
 Record only selected evidence and unresolved differences; do not read every
 setting, session or reference for an unrelated task.
 
+Keep project-specific findings and choices in the relevant project's guidance.
+A correction observed in one project is not a cross-project default. Promote
+only an execution principle whose intended scope and evidence justify it, while
+preserving explicit project requirements.
+
 Use [configuration review](codex-configuration.md) and
 [installation alignment](installation-alignment.md) for the actual repair path.
 Choose common settings and intentional host exceptions explicitly. Keep private

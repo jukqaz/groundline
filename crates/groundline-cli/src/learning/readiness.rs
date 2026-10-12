@@ -64,6 +64,7 @@ pub(super) fn summarize(
     if records.len() > MAX_ENTRIES || receipts.len() > MAX_ENTRIES {
         return Err(error("readiness_scope_limit_exceeded"));
     }
+    let conversation_work = learning::conversation_work::readouts(records)?;
     let records: BTreeMap<_, _> = records
         .iter()
         .map(|record| Ok((learning::content_sha256(record)?, record)))
@@ -262,6 +263,7 @@ pub(super) fn summarize(
         "link_only_count":records.iter().filter(|(hash,record)| record["kind"]=="groundline-learning-link" && !referenced_links.contains(hash.as_str())).count(),
             "analysis_resources":analysis_resources,
         "native_activation":"UNVERIFIED","causal_effect_verified":false,"efficiency_improvement_verified":false,
+        "conversation_work":conversation_work,
         "mutation_performed":false,"model_calls_performed":false,"raw_content_emitted":false}),
     )
 }

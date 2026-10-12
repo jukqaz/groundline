@@ -1,7 +1,8 @@
 # GroundLine 아키텍처
 
-GroundLine은 사용 패턴·실제 작업 결과·현재 모델의 공식 지침을 연결해
-사용 방식과 공통 Codex 환경을 개선하는 것을 목표로 합니다.
+GroundLine은 실제 대화의 정정·지침 및 스킬 변경·후속 관측을 연결해
+Codex의 작업 방식을 개선합니다. 프로젝트마다 다른 조건은 해당 프로젝트에
+남기며, 사용량과 직접 작업 결과·공식 지침은 개선 판단의 별도 근거입니다.
 실행·모델 적용·권한·에이전트·작업 관리는 Codex가 담당합니다.
 
 아래는 현재 구현 경계입니다. 개인 기준·기기 예외·실제 적용과 후속 결과를 연결하는
@@ -10,6 +11,12 @@ GroundLine은 사용 패턴·실제 작업 결과·현재 모델의 공식 지�
 ```mermaid
 flowchart LR
   Native[Codex 기록] --> Window[기간 내 표본]
+  Native --> Sequence[대화 문맥 검토]
+  Sequence --> Scoped[프로젝트·공통 적용 범위]
+  Scoped --> Changed[실제 지침·스킬 변경]
+  Changed --> Activated[실제 읽기·호출 관측]
+  Activated --> Natural[자연 후속 기회·재발]
+  Natural --> Sequence
   Native --> Store[별도 전체 저장소 진단]
   Window --> Review[현재 정책으로 재해석]
   Evidence[실행 및 검증 근거] --> Receipt[비공개 작업 결과]
@@ -41,6 +48,7 @@ flowchart LR
 - **비교:** 현재 카탈로그와 같은 작업군의 직접 결과를 비교하며 품질·재작업·자원 보호를 적용합니다. 집계가 불완전해도 직접 증거는 별도로 판단합니다. 운영 임계값은 통계적 확신이나 자동 개선의 증명이 아닙니다. [라우팅 계약](../plugins/groundline/references/evidence-routing.md)
 - **상태:** Core는 Insights 동의·전송 상태를 파일 존재로 추측하지 않습니다. 기존 개인 상태는 status/rollback으로만 복구하며 사용자 설정·기록을 삭제하거나 폐기 형식을 자동 변환하지 않습니다. [복구 계약](../plugins/groundline/references/personal-recovery.md)
 - **환경·학습:** 새 owner-private 상태는 기준·계획·파일 적용·후속 결과를 연결하고 오래된 revision과 사용자 편집을 보존합니다. native 발견·지침 사용·업무 효과와 실제 비교 기준·현재 계획 기준을 구분합니다. [실행 계약](adaptive-environment-implementation.md)
+- **대화 개선:** `learning review-conversation`, `capture-conversation-target`, `record-conversation-change`, `observe-conversation`은 같은 학습 저장소에서 문맥 해석·변경 전 대상 캡처·실제 변경·활성화·후속 기회를 연결합니다. 직접 delivery가 없는 회고에도 가짜 완료·수락·사용량을 만들지 않습니다. `learning status`가 다음 확인 사항을 보여주며, 주간 루틴은 이 제품 경로를 호출합니다. [대화 개선 경로](../plugins/groundline/references/conversation-improvement.md)
 
 공용 계약에 I/O를 넣거나 새 실행기·지침 registry·상태 추측 경로를 만들기 전에
 기존 소유 경계에서 해결할 수 있는지 확인합니다. 폐기 기능은

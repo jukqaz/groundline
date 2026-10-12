@@ -1,6 +1,6 @@
 # GroundLine
 
-GroundLine은 Codex 사용 패턴·실제 작업 결과·현재 모델의 공식 지침을 연결해
+GroundLine은 Codex 대화패턴·지침과 스킬의 실제 변경·후속 작업 결과를 연결해
 사용 방식과 개인의 공통 Codex 환경을 개선합니다. 실행·권한·설정·에이전트는
 Codex가 담당합니다. 과거 관측은 보존하고 환경 변경은 사용자의 명시 선택과 범위를 따릅니다.
 
@@ -8,7 +8,7 @@ Codex가 담당합니다. 과거 관측은 보존하고 환경 변경은 사용�
 
 | 제품 | 역할 | 기본 동작 |
 | --- | --- | --- |
-| [Core](plugins/groundline/README.ko.md) | 로컬 감사, 작업 결과 기록, 개선 추천 | 오프라인, 훅 없음 |
+| [Core](plugins/groundline/README.ko.md) | 대화 검토, 변경·활성화·후속 확인, 로컬 감사와 결과 비교 | 오프라인, 훅 없음 |
 | [Insights](plugins/groundline-insights/README.ko.md) | 선택형 집계 수집, ClickHouse, Grafana | 연결 설정과 명시적 동의 전에는 수집 중지 |
 
 두 플러그인은 독립적으로 설치합니다. Insights는 운영자가 준비한 서비스에
@@ -40,9 +40,12 @@ App/CLI 선택, 패키지만 설치하는 명령, 비공개 연결 설정, 동�
 
 - `$groundline:align-agent-home`: 요청한 설치와 설정 정렬
 - `$groundline:audit-agent-history`: 명시적으로 요청한 사용 기록 감사
-- `$groundline:optimize-codex-workflow`: 작업별 모델·effort 선택과 작업 방식 검토
+- `$groundline:optimize-codex-workflow`: 대화패턴 개선과 후속 확인, 모델·effort 선택과 작업 방식 검토
 
-**audit → delivery → route** 순서로 관측·실제 결과·비교를 연결합니다.
+대화 개선은 **검토 → 변경 전 대상 캡처 → 실제 변경 → 활성화 → 자연 후속 확인**으로
+연결합니다. [제품 경로](plugins/groundline/references/conversation-improvement.md)가
+기록·범위 검증·다음 조치를 담당하고 주간 루틴은 이를 호출합니다.
+별도의 **audit → delivery → route**는 관측·실제 결과·비교를 연결합니다.
 [CLI 예제](docs/examples.md)에서 시작하고 실패·미완료 결과도 기록합니다.
 주간 표본을 전체 이력으로 일반화하거나 집계 사용량만으로 최적 모델과 개선 효과를
 단정하지 않습니다.

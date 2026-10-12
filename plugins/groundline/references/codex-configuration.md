@@ -102,7 +102,7 @@ Only supplied files are checked. Effective layer resolution, full native schema,
 and fresh-task behavior still require native verification. No state is reset,
 no retired format is migrated, and no package or hook is installed by this command.
 
-## GPT-6 and context posture
+## Native context and instruction scope
 
 Follow [model and effort guidance](model-effort-routing.md) on demand. Use the
 native catalog's supported efforts instead of translating effort names or
@@ -110,11 +110,12 @@ hard-coding context sizes. Leave context window and compaction thresholds unset
 unless evidence justifies an override; unset compaction uses the model default.
 Do not transfer API-only request parameters into Codex TOML.
 
-For persistent instruction changes, prefer the closest repository guidance and
-load specialist references only for the matching task. Avoid restating the same
-approval, delegation, or verification rule in multiple loaded skills. Keep
-commands and observable acceptance criteria concrete. Reuse passing tests until
-a relevant change or unresolved risk warrants more work.
+For persistent instruction changes, use the native instruction chain and the
+owning scope. Keep project behavior, technology choices, acceptance commands and
+release rules in that project's guidance. Use
+[task continuity](task-continuity.md) for shared workflow principles and load
+specialist detail only for the matching operation. Keep one authoritative rule
+instead of duplicating it across loaded skills.
 
 Experimental context management and asynchronous question tools are native
 capabilities. Verify availability on the active account/runtime before use;
@@ -164,16 +165,16 @@ changed startup rules. An explicit reviewer denial requires a materially safer
 alternative or the native exact-action approval path, never an indirect retry.
 
 Remove a reported obsolete feature only within an authorized settings repair
-and after verifying the exact key on the actual host. For example,
-`features.thread_tools` is absent from the September 28 App/PATH feature lists;
-do not invent a replacement switch or infer that native thread tools are absent.
+and after verifying the exact key on the actual host. Historical feature lists
+are not current support evidence; verify any replacement rather than guessing it.
 GroundLine guidance does not modify the active policy, enable all capabilities,
 or turn a denial into permission. A refusal needs its exact reason and a materially
 safer authorized alternative; increasing model effort cannot resolve it.
 
 ## Worktrees and private surfaces
 
-For App-managed local worktrees, prefer checked-in local environments. Add root
+Use the target project's existing setup and the actual host's worktree mechanism.
+For App-managed local worktrees, add root
 `.worktreeinclude` only for demonstrated ignored-file dependencies and requested
 changes. Keep patterns narrow, verify targets are ignored, exclude broad or
 tracked directories, and smoke a new worktree when feasible. This file does not
@@ -184,8 +185,10 @@ MCP headers, and environment values out of source and diagnostic output. Trust
 records alone do not prove activation. Core has no lifecycle hooks; optional
 Insights uses its own reviewed hook and explicit collection-consent contract.
 
-Sources checked 2026-09-28:
+Configuration sources were previously checked on 2026-09-28. Instruction-scope
+and skill-authoring sources were rechecked on 2026-10-11:
 - [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)
-- [Astra prompting best practices](https://developers.openai.com/api/docs/guides/latest-model#prompting-best-practices)
+- [Scoped project instructions](https://learn.chatgpt.com/docs/agent-configuration/agents-md)
+- [Skill triggers and progressive disclosure](https://learn.chatgpt.com/docs/build-skills)
 - [Codex subagent configuration](https://learn.chatgpt.com/docs/agent-configuration/subagents)
 - [Automatic review boundaries](https://learn.chatgpt.com/docs/sandboxing/auto-review)

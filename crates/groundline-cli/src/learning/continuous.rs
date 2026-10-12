@@ -8,6 +8,9 @@ mod storage;
 #[path = "work.rs"]
 mod work;
 pub(super) use storage::{archived_record, load_archive_references};
+pub(super) use storage::{
+    compact_conversations, conversation_archive_summary, restore_conversation_replay,
+};
 pub(super) use work::assess;
 
 fn codex_home(value: Option<&Path>) -> Result<PathBuf, ContractError> {

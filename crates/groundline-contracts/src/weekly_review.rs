@@ -83,6 +83,54 @@ fn command_diagnostics(root: &Value) -> Value {
     json!({"revision":1,"reasons":values})
 }
 
+fn root_selection_readout(audit: &Value) -> Value {
+    let source = &audit["scope"]["root_selection"];
+    if source["revision"] != 1
+        || source["scope"] != "indexed_rows_and_window_candidates"
+        || source["counts_form_population_partition"] != false
+        || !source["completed_only"].is_boolean()
+    {
+        return Value::Null;
+    }
+    let keys = [
+        "indexed_root_row_count",
+        "index_clock_excluded_root_row_count",
+        "nonvisible_excluded_root_row_count",
+        "indexed_candidate_root_row_count",
+        "no_window_records_excluded_root_count",
+        "readable_candidate_root_count",
+        "latest_turn_incomplete_excluded_root_count",
+    ];
+    if keys.iter().any(|key| !source[*key].is_u64()) {
+        return Value::Null;
+    }
+    let indexed = source[keys[0]].as_u64().unwrap();
+    let clock_excluded = source[keys[1]].as_u64().unwrap();
+    let nonvisible = source[keys[2]].as_u64().unwrap();
+    let candidates = source[keys[3]].as_u64().unwrap();
+    let no_window = source[keys[4]].as_u64().unwrap();
+    let readable = source[keys[5]].as_u64().unwrap();
+    let incomplete = source[keys[6]].as_u64().unwrap();
+    if clock_excluded
+        .checked_add(nonvisible)
+        .and_then(|sum| sum.checked_add(candidates))
+        != Some(indexed)
+        || readable
+            .checked_add(no_window)
+            .is_none_or(|sum| sum > candidates)
+        || incomplete > readable
+        || (source["completed_only"] == false && incomplete != 0)
+    {
+        return Value::Null;
+    }
+    let mut result = json!({"revision":1,"scope":"indexed_rows_and_window_candidates",
+        "counts_form_population_partition":false,"completed_only":source["completed_only"]});
+    for key in keys {
+        result[key] = source[key].clone();
+    }
+    result
+}
+
 fn validate_audit(audit: &Value) -> Result<(), crate::ContractError> {
     if audit["kind"] != "groundline-codex-weekly-audit"
         || audit["schema"] != 1
@@ -215,6 +263,64 @@ fn render_review(audit: Value, recommendation: Value) -> Result<Value, crate::Co
     let unclassified_commands = count(root, "/tools/unclassified_command_call_count");
     let command_diagnostics = command_diagnostics(root);
     let command_reasons = reasons(&command_diagnostics, "/reasons", COMMAND_REASONS);
+    let root_selection = root_selection_readout(&audit);
+    let mut input_sources = json!({
+        "event_msg_record_count":count(root, "/activity/user_message_events"),
+        "response_item_record_count":count(root, "/activity/response_item_user_messages"),
+        "native_input_record_count":count(root, "/activity/native_user_input_records"),
+        "duplicate_record_count":count(root, "/activity/duplicate_native_user_input_records"),
+        "unique_input_count":count(root, "/activity/unique_native_user_inputs"),
+        "extracted_request_count":count(root, "/activity/user_messages_with_text"),
+        "classification_revision":count(root, "/prompt_shape/input_classification/revision"),
+        "classification_complete":root.pointer("/prompt_shape/input_classification/complete").and_then(Value::as_bool),
+        "coverage_observation_complete":root.pointer("/prompt_shape/input_classification/coverage_observation_complete").and_then(Value::as_bool),
+        "coverage_issue_counts":{
+            "empty_text":count(root, "/prompt_shape/input_classification/coverage_issue_counts/empty_text"),
+            "unresolved_envelope":count(root, "/prompt_shape/input_classification/coverage_issue_counts/unresolved_envelope"),
+            "unavailable_text":count(root, "/prompt_shape/input_classification/coverage_issue_counts/unavailable_text"),
+            "non_text_content":count(root, "/prompt_shape/input_classification/coverage_issue_counts/non_text_content"),
+            "unsupported_content":count(root, "/prompt_shape/input_classification/coverage_issue_counts/unsupported_content"),
+        },
+    });
+    let classification_status = if input_sources["coverage_observation_complete"] == false {
+        "incomplete"
+    } else {
+        match input_sources["classification_complete"].as_bool() {
+            Some(true) => "complete",
+            Some(false)
+                if input_sources["extracted_request_count"] == 0
+                    && input_sources["coverage_observation_complete"] == true =>
+            {
+                "unavailable"
+            }
+            Some(false) => "incomplete",
+            None => "unknown",
+        }
+    };
+    input_sources["classification_status"] = json!(classification_status);
+    let input_classification = match classification_status {
+        "complete" => "관측된 요청 분류 완료",
+        "unavailable" => "요청 텍스트 미관측",
+        "incomplete" => "입력 분류 범위 불완전",
+        _ => "입력 분류 범위 미확인",
+    };
+    let selection_report = format!(
+        "표본 선택: 인덱스 기간·표시 후보 {}행 · 읽힌 기간 후보 루트 {}개 · 최신 턴 미완료 제외 {}개 (시각 미확정 포함 · 전체 이력 분모 아님)",
+        shown(count(&root_selection, "/indexed_candidate_root_row_count")),
+        shown(count(&root_selection, "/readable_candidate_root_count")),
+        shown(count(
+            &root_selection,
+            "/latest_turn_incomplete_excluded_root_count"
+        )),
+    );
+    let input_report = format!(
+        "사용자 입력: 고유 {}건 · event {}건 · response message {}건 · 중복 제외 {}건 · 추출 요청 {}건 · {input_classification} (0·미관측은 대화 부재 증거 아님)",
+        shown(count(&input_sources, "/unique_input_count")),
+        shown(count(&input_sources, "/event_msg_record_count")),
+        shown(count(&input_sources, "/response_item_record_count")),
+        shown(count(&input_sources, "/duplicate_record_count")),
+        shown(count(&input_sources, "/extracted_request_count")),
+    );
     // These store-level failures never reached the root parser. Keep their
     // denominators separate instead of hiding them behind its zero issue count.
     let unreadable_roots = count(&audit, "/scope/unreadable_completed_root_count");
@@ -312,7 +418,7 @@ fn render_review(audit: Value, recommendation: Value) -> Result<Value, crate::Co
         "추천 생성 실패. 확보한 감사 결과는 보존했습니다."
     };
     let report = format!(
-        "주간 감사 {audit_status} · 추천 {}\n완료 루트 작업 표본 {}개 · 완료 턴 {}개\n사용량 관측 {}/{}개 rollout · {} 토큰 ({source}; 청구액 추정 아님)\n사용량 출처: 누계 {}개 · 소유 응답 {}개 · 최근 사용량 대체 {}개\n사용량 미관측 사유: {usage_reasons}\n알려진 범위 제외 {}건 · 읽힌 루트 내부 수집 문제 {}건\n{collection_coverage}\n{store_coverage}\n검증: 성공 {}건 · 실패 {}건 · 미확정 {}건 · 후속 대기로 복구 {}건\n검증 미확정 사유: {verification_reasons}\nGuardian: {guardian}\n{advice}\n이 보고서는 설치 무결성, 실제 훅, worker, 서버 수신 또는 예약 트리거의 실행을 증명하지 않습니다.",
+        "주간 감사 {audit_status} · 추천 {}\n완료 루트 작업 표본 {}개 · 완료 턴 {}개\n{selection_report}\n{input_report}\n사용량 관측 {}/{}개 rollout · {} 토큰 ({source}; 청구액 추정 아님)\n사용량 출처: 누계 {}개 · 소유 응답 {}개 · 최근 사용량 대체 {}개\n사용량 미관측 사유: {usage_reasons}\n알려진 범위 제외 {}건 · 읽힌 루트 내부 수집 문제 {}건\n{collection_coverage}\n{store_coverage}\n검증: 성공 {}건 · 실패 {}건 · 미확정 {}건 · 후속 대기로 복구 {}건\n검증 미확정 사유: {verification_reasons}\nGuardian: {guardian}\n{advice}\n이 보고서는 설치 무결성, 실제 훅, worker, 서버 수신 또는 예약 트리거의 실행을 증명하지 않습니다.",
         if recommendation_pass { "PASS" } else { "FAIL" },
         shown(roots),
         shown(turns),
@@ -335,6 +441,7 @@ fn render_review(audit: Value, recommendation: Value) -> Result<Value, crate::Co
         "execution":{"audit_runs":0,"recommendation_runs":0,"audit_completed":false,"recommendation_completed":recommendation_pass},
         "readout":{
             "completed_root_task_count":roots,"completed_turn_count":turns,
+            "root_selection":root_selection,"native_user_input_sources":input_sources,
             "usage_observed_rollouts":observed,"usage_selected_rollouts":selected,
             "scope_exclusion_count":excluded,"collection_issue_count":issues,
             "verification_success_count":success,"verification_failure_count":failure,"verification_unresolved_count":unresolved,
@@ -360,6 +467,59 @@ fn render_review(audit: Value, recommendation: Value) -> Result<Value, crate::Co
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_known_extraction_hole_is_incomplete_even_with_zero_extracted_requests() {
+        let audit = json!({"kind":"groundline-codex-weekly-audit","schema":1,
+            "raw_content_emitted":false,"private_paths_emitted":false,"thread_ids_emitted":false,
+            "rollout_paths_emitted":false,"secret_value_printed":false,"status":"PARTIAL",
+            "scope":{},"root":{"activity":{"user_messages_with_text":0},
+            "prompt_shape":{"input_classification":{"revision":2,"complete":false,
+            "coverage_observation_complete":false,"coverage_issue_counts":{"unavailable_text":1}}}}});
+        let result = review(audit).unwrap();
+        assert_eq!(
+            result["readout"]["native_user_input_sources"]["classification_status"],
+            "incomplete"
+        );
+        assert_eq!(
+            result["readout"]["native_user_input_sources"]["coverage_issue_counts"]["unavailable_text"],
+            1
+        );
+        assert_eq!(
+            result["readout"]["native_user_input_sources"]["extracted_request_count"],
+            0
+        );
+    }
+
+    #[test]
+    fn root_selection_is_typed_bounded_and_unknown_when_not_observed() {
+        let mut audit = json!({"scope":{"root_selection":{
+            "revision":1,"scope":"indexed_rows_and_window_candidates",
+            "counts_form_population_partition":false,"completed_only":true,
+            "indexed_root_row_count":10,"index_clock_excluded_root_row_count":2,
+            "nonvisible_excluded_root_row_count":1,"indexed_candidate_root_row_count":7,
+            "no_window_records_excluded_root_count":1,"readable_candidate_root_count":5,
+            "latest_turn_incomplete_excluded_root_count":2,"private_field":"PRIVATE_SENTINEL"}}});
+        let result = root_selection_readout(&audit);
+        assert_eq!(result["readable_candidate_root_count"], 5);
+        assert!(!result.to_string().contains("PRIVATE_SENTINEL"));
+        for (key, value) in [
+            ("revision", json!(9)),
+            ("indexed_root_row_count", json!(9)),
+            (
+                "indexed_candidate_root_row_count",
+                json!("PRIVATE_SENTINEL"),
+            ),
+            ("latest_turn_incomplete_excluded_root_count", json!(6)),
+            ("completed_only", json!(false)),
+        ] {
+            let mut invalid = audit.clone();
+            invalid["scope"]["root_selection"][key] = value;
+            assert!(root_selection_readout(&invalid).is_null());
+        }
+        audit["scope"]["root_selection"] = Value::Null;
+        assert!(root_selection_readout(&audit).is_null());
+    }
 
     #[test]
     fn command_diagnostic_readout_preserves_counts_and_unknown_old_reports() {
