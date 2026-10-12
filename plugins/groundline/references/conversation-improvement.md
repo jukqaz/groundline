@@ -220,7 +220,11 @@ transcripts or a parallel ledger.
 
 Use the existing nullable observation fields according to that evidence: an
 unknown trigger stays `opportunity: null`; a contextually absent trigger is
-`false`; a present trigger is `true`. Unknown recurrence stays `recurred: null`.
+`false`; a present trigger is `true`. When `opportunity` is `false` or `null`,
+`recurred` must be `null`. An interaction without the relevant trigger is not an
+assessed non-recurrence; do not write `recurred: false` merely because that
+interaction contains no error. Only a known relevant opportunity permits a
+recurrence verdict. Unknown recurrence stays `recurred: null`.
 A recurrence claim still needs the contract's actual own-correction evidence;
 observed criterion behavior and recorded recurrence are distinct. Preserve the
 actual comparison conditions rather than copying an earlier context merely to
