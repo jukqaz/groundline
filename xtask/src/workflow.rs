@@ -125,7 +125,7 @@ fn native_delivery_command_is_complete(line: &str) -> bool {
     let mut rest = args[7..].iter().copied();
     let (mut delivery, mut routing, mut adaptive) = (false, false, false);
     let (mut learning_loop, mut environment_sync, mut official_sources) = (false, false, false);
-    let mut learning_work = false;
+    let (mut learning_work, mut conversation_work) = (false, false);
     while let Some(arg) = rest.next() {
         match arg {
             "--lib" => {}
@@ -135,6 +135,7 @@ fn native_delivery_command_is_complete(line: &str) -> bool {
                 Some("adaptive_environment_cli") => adaptive = true,
                 Some("learning_loop_cli") => learning_loop = true,
                 Some("learning_work_cli") => learning_work = true,
+                Some("conversation_work_cli") => conversation_work = true,
                 Some("environment_sync_cli") => environment_sync = true,
                 Some("official_sources_cli") => official_sources = true,
                 Some("setup_cli" | "config_repair_cli" | "install_cli") => {}
@@ -148,6 +149,7 @@ fn native_delivery_command_is_complete(line: &str) -> bool {
                     && adaptive
                     && learning_loop
                     && learning_work
+                    && conversation_work
                     && environment_sync
                     && official_sources
                     && rest.all(|arg| matches!(arg, "--show-output" | "--nocapture"));
@@ -160,6 +162,7 @@ fn native_delivery_command_is_complete(line: &str) -> bool {
         && adaptive
         && learning_loop
         && learning_work
+        && conversation_work
         && environment_sync
         && official_sources
 }
@@ -486,6 +489,7 @@ mod tests {
                 " --test adaptive_environment_cli",
                 " --test learning_loop_cli",
                 " --test learning_work_cli",
+                " --test conversation_work_cli",
                 " --test environment_sync_cli",
                 " --test official_sources_cli",
             ] {
