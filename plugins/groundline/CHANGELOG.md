@@ -1,5 +1,10 @@
 # GroundLine Core changes
 
+## 2026.1013.1
+
+- Codex App의 정상 alpha SemVer 버전을 관측하고 prerelease·build metadata와 잘못된 출력 형식을 표준 파서로 구분합니다.
+- 공식 TypeScript SDK의 `codex_sdk_ts` root·child를 `codex_cli`로 분류해 보존된 App 수집 window의 완전성을 복구합니다. 임의 originator는 계속 거부합니다.
+
 ## 2026.1012.1
 
 - 실제 대화의 요구·행동·정정 근거를 분석하고, 변경 전 대상 capture부터 지침·스킬 변경, 별도 활성화와 자연 후속 관측까지 기존 learning 저장소에서 연결합니다. `learning status`는 다음 필요한 행동을 표시하며 가짜 완료·수락·사용량을 요구하지 않습니다.

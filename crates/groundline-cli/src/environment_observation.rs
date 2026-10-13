@@ -356,14 +356,8 @@ fn version(cli: &Path, home: &Path, cwd: &Path, timeout: Duration) -> Value {
         if words.len() != 2 || words[0] != "codex-cli" {
             return Err(Failure::new("version_format_unknown"));
         }
-        let parts: Vec<_> = words[1].split('.').collect();
-        if parts.len() != 3
-            || parts
-                .iter()
-                .any(|part| part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()))
-        {
-            return Err(Failure::new("version_format_unknown"));
-        }
+        // App-bundled CLIs can include SemVer prerelease and build identifiers.
+        semver::Version::parse(words[1]).map_err(|_| Failure::new("version_format_unknown"))?;
         Ok(words[1].to_owned())
     })();
     let terminated = exited || terminate(&mut child);
@@ -901,6 +895,154 @@ mod tests {
         );
         assert!(client.close());
         assert!(client.activity);
+    }
+
+    #[test]
+    fn environment_observation_version_accepts_semver_and_preserves_native_label() {
+        let (root, home, _target) = setup();
+        let cli = root.path().join("version");
+        for value in [
+            "0.162.0-alpha.17.2",
+            "0.162.1",
+            "0.0.0",
+            "1.2.3-alpha",
+            "1.2.3-rc.1",
+            "1.2.3+build.001",
+            "1.2.3-alpha.17.2+build-1.001",
+        ] {
+            std::fs::write(
+                &cli,
+                format!(
+                    "#!/bin/sh\nprintf '%s\\n' {}\n",
+                    quote(&format!("codex-cli {value}"))
+                ),
+            )
+            .unwrap();
+            std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let result = version(&cli, &home, root.path(), Duration::from_secs(1));
+            assert_eq!(result["value"], value, "{value}");
+            assert!(result["error"].is_null(), "{value}");
+            assert_eq!(result["process_terminated"], true, "{value}");
+        }
+    }
+
+    #[test]
+    fn environment_observation_prerelease_version_completes_the_app_lane() {
+        let (root, home, target) = setup();
+        let cwd = std::env::current_dir().unwrap();
+        let app_root = root.path().join("app");
+        let path_root = root.path().join("path");
+        std::fs::create_dir(&app_root).unwrap();
+        std::fs::create_dir(&path_root).unwrap();
+        let app_cli = mock_cli(&app_root, &home, &cwd, &target, false);
+        let path_cli = mock_cli(&path_root, &home, &cwd, &target, false);
+        let script = std::fs::read_to_string(&app_cli)
+            .unwrap()
+            .replace("codex-cli 0.159.2", "codex-cli 0.162.0-alpha.17.2");
+        std::fs::write(&app_cli, script).unwrap();
+        let snapshot = inspect(&app_cli, &path_cli, &home, &[target]).unwrap();
+        assert_eq!(snapshot["status"], "PASS");
+        assert_eq!(
+            snapshot["app_cli"]["version"]["value"],
+            "0.162.0-alpha.17.2"
+        );
+        assert_eq!(snapshot["path_cli"]["version"]["value"], "0.159.2");
+        assert_eq!(snapshot["config_file"]["unchanged"], true);
+        assert_eq!(snapshot["execution_effect_verified"], false);
+    }
+
+    #[test]
+    fn environment_observation_version_rejects_malformed_or_extra_output_privately() {
+        let (root, home, _target) = setup();
+        let cli = root.path().join("version");
+        for output in [
+            "",
+            "codex-cli",
+            "codex 0.162.1",
+            "PRIVATE_PREFIX codex-cli 0.162.1",
+            "codex-cli 0.162.1 PRIVATE_SUFFIX",
+            "codex-cli 0.162.1\ncodex-cli 0.162.1",
+            "codex-cli v0.162.1",
+            "codex-cli 0.162",
+            "codex-cli 0.162.1.2",
+            "codex-cli 00.162.1",
+            "codex-cli 0.0162.1",
+            "codex-cli 0.162.01",
+            "codex-cli 0.162.-1",
+            "codex-cli 0.162.1-",
+            "codex-cli 0.162.1+",
+            "codex-cli 0.162.1-alpha..1",
+            "codex-cli 0.162.1-alpha.01",
+            "codex-cli 0.162.1-alpha_1",
+            "codex-cli 0.162.1-alpha.한글",
+            "codex-cli 0.162.1+build..1",
+            "codex-cli 0.162.1+build_1",
+            "codex-cli 0.162.1+build+1",
+            "codex-cli 18446744073709551616.162.1",
+        ] {
+            std::fs::write(
+                &cli,
+                format!("#!/bin/sh\nprintf '%s\\n' {}\n", quote(output)),
+            )
+            .unwrap();
+            std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let result = version(&cli, &home, root.path(), Duration::from_secs(1));
+            assert!(result["value"].is_null(), "{output:?}");
+            assert_eq!(
+                result["error"]["reason"], "version_format_unknown",
+                "{output:?}"
+            );
+            assert_eq!(result["process_terminated"], true, "{output:?}");
+            assert!(!result.to_string().contains("PRIVATE_"));
+        }
+    }
+
+    #[test]
+    fn environment_observation_version_rejects_control_and_invalid_utf8_bytes() {
+        let (root, home, _target) = setup();
+        let cli = root.path().join("version");
+        for suffix in ["\\000", "\\377"] {
+            std::fs::write(
+                &cli,
+                format!("#!/bin/sh\nprintf 'codex-cli 0.162.1{suffix}\\n'\n"),
+            )
+            .unwrap();
+            std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let result = version(&cli, &home, root.path(), Duration::from_secs(1));
+            assert!(result["value"].is_null());
+            assert_eq!(result["error"]["reason"], "version_format_unknown");
+            assert_eq!(result["process_terminated"], true);
+        }
+    }
+
+    #[test]
+    fn environment_observation_version_output_limit_is_preserved() {
+        let (root, home, _target) = setup();
+        let cli = root.path().join("version");
+        std::fs::write(
+            &cli,
+            format!("#!/bin/sh\nprintf '%s' {}\n", quote(&"x".repeat(513))),
+        )
+        .unwrap();
+        std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let result = version(&cli, &home, root.path(), Duration::from_secs(1));
+        assert!(result["value"].is_null());
+        assert_eq!(result["error"]["reason"], "version_output_limit");
+        assert_eq!(result["process_terminated"], true);
+    }
+
+    #[test]
+    fn environment_observation_version_timeout_reaps_the_child() {
+        let (root, home, _target) = setup();
+        let cli = root.path().join("hang-version");
+        std::fs::write(&cli, "#!/bin/sh\nexec /bin/sleep 30\n").unwrap();
+        std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let start = Instant::now();
+        let result = version(&cli, &home, root.path(), Duration::from_millis(30));
+        assert!(result["value"].is_null());
+        assert_eq!(result["error"]["reason"], "timeout");
+        assert_eq!(result["process_terminated"], true);
+        assert!(start.elapsed() < Duration::from_secs(2));
     }
 
     #[test]

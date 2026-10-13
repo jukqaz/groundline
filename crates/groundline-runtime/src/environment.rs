@@ -8,7 +8,7 @@ pub struct EnvironmentError;
 pub fn codex_originator(value: &str) -> Option<&'static str> {
     match value.trim().to_ascii_lowercase().replace('-', "_").as_str() {
         "codex desktop" | "codex_app" | "codex vscode" | "codex_vscode" => Some("codex_app"),
-        "codex_tui" | "codex_exec" | "codex_cli" => Some("codex_cli"),
+        "codex_tui" | "codex_exec" | "codex_cli" | "codex_sdk_ts" => Some("codex_cli"),
         _ => None,
     }
 }
@@ -107,5 +107,26 @@ mod tests {
             assert!(codex_originator(value).is_none());
         }
         assert!(!foreign_originator("future-codex"));
+    }
+
+    #[test]
+    fn official_typescript_sdk_originator_is_cli_and_unknown_sdk_names_are_rejected() {
+        assert_eq!(codex_originator("codex_sdk_ts"), Some("codex_cli"));
+        assert_eq!(
+            Environment::resolve(None, None, Some("codex_sdk_ts")).unwrap(),
+            Environment {
+                runtime: "codex_cli",
+                mode: "local_headless",
+            }
+        );
+        for originator in [
+            "codex_sdk",
+            "codex_sdk_py",
+            "private_codex_sdk_ts",
+            "codex_sdk_ts_private",
+        ] {
+            assert!(codex_originator(originator).is_none());
+            assert!(Environment::resolve(None, None, Some(originator)).is_err());
+        }
     }
 }

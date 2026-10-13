@@ -48,6 +48,7 @@ GroundLine does not enable them or pin global model settings.
 
 ## Known evidence limits
 
+- The [official TypeScript SDK](https://github.com/openai/codex/blob/main/sdk/typescript/src/exec.ts) launches CLI subprocesses with `codex_sdk_ts`; its roots and delegated children are `codex_cli` data and remain outside `codex_app` windows.
 - Codex may retain imported tasks with an explicit `Claude Code`, `Hermes`,
   `Gemini CLI`, or `Antigravity` originator.
   These are outside GroundLine's Codex-only collection scope, even when the
