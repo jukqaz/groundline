@@ -182,6 +182,73 @@ mod tests {
     }
 
     #[test]
+    fn quality_panels_distinguish_unsupported_attribution_and_partial_scope() {
+        let config = source();
+        let panel = |name: &str, id: u64| {
+            let value: Value =
+                serde_json::from_str(config["configs"][name]["content"].as_str().unwrap()).unwrap();
+            value["panels"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|panel| panel["id"] == id)
+                .unwrap()
+                .clone()
+        };
+        let quality = panel("grafana_analysis_dashboard", 10);
+        let sql = quality["targets"][0]["rawSql"].as_str().unwrap();
+        for expression in [
+            "countIf(root_status = 'PARTIAL') AS root_partial_windows",
+            "countIf(root_status = 'FAIL') AS root_failed_windows",
+            "countIf(guardian_review_count > 0 AND capability_guardian_workspace_attribution = 0) AS guardian_attribution_unsupported_windows",
+            "countIf(component_nonpass = 1) AS component_nonpass_windows",
+            "countIf(observed_root_count > 0 AND usage_source IN ('unavailable', 'unknown')) AS root_usage_missing_windows",
+            "countIf(delegated_count > 0 AND delegated_usage_source IN ('unavailable', 'unknown')) AS delegated_usage_missing_windows",
+            "countIf(guardian_count > 0 AND guardian_usage_source IN ('unavailable', 'unknown')) AS guardian_usage_missing_windows",
+        ] {
+            assert!(sql.contains(expression), "missing {expression}");
+        }
+        assert!(!sql.contains("root_incomplete_windows"));
+        assert!(!sql.contains("guardian_attribution_missing_windows"));
+        assert!(
+            quality["description"]
+                .as_str()
+                .unwrap()
+                .contains("단정할 수 없고")
+        );
+        assert!(
+            quality["fieldConfig"]["overrides"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|field| field["matcher"]["options"]
+                    == "guardian_attribution_unsupported_windows"
+                    && field["properties"][0]["value"] == "Guardian 귀속 미지원 구간")
+        );
+        for (name, id) in [("grafana_dashboard", 14), ("grafana_analysis_dashboard", 8)] {
+            let coverage = panel(name, id);
+            let sql = coverage["targets"][0]["rawSql"].as_str().unwrap();
+            for expression in [
+                "countIf(guardian_review_count > 0) AS guardian_attribution_applicable_events",
+                "countIf(guardian_review_count > 0 AND capability_guardian_workspace_attribution = 1) AS guardian_attribution_events",
+                "countIf(guardian_review_count > 0 AND capability_guardian_workspace_attribution = 0) AS guardian_attribution_unsupported_events",
+                "AS usage_missing_events",
+            ] {
+                assert!(sql.contains(expression), "missing {expression}");
+            }
+        }
+        let readiness = panel("grafana_dashboard", 11);
+        assert!(
+            readiness["targets"][0]["rawSql"]
+                .as_str()
+                .unwrap()
+                .contains(
+                    "guardian_review_count > 0 AND capability_guardian_workspace_attribution = 0"
+                )
+        );
+    }
+
+    #[test]
     fn compressed_content_rejects_corruption_trailing_bytes_and_expansion() {
         let mut config = source();
         pack(&mut config).unwrap();

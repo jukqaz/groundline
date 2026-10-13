@@ -1,5 +1,10 @@
 # GroundLine Core changes
 
+## 2026.1013.2
+
+- 공통 Basic metrics가 정상 범위 제외와 실제 수집 불완전을 구분하도록 수정합니다. 로컬 audit의 `PARTIAL`·오류·scope 제외 근거는 보존합니다.
+- guardian 미관측값과 품질 화면 수정에 맞춰 패키지 버전을 동기화합니다.
+
 ## 2026.1013.1
 
 - Codex App의 정상 alpha SemVer 버전을 관측하고 prerelease·build metadata와 잘못된 출력 형식을 표준 파서로 구분합니다.

@@ -1,5 +1,10 @@
 # GroundLine Insights changes
 
+## 2026.1013.2
+
+- 완전성이 확인된 관측 범위에 정상 prefix 제외가 있다는 이유로 수집 손실 경고가 생기는 문제를 수정합니다.
+- 지원하지 않는 guardian 값은 보고서의 `null`과 품질 화면의 미관측 상태로 표시합니다.
+
 ## 2026.1013.1
 
 - 공식 TypeScript SDK의 정확한 `codex_sdk_ts` originator를 CLI로 분류해 보존된 App 수집 window를 정상 범위로 다시 수집합니다. 알 수 없는 originator의 불완전 판정은 유지합니다.

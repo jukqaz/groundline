@@ -59,13 +59,46 @@ fn timestamp(value: Option<&Value>) -> Option<String> {
     Some(utc.to_rfc3339_opts(format, true))
 }
 
-fn component_status(value: Option<&Value>) -> &'static str {
-    match value.and_then(Value::as_str) {
+fn component_status(component: &Map<String, Value>) -> &'static str {
+    let status = match component.get("status").and_then(Value::as_str) {
         Some("PASS") => "PASS",
         Some("PARTIAL") => "PARTIAL",
         Some("INSUFFICIENT_EVIDENCE") => "INSUFFICIENT_EVIDENCE",
         Some("FAIL") => "FAIL",
         _ => "UNKNOWN",
+    };
+    if status != "PARTIAL"
+        || component
+            .get("collection_complete")
+            .and_then(Value::as_bool)
+            != Some(true)
+        || component
+            .get("collection_issue_count")
+            .is_some_and(|value| value.as_u64() != Some(0))
+    {
+        return status;
+    }
+    let input_coverage_complete = component.get("prompt_shape").is_none_or(|prompts| {
+        prompts.as_object().is_some_and(|prompts| {
+            prompts.get("input_classification").is_none_or(|inputs| {
+                inputs
+                    .get("coverage_observation_complete")
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                    && inputs.get("coverage_issue_counts").is_none_or(|issues| {
+                        issues.as_object().is_some_and(|issues| {
+                            issues.values().all(|value| value.as_u64() == Some(0))
+                        })
+                    })
+            })
+        })
+    });
+    // Basic status describes the observed collection scope. Local audits keep
+    // PARTIAL and their diagnostics when an inherited prefix is excluded.
+    if input_coverage_complete {
+        "PASS"
+    } else {
+        status
     }
 }
 
@@ -164,7 +197,7 @@ fn session_metrics(component: Option<&Value>) -> Value {
         count(tools.get("verification_failure_count")).min(verification.saturating_sub(success));
     let unresolved = verification.saturating_sub(success).saturating_sub(failure);
     json!({
-        "status":component_status(component.get("status")),
+        "status":component_status(component),
         "activity":{
             "task_started":count(activity.get("task_started")),
             "task_completed":count(activity.get("task_completed")),
@@ -205,7 +238,7 @@ fn guardian_metrics(component: Option<&Value>) -> Value {
     let component = object(component);
     let signals = object(component.get("signals"));
     json!({
-        "status":component_status(component.get("status")),
+        "status":component_status(component),
         "rollout_count":count(component.get("rollout_count")),
         "review_count":count(component.get("review_count")),
         "usage":usage(component, false),
@@ -351,6 +384,187 @@ pub fn build_basic_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "audit")]
+    #[test]
+    fn basic_metrics_use_complete_observed_scope_without_changing_local_audit() {
+        let records = [
+            json!({"ordinal":0,"type":"session_meta","payload":{
+                "id":"synthetic-owner","history_mode":"paginated",
+                "history_base":{"end_ordinal_exclusive":1}
+            }}),
+            json!({"ordinal":1,"timestamp":"1970-01-01T00:00:05Z","type":"token_usage_record","payload":{
+                "thread_id":"synthetic-owner","response_id":"response-1",
+                "usage":{"total_tokens":7},"thread_token_usage":{"total_tokens":700}
+            }}),
+            json!({"ordinal":2,"timestamp":"1970-01-01T00:00:06Z","type":"event_msg","payload":{"type":"task_complete"}}),
+        ];
+        let contents = records
+            .iter()
+            .map(Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        let session = crate::audit::audit_rollouts(
+            &[&contents],
+            0,
+            20,
+            crate::audit::AuditWindow {
+                start: Some("1970-01-01T00:00:00Z".parse().unwrap()),
+                end: Some("1970-01-01T00:00:10Z".parse().unwrap()),
+            },
+        )
+        .unwrap();
+        assert_eq!(session["status"], "PARTIAL");
+        assert_eq!(session["collection_complete"], true);
+        assert_eq!(session["scope_exclusion_count"], 1);
+        assert_eq!(session["collection_issue_count"], 0);
+        assert_eq!(
+            session["prompt_shape"]["input_classification"]["coverage_observation_complete"],
+            true
+        );
+        assert_eq!(
+            session["prompt_shape"]["input_classification"]["complete"],
+            false
+        );
+        let guardian = json!({
+            "status":"PARTIAL","collection_complete":true,"rollout_count":1,"review_count":1,
+            "provider_reported_usage":session["provider_reported_usage"],
+            "availability":{"workspace_attribution":false},
+            "signals":{"reviewer_already_low_effort":null,"workspace_attributed_review_count":null,"workspace_attribution_coverage":null}
+        });
+        let audit = json!({
+            "schema":1,"kind":"groundline-codex-activity-audit","status":"PARTIAL","collection_complete":true,
+            "scope":{"generated_at":"1970-01-01T00:00:10Z","selection_mode":"activity_window",
+                "requested_window_start":"1970-01-01T00:00:00Z","requested_window_end":"1970-01-01T00:00:10Z",
+                "eligible_root_count":1,"selected_root_count":1,"observed_root_sample_count":1,
+                "minimum_root_sample_count":5,"sample_sufficient":false,"selection_coverage":1.0,
+                "delegated_rollout_count":1,"guardian_rollout_count":1},
+            "root":session,"delegated":session,"guardian":guardian,
+            "mutation_performed":false,"raw_content_emitted":false,"private_paths_emitted":false,
+            "thread_ids_emitted":false,"rollout_paths_emitted":false,"secret_value_printed":false
+        });
+        let before = audit.clone();
+        let event = build_basic_event(
+            &audit,
+            CollectorIdentity {
+                instance_id: Uuid::new_v4(),
+                os_family: "macos",
+                runtime_family: "codex_app",
+                execution_mode: "desktop",
+            },
+            ConsentReceipt {
+                receipt_id: Uuid::new_v4(),
+                accepted_at_utc: "1970-01-01T00:00:00Z",
+            },
+            env!("CARGO_PKG_VERSION"),
+            7,
+            "stop_hook",
+        )
+        .unwrap();
+        assert_eq!(audit, before);
+        assert_eq!(event["schema_version"], 5);
+        for component in ["root", "delegated", "guardian"] {
+            assert_eq!(event["metrics"][component]["status"], "PASS", "{component}");
+            assert_eq!(event["metrics"][component]["usage"]["total_tokens"], 7);
+        }
+        assert_eq!(
+            event["capabilities"]["guardian_workspace_attribution"],
+            false
+        );
+        assert_eq!(
+            event["metrics"]["guardian"]["signals"]["reviewer_already_low_effort"],
+            false
+        );
+        assert_eq!(
+            event["metrics"]["guardian"]["signals"]["workspace_attribution_coverage"],
+            Value::Null
+        );
+    }
+
+    #[test]
+    fn partial_metrics_require_direct_complete_evidence_and_clear_diagnostics() {
+        for component in [
+            json!({"status":"PARTIAL"}),
+            json!({"status":"PARTIAL","collection_complete":false}),
+            json!({"status":"PARTIAL","collection_complete":null}),
+            json!({"status":"PARTIAL","collection_complete":"true"}),
+            json!({"status":"PARTIAL","collection_complete":true,"collection_issue_count":1}),
+            json!({"status":"PARTIAL","collection_complete":true,"collection_issue_count":null}),
+            json!({"status":"PARTIAL","collection_complete":true,"collection_issue_count":"0"}),
+            json!({"status":"PARTIAL","collection_complete":true,"prompt_shape":null}),
+            json!({"status":"PARTIAL","collection_complete":true,"prompt_shape":{"input_classification":null}}),
+            json!({"status":"PARTIAL","collection_complete":true,"prompt_shape":{"input_classification":{"complete":true}}}),
+            json!({"status":"PARTIAL","collection_complete":true,"prompt_shape":{"input_classification":{"coverage_observation_complete":false}}}),
+            json!({"status":"PARTIAL","collection_complete":true,"prompt_shape":{"input_classification":{"coverage_observation_complete":null}}}),
+            json!({"status":"PARTIAL","collection_complete":true,"prompt_shape":{"input_classification":{"coverage_observation_complete":true,"coverage_issue_counts":{"unresolved_envelope":1}}}}),
+            json!({"status":"PARTIAL","collection_complete":true,"prompt_shape":{"input_classification":{"coverage_observation_complete":true,"coverage_issue_counts":null}}}),
+        ] {
+            assert_eq!(session_metrics(Some(&component))["status"], "PARTIAL");
+            assert_eq!(guardian_metrics(Some(&component))["status"], "PARTIAL");
+        }
+        for component in [
+            json!({"status":"PARTIAL","collection_complete":true}),
+            json!({"status":"PARTIAL","collection_complete":true,"scope_exclusion_count":3,"collection_issue_count":0}),
+            json!({"status":"PARTIAL","collection_complete":true,"collection_issue_count":0,"prompt_shape":{"input_classification":{
+                "coverage_observation_complete":true,"complete":false,"human_text_input_count":0,
+                "coverage_issue_counts":{"empty_text":0,"unresolved_envelope":0,"unavailable_text":0,"non_text_content":0,"unsupported_content":0}
+            }}}),
+        ] {
+            assert_eq!(session_metrics(Some(&component))["status"], "PASS");
+            assert_eq!(guardian_metrics(Some(&component))["status"], "PASS");
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "audit")]
+    fn native_collection_and_input_losses_keep_partial_metrics() {
+        let metadata = json!({"type":"session_meta","payload":{"id":"synthetic-owner"}});
+        let usage = json!({"timestamp":"1970-01-01T00:00:05Z","type":"token_usage_record","payload":{
+            "thread_id":"synthetic-owner","response_id":"response-1",
+            "usage":{"total_tokens":7},"thread_token_usage":{"total_tokens":7}
+        }});
+        for loss in [
+            "{invalid JSON}".to_owned(),
+            json!({"type":"event_msg","payload":{"type":"task_complete"}}).to_string(),
+            json!({"timestamp":"1970-01-01T00:00:06Z","type":"event_msg","payload":{
+                "type":"user_message","message":"<send_user_message_question_reply>[{broken}</send_user_message_question_reply>"
+            }}).to_string(),
+        ] {
+            let contents = format!("{metadata}\n{usage}\n{loss}\n");
+            let session = crate::audit::audit_rollouts(
+                &[&contents], 0, 20, crate::audit::AuditWindow {
+                    start: Some("1970-01-01T00:00:00Z".parse().unwrap()),
+                    end: Some("1970-01-01T00:00:10Z".parse().unwrap()),
+                }
+            ).unwrap();
+            let before = session.clone();
+            assert_eq!(session["status"], "PARTIAL");
+            assert_eq!(session["collection_complete"], false);
+            assert_eq!(session_metrics(Some(&session))["status"], "PARTIAL");
+            let guardian = json!({
+                "status":session["status"],"collection_complete":session["collection_complete"],
+                "provider_reported_usage":session["provider_reported_usage"]
+            });
+            assert_eq!(guardian_metrics(Some(&guardian))["status"], "PARTIAL");
+            assert_eq!(session, before);
+        }
+    }
+
+    #[test]
+    fn non_partial_metrics_statuses_and_unavailable_components_are_preserved() {
+        for status in ["PASS", "FAIL", "UNKNOWN", "INSUFFICIENT_EVIDENCE"] {
+            for complete in [Value::Bool(true), Value::Bool(false), Value::Null] {
+                let component = json!({"status":status,"collection_complete":complete});
+                assert_eq!(session_metrics(Some(&component))["status"], status);
+                assert_eq!(guardian_metrics(Some(&component))["status"], status);
+            }
+        }
+        for component in [None, Some(&Value::Null)] {
+            assert_eq!(session_metrics(component)["status"], "UNKNOWN");
+            assert_eq!(guardian_metrics(component)["status"], "UNKNOWN");
+        }
+    }
 
     #[test]
     fn unavailable_guardian_fields_preserve_the_ingest_contract() {

@@ -990,12 +990,22 @@ impl WeeklyReport {
             return invalid();
         }
         let guardian = &self.weekly_metrics.guardian;
-        if !valid_ratio(guardian.workspace_attribution_coverage)
-            || !ratio_matches(
-                guardian.workspace_attribution_coverage,
+        let guardian_attribution_coverage = if coverage.guardian_attribution_applicable_event_count
+            > coverage.guardian_attribution_capable_event_count
+        {
+            None
+        } else {
+            round_ratio(
                 guardian.workspace_attributed_review_count,
                 guardian.review_count,
             )
+        };
+        if !valid_ratio(guardian.workspace_attribution_coverage)
+            || guardian.workspace_attributed_review_count > guardian.review_count
+            || coverage.guardian_attribution_applicable_event_count > guardian.review_count
+            || (guardian.review_count == 0)
+                != (coverage.guardian_attribution_applicable_event_count == 0)
+            || guardian.workspace_attribution_coverage != guardian_attribution_coverage
         {
             return invalid();
         }
@@ -2529,6 +2539,56 @@ mod tests {
         let bytes = serde_json::to_vec(&report()).unwrap();
         let parsed = WeeklyReport::from_slice(&bytes).expect("valid report");
         assert_eq!(parsed.collection_health.enrolled_installation_count, 1);
+    }
+
+    #[test]
+    fn guardian_report_unsupported_coverage_must_remain_unknown() {
+        let mut report = report();
+        report["coverage"]["guardian_attribution_applicable_event_count"] = json!(2);
+        report["weekly_metrics"]["guardian"]["review_count"] = json!(4);
+        report["data_quality"]["status"] = json!("PARTIAL");
+        report["data_quality"]["reason_codes"] = json!(["guardian_attribution_unavailable"]);
+        report["comparison_readiness"]["reason_codes"] =
+            json!(["comparison_baseline_not_included", "data_quality_not_pass"]);
+        for capable in [0, 1] {
+            report["coverage"]["guardian_attribution_capable_event_count"] = json!(capable);
+            report["weekly_metrics"]["guardian"]["workspace_attribution_coverage"] = Value::Null;
+            assert!(WeeklyReport::from_slice(&serde_json::to_vec(&report).unwrap()).is_ok());
+            report["weekly_metrics"]["guardian"]["workspace_attribution_coverage"] = json!(0.0);
+            assert!(WeeklyReport::from_slice(&serde_json::to_vec(&report).unwrap()).is_err());
+        }
+        report["weekly_metrics"]["guardian"]["workspace_attribution_coverage"] = Value::Null;
+        report["weekly_metrics"]["guardian"]["workspace_attributed_review_count"] = json!(5);
+        assert!(WeeklyReport::from_slice(&serde_json::to_vec(&report).unwrap()).is_err());
+    }
+
+    #[test]
+    fn guardian_report_non_applicable_and_capable_denominators_are_exact() {
+        let mut report = report();
+        assert!(WeeklyReport::from_slice(&serde_json::to_vec(&report).unwrap()).is_ok());
+        report["weekly_metrics"]["guardian"]["workspace_attribution_coverage"] = json!(0.0);
+        assert!(WeeklyReport::from_slice(&serde_json::to_vec(&report).unwrap()).is_err());
+        report["coverage"]["guardian_attribution_applicable_event_count"] = json!(2);
+        report["coverage"]["guardian_attribution_capable_event_count"] = json!(2);
+        report["weekly_metrics"]["guardian"] = json!({
+            "review_count":4,"workspace_attributed_review_count":3,"workspace_attribution_coverage":0.75
+        });
+        assert!(WeeklyReport::from_slice(&serde_json::to_vec(&report).unwrap()).is_ok());
+        for coverage in [Value::Null, json!(0.0), json!(1.0)] {
+            report["weekly_metrics"]["guardian"]["workspace_attribution_coverage"] = coverage;
+            assert!(WeeklyReport::from_slice(&serde_json::to_vec(&report).unwrap()).is_err());
+        }
+        report["weekly_metrics"]["guardian"]["workspace_attribution_coverage"] = json!(0.75);
+        report["coverage"]["guardian_attribution_capable_event_count"] = json!(3);
+        assert!(WeeklyReport::from_slice(&serde_json::to_vec(&report).unwrap()).is_err());
+        report["coverage"]["guardian_attribution_capable_event_count"] = json!(2);
+        report["weekly_metrics"]["guardian"]["review_count"] = json!(1);
+        report["weekly_metrics"]["guardian"]["workspace_attributed_review_count"] = json!(0);
+        report["weekly_metrics"]["guardian"]["workspace_attribution_coverage"] = json!(0.0);
+        assert!(WeeklyReport::from_slice(&serde_json::to_vec(&report).unwrap()).is_err());
+        report["coverage"]["guardian_attribution_applicable_event_count"] = json!(0);
+        report["coverage"]["guardian_attribution_capable_event_count"] = json!(0);
+        assert!(WeeklyReport::from_slice(&serde_json::to_vec(&report).unwrap()).is_err());
     }
 
     #[test]

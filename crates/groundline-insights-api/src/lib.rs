@@ -1953,6 +1953,17 @@ fn build_report(days: u16, end: DateTime<Utc>, latest_version: &str, rows: &Repo
     let verification_unresolved = count(summary, "verification_unresolved_count");
     let tool_calls = count(summary, "tool_call_count");
     let user_messages = count(summary, "user_messages_with_text");
+    let guardian_reviews = count(summary, "guardian_review_total");
+    let guardian_attributed_reviews = count(summary, "guardian_workspace_attributed_review_count");
+    // Wire zero defaults in unsupported windows are not observed attribution.
+    let guardian_attribution_coverage =
+        if count(summary, "guardian_attribution_applicable_event_count")
+            > count(summary, "guardian_attribution_capable_event_count")
+        {
+            Value::Null
+        } else {
+            ratio(guardian_attributed_reviews, guardian_reviews)
+        };
     let mut quality = BTreeSet::<String>::new();
     if event_count == 0 {
         quality.insert("no_events".to_owned());
@@ -2130,8 +2141,8 @@ fn build_report(days: u16, end: DateTime<Utc>, latest_version: &str, rows: &Repo
                 "boundary_review_root_count":count(summary,"boundary_review_root_count"),"long_lived_root_count":count(summary,"long_lived_root_count")},
             "verification":{"tool_call_count":verification_calls,"success_count":verification_success,"failure_count":verification_failure,
                 "unresolved_count":verification_unresolved,"outcome_coverage":ratio(verification_success.saturating_add(verification_failure),verification_calls)},
-            "guardian":{"review_count":count(summary,"guardian_review_total"),"workspace_attributed_review_count":count(summary,"guardian_workspace_attributed_review_count"),
-                "workspace_attribution_coverage":ratio(count(summary,"guardian_workspace_attributed_review_count"),count(summary,"guardian_review_total"))}
+            "guardian":{"review_count":guardian_reviews,"workspace_attributed_review_count":guardian_attributed_reviews,
+                "workspace_attribution_coverage":guardian_attribution_coverage}
         },
         "cohorts":{
             "event_distributions":{"schema_version":distributions(event_cohorts,"schema_version","event_count"),
@@ -3220,6 +3231,78 @@ mod tests {
                 .unwrap()
                 .contains(&json!("completed_root_coverage_unavailable"))
         );
+    }
+
+    #[test]
+    fn guardian_report_coverage_preserves_unsupported_and_non_applicable_windows() {
+        let mut rows: ReportRows =
+            serde_json::from_str(include_str!("../tests/fixtures/report-mixed-schema.json"))
+                .unwrap();
+        let build = |rows: &ReportRows| {
+            build_report(90, "2026-09-11T06:00:00Z".parse().unwrap(), "0.24.6", rows)
+        };
+        let report = build(&rows);
+        assert!(report["weekly_metrics"]["guardian"]["workspace_attribution_coverage"].is_null());
+        assert!(validated_report_response(report).is_ok());
+
+        rows.summary["guardian_review_total"] = json!(4);
+        rows.summary["guardian_attribution_applicable_event_count"] = json!(2);
+        // A mix of supported and unsupported windows remains unknown as a whole.
+        for capable in [0, 1] {
+            rows.summary["guardian_attribution_capable_event_count"] = json!(capable);
+            rows.summary["guardian_workspace_attributed_review_count"] = json!(capable);
+            let report = build(&rows);
+            assert_eq!(
+                report["weekly_metrics"]["guardian"]["workspace_attributed_review_count"],
+                capable
+            );
+            assert!(
+                report["weekly_metrics"]["guardian"]["workspace_attribution_coverage"].is_null()
+            );
+            assert!(
+                report["data_quality"]["reason_codes"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&json!("guardian_attribution_unavailable"))
+            );
+            assert!(validated_report_response(report).is_ok());
+        }
+        rows.summary["guardian_attribution_capable_event_count"] = json!(2);
+        rows.summary["guardian_workspace_attributed_review_count"] = json!(3);
+        let report = build(&rows);
+        assert_eq!(
+            report["weekly_metrics"]["guardian"]["workspace_attribution_coverage"],
+            0.75
+        );
+        assert!(validated_report_response(report).is_ok());
+    }
+
+    #[test]
+    fn guardian_report_unknown_attribution_keeps_usage_and_denominator_checks() {
+        let mut rows: ReportRows =
+            serde_json::from_str(include_str!("../tests/fixtures/report-mixed-schema.json"))
+                .unwrap();
+        rows.summary["guardian_review_total"] = json!(4);
+        rows.summary["guardian_attribution_applicable_event_count"] = json!(1);
+        rows.summary["guardian_usage_applicable_event_count"] = json!(1);
+        rows.summary["guardian_usage_missing_event_count"] = json!(1);
+        rows.summary["usage_missing_count"] = json!(1);
+        let build = |rows: &ReportRows| {
+            build_report(90, "2026-09-11T06:00:00Z".parse().unwrap(), "0.24.6", rows)
+        };
+        let report = build(&rows);
+        assert!(
+            report["data_quality"]["reason_codes"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("usage_missing"))
+        );
+        assert!(validated_report_response(report).is_ok());
+        rows.summary["guardian_workspace_attributed_review_count"] = json!(5);
+        assert!(validated_report_response(build(&rows)).is_err());
+        rows.summary["guardian_workspace_attributed_review_count"] = json!(0);
+        rows.summary["guardian_usage_missing_event_count"] = json!(2);
+        assert!(validated_report_response(build(&rows)).is_err());
     }
 
     #[tokio::test]
