@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026.10.13-a (`2026.1013.1`)
+
+- Codex App의 `0.162.0-alpha.17.2` 같은 정상 SemVer 버전을 관측하도록 파서를 수정합니다. prerelease·build metadata를 허용하고 잘못된 형식·추가 출력 거부, 출력 상한·시간 제한·종료 확인은 유지합니다.
+- 공식 TypeScript SDK의 정확한 `codex_sdk_ts` originator를 `codex_cli`로 분류해, SDK root·child가 섞인 보존된 App 수집 window의 완전성을 복구합니다. 알 수 없는 originator는 계속 수집 불완전으로 처리합니다.
+
 ## 2026.10.12-a (`2026.1012.1`)
 
 - 공통 기본 원칙의 전달 대상을 native `AGENTS.md`와 작업별 스킬 절차로 구분하고, 실제 로딩과 행동 검증을 분리합니다. 주간 루틴은 후속 대화의 실제 맥락을 읽어 기회·동작을 판단한 뒤 지침 노출·비교 조건을 별도로 확인합니다.

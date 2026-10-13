@@ -1040,6 +1040,90 @@ mod tests {
     }
 
     #[test]
+    fn typescript_sdk_roots_and_children_are_cli_data_without_blocking_app_windows() {
+        let home = codex_home();
+        let sessions = home.path().join("sessions");
+        fs::create_dir(&sessions).unwrap();
+        let app = sessions.join("app.jsonl");
+        let database = fixture_database(home.path(), &app, "vscode");
+        let connection = Connection::open(&database).unwrap();
+        let child_source = serde_json::json!({"subagent":{"thread_spawn":{
+            "parent_thread_id":"sdk-root", "depth":1
+        }}})
+        .to_string();
+        let mut originals = Vec::new();
+        for (owner, originator, source, tokens) in [
+            ("app", "codex_app", "vscode", 7),
+            ("sdk-root", "codex_sdk_ts", "exec", 11),
+            ("sdk-child", "codex_sdk_ts", child_source.as_str(), 13),
+        ] {
+            let path = sessions.join(format!("{owner}.jsonl"));
+            let records = [
+                serde_json::json!({"type":"session_meta","payload":{
+                    "id":owner,"originator":originator,"cli_version":"0.162.0-alpha.17.2"
+                }}),
+                serde_json::json!({"timestamp":"1970-01-01T00:00:05Z","type":"token_usage_record","payload":{
+                    "thread_id":owner,"response_id":"response-1",
+                    "usage":{"total_tokens":tokens},"thread_token_usage":{"total_tokens":tokens}
+                }}),
+                serde_json::json!({"timestamp":"1970-01-01T00:00:06Z","type":"event_msg","payload":{"type":"task_complete"}}),
+            ];
+            let contents = records
+                .iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n";
+            fs::write(&path, &contents).unwrap();
+            if owner != "app" {
+                connection
+                    .execute(
+                        "INSERT INTO threads VALUES (?1, ?2, 0, ?3, 6)",
+                        params![
+                            path.to_string_lossy(),
+                            source,
+                            i64::from(owner == "sdk-root")
+                        ],
+                    )
+                    .unwrap();
+            }
+            originals.push((path, contents));
+        }
+        drop(connection);
+        let database_before = fs::read(&database).unwrap();
+        let time = |n| chrono::DateTime::from_timestamp(n, 0).unwrap();
+        for completed_only in [false, true] {
+            for (family, roots, children, root_tokens, child_tokens) in [
+                (Some("codex_app"), 1, 0, 7, 0),
+                (Some("codex_cli"), 1, 1, 11, 13),
+                (None, 2, 1, 18, 13),
+            ] {
+                let audit =
+                    collect_audit(home.path(), time(0), time(10), family, completed_only).unwrap();
+                assert_eq!(audit["collection_complete"], true);
+                assert_eq!(
+                    audit["scope"]["originator_unclassified_excluded_root_count"],
+                    0
+                );
+                assert_eq!(audit["scope"]["selected_root_count"], roots);
+                assert_eq!(audit["scope"]["delegated_rollout_count"], children);
+                assert_eq!(
+                    audit["root"]["provider_reported_usage"]["total_tokens"],
+                    root_tokens
+                );
+                assert_eq!(
+                    audit["delegated"]["provider_reported_usage"]["total_tokens"],
+                    child_tokens
+                );
+            }
+        }
+        assert_eq!(fs::read(&database).unwrap(), database_before);
+        for (path, contents) in originals {
+            assert_eq!(fs::read_to_string(path).unwrap(), contents);
+        }
+    }
+
+    #[test]
     fn unknown_originators_still_block_instead_of_becoming_codex_data() {
         let home = codex_home();
         let sessions = home.path().join("sessions");
@@ -1047,7 +1131,13 @@ mod tests {
         let rollout = sessions.join("unknown.jsonl");
         fixture_database(home.path(), &rollout, "vscode");
         let time = |n| chrono::DateTime::from_timestamp(n, 0).unwrap();
-        for originator in ["future-originator", "Claude Code unknown", ""] {
+        for originator in [
+            "future-originator",
+            "Claude Code unknown",
+            "codex_sdk_py",
+            "codex_sdk_ts_private",
+            "",
+        ] {
             fs::write(
                 &rollout,
                 serde_json::json!({

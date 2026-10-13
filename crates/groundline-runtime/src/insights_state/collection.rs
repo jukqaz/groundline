@@ -287,6 +287,105 @@ mod tests {
     }
 
     #[test]
+    fn typescript_sdk_retry_stages_root_and_child_usage_in_the_preserved_window() {
+        let (_temp, root, rollout, identity, consent) = fixture();
+        let child = root.join("sessions/sdk-child.jsonl");
+        let child_source = json!({"subagent":{"thread_spawn":{
+            "parent_thread_id":"sdk-root", "depth":1
+        }}})
+        .to_string();
+        let database = root.join("state_5.sqlite");
+        let connection = Connection::open(&database).unwrap();
+        connection
+            .execute("UPDATE threads SET source='exec'", [])
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO threads VALUES (?1,?2,0,?3)",
+                params![child.to_str(), child_source, at(20).timestamp()],
+            )
+            .unwrap();
+        drop(connection);
+        let mut originals = Vec::new();
+        for (path, owner, tokens) in [(&rollout, "sdk-root", 7), (&child, "sdk-child", 11)] {
+            let records = [
+                json!({"type":"session_meta","payload":{
+                    "id":owner,"originator":"codex_sdk_ts","cli_version":"0.162.0-alpha.17.2"
+                }}),
+                json!({"timestamp":at(5).to_rfc3339(),"type":"token_usage_record","payload":{
+                    "thread_id":owner,"response_id":"response-1",
+                    "usage":{"total_tokens":tokens},"thread_token_usage":{"total_tokens":tokens}
+                }}),
+            ];
+            let contents = records
+                .iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n";
+            std::fs::write(path, &contents).unwrap();
+            originals.push((path, contents));
+        }
+        let database_before = std::fs::read(&database).unwrap();
+        let directory = state_directory(&root).unwrap();
+        let cursor = at(0).to_rfc3339();
+        write_json(
+            &directory.join(FILE),
+            &Window {
+                schema_version: 1,
+                start_utc: cursor.clone(),
+                end_utc: at(10).to_rfc3339(),
+                attempts: MAX_ATTEMPTS,
+                prepared: false,
+                event: None,
+            },
+        )
+        .unwrap();
+        let end = stage(
+            &directory,
+            Some(&cursor),
+            at(40),
+            &identity,
+            &consent,
+            Source {
+                generation: 7,
+                trigger: "manual",
+            },
+            |start, end| audit(&root, start, end),
+        )
+        .expect("supported SDK source must recover the existing window");
+        assert_eq!(parse_timestamp(&end).unwrap(), at(10));
+        let window = read(&directory).unwrap().unwrap();
+        assert!(window.prepared);
+        assert_eq!(window.attempts, MAX_ATTEMPTS);
+        assert_eq!(parse_timestamp(&window.start_utc).unwrap(), at(0));
+        assert_eq!(parse_timestamp(&window.end_utc).unwrap(), at(10));
+        let events = pending_events(&directory, 16).unwrap();
+        assert_eq!(events.observed_count, 1);
+        let event = &events.batch[0].1;
+        assert_eq!(event["sample"]["root_count"], 1);
+        assert_eq!(event["sample"]["delegated_count"], 1);
+        assert_eq!(
+            event["sample"]["originator_unclassified_excluded_root_count"],
+            0
+        );
+        assert_eq!(event["metrics"]["root"]["usage"]["total_tokens"], 7);
+        assert_eq!(event["metrics"]["delegated"]["usage"]["total_tokens"], 11);
+        assert_eq!(
+            parse_timestamp(event["period"]["start_utc"].as_str().unwrap()).unwrap(),
+            at(0)
+        );
+        assert_eq!(
+            parse_timestamp(event["period"]["end_utc"].as_str().unwrap()).unwrap(),
+            at(10)
+        );
+        assert_eq!(std::fs::read(&database).unwrap(), database_before);
+        for (path, contents) in originals {
+            assert_eq!(std::fs::read_to_string(path).unwrap(), contents);
+        }
+    }
+
+    #[test]
     fn audit_read_failure_keeps_fixed_diagnostic_window_and_cadence_through_recovery() {
         let (_temp, root, rollout, identity, consent) = fixture();
         let directory = state_directory(&root).unwrap();

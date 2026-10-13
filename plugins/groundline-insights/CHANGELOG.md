@@ -1,5 +1,10 @@
 # GroundLine Insights changes
 
+## 2026.1013.1
+
+- 공식 TypeScript SDK의 정확한 `codex_sdk_ts` originator를 CLI로 분류해 보존된 App 수집 window를 정상 범위로 다시 수집합니다. 알 수 없는 originator의 불완전 판정은 유지합니다.
+- Core의 alpha SemVer 버전 관측 수정과 패키지 버전을 맞춥니다.
+
 ## 2026.1012.1
 
 - Core 대화 개선 릴리스와 패키지 버전을 맞춥니다. 수집·동의·훅·전송·서버의 런타임 계약과 기본 설정은 유지합니다.
