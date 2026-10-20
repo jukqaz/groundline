@@ -559,6 +559,15 @@ struct State {
 
 impl State {
     fn open(path: &Path, create: bool) -> Result<Self, ContractError> {
+        Self::open_locked(path, create, OFlags::RDWR)
+    }
+
+    fn open_for_status(path: &Path) -> Result<Self, ContractError> {
+        // Status keeps the exclusive lock without requiring write access to its file.
+        Self::open_locked(path, false, OFlags::RDONLY)
+    }
+
+    fn open_locked(path: &Path, create: bool, access: OFlags) -> Result<Self, ContractError> {
         let path = absolute(path)?;
         if create
             && fs::symlink_metadata(&path).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
@@ -587,7 +596,7 @@ impl State {
         // the former enforces the existing owner-private contract.
         open_private_directory(&path).map_err(|_| error("private_directory_required"))?;
         let directory = directory_handle(&path, true)?;
-        let lock_flags = OFlags::RDWR | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
+        let lock_flags = access | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
         let lock = match openat(&directory, ".learning.lock", lock_flags, Mode::empty()) {
             Ok(fd) => Some(File::from(fd)),
             Err(rustix::io::Errno::NOENT) if create => Some(File::from(
@@ -1772,7 +1781,7 @@ fn status_with_operations(path: &Path, paths: &[PathBuf]) -> Result<Value, Contr
         }
     }
     let operations = operations.into_values().collect::<Vec<_>>();
-    let state = State::open(path, false)?;
+    let state = State::open_for_status(path)?;
     let mut counts = BTreeMap::<String, usize>::new();
     let mut processed = BTreeSet::new();
     let mut analyses = BTreeMap::<String, Value>::new();
@@ -2414,6 +2423,46 @@ mod tests {
         );
         drop(second);
         drop(duplicated);
+    }
+
+    #[test]
+    fn status_reads_a_private_read_only_lock_without_changing_state() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("learning");
+        drop(State::open(&path, true).unwrap());
+        let expected = status(&path).unwrap();
+        let lock = path.join(".learning.lock");
+        fs::set_permissions(&lock, fs::Permissions::from_mode(0o400)).unwrap();
+        let before = fs::read(&lock).unwrap();
+
+        assert_eq!(status(&path).unwrap(), expected);
+        assert_eq!(fs::read(&lock).unwrap(), before);
+        assert_eq!(fs::metadata(&lock).unwrap().mode() & 0o777, 0o400);
+        assert_eq!(fs::read_dir(&path).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn status_keeps_exclusive_locking_and_rejects_linked_locks() {
+        use std::os::unix::fs::symlink;
+        let root = tempdir().unwrap();
+        let path = root.path().join("learning");
+        let writer = State::open(&path, true).unwrap();
+        assert_eq!(status(&path).unwrap_err().0, "learning_state_busy");
+        drop(writer);
+        let reader = State::open_for_status(&path).unwrap();
+        assert!(
+            matches!(State::open(&path, true), Err(ContractError(code)) if code == "learning_state_busy")
+        );
+        drop(reader);
+
+        let lock = path.join(".learning.lock");
+        let alias = root.path().join("lock-alias");
+        fs::hard_link(&lock, &alias).unwrap();
+        assert_eq!(status(&path).unwrap_err().0, "learning_invalid_state_lock");
+        fs::remove_file(&alias).unwrap();
+        fs::rename(&lock, &alias).unwrap();
+        symlink(&alias, &lock).unwrap();
+        assert_eq!(status(&path).unwrap_err().0, "learning_invalid_state_lock");
     }
 
     #[test]
