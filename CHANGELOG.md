@@ -1,6 +1,13 @@
 # Changelog
 
+## 2026.10.20-b (`2026.1020.2`)
+
+- 읽기 전용 학습 상태 조회 수정과 함께 TLS 의존성 `rustls`를 `0.23.46`으로 갱신합니다. 기존 feature 선택과 수집·동의·훅·전송 계약은 유지합니다.
+- RustSec [RUSTSEC-2026-0346](https://rustsec.org/advisories/RUSTSEC-2026-0346.html), [0347](https://rustsec.org/advisories/RUSTSEC-2026-0347.html), [0348](https://rustsec.org/advisories/RUSTSEC-2026-0348.html), [0349](https://rustsec.org/advisories/RUSTSEC-2026-0349.html)의 패치 버전을 적용하며 advisory 예외나 검증 완화는 추가하지 않습니다.
+
 ## 2026.10.20-a (`2026.1020.1`)
+
+이 소스 태그는 의존성 검증에서 차단돼 정식 asset과 stable 배포를 발행하지 않았습니다.
 
 - `learning status`가 기존 잠금 파일을 읽기 권한으로 열어, 저장소 쓰기가 금지된 환경에서도 기존 학습 기록을 조회하도록 수정합니다.
 - 배타 잠금과 소유권·권한·심볼릭 링크·하드링크 검사를 유지하고 기록 명령의 쓰기 경로를 보존합니다. 읽기 전용 조회와 잠금·링크 경계 회귀 검사를 추가합니다.
