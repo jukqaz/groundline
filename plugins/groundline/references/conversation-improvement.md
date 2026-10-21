@@ -63,6 +63,10 @@ failure mechanism, the smallest useful behavior change, its trigger, exclusions,
 and an observable acceptance check. Check the relevant current guidance or skill
 for an existing owner of that rule; amend it instead of adding a duplicate layer.
 Do not invent a permanent rule for a one-off missing fact or requirement change.
+Prefer knowledge that is non-obvious, durable, and material: losing it would
+plausibly cause recurrence, risk, or substantial rediscovery. If the final code,
+tests, or an existing owning reference already communicate the lesson, keep it
+there instead of creating another instruction or learning document.
 
 | Scope | Appropriate target |
 | --- | --- |

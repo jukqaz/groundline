@@ -115,7 +115,22 @@ speculative fixes or weakening acceptance checks.
 ## Keep large output inspectable
 
 First narrow the search/read range or aggregate with native tools. When a large
-failed or truncated result needs later inspection, return status/exit code,
+batch returns through one orchestration response, budget the combined output,
+not just each nested tool's limit. Select fields or bound excerpts before
+printing; a collection of individually bounded results can still overflow its
+shared response. Inspect every result, including rejected calls and nonzero
+exits, before producing the compact readout. Keep an explicit count and scope
+for omitted detail; do not present a clipped batch as a complete inspection.
+
+A line limit is not an output-size limit. A JSON document, minified source or
+log record can occupy one very long line. Check file sizes before previewing
+unfamiliar data. Use a bounded byte preview for an unknown format, then parse
+structured data locally and print only the required fields or aggregates.
+Do not use `cat`, a line-range preview, or a display truncation option as the
+size guard for a large structured document. Parsing an entire local file is
+different from returning that entire file through a tool result.
+
+When a failed or truncated result needs later inspection, return status/exit code,
 essential errors, exact scope and a local original-output reference when available.
 Keep that reference retrievable within the task's bounded retention scope; read
 the existing result before rerunning an expensive command. If the original is

@@ -141,6 +141,52 @@ checks for relevant changes or concrete unresolved risk.
 
 ### Native evaluation evidence
 
+The developer-only `groundline-guidance-eval` binary provides three bounded
+synthetic cases: read-only report aggregation, an ordinary typo fix that should
+not read specialist guidance, and reuse of an actual unchanged verification.
+It is not part of Core, installation, or `verify-source`. Run it only for an
+owner-requested native behavioral check, with explicit inference authorization:
+
+```console
+cargo run --locked -p xtask --bin groundline-guidance-eval -- --run-native --codex <actual-cli> --plugin-root <reviewed-core-root> --work <private-0700-directory> --report <same-directory/new-report.json> --case report-review --model <current-model> --effort <current-effort> --service-tier <current-tier>
+```
+
+The root may be a registered installed package or a source candidate; keep those
+results separate. The tool copies exact skills/references into a disposable
+fixture's native `.agents` discovery layout. Positive cases request full reads
+of the entry and owning reference; observed successful command output must
+contain their contents. A path mention or model self-report cannot satisfy that
+check. The ordinary case checks absence of these reads in the available command
+trace; it does not prove that no internal native loading happened.
+Behavioral correctness and instruction-content evidence have separate fields.
+A known functional or scope failure stays a failure when exposure is unknown;
+correct behavior with missing exposure keeps the overall case inconclusive.
+Observed command output does not authenticate the exact model-input projection.
+The output-byte metric measures native captured command output, not model
+context tokens, billed usage, or whole-task savings.
+
+The supplied current model, effort, and tier are per-invocation selections, not
+global edits. Their requested values are recorded; the CLI event stream does
+not authenticate effective model selection, so the observed-selection field
+stays null. Hooks, memory, delegation and web search are disabled only for the
+test invocation. No user configuration, consent or hook trust is rewritten.
+This controlled harness is a different condition from normal App work.
+
+Before inference, the native named permission profile must pass readable and
+excluded synthetic-file probes. Never substitute unrestricted access. Native
+execution uses ephemeral sessions. Events remain in bounded memory; private
+reports contain only hashes, counters, functional/boundary verdicts and the
+available root usage fields. Unknown events, interrupted turns, missing reads,
+and unsupported output keep the result inconclusive. No raw conversation or
+tool-output file is written. No automatic retry or second model grades a run.
+
+Each case permits one native model process and a bounded wall time. Stream or
+frame limits stop that process group and retain an unverified derived report;
+late or missing usage stays unknown. An offline oracle test pass is separate
+from a native case pass. Neither establishes natural follow-up, overall model
+quality, savings, implicit skill invocation, or causal improvement. Do not submit
+synthetic cases as real conversation opportunities or delivery receipts.
+
 Before an authorized comparison, verify the installed app-server protocol and
 effective permissions. A write-restricted workspace does not establish restricted
 reads. Probe the allowed and excluded paths using task-owned fixture files without
