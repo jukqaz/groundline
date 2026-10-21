@@ -50,3 +50,31 @@ links and product boundaries. The review and those checks do not establish skill
 trigger behavior, model quality, savings, installed activation or release readiness.
 The project-neutral cases in [guidance validation](guidance-validation.md) retain
 those behavioral acceptance requirements without creating new tasks or paid runs.
+
+## Bounded development update, 2026-10-22
+
+The owner requested a product improvement and actual instruction-following
+verification after reviewing current agent frameworks. The update stays in
+GroundLine's existing owning references and developer verification tooling.
+It adds no general execution controller, global instruction template, external
+framework installation, scheduler, collection, or model-routing policy.
+
+| Current primary source | Bounded adaptation | Boundary retained |
+| --- | --- | --- |
+| [Matt Pocock writing for agents](https://github.com/mattpocock/skills/blob/main/skills/productivity/writing-for-agents/SKILL.md) | Observable completion criteria for each native fixture, with functional and scope checks evaluated separately | No compulsory tickets, agent cohorts, or new interview workflow |
+| [Superpowers behavioral evals](https://github.com/prime-radiant-inc/superpowers-evals) | Real native CLI actions, relevant positive/negative cases, and deterministic post-checks | No approval/sandbox bypass, copied credentials, raw transcript retention, or automatic evaluation runs |
+| [Compound knowledge capture](https://github.com/EveryInc/compound-engineering-plugin/blob/main/docs/guides/ce-compound.md) | Prefer non-obvious, durable, material knowledge; retain its narrowest existing owner | No automatic memory edits, duplicate lessons already expressed by code/tests, or inferred collection consent |
+
+The large-output reference now addresses the combined budget of nested tool
+results, including failures and omitted-detail scope. Its trigger is a shared
+response carrying several results; small single results need no extra protocol.
+The principle depends on that transport limit, not a project stack or release
+policy. It remains in the workflow-specific reference; this source update does
+not claim ordinary-work exposure through a new global `AGENTS.md` rule.
+
+The developer-only native fixture tool is documented in
+[guidance validation](guidance-validation.md#native-evaluation-evidence).
+Runtime results belong in the owner's private task artifacts, not this source
+review. Source checks, native synthetic behavior, installed exposure, and natural
+follow-up remain separate. No native outcome or causal benefit is asserted by
+this review record.

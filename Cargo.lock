@@ -645,7 +645,7 @@ dependencies = [
 
 [[package]]
 name = "groundline-cli"
-version = "2026.1020.2"
+version = "2026.1022.1"
 dependencies = [
  "chrono",
  "clap",
@@ -671,7 +671,7 @@ dependencies = [
 
 [[package]]
 name = "groundline-contracts"
-version = "2026.1020.2"
+version = "2026.1022.1"
 dependencies = [
  "chrono",
  "hmac",
@@ -693,7 +693,7 @@ dependencies = [
 
 [[package]]
 name = "groundline-insights-api"
-version = "2026.1020.2"
+version = "2026.1022.1"
 dependencies = [
  "axum",
  "base64",
@@ -719,7 +719,7 @@ dependencies = [
 
 [[package]]
 name = "groundline-insights-cli"
-version = "2026.1020.2"
+version = "2026.1022.1"
 dependencies = [
  "clap",
  "groundline-contracts",
@@ -733,7 +733,7 @@ dependencies = [
 
 [[package]]
 name = "groundline-runtime"
-version = "2026.1020.2"
+version = "2026.1022.1"
 dependencies = [
  "chrono",
  "command-group",
@@ -1900,9 +1900,9 @@ checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.15"
+version = "0.103.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
+checksum = "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"
 dependencies = [
  "ring",
  "rustls-pki-types",
@@ -3000,7 +3000,7 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
 name = "xtask"
-version = "2026.1020.2"
+version = "2026.1022.1"
 dependencies = [
  "aho-corasick",
  "base64",
