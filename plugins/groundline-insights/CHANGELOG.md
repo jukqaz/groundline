@@ -1,5 +1,10 @@
 # GroundLine Insights changes
 
+## 2026.1022.2
+
+- 현재 훅 5개·ingest revision 10·선택적 local learning 입력 처리의 문서를 실제 구현과 맞춥니다. 훅 정의·동의·identity·outbox·API 전송 계약은 변경하지 않습니다.
+- Core의 검증기 수정과 패키지 버전을 맞춥니다. 설치·검증 통과를 행동 개선이나 새 전송 성공으로 대신하지 않습니다.
+
 ## 2026.1020.2
 
 - TLS 의존성 `rustls`를 보안 패치 버전 `0.23.46`으로 갱신합니다. 기존 feature와 수집·동의·훅·전송·서버 계약은 유지합니다.
