@@ -31,8 +31,8 @@ Tailnet 전용 접근을 유지합니다. 일반 HTTPS로 전환하려면 TLS �
   영구적인 최대 지원 버전이 아닙니다.
 
 Linux와 macOS Docker host에서 절대 dataset path를 렌더링할 수 있습니다.
-Docker Desktop에서는 VM과 공유되는 경로를 사용합니다. collector 플러그인은 두
-운영체제의 ARM64·x86-64 binary로 별도 배포됩니다.
+Docker Desktop에서는 VM과 공유되는 경로를 사용합니다. collector 플러그인은
+Apple Silicon macOS(ARM64)와 Linux(ARM64·x86-64) binary로 별도 배포됩니다.
 
 ## 1. 버전이 지정된 소스 checkout
 
@@ -163,7 +163,7 @@ case "$http_status" in 302|401) ;; *) echo "unexpected unauthenticated status: $
 ## 5. collector별 설정
 
 새 수집기보다 API를 먼저 업데이트합니다. 현재 요구 사항은 Basic schema 5와
-ingest contract revision 9 이상입니다. `worker check-server --json`은 등록·동의
+ingest contract revision 10 이상입니다. `worker check-server --json`은 등록·동의
 변경·수집 없이 이 호환성을 확인합니다. TrueNAS 앱의 버전 표기만으로 API 제품
 버전이나 실제 저장 상태를 판단하지 않습니다.
 

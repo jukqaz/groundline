@@ -1,10 +1,13 @@
 # Codex 호환성
 
-GroundLine은 Codex의 모델·권한·컨텍스트·플러그인 기능을 사용하며 macOS·Linux의
-ARM64·x86-64를 지원합니다. 과거 Windows 관측값은 보존하지만 Windows 실행
+GroundLine은 Codex의 모델·권한·컨텍스트·플러그인 기능을 사용하며 Apple Silicon
+macOS(ARM64)와 Linux(ARM64·x86-64)를 지원합니다. 과거 Windows 관측값은 보존하지만 Windows 실행
 환경은 지원하지 않습니다. 모델 추천은 현재 카탈로그를 확인하며 전역 모델이나
-추론 강도를 고정하지 않습니다. 공통 모델 계열 분류에서 알 수 없는 이름은
-`other`가 되고, 모델별 문맥 횟수는 토큰이나 비용을 뜻하지 않습니다.
+추론 강도를 고정하지 않습니다. 공개 naming grammar에 맞는 모델은 version·snapshot
+ID를 보존하고, 다른 유효한 private ID는 원래 이름을 내보내지 않는
+`private-<sha256>`로 구분합니다. 과거 계열·`other` 표기는 소급 재해석하지 않고
+unknown·overflow를 별도로 보존합니다. 관측 identity는 계정 가용성이나 별도 경험적
+비교 정책의 지원을 뜻하지 않으며, 모델별 문맥 횟수도 토큰이나 비용이 아닙니다.
 
 ## 실행 환경 확인
 

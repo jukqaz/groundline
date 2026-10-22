@@ -10,7 +10,7 @@ readable without Windows runtime support.
 
 | Surface | GroundLine behavior | Recheck when |
 | --- | --- | --- |
-| Models and effort | Use the active runtime catalog for advice; fixed aggregate labels for telemetry | New family labels would improve analysis |
+| Models and effort | Use the active runtime catalog for advice; preserve dynamic public IDs and opaque private identities in observations | Native metadata, naming grammar, or attribution changes |
 | State database | Select the highest numeric `state_<n>.sqlite`, validate columns, open read-only | Required thread columns change |
 | Rollout storage | Read plain or Zstandard JSONL in memory with file, decoder-window, and invocation limits | Physical format changes |
 | Task lifecycle | Weekly sample requires the latest turn to complete; activity includes resumed work | Lifecycle events change |
@@ -18,11 +18,15 @@ readable without Windows runtime support.
 | Plugin upgrade | Codex manages packages at the installer's reviewed exact Git commit | Provider source or upgrade interface changes |
 | Permissions and context | Preserve user settings and use supported native features | Native schema or account availability changes |
 
-Model family and effort labels are defined once in
-`crates/groundline-contracts/src/model.rs`. Audit normalization, event ingestion,
-weekly reports, and comparison validation share them. New or custom IDs use a
-bounded `other` label; arbitrary model names cannot become exported dimensions.
-Model-context counts are not token attribution or billing estimates.
+Model observation identities and effort labels are defined once in
+`crates/groundline-contracts/src/model.rs`. Supported public naming shapes retain
+their exact version and snapshot IDs; other valid private IDs become stable,
+domain-separated `private-<sha256>` keys without exporting their original names.
+Historical family/`other` labels remain historical, and unknown/overflow stay
+explicit. Observation labels do not establish account availability or eligibility
+for the separate empirical comparison policy. Model-context counts are not token
+attribution or billing estimates. See the
+[current observation contract](../plugins/groundline-insights/references/insights-contract.md#collection-and-transport).
 
 ## Check the runtime you use
 

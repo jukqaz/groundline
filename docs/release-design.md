@@ -176,8 +176,9 @@ provider 인증이나 업무 품질의 증명이 아닙니다. 새 완료 기준
 
 ## 권한과 기본 설정
 
-GroundLine 신규 설정 경로의 기본은 workspace-write·on-request·auto_review입니다.
-기존 사용자 설정은 보존하고 명시적으로 관리하는 범위에서만 변경합니다.
+권한·승인·reviewer 기본값은 native Codex와 사용자의 선택을 따릅니다.
+GroundLine setup은 기존 선택을 보존하며 새 설정도 native 기본값을 사용합니다.
+변경은 명시적으로 관리하는 범위에 한정합니다.
 모델·effort·권한·네트워크는 config와 native 정책에서 관리합니다.
 
 Full Access 선택을 존중하며 GroundLine이 관리하는 추가 제한은 시스템/홈 전체 삭제와
@@ -220,7 +221,7 @@ Auto-review는 승인 요청을 검토하므로 Full Access/never의 모든 작�
 | 단계 | 필요한 직접 확인 |
 | --- | --- |
 | 소스 | 경계 입력·완료 기준 변경·응답 소유·비용 중복·후속 소비·공통/기기별 ref의 회귀와 최종 source qualification |
-| 패키지 | Core 0개/Insights 5개 훅 계약, 두 CLI·플러그인의 동일 version, 네 native target·SHA·manifest·source attestation |
+| 패키지 | Core 0개/Insights 5개 훅 계약, 두 CLI·플러그인의 동일 version, 세 native target·SHA·manifest·source attestation |
 | 현재 Mac | App 번들/PATH 각각 native 발견·trust·실제 dispatch, 동시 세션·중단·압축·재개·일반 업무 비차단 |
 | 여러 기기 | 별도 실제 지원 기기에서 backfill/오프라인 재전송/중복 retry/ACK와 기기별 중앙 조회, 공통 bundle 적용·native 활성·후속 편집 복구 |
 | 서버 | 해당 release의 API image/배포 상태, 계약 readiness, 기존 collector ID·데이터 보존, 실제 ACK→ClickHouse→Grafana 왕복 |
