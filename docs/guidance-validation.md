@@ -10,6 +10,11 @@ technology, compatibility, test and release policies remain project-local.
 GroundLine-specific CLI, installation and evidence formats remain product
 contracts, not default policies for projects using the plugin.
 
+Evaluate within the active higher-priority instructions and native permissions.
+Explicit user instructions take precedence over skill guidelines within those
+boundaries. Official examples and external workflows do not replace that chain.
+See [OpenAI's skill instruction-following guidance](https://developers.openai.com/plugins/build/skills#define-the-workflow-boundary).
+
 ## Structural and contract checks
 
 Run `cargo test --locked -p xtask guidance::tests` after skill metadata or
@@ -172,12 +177,40 @@ stays null. Hooks, memory, delegation and web search are disabled only for the
 test invocation. No user configuration, consent or hook trust is rewritten.
 This controlled harness is a different condition from normal App work.
 
+Schema-2 native reports also check the final answer. Report review retains its
+four-count JSON contract. Ordinary-fix requires
+`{"result":"fixed","verification":"passed"}` and the actual requested grep.
+Verification-reuse requires
+`{"result":"fixed","verification":"reused","new_check_executed":false}`.
+Missing, contradictory, extra, or duplicate fields fail a completed case. These
+are bounded fixture contracts, not a general natural-language truth detector.
+
+Every input, including guidance, the check script, execution counter and prior
+verification receipt, is read-only to model tools. Only the case's single output
+file is writable; report review allows none. Native isolation probes verify both
+denied writes and the permitted output write before inference. The same invocation
+policy is used for the model. Use `--isolation-only` instead of `--run-native` to
+run those probes without starting a model or changing the owner's configuration.
+
+Verification-reuse accepts separate `cat` reads of the named fixture files and
+`shasum -a 256`/`sha256sum` observations, plus native file edits. Other interpreter,
+compound or dynamic command shapes stay unassessed and cannot produce PASS.
+An observed check rerun or forbidden file change remains FAIL even after the
+counter/file is restored. Known scope/output violations remain FAIL with an
+unknown or interrupted trace; trace completeness and termination reasons remain
+separate. Operational termination without a proven violation stays UNVERIFIED.
+Unexpected failed commands leave process coverage inconclusive rather than
+being silently counted as successful reuse. Events and command text stay only
+in bounded memory; reports retain derived counters and reasons.
+
 Before inference, the native named permission profile must pass readable and
-excluded synthetic-file probes. Never substitute unrestricted access. Native
+excluded synthetic-file probes and the case-specific write probes above. Never
+substitute unrestricted access. Native
 execution uses ephemeral sessions. Events remain in bounded memory; private
 reports contain only hashes, counters, functional/boundary verdicts and the
 available root usage fields. Unknown events, interrupted turns, missing reads,
-and unsupported output keep the result inconclusive. No raw conversation or
+and unsupported output keep unproven outcomes inconclusive. A proven violation
+is preserved separately. No raw conversation or
 tool-output file is written. No automatic retry or second model grades a run.
 
 Each case permits one native model process and a bounded wall time. Stream or
