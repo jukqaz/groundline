@@ -144,8 +144,12 @@ is never emitted. These permanent failures still require an operator retry.
 
 ## Collection and transport
 
-Hooks ignore input, persist bounded private lifecycle markers, and detach a
-fail-open checkpoint process. The worker coalesces work and acknowledges only its
+Aggregate checkpoints ignore hook input, persist bounded private lifecycle markers,
+and detach a fail-open checkpoint process. With a separately enabled Core learning
+profile, the binary also reads bounded native hook input, skips prompt/cwd/transcript
+fields, and stores only allowlisted private event metadata and target digests.
+This local opt-in does not enable upload or broaden Insights consent; see Core's
+learning-loop reference. The worker coalesces work and acknowledges only its
 atomically claimed marker generation after durable handling; later captures stay
 pending. Collection and delivery retries have independent cadence. The outbox
 caps at 256 events/16 MiB and 16 uploads per cycle with capped exponential backoff;

@@ -26,7 +26,7 @@ READMEs instead of copying it. Preserve Korean/English command parity.
 
 - Keep dependencies minimal and justify every new network or platform surface.
 - Keep Codex as the only supported runtime.
-- Preserve ARM64 and x86_64 support on macOS and Linux.
+- Preserve Apple Silicon macOS (ARM64) and Linux ARM64/x86_64 support.
 - Keep Core read-only and offline by default. Keep Insights opt-in,
   authenticated, and privacy-bounded over HTTPS with optional Tailnet access.
 - Do not commit provider auth files, sessions, shell snapshots, logs, caches,

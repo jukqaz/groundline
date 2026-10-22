@@ -8,7 +8,11 @@ formats, limits, transactions, and recovery.
 ## Current boundaries
 
 - Five fail-open lifecycle wrappers invoke only an existing packaged binary,
-  read no hook input, emit no output, and never download/build code.
+  emit no output, and never download/build code. Aggregate checkpoints do not
+  consume hook input. With a separately enabled Core learning profile, the
+  binary reads bounded hook input and retains only allowlisted private boundary
+  metadata and registered target digests; prompt, cwd and transcript fields are
+  discarded. Local learning neither grants nor requires Insights upload consent.
 - The collector reads bounded Codex state read-only and writes atomic private
   state. Strict aggregates exclude prompts, responses, transcripts, commands,
   patches, paths, repositories, task/rollout/account IDs, hostnames, and IPs.

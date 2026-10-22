@@ -100,8 +100,9 @@
    independently, then verify hook dispatch, upload, ClickHouse, Grafana, and any
    production deployment as separate live lanes.
    Version tags contain source; `stable` adds the verified native binaries.
-   If refresh leaves an installed version unchanged, reinstall only that same
-   plugin ID from the refreshed distribution and verify its checksum.
+   If refresh leaves an installed version unchanged, inspect the reviewed source
+   pin and cache evidence, then resume the reviewed installer. Preserve disabled
+   state; re-adding an existing disabled plugin would enable it.
 13. Keep the generic Compose path labeled public preview until the exact release
    passes on a fresh host and an authorized external client verifies TLS reachability,
    unauthenticated rejection, authenticated dashboard access, collector upload,

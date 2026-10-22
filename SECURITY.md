@@ -10,7 +10,7 @@ GroundLine Core is offline and hook-free. It rejects symlinked or oversized
 bounded inputs, opens Codex SQLite read-only, and emits aggregates or reason codes.
 
 GroundLine Insights is a separately installed opt-in plugin and does not require
-Core. It owns exactly four fail-open Codex lifecycle hooks, owner-private local
+Core. It owns exactly five fail-open Codex lifecycle hooks, owner-private local
 state, a no-proxy/no-redirect HTTPS client, an authenticated Axum API,
 ClickHouse, and Grafana. Collectors accept an owner-selected HTTPS origin;
 Tailnet access is optional. Plain HTTP is limited to loopback development and
@@ -34,7 +34,7 @@ not echo endpoints, headers, tokens, collector IDs, payloads, private paths, or
 exception text.
 
 Source qualification checks both canonical plugin manifests, the Core zero-hook
-invariant, the Insights four-hook invariant, personal/secret markers, pinned CI
+invariant, the Insights five-hook invariant, personal/secret markers, pinned CI
 actions, bounded jobs, and the moving Rust stable channel. These controls reduce
 accidental exposure but do not replace review or live deployment validation.
 

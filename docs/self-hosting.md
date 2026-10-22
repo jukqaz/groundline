@@ -32,7 +32,7 @@ the private server configuration. The update controller preserves explicit
 
 Linux and macOS Docker hosts can render absolute dataset roots. Use a
 path shared with the Docker VM on Docker Desktop. The collector plugin itself is
-released separately for ARM64 and x86-64 on both operating systems.
+released separately for Apple Silicon macOS (ARM64) and Linux ARM64/x86-64.
 
 ## 1. Check out one source release
 
