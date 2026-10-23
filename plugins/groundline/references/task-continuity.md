@@ -3,7 +3,8 @@
 Use this reference when a requested workflow improvement needs scope decisions,
 lane context, long-task recovery, verification reuse, or large-output handling.
 It is not a mandatory plan, ledger, review cohort, or new execution layer. Keep
-native Codex in charge and preserve the user's settings and scoped authority.
+the active OpenAI/native instruction chain in charge and preserve the user's
+settings and scoped authority.
 
 ## Resolve shared and project guidance
 
@@ -28,6 +29,14 @@ behavior, and behavior to preserve from available requirements and evidence.
 Do not expand the request into extra features, settings, or technical uniformity.
 A clear small change needs no separate plan or redundant confirmation. A
 dependency on another project does not authorize editing that project.
+
+For a broad inventory or fix-all request, reconcile the current included and
+excluded targets with what was actually inspected. Carry later scope changes
+forward without treating them as earlier errors. Before reporting zero findings
+or full completion, check coverage, skipped or inaccessible targets, and partial
+results. Limit the conclusion to the verified scope and retain the unknowns.
+Use an existing target list when useful; a small bounded task needs no inventory
+document or additional approval step.
 
 Judge new findings by reproduction, user impact, and relation to the accepted
 outcome. Distinguish defects from improvements and whether they block acceptance.
@@ -66,7 +75,14 @@ The parent owns requirement checks, conflicting results and final integration.
 ## Resume long work without restarting it
 
 For several turns, compaction, interruption or external waiting, retain a small
-handoff in the task's existing work area when native state alone is insufficient.
+handoff in the task's existing durable work area when native state alone is
+insufficient. Before a temporary location or execution session can expire,
+preserve recoverable edits or original inputs, their base revision, and links to
+needed verification in an authorized location. A summary or temporary path alone
+cannot recover an uncommitted patch. Use existing artifacts where sufficient;
+this does not require an automatic commit, a new store, or copied conversations
+or secrets. If originals are missing, distinguish recovered originals from a
+reconstruction and leave unverified equivalence explicit.
 The parent updates it; children report evidence instead of concurrently rewriting
 shared state. Record the task and accepted changes, current status, completed
 evidence, next action/blockers, worktree/HEAD and any pending native handle.
@@ -146,7 +162,10 @@ does not authorize transcript upload.
 ## State what the evidence proves
 
 For multi-step completion, connect each delivered result to what its evidence
-proves and the remaining required proof or next action and owner. Keep evidence
+proves: describe the concrete changed behavior, where it is actually applied,
+and remaining required work or the next action and owner. Explain ambiguous
+labels such as WIP or candidate through the current state when needed; do not
+make the user infer completion from those labels or test counts. Keep evidence
 for distinct required outcomes separate; a passed check does not establish an
 unobserved outcome. Claim only the requested outcomes actually established;
 small tasks need no extra document, template, or empty fields.
