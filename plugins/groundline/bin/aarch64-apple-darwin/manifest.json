@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "kind": "groundline-binary-artifact",
+  "groundline_version": "2026.1023.1",
+  "target": "aarch64-apple-darwin",
+  "executable": "groundline",
+  "size_bytes": 6990368,
+  "sha256": "dc83c816e003ef9c137b78e22db078be17d264fcca2bdd99fb5cda76a9a20f4f"
+}
