@@ -584,12 +584,10 @@ fn run(cli: Cli) -> Result<(), ExitCode> {
             ) && value.get("status").and_then(Value::as_str) == Some("FAIL")
             {
                 Err(ExitCode::FAILURE)
-            } else if value["kind"] == "groundline-environment-observation"
-                && matches!(value["status"].as_str(), Some("PARTIAL" | "DIFFERENT"))
-            {
-                Err(ExitCode::from(2))
-            } else if value["kind"] == "groundline-environment-result"
-                && matches!(value["status"].as_str(), Some("PARTIAL" | "CONFLICT"))
+            } else if (value["kind"] == "groundline-environment-observation"
+                && matches!(value["status"].as_str(), Some("PARTIAL" | "DIFFERENT")))
+                || (value["kind"] == "groundline-environment-result"
+                    && matches!(value["status"].as_str(), Some("PARTIAL" | "CONFLICT")))
             {
                 Err(ExitCode::from(2))
             } else {
