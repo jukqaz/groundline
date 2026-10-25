@@ -62,6 +62,14 @@ enum Command {
         codex_home: PathBuf,
         #[arg(long)]
         target: Vec<PathBuf>,
+        /// Explicit source package root; comparison never installs or reloads it.
+        #[arg(long, requires_all = ["installed_plugin_root", "compare_file"])]
+        source_plugin_root: Option<PathBuf>,
+        #[arg(long, requires_all = ["source_plugin_root", "compare_file"])]
+        installed_plugin_root: Option<PathBuf>,
+        /// Relative package files to compare (maximum 32; no directory scan).
+        #[arg(long, requires_all = ["source_plugin_root", "installed_plugin_root"])]
+        compare_file: Vec<PathBuf>,
     },
     /// Inspect or roll back an existing private personal-guidance trial.
     Personal {
@@ -350,8 +358,26 @@ fn run(cli: Cli) -> Result<(), ExitCode> {
             path_cli,
             codex_home,
             target,
-        } => environment_observation::inspect(&app_cli, &path_cli, &codex_home, &target)
-            .map(|value| (value, true)),
+            source_plugin_root,
+            installed_plugin_root,
+            compare_file,
+        } => environment_observation::inspect(
+            &app_cli,
+            &path_cli,
+            &codex_home,
+            &target,
+            source_plugin_root
+                .as_deref()
+                .zip(installed_plugin_root.as_deref())
+                .map(
+                    |(source_root, installed_root)| environment_observation::PackageComparison {
+                        source_root,
+                        installed_root,
+                        files: &compare_file,
+                    },
+                ),
+        )
+        .map(|value| (value, true)),
         Command::Personal { command } => personal::run(command).map(|value| (value, true)),
         Command::ConfigRepair(options) => config_repair::run(options).map(|value| (value, true)),
         Command::Setup(options) => match setup::run(options) {
@@ -558,8 +584,10 @@ fn run(cli: Cli) -> Result<(), ExitCode> {
             ) && value.get("status").and_then(Value::as_str) == Some("FAIL")
             {
                 Err(ExitCode::FAILURE)
-            } else if value["kind"] == "groundline-environment-result"
-                && matches!(value["status"].as_str(), Some("PARTIAL" | "CONFLICT"))
+            } else if (value["kind"] == "groundline-environment-observation"
+                && matches!(value["status"].as_str(), Some("PARTIAL" | "DIFFERENT")))
+                || (value["kind"] == "groundline-environment-result"
+                    && matches!(value["status"].as_str(), Some("PARTIAL" | "CONFLICT")))
             {
                 Err(ExitCode::from(2))
             } else {

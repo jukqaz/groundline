@@ -12,6 +12,9 @@ use groundline_runtime::local_file::{open_bounded_regular_file, owned_by_current
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+mod package;
+pub(crate) use package::Request as PackageComparison;
+
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);
 const VERSION_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_FRAME_BYTES: usize = 2 * 1024 * 1024;
@@ -393,22 +396,36 @@ fn read_result(
 fn config_observation(value: &Value) -> Option<Value> {
     let config = value.get("config")?.as_object()?;
     value.get("origins")?.as_object()?;
-    let selected: BTreeMap<_, _> = [
+    let keys = [
         "model",
         "model_provider",
         "model_reasoning_effort",
+        "service_tier",
         "approval_policy",
         "approvals_reviewer",
         "sandbox_mode",
-    ]
-    .into_iter()
-    .filter_map(|key| config.get(key).map(|value| (key, value)))
-    .collect();
-    Some(
-        json!({"selection_sha256": fingerprint(&serde_json::to_vec(&selected).ok()?),
+        "sandbox_workspace_write",
+        "default_permissions",
+        "permissions",
+    ];
+    let selected: BTreeMap<_, _> = keys
+        .into_iter()
+        .filter_map(|key| config.get(key).map(|value| (key, value)))
+        .collect();
+    let missing: Vec<_> = keys
+        .into_iter()
+        .filter(|key| !config.contains_key(*key))
+        .collect();
+    let null_keys: Vec<_> = selected
+        .iter()
+        .filter_map(|(key, value)| value.is_null().then_some(*key))
+        .collect();
+    Some(json!({"selection_fingerprint_schema": 2,
+        "selection_sha256": fingerprint(&serde_json::to_vec(&selected).ok()?),
         "selection_keys_observed": selected.keys().collect::<Vec<_>>(),
-        "runtime_effect_verified": false}),
-    )
+        "selection_keys_missing": missing, "selection_keys_null": null_keys,
+        "resolution_scope":"fresh_app_server_config_read_not_existing_chat",
+        "runtime_effect_verified": false}))
 }
 
 fn skill_observation(value: &Value, cwd: &Path, targets: &[PathBuf]) -> Option<Value> {
@@ -617,6 +634,7 @@ pub(crate) fn inspect(
     path_cli: &Path,
     codex_home: &Path,
     targets: &[PathBuf],
+    comparison: Option<PackageComparison<'_>>,
 ) -> Result<Value, ContractError> {
     if targets.len() > 64 {
         return Err(ContractError("environment_observation_target_limit".into()));
@@ -637,11 +655,14 @@ pub(crate) fn inspect(
         .and_then(|path| path.canonicalize())
         .map_err(|_| ContractError("environment_observation_cwd_unavailable".into()))?;
     let config = home.join("config.toml");
+    let package_before = package::observe(comparison.as_ref())?;
     let before = file_hash(&config);
     let target_before: Vec<_> = targets.iter().map(|path| file_hash(path)).collect();
     let app = lane(app_cli, &home, &cwd, targets, CALL_TIMEOUT);
     let path = lane(path_cli, &home, &cwd, targets, CALL_TIMEOUT);
     let after = file_hash(&config);
+    let package_after = package::observe(comparison.as_ref())?;
+    let package = package::finish(package_before, package_after);
     let disk: Vec<_> = targets.iter().enumerate().map(|(index, target)| {
         let after = file_hash(target);
         json!({"target_index":index, "path_fingerprint":path_fingerprint(target), "sha256":target_before[index],
@@ -649,18 +670,33 @@ pub(crate) fn inspect(
             "unchanged":if target_before[index].is_some() && after.is_some() { Some(target_before[index] == after) } else { None },
             "activation_status":"unknown", "native_activation_verified":false})
     }).collect();
-    let complete = lane_complete(&app)
+    let metadata_complete = lane_complete(&app)
         && lane_complete(&path)
         && before.is_some()
         && before == after
         && disk.iter().all(|target| target["unchanged"] == true);
+    let package_status = package["status"].as_str().unwrap_or("UNKNOWN");
+    let status = match package_status {
+        "DIFFERENT" | "FAIL" => "DIFFERENT",
+        "UNKNOWN" => "PARTIAL",
+        _ if metadata_complete => "PASS",
+        _ => "PARTIAL",
+    };
+    let metadata_status = if metadata_complete { "PASS" } else { "PARTIAL" };
     Ok(
-        json!({"kind":"groundline-environment-observation","schema":1,
-        "status":if complete { "PASS" } else { "PARTIAL" }, "observed_at":chrono::Utc::now().to_rfc3339(),
+        json!({"kind":"groundline-environment-observation","schema":2,
+        "status":status, "status_scope":"local_metadata_and_requested_package_comparison",
+        "metadata_status":metadata_status, "observed_at":chrono::Utc::now().to_rfc3339(),
         "visibility":"owner_private","home_fingerprint":path_fingerprint(&home),"cwd_fingerprint":path_fingerprint(&cwd),
+        "host":{"os":std::env::consts::OS,"architecture":std::env::consts::ARCH},
         "per_call_timeout_ms":CALL_TIMEOUT.as_millis(),"native_methods_allowed":METHODS,
         "config_file":{"sha256":before,"unchanged":if before.is_some() && after.is_some() { Some(before == after) } else { None }},
         "disk_targets":disk,"app_cli":app,"path_cli":path,
+        "package_comparison":package,
+        "verification_summary":{"metadata":metadata_status,"source_installation":package_status,
+            "existing_chat_reload":"UNKNOWN","plugin_tool_exposure":"NOT_OBSERVED",
+            "plugin_invocation":"NOT_OBSERVED","plugin_outcome":"NOT_VERIFIED",
+            "workflow_effect":"NOT_MEASURED"},
         "existing_chat_reload_verified":false,"execution_effect_verified":false,
         "model_calls_requested":0,"native_mutations_requested":0,
         "network_performed":false,"mutation_performed":false,
@@ -746,7 +782,20 @@ mod tests {
         let cwd = std::env::current_dir().unwrap();
         let cli = mock_cli(root.path(), &home, &cwd, &target, false);
         let before = file_hash(&home.join("config.toml"));
-        let snapshot = inspect(&cli, &cli, &home, std::slice::from_ref(&target)).unwrap();
+        let snapshot = inspect(&cli, &cli, &home, std::slice::from_ref(&target), None).unwrap();
+        assert_eq!(snapshot["schema"], 2);
+        assert_eq!(
+            snapshot["verification_summary"]["plugin_invocation"],
+            "NOT_OBSERVED"
+        );
+        assert_eq!(
+            snapshot["verification_summary"]["plugin_outcome"],
+            "NOT_VERIFIED"
+        );
+        assert_eq!(
+            snapshot["verification_summary"]["workflow_effect"],
+            "NOT_MEASURED"
+        );
         for lane in ["app_cli", "path_cli"] {
             assert_eq!(snapshot[lane]["version"]["value"], "0.159.2");
             assert_eq!(
@@ -784,7 +833,7 @@ mod tests {
             &target,
             true,
         );
-        let result = inspect(&root.path().join("missing"), &cli, &home, &[target]).unwrap();
+        let result = inspect(&root.path().join("missing"), &cli, &home, &[target], None).unwrap();
         assert_eq!(
             result["app_cli"]["initialize"]["error"]["reason"],
             "spawn_failed"
@@ -940,7 +989,7 @@ mod tests {
             .unwrap()
             .replace("codex-cli 0.159.2", "codex-cli 0.162.0-alpha.17.2");
         std::fs::write(&app_cli, script).unwrap();
-        let snapshot = inspect(&app_cli, &path_cli, &home, &[target]).unwrap();
+        let snapshot = inspect(&app_cli, &path_cli, &home, &[target], None).unwrap();
         assert_eq!(snapshot["status"], "PASS");
         assert_eq!(
             snapshot["app_cli"]["version"]["value"],
@@ -949,6 +998,67 @@ mod tests {
         assert_eq!(snapshot["path_cli"]["version"]["value"], "0.159.2");
         assert_eq!(snapshot["config_file"]["unchanged"], true);
         assert_eq!(snapshot["execution_effect_verified"], false);
+    }
+
+    #[test]
+    fn expanded_settings_fingerprint_detects_tier_and_permission_only_changes() {
+        let value = json!({"config":{"model":"PRIVATE_MODEL","service_tier":"default",
+            "default_permissions":":workspace","permissions":{"PRIVATE_PROFILE":{"network":{"enabled":false}}}},
+            "origins":{}});
+        let baseline = config_observation(&value).unwrap();
+        for (key, changed) in [
+            ("service_tier", json!("fast")),
+            ("default_permissions", json!(":read-only")),
+            (
+                "permissions",
+                json!({"PRIVATE_PROFILE":{"network":{"enabled":true}}}),
+            ),
+            ("sandbox_workspace_write", json!({"network_access":true})),
+        ] {
+            let mut other = value.clone();
+            other["config"][key] = changed;
+            assert_ne!(
+                baseline["selection_sha256"],
+                config_observation(&other).unwrap()["selection_sha256"],
+                "{key}"
+            );
+        }
+        let mut unrelated = value.clone();
+        unrelated["config"]["instructions"] = json!("PRIVATE_INSTRUCTIONS");
+        assert_eq!(
+            baseline["selection_sha256"],
+            config_observation(&unrelated).unwrap()["selection_sha256"]
+        );
+        let output = baseline.to_string();
+        assert!(!output.contains("PRIVATE_"));
+        assert_eq!(baseline["selection_fingerprint_schema"], 2);
+        assert_eq!(baseline["runtime_effect_verified"], false);
+    }
+
+    #[test]
+    fn absent_and_null_settings_are_not_guessed_as_defaults() {
+        let absent = config_observation(&json!({"config":{},"origins":{}})).unwrap();
+        let null = config_observation(&json!({"config":{"default_permissions":null},"origins":{}}))
+            .unwrap();
+        let explicit = config_observation(
+            &json!({"config":{"default_permissions":":workspace"},"origins":{}}),
+        )
+        .unwrap();
+        assert_ne!(absent["selection_sha256"], null["selection_sha256"]);
+        assert_ne!(null["selection_sha256"], explicit["selection_sha256"]);
+        assert!(
+            absent["selection_keys_missing"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("default_permissions"))
+        );
+        assert!(
+            null["selection_keys_null"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("default_permissions"))
+        );
+        assert!(config_observation(&json!({"config":{},"origins":null})).is_none());
     }
 
     #[test]

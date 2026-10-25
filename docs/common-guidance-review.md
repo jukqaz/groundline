@@ -78,3 +78,22 @@ Runtime results belong in the owner's private task artifacts, not this source
 review. Source checks, native synthetic behavior, installed exposure, and natural
 follow-up remain separate. No native outcome or causal benefit is asserted by
 this review record.
+
+## Connected tool routing update, 2026-10-26
+
+The capability-routing reference now prefers an available connected provider
+plugin to a duplicate standalone MCP for the same task. Plugins may expose MCP
+tools internally; account installation, host configuration, callable tools and
+observed results remain separate facts. This is conditional guidance, not a
+runtime plugin installer or a change to settings, authentication or authority.
+
+| Primary source | Bounded adaptation | Boundary retained |
+| --- | --- | --- |
+| [OpenAI skills and plugins](https://learn.chatgpt.com/docs/skills-and-plugins), [configuration precedence](https://learn.chatgpt.com/docs/config-file/config-basic) | Prefer the connected capability and distinguish host/account exposure from resolved defaults and active task policy | No automatic MCP removal, credential transfer, permission changes or inference of remote-host alignment |
+| [Context7](https://github.com/upstash/context7), [Serena features](https://oraios.github.io/serena/01-about/025_features.html), [ast-grep](https://github.com/ast-grep/ast-grep) | Route relevant documentation, symbol and structural questions to the smallest supported tool | No mandatory external lookup for incidental mentions, tool installation, autonomous onboarding memory or search-to-edit escalation |
+
+The existing verification-reuse and debugging guidance remains the owner of
+those principles. External frameworks do not add a conversation-wide bootstrap,
+fresh full-test requirement per message, mandatory planning approval or model
+selection. Source validation and a successful provider call do not establish
+installed instruction activation, lower task cost or improved behavior.

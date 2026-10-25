@@ -146,9 +146,10 @@ checks for relevant changes or concrete unresolved risk.
 
 ### Native evaluation evidence
 
-The developer-only `groundline-guidance-eval` binary provides three bounded
+The developer-only `groundline-guidance-eval` binary provides four bounded
 synthetic cases: read-only report aggregation, an ordinary typo fix that should
-not read specialist guidance, and reuse of an actual unchanged verification.
+not read specialist guidance, reuse of an actual unchanged verification, and
+read-only capability routing across six positive/negative scenarios.
 It is not part of Core, installation, or `verify-source`. Run it only for an
 owner-requested native behavioral check, with explicit inference authorization:
 
@@ -169,6 +170,30 @@ correct behavior with missing exposure keeps the overall case inconclusive.
 Observed command output does not authenticate the exact model-input projection.
 The output-byte metric measures native captured command output, not model
 context tokens, billed usage, or whole-task savings.
+
+`--case capability-routing` reads the exact capability-routing reference and a
+fixed synthetic capability inventory. Its six decisions cover connected-plugin
+preference, official OpenAI documentation, broad research, sufficient local
+evidence, unavailable task access and an explicit provider choice. The strict
+JSON oracle checks every decision, instruction/fixture exposure, read-only scope,
+trace completeness and output bounds. It does not simulate successful service
+calls or prove real plugin authentication. Run current and candidate guidance
+against the same fixture and native selection; keep resource observations and
+natural follow-up separate from this bounded non-regression check.
+
+On 2026-10-26, current installed and candidate capability guidance both passed
+these six decisions with the same fixture, evaluator, native binary and requested
+model/effort/tier. Both exposed the complete instruction and fixture contents,
+completed their traces, preserved every file and had zero failed commands. The
+candidate used more observed root tokens and one additional command in this
+single pair; this is bounded routing non-regression evidence, not an efficiency
+gain, a complete resource account, authenticated effective-selection proof or
+natural-conversation improvement. Reports retain derived observations privately.
+
+Isolation probes select the same named test permissions explicitly with managed
+requirements included. Legacy user sandbox defaults cannot substitute a different
+policy for those probes. Unsupported native flags or failed isolation stop before
+inference; the evaluator never rewrites the owner's permissions.
 
 The supplied current model, effort, and tier are per-invocation selections, not
 global edits. Their requested values are recorded; the CLI event stream does

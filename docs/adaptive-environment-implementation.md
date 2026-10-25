@@ -93,6 +93,44 @@ desired revision, disk digest, native discovery/metadata, execution effect를 �
 일부 기기의 성공을 전체 환경 통일로 보고하지 않습니다. 기록의 true 필드 하나를
 외부에서 입력하여 activation_verified를 승격하는 경로도 없습니다.
 
+### Current observation contract (schema 2)
+
+`environment-observe` emits schema 2. Its versioned selection fingerprint adds
+`service_tier`, `default_permissions`, permission definitions and legacy workspace
+permissions to the existing model and approval fields. Missing, explicit null and
+explicit values remain distinct; native `config/read` owns resolution. Do not
+compare selection digests across fingerprint schemas. Retain older snapshots as
+historical observations without adapting them into the current contract.
+
+For a bounded source/install comparison, add all three options:
+
+```console
+groundline environment-observe --app-cli APP_CLI --path-cli PATH_CLI --codex-home CODEX_HOME_PATH --source-plugin-root SOURCE_CORE_ROOT --installed-plugin-root INSTALLED_CORE_ROOT --compare-file references/capability-routing.md
+```
+
+The comparison checks the two package manifests, reuses `provider-smoke` for the
+installed artifact, and compares only the explicitly named relative files (1–32).
+It rejects traversal, duplicates, symlink components and oversized or unreadable
+files. Missing evidence stays `UNKNOWN`; matching version labels do not hide a
+file difference. Before/after fingerprints detect changes during observation.
+There is no directory scan, installation, existing-chat reload or tool execution.
+The two roots must be distinct. Resolve the active installed root through native
+plugin discovery before calling this command; comparing supplied roots and
+checking an artifact alone does not certify an enabled native installation.
+
+`metadata_status` reports the native metadata checks independently from
+`package_comparison.status`. The top-level status is scoped to these checks:
+`PASS` means the requested local checks passed, `DIFFERENT` means a known package
+difference or artifact failure, and `PARTIAL` means incomplete evidence. The last
+two return exit code 2 with the JSON result intact; invalid arguments return a
+nonzero error. `verification_summary` keeps current-chat reload, connected-plugin
+exposure/invocation/outcome and workflow effect explicitly unverified. A native
+agent must check any requested plugin call through its actual available tool;
+neither discovery metadata nor caller-supplied success flags establish that call.
+The report emits allowlisted states and fingerprints, not configuration values,
+file contents, credentials, hostnames or private paths. OS/architecture identify
+the runtime class; the bound home/cwd fingerprints do not identify another host.
+
 ## 실제 결과에서 작은 후보를 남긴다
 
 기존 efficiency record-delivery로 결과와 소유된 root/child/실패/재시도 자원을 기록합니다.
