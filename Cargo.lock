@@ -645,7 +645,7 @@ dependencies = [
 
 [[package]]
 name = "groundline-cli"
-version = "2026.1026.1"
+version = "2026.1026.2"
 dependencies = [
  "chrono",
  "clap",
@@ -671,7 +671,7 @@ dependencies = [
 
 [[package]]
 name = "groundline-contracts"
-version = "2026.1026.1"
+version = "2026.1026.2"
 dependencies = [
  "chrono",
  "hmac",
@@ -693,7 +693,7 @@ dependencies = [
 
 [[package]]
 name = "groundline-insights-api"
-version = "2026.1026.1"
+version = "2026.1026.2"
 dependencies = [
  "axum",
  "base64",
@@ -719,7 +719,7 @@ dependencies = [
 
 [[package]]
 name = "groundline-insights-cli"
-version = "2026.1026.1"
+version = "2026.1026.2"
 dependencies = [
  "clap",
  "groundline-contracts",
@@ -733,7 +733,7 @@ dependencies = [
 
 [[package]]
 name = "groundline-runtime"
-version = "2026.1026.1"
+version = "2026.1026.2"
 dependencies = [
  "chrono",
  "command-group",
@@ -2269,7 +2269,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -2338,9 +2338,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.53.1"
+version = "1.53.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
+checksum = "ce3335fa71841cda333a58d7615b03901380ecf09d59b3296d21f8bbac0dde4e"
 dependencies = [
  "bytes",
  "libc",
@@ -3000,7 +3000,7 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
 name = "xtask"
-version = "2026.1026.1"
+version = "2026.1026.2"
 dependencies = [
  "aho-corasick",
  "base64",
