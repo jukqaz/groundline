@@ -23,6 +23,15 @@ fn private_json(path: &Path, value: &Value) {
     private(path, &serde_json::to_vec_pretty(value).unwrap());
 }
 
+fn comparison(path: &Path) -> (Value, String) {
+    let conditions: groundline_contracts::learning::conversation_work::ComparisonConditions =
+        serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+    (
+        serde_json::to_value(&conditions).unwrap(),
+        conditions.fingerprint().unwrap(),
+    )
+}
+
 fn executable() -> &'static Path {
     static COPY: OnceLock<(tempfile::TempDir, PathBuf)> = OnceLock::new();
     let (_, executable) = COPY.get_or_init(|| {
@@ -87,9 +96,12 @@ impl Fixture {
             "context_evidence_sha256":private(&context,b"PRIVATE_FAKE_CONTEXT_TEXT"),
             "observed_at_utc":"2026-10-01T00:00:00Z","summary":"PRIVATE_FAKE_SUMMARY"});
         private(&verification, b"Actual guidance diff was checked.\n");
-        private(
+        private_json(
             &comparison,
-            b"Native work, same criterion, current owning guidance.\n",
+            &json!({"schema":1,"model":"fixture-model","effort":"fixture-effort",
+            "service_tier":"fixture-tier","runtime_family":"codex","runtime_version":"fixture-version",
+            "tools_sha256":hash(b"relevant-tools"),"permissions_sha256":hash(b"scoped-permissions"),
+            "task_parameters_sha256":hash(b"same-acceptance-parameters")}),
         );
         private(
             &evidence,
@@ -190,14 +202,15 @@ impl Fixture {
             .unwrap();
             captured
         });
-        json!({"kind":"groundline-learning-conversation-change-input","schema":1,
+        let (conditions, fingerprint) = comparison(&self.comparison);
+        json!({"kind":"groundline-learning-conversation-change-input","schema":2,
             "review_sha256":review_hash,"snapshot_sha256":snapshot["snapshot_sha256"],
             "target_binding_sha256":snapshot["target_binding_sha256"],"target":{"scope":scope,
                 "target_id":"project-guidance","kind":"agents_block",
                 "before_sha256":hash(&fs::read(&self.before).unwrap()),
                 "after_sha256":hash(&fs::read(&self.target).unwrap())},
             "verification_evidence_sha256":hash(&fs::read(&self.verification).unwrap()),
-            "comparison_context_sha256":hash(&fs::read(&self.comparison).unwrap()),
+            "comparison_context_sha256":fingerprint,"comparison_conditions":conditions,
             "applied_at_utc":chrono::Utc::now().to_rfc3339(),"transferability_review":null})
     }
 
@@ -228,10 +241,11 @@ impl Fixture {
     }
 
     fn activation(&self, change: &Value) -> Value {
-        json!({"kind":"groundline-learning-conversation-activation-input","schema":1,
+        let (conditions, fingerprint) = comparison(&self.comparison);
+        json!({"kind":"groundline-learning-conversation-activation-input","schema":2,
             "change_sha256":change,"target_after_sha256":hash(&fs::read(&self.target).unwrap()),
             "activation_kind":"instruction_read",
-            "comparison_context_sha256":hash(&fs::read(&self.comparison).unwrap()),
+            "comparison_context_sha256":fingerprint,"comparison_conditions":conditions,
             "evidence_sha256":hash(&fs::read(&self.evidence).unwrap()),
             "activated_at_utc":chrono::Utc::now().to_rfc3339()})
     }
@@ -243,12 +257,13 @@ impl Fixture {
         opportunity: Value,
         recurred: Value,
     ) -> Value {
-        json!({"kind":"groundline-learning-conversation-observation-input","schema":1,
+        let (conditions, fingerprint) = comparison(&self.comparison);
+        json!({"kind":"groundline-learning-conversation-observation-input","schema":2,
             "change_sha256":change,"source_work_sha256":hash(work.as_bytes()),
             "source_revision_sha256":hash(&fs::read(&self.source_revision).unwrap()),
             "target_after_sha256":hash(&fs::read(&self.target).unwrap()),
             "criterion_sha256":self.review["criterion_sha256"],"criterion_version":"v1",
-            "comparison_context_sha256":hash(&fs::read(&self.comparison).unwrap()),
+            "comparison_context_sha256":fingerprint,"comparison_conditions":conditions,
             "opportunity":opportunity,"recurred":recurred,
             "evidence_sha256":hash(&fs::read(&self.evidence).unwrap()),
             "recurrence_evidence_sha256":null,"observed_at_utc":chrono::Utc::now().to_rfc3339()})
@@ -275,6 +290,141 @@ impl Fixture {
 
 fn next(value: &Value) -> &Value {
     &value["conversation_work"]["chains"][0]["next_required_action"]
+}
+
+#[test]
+fn one_complete_cli_cycle_uses_conditions_not_work_provenance_or_json_format() {
+    let f = Fixture::new(true);
+    let review = f.review(&f.review, true);
+    assert_eq!(review["conversation_work"]["assessment_complete"], false);
+    let change = f.change(
+        &f.change_input(&review["record_sha256"]),
+        Some(&f.project),
+        &f.target,
+        None,
+        true,
+    );
+    let activated = f.observe(&f.activation(&change["record_sha256"]), None, true);
+    assert_eq!(activated["conversation_work"]["assessment_complete"], false);
+    // Formatting is not a changed condition. New work and source revision have
+    // their own bindings; neither belongs in the condition document.
+    let conditions: Value = serde_json::from_slice(&fs::read(&f.comparison).unwrap()).unwrap();
+    private(&f.comparison, &serde_json::to_vec(&conditions).unwrap());
+    private(
+        &f.source_revision,
+        b"Different real-work revision reference.\n",
+    );
+    let observation = f.observation(
+        &change["record_sha256"],
+        "independent followup work",
+        json!(true),
+        json!(false),
+    );
+    let result = f.observe(&observation, None, true);
+    assert_eq!(next(&result), "no_recurrence_observed");
+    assert_eq!(result["conversation_work"]["assessment_complete"], true);
+    assert_eq!(result["conversation_work"]["comparison_complete"], true);
+    assert_eq!(result["conversation_work"]["opportunity_count"], 1);
+    assert_eq!(result["conversation_work"]["recurrence_rate"], 0.0);
+    assert_eq!(
+        result["conversation_work"]["causal_effect_established"],
+        false
+    );
+    let repeated = f.observe(&observation, None, true);
+    assert_eq!(repeated["status"], "UNCHANGED");
+    assert_eq!(repeated["record_sha256"], result["record_sha256"]);
+    let status = f.run("status", &[("--state", &f.state)], true);
+    assert_eq!(status["conversation_work"]["assessment_complete"], true);
+    assert_eq!(
+        status["readiness"]["conversation_work"]["comparison_complete"],
+        true
+    );
+    assert_eq!(status["conversation_work"]["observation_count"], 1);
+}
+
+#[test]
+fn completed_review_with_changed_or_unknown_conditions_never_claims_comparison_success() {
+    for unknown in [false, true] {
+        let f = Fixture::new(true);
+        let review = f.review(&f.review, true);
+        if unknown {
+            let mut conditions: Value =
+                serde_json::from_slice(&fs::read(&f.comparison).unwrap()).unwrap();
+            conditions["permissions_sha256"] = Value::Null;
+            private_json(&f.comparison, &conditions);
+        }
+        let change = f.change(
+            &f.change_input(&review["record_sha256"]),
+            Some(&f.project),
+            &f.target,
+            None,
+            true,
+        );
+        f.observe(&f.activation(&change["record_sha256"]), None, true);
+        if !unknown {
+            let mut conditions: Value =
+                serde_json::from_slice(&fs::read(&f.comparison).unwrap()).unwrap();
+            conditions["model"] = json!("different-fixture-model");
+            private_json(&f.comparison, &conditions);
+        }
+        let observation = f.observation(
+            &change["record_sha256"],
+            "different or unobserved conditions",
+            json!(true),
+            json!(false),
+        );
+        let result = f.observe(&observation, None, true);
+        assert_eq!(result["conversation_work"]["assessment_complete"], true);
+        assert_eq!(result["conversation_work"]["comparison_complete"], false);
+        assert_eq!(next(&result), "wait_comparable_followup");
+        assert_eq!(result["conversation_work"]["opportunity_count"], 0);
+        assert!(result["conversation_work"]["recurrence_rate"].is_null());
+        assert_eq!(
+            result["conversation_work"]["causal_effect_established"],
+            false
+        );
+    }
+}
+
+#[test]
+fn comparison_contract_rejects_work_identity_and_retired_writer_inputs() {
+    let f = Fixture::new(true);
+    let review = f.review(&f.review, true);
+    let change_input = f.change_input(&review["record_sha256"]);
+    let change = f.change(&change_input, Some(&f.project), &f.target, None, true);
+    let mut activation = f.activation(&change["record_sha256"]);
+    activation["schema"] = json!(1);
+    activation
+        .as_object_mut()
+        .unwrap()
+        .remove("comparison_conditions");
+    assert_eq!(
+        f.observe(&activation, None, false)["error"],
+        "learning_unsupported_conversation_comparison_schema"
+    );
+    let valid_activation = f.activation(&change["record_sha256"]);
+    let mut conditions: Value = serde_json::from_slice(&fs::read(&f.comparison).unwrap()).unwrap();
+    conditions["native_work_sha256"] = json!(hash(b"work identity belongs elsewhere"));
+    private_json(&f.comparison, &conditions);
+    assert_eq!(
+        f.observe(&valid_activation, None, false)["error"],
+        "learning_invalid_comparison_conditions"
+    );
+}
+
+#[test]
+fn justified_no_change_is_a_completed_cycle_without_a_trial_or_effect_claim() {
+    let f = Fixture::new(true);
+    let mut input = f.review.clone();
+    input["interpretation"] = json!("iteration");
+    let result = f.review(&input, true);
+    assert_eq!(next(&result), "no_change");
+    assert_eq!(result["conversation_work"]["assessment_complete"], true);
+    assert_eq!(result["conversation_work"]["change_count"], 0);
+    assert_eq!(
+        result["conversation_work"]["causal_effect_established"],
+        false
+    );
 }
 
 #[test]
@@ -305,7 +455,10 @@ fn actual_change_activation_and_natural_followup_are_separate_from_delivery() {
         Value::Null,
         Value::Null,
     );
-    assert_eq!(next(&f.observe(&unknown, None, true)), "assess_opportunity");
+    assert_eq!(
+        next(&f.observe(&unknown, None, true)),
+        "wait_context_evidence"
+    );
     let unrelated = f.observation(
         &change["record_sha256"],
         "no opportunity",
@@ -551,10 +704,22 @@ fn unrelated_private_records_survive_and_pre_activation_work_is_not_effect_proof
     observation["observed_at_utc"] = json!("2026-10-01T01:30:00Z");
     let out = f.observe(&observation, None, true);
     assert_eq!(out["conversation_work"]["opportunity_count"], 0);
+    assert_eq!(
+        out["conversation_work"]["recorded_opportunities"]["present_count"],
+        1
+    );
     assert_eq!(out["conversation_work"]["inconclusive_count"], 1);
     f.observe(&f.activation(&change["record_sha256"]), None, true);
     let status = f.run("status", &[("--state", &f.state)], true);
     assert_eq!(status["conversation_work"]["opportunity_count"], 0);
+    assert_eq!(
+        status["conversation_work"]["recorded_opportunities"]["present_count"],
+        1
+    );
+    assert_eq!(
+        status["readiness"]["conversation_work"]["recorded_opportunities"],
+        status["conversation_work"]["recorded_opportunities"]
+    );
     assert_eq!(status["conversation_work"]["inconclusive_count"], 1);
     assert_eq!(status["readiness"]["standalone_capture_count"], 1);
     assert_eq!(fs::read(&existing).unwrap(), original);

@@ -396,6 +396,23 @@ fn verify_optional_conversation_evidence(
     }
 }
 
+fn verify_comparison_conditions(value: &Value, path: &Path) -> Result<(), ContractError> {
+    if value["schema"] != 2 {
+        return Err(error("unsupported_conversation_comparison_schema"));
+    }
+    let conditions: learning::conversation_work::ComparisonConditions =
+        serde_json::from_slice(&read_private(path)?)
+            .map_err(|_| error("invalid_comparison_conditions"))?;
+    let fingerprint = conditions.fingerprint()?;
+    if value["comparison_context_sha256"] != fingerprint
+        || value["comparison_conditions"]
+            != serde_json::to_value(&conditions).map_err(|_| error("serialization_failed"))?
+    {
+        return Err(error("conversation_evidence_mismatch"));
+    }
+    Ok(())
+}
+
 /// The owning file can be repository-readable. All path components are bound
 /// without following symlinks, and the held parent and file must be owned by
 /// the caller and not writable by other users. This is a filesystem boundary,
@@ -1149,7 +1166,7 @@ fn record_conversation_change(
         return Err(error("conversation_target_digest_mismatch"));
     }
     verify_conversation_evidence(&input, "verification_evidence_sha256", verification)?;
-    verify_conversation_evidence(&input, "comparison_context_sha256", comparison_context)?;
+    verify_comparison_conditions(&input, comparison_context)?;
     verify_optional_conversation_evidence(
         &input["transferability_review"],
         "evidence_sha256",
@@ -1177,7 +1194,7 @@ fn observe_conversation(
         return Err(error("invalid_conversation_observation_input"));
     }
     verify_conversation_evidence(&input, "evidence_sha256", evidence)?;
-    verify_conversation_evidence(&input, "comparison_context_sha256", comparison_context)?;
+    verify_comparison_conditions(&input, comparison_context)?;
     verify_optional_conversation_evidence(&input, "criterion_sha256", criterion)?;
     verify_optional_conversation_evidence(&input, "source_revision_sha256", source_revision)?;
     verify_optional_conversation_evidence(&input, "recurrence_evidence_sha256", recurrence)?;

@@ -122,7 +122,8 @@ groundline learning observe-conversation --input activation-or-followup.json --s
 
 Native Codex authors the small input and derived evidence files in the task's
 authorized private artifact location. The owner does not fill forms or JSON.
-Core checks the exact evidence bytes before immutable publication. Native work
+Core checks evidence before immutable publication. Ordinary evidence binds exact
+bytes; the typed comparison conditions below bind canonical values. Native work
 and feedback references are bounded digests, not copied conversations.
 
 - `groundline-learning-conversation-review-input` binds `pattern_id`, stable
@@ -146,6 +147,22 @@ and feedback references are bounded digests, not copied conversations.
   normalized absolute owning project root; the actual target must remain within
   that root. Common changes require a positive transferability review and
   `--scope-review-evidence`; project-dependent requirements cannot be promoted.
+- Change, activation and observation inputs use schema 2 with a
+  `comparison_conditions` object. The `--comparison-context-evidence` file is that
+  same object: `schema: 1`, nullable `model`, `effort`, `service_tier`,
+  `runtime_family`, `runtime_version`, `tools_sha256`, `permissions_sha256` and
+  `task_parameters_sha256`. The three digests describe relevant tools, actual
+  task permissions and acceptance-relevant project parameters; they do not grant
+  authority or infer task defaults from disk config. Use null for an unobserved
+  condition. `comparison_context_sha256` is SHA-256 of the object serialized as
+  compact JSON with sorted keys, not of its original file bytes. Formatting and
+  field order do not change the condition fingerprint. All conditions must be
+  observed and equal for a comparison. Put per-work identity, timestamps,
+  evidence references and source revisions in their existing provenance fields,
+  never in this condition object; unknown extra fields are rejected.
+  Schema-1 opaque-context records remain immutable readable history. The CLI
+  rejects new writes using that retired comparison input contract; it does not
+  transform their evidence or infer missing conditions.
 - `groundline-learning-conversation-activation-input` binds the change digest,
   exact after revision, comparison context, evidence and actual activation time.
   A skill needs `skill_invoked`; an instruction block needs `instruction_read`.
@@ -160,7 +177,20 @@ and feedback references are bounded digests, not copied conversations.
   in the comparison context when it affects the acceptance conditions.
 
 Use `learning status`'s `conversation_work` and readiness readout to select the
-next required action. Repeating the same input retains its immutable record;
+next required action. Its schema-2 `assessment_complete` means that the recorded
+review cycle ended: a justified no-change review, or a change with activation
+and a later independent-work review. It does not require a favorable outcome.
+Each chain reports its own completion so unrelated outstanding chains do not
+make a completed cycle unfinished. `comparison_complete` separately reports
+comparison coverage. Inconclusive or unassessed follow-up can end this review
+pass while `wait_comparable_followup` or `wait_context_evidence` waits for new
+evidence; do not repeat unchanged analysis or add another rule to fill the gap.
+`causal_effect_established: false` is an explicit scope limit, not an unfinished
+step that can eventually flip true in this readout. Keep actual file application,
+provider loading and semantic authenticity limits separate from recorded-cycle
+completion. Native Codex still judges the full user-requested outcome and its dependencies;
+this recorded-cycle flag cannot override unfinished required application or
+verification. Repeating the same input retains its immutable record;
 reusing one feedback or work reference for conflicting observations is rejected.
 Applying bytes, activating instructions, and observing later work are separate
 records. A capture is mandatory before mutation, and a change must reference the

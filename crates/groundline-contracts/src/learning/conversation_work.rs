@@ -11,6 +11,84 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Stable comparison conditions only. Work identity, evidence and timestamps
+/// have their own input fields and must never become cohort conditions.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ComparisonConditions {
+    pub schema: u8,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub service_tier: Option<String>,
+    pub runtime_family: Option<String>,
+    pub runtime_version: Option<String>,
+    pub tools_sha256: Option<String>,
+    pub permissions_sha256: Option<String>,
+    pub task_parameters_sha256: Option<String>,
+}
+
+impl ComparisonConditions {
+    pub fn validate(&self) -> Result<(), ContractError> {
+        if self.schema != 1
+            || [
+                &self.model,
+                &self.effort,
+                &self.service_tier,
+                &self.runtime_family,
+                &self.runtime_version,
+            ]
+            .into_iter()
+            .flatten()
+            .any(|s| !text(s) || s.len() > 128)
+            || [
+                &self.tools_sha256,
+                &self.permissions_sha256,
+                &self.task_parameters_sha256,
+            ]
+            .into_iter()
+            .flatten()
+            .any(|s| !digest(s))
+        {
+            return Err(error("invalid_comparison_conditions"));
+        }
+        Ok(())
+    }
+
+    pub fn fingerprint(&self) -> Result<String, ContractError> {
+        self.validate()?;
+        content_sha256(&serde_json::to_value(self).map_err(|_| error("serialization_failed"))?)
+    }
+
+    fn complete(&self) -> bool {
+        [
+            &self.model,
+            &self.effort,
+            &self.service_tier,
+            &self.runtime_family,
+            &self.runtime_version,
+            &self.tools_sha256,
+            &self.permissions_sha256,
+            &self.task_parameters_sha256,
+        ]
+        .into_iter()
+        .all(|s| s.is_some())
+    }
+}
+
+fn valid_comparison(
+    schema: u8,
+    conditions: Option<&ComparisonConditions>,
+    fingerprint: &str,
+) -> bool {
+    match (schema, conditions) {
+        // Existing immutable records stay readable; the CLI never writes this
+        // retired opaque-context input contract again.
+        (1, None) => digest(fingerprint),
+        (2, Some(conditions)) => conditions.fingerprint().is_ok_and(|h| h == fingerprint),
+        _ => false,
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind")]
 pub enum Input {
@@ -56,6 +134,8 @@ pub struct ChangeInput {
     pub verification_evidence_sha256: String,
     pub applied_at_utc: String,
     pub comparison_context_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comparison_conditions: Option<ComparisonConditions>,
     pub transferability_review: Option<TransferabilityReview>,
 }
 
@@ -81,6 +161,8 @@ pub struct ActivationInput {
     pub target_after_sha256: String,
     pub activation_kind: String,
     pub comparison_context_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comparison_conditions: Option<ComparisonConditions>,
     pub evidence_sha256: String,
     pub activated_at_utc: String,
 }
@@ -100,6 +182,8 @@ pub struct ObservationInput {
     pub criterion_sha256: String,
     pub criterion_version: String,
     pub comparison_context_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comparison_conditions: Option<ComparisonConditions>,
     pub opportunity: Option<bool>,
     pub recurred: Option<bool>,
     pub evidence_sha256: String,
@@ -174,8 +258,11 @@ impl Input {
                     && v.summary.as_ref().is_none_or(|s| text(s))
             }
             Self::Change(v) => {
-                v.schema == 1
-                    && digest(&v.review_sha256)
+                valid_comparison(
+                    v.schema,
+                    v.comparison_conditions.as_ref(),
+                    &v.comparison_context_sha256,
+                ) && digest(&v.review_sha256)
                     && digest(&v.snapshot_sha256)
                     && digest(&v.target_binding_sha256)
                     && scope(&v.target.scope)
@@ -204,20 +291,26 @@ impl Input {
                     && digest(&v.target_binding_sha256)
             }
             Self::Activation(v) => {
-                v.schema == 1
-                    && [
-                        &v.change_sha256,
-                        &v.target_after_sha256,
-                        &v.comparison_context_sha256,
-                        &v.evidence_sha256,
-                    ]
-                    .into_iter()
-                    .all(|s| digest(s))
+                valid_comparison(
+                    v.schema,
+                    v.comparison_conditions.as_ref(),
+                    &v.comparison_context_sha256,
+                ) && [
+                    &v.change_sha256,
+                    &v.target_after_sha256,
+                    &v.comparison_context_sha256,
+                    &v.evidence_sha256,
+                ]
+                .into_iter()
+                .all(|s| digest(s))
                     && ["skill_invoked", "instruction_read"].contains(&v.activation_kind.as_str())
             }
             Self::Observation(v) => {
-                v.schema == 1
-                    && identifier(&v.criterion_version)
+                valid_comparison(
+                    v.schema,
+                    v.comparison_conditions.as_ref(),
+                    &v.comparison_context_sha256,
+                ) && identifier(&v.criterion_version)
                     && [
                         &v.change_sha256,
                         &v.source_work_sha256,
@@ -415,6 +508,8 @@ pub fn validate_collection(values: &[Value]) -> Result<(), ContractError> {
                     "instruction_read"
                 };
                 if v.target_after_sha256 != applied.target.after_sha256
+                    || v.schema != applied.schema
+                    || v.comparison_conditions != applied.comparison_conditions
                     || v.comparison_context_sha256 != applied.comparison_context_sha256
                     || v.activation_kind != expected
                     || timestamp(&v.activated_at_utc)? < timestamp(&applied.applied_at_utc)?
@@ -437,17 +532,24 @@ fn comparable(
     activations: &[&ActivationInput],
 ) -> Result<bool, ContractError> {
     let observed = timestamp(&observation.observed_at_utc)?;
-    Ok(
-        observation.target_after_sha256 == applied.target.after_sha256
-            && observation.criterion_sha256 == origin.criterion_sha256
-            && observation.criterion_version == origin.criterion_version
-            && observation.comparison_context_sha256 == applied.comparison_context_sha256
-            && observation.source_work_sha256 != origin.source_work_sha256
-            && observed > timestamp(&applied.applied_at_utc)?
-            && activations
-                .iter()
-                .any(|a| timestamp(&a.activated_at_utc).is_ok_and(|t| observed > t)),
-    )
+    let conditions_match = match (observation.schema, applied.schema) {
+        (1, 1) => true,
+        (2, 2) => observation
+            .comparison_conditions
+            .as_ref()
+            .is_some_and(|c| c.complete() && Some(c) == applied.comparison_conditions.as_ref()),
+        _ => false,
+    };
+    Ok(conditions_match
+        && observation.target_after_sha256 == applied.target.after_sha256
+        && observation.criterion_sha256 == origin.criterion_sha256
+        && observation.criterion_version == origin.criterion_version
+        && observation.comparison_context_sha256 == applied.comparison_context_sha256
+        && observation.source_work_sha256 != origin.source_work_sha256
+        && observed > timestamp(&applied.applied_at_utc)?
+        && activations
+            .iter()
+            .any(|a| timestamp(&a.activated_at_utc).is_ok_and(|t| observed > t)))
 }
 
 /// Safe derived status only. Owner-private summaries, evidence bodies and paths
@@ -509,7 +611,7 @@ pub fn readouts(values: &[Value]) -> Result<Value, ContractError> {
             chains.push(
                 json!({"pattern_id":origin.pattern_id,"review_sha256":review_hash,
                 "change_sha256":null,"next_required_action":next,"opportunity_count":0,
-                "recurrence_count":0,"recurrence_rate":null}),
+                "recurrence_count":0,"recurrence_rate":null,"assessment_complete":next == "no_change"}),
             );
         }
         for (snapshot_hash, snapshot) in pending_snapshots {
@@ -521,7 +623,7 @@ pub fn readouts(values: &[Value]) -> Result<Value, ContractError> {
             chains.push(
                 json!({"pattern_id":origin.pattern_id,"review_sha256":review_hash,
                 "snapshot_sha256":snapshot_hash,"change_sha256":null,"next_required_action":next,
-                "opportunity_count":0,"recurrence_count":0,"recurrence_rate":null}),
+                "opportunity_count":0,"recurrence_count":0,"recurrence_rate":null,"assessment_complete":false}),
             );
         }
         for (change_hash, applied) in changes {
@@ -555,7 +657,14 @@ pub fn readouts(values: &[Value]) -> Result<Value, ContractError> {
             let mut recurrences = 0;
             let mut inconclusive = 0;
             let mut unassessed = 0;
+            let mut assessment_complete = false;
             for observation in observations {
+                let observed = timestamp(&observation.observed_at_utc)?;
+                assessment_complete |= observation.source_work_sha256 != origin.source_work_sha256
+                    && observed > timestamp(&applied.applied_at_utc)?
+                    && activations
+                        .iter()
+                        .any(|a| timestamp(&a.activated_at_utc).is_ok_and(|t| observed > t));
                 if !comparable(observation, applied, origin, &activations)? {
                     inconclusive += 1;
                 } else if observation.opportunity.is_none()
@@ -571,12 +680,14 @@ pub fn readouts(values: &[Value]) -> Result<Value, ContractError> {
             }
             let next = if activations.is_empty() {
                 "verify_activation"
+            } else if !assessment_complete {
+                "wait_natural_opportunity"
             } else if recurrences > 0 {
                 "review_recurrence"
             } else if inconclusive > 0 {
-                "comparison_inconclusive"
+                "wait_comparable_followup"
             } else if unassessed > 0 {
-                "assess_opportunity"
+                "wait_context_evidence"
             } else if opportunities > 0 {
                 "no_recurrence_observed"
             } else {
@@ -593,6 +704,7 @@ pub fn readouts(values: &[Value]) -> Result<Value, ContractError> {
             total_unassessed += unassessed;
             chains.push(json!({"pattern_id":origin.pattern_id,"review_sha256":review_hash,
                 "change_sha256":change_hash,"next_required_action":next,"activation_observed":!activations.is_empty(),
+                "assessment_complete":assessment_complete,
                 "opportunity_count":opportunities,"recurrence_count":recurrences,"recurrence_rate":rate,
                 "inconclusive_count":inconclusive,"unassessed_count":unassessed}));
         }
@@ -600,6 +712,10 @@ pub fn readouts(values: &[Value]) -> Result<Value, ContractError> {
     let count =
         |predicate: fn(&Input) -> bool| unique.iter().filter(|(_, r)| predicate(&r.input)).count();
     let assessment_complete = !chains.is_empty()
+        && chains
+            .iter()
+            .all(|chain| chain["assessment_complete"] == true);
+    let comparison_complete = !chains.is_empty()
         && chains.iter().all(|chain| {
             matches!(
                 chain["next_required_action"].as_str(),
@@ -607,16 +723,24 @@ pub fn readouts(values: &[Value]) -> Result<Value, ContractError> {
             )
         });
     Ok(
-        json!({"kind":"groundline-learning-conversation-status","schema":1,
+        json!({"kind":"groundline-learning-conversation-status","schema":2,
         "review_count":count(|i| matches!(i,Input::Review(_))),
         "snapshot_count":count(|i| matches!(i,Input::Snapshot(_))),
         "change_count":count(|i| matches!(i,Input::Change(_))),
         "activation_count":count(|i| matches!(i,Input::Activation(_))),
         "observation_count":count(|i| matches!(i,Input::Observation(_))),
+        "recorded_opportunities":{
+            "scope":"deduplicated_observation_inputs_before_comparability",
+            "present_count":count(|i| matches!(i,Input::Observation(o) if o.opportunity == Some(true))),
+            "absent_count":count(|i| matches!(i,Input::Observation(o) if o.opportunity == Some(false))),
+            "unknown_count":count(|i| matches!(i,Input::Observation(o) if o.opportunity.is_none()))},
+        "opportunity_count_scope":"comparable_assessed_observations",
         "opportunity_count":total_opportunities,"recurrence_count":total_recurrences,
         "inconclusive_count":total_inconclusive,"unassessed_count":total_unassessed,
         "assessment_complete":assessment_complete,
-        "recurrence_rate":if total_opportunities > 0 && total_inconclusive == 0 && total_unassessed == 0 && assessment_complete {
+        "completion_scope":"recorded_review_cycle_not_causal_effect",
+        "comparison_complete":comparison_complete,
+        "recurrence_rate":if total_opportunities > 0 && total_inconclusive == 0 && total_unassessed == 0 && comparison_complete {
             Some(total_recurrences as f64 / total_opportunities as f64) } else { None },
         "causal_effect_established":false,"semantic_authenticity_established":false,
         "activation_authenticity_established":false,"efficiency_gain_established":false,
@@ -858,9 +982,17 @@ mod tests {
         values.push(observation.clone());
         values.push(observation);
         assert_eq!(readouts(&values).unwrap()["opportunity_count"], 1);
+        assert_eq!(
+            readouts(&values).unwrap()["recorded_opportunities"]["present_count"],
+            1
+        );
         // Identical input re-recorded at another time remains one work item.
         values.push(build_record(&input, "2026-01-03T00:00:00Z").unwrap());
         assert_eq!(readouts(&values).unwrap()["opportunity_count"], 1);
+        assert_eq!(
+            readouts(&values).unwrap()["recorded_opportunities"]["present_count"],
+            1
+        );
         let mut changed = input;
         changed["evidence_sha256"] = json!(h('a'));
         values.push(record(&changed));
@@ -937,9 +1069,18 @@ mod tests {
             let status = readouts(&values).unwrap();
             assert_eq!(
                 status["chains"][0]["next_required_action"],
-                "comparison_inconclusive"
+                if ["observed_at_utc", "source_work_sha256"].contains(&field) {
+                    "wait_natural_opportunity"
+                } else {
+                    "wait_comparable_followup"
+                }
             );
             assert_eq!(status["opportunity_count"], 0);
+            assert_eq!(status["recorded_opportunities"]["present_count"], 1);
+            assert_eq!(
+                status["opportunity_count_scope"],
+                "comparable_assessed_observations"
+            );
             assert_eq!(status["recurrence_rate"], Value::Null);
         }
         let mut values = fixture();
@@ -957,17 +1098,29 @@ mod tests {
     fn no_opportunity_and_unassessed_observations_are_never_successes() {
         for (opportunity, recurred, next) in [
             (json!(false), Value::Null, "wait_natural_opportunity"),
-            (Value::Null, Value::Null, "assess_opportunity"),
-            (json!(true), Value::Null, "assess_opportunity"),
+            (Value::Null, Value::Null, "wait_context_evidence"),
+            (json!(true), Value::Null, "wait_context_evidence"),
         ] {
             let mut values = fixture();
             let mut input = observation_input(&values);
+            let expected_counts = match opportunity.as_bool() {
+                Some(true) => [1, 0, 0],
+                Some(false) => [0, 1, 0],
+                None => [0, 0, 1],
+            };
             input["opportunity"] = opportunity;
             input["recurred"] = recurred;
             values.push(record(&input));
             let status = readouts(&values).unwrap();
             assert_eq!(status["chains"][0]["next_required_action"], next);
             assert_eq!(status["opportunity_count"], 0);
+            assert_eq!(status["assessment_complete"], true);
+            for (field, expected) in ["present_count", "absent_count", "unknown_count"]
+                .into_iter()
+                .zip(expected_counts)
+            {
+                assert_eq!(status["recorded_opportunities"][field], expected);
+            }
             assert_eq!(status["recurrence_rate"], Value::Null);
         }
         let mut input = observation_input(&fixture());
@@ -991,6 +1144,8 @@ mod tests {
             let status = readouts(&values).unwrap();
             assert_eq!(status["chains"][0]["next_required_action"], next);
             assert_eq!(status["opportunity_count"], 1);
+            assert_eq!(status["assessment_complete"], true);
+            assert_eq!(status["comparison_complete"], true);
             assert_eq!(status["recurrence_rate"], rate);
             assert_eq!(status["causal_effect_established"], false);
             assert_eq!(status["semantic_authenticity_established"], false);

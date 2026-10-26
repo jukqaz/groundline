@@ -54,6 +54,27 @@ Use the shared Unix file helpers for bounded regular-file reads, owner/private
 mode checks, exclusive creation, fsync, and rename. Do not weaken permissions or
 replace a bounded failure with unlimited retries.
 
+## Conversation observation readouts
+
+`learning status` separates recorded content-review inputs from comparable
+outcomes. `conversation_work.recorded_opportunities` counts deduplicated
+observation inputs with a present, absent, or unknown opportunity before the
+comparison gate. These are recorded declarations, not authenticated semantic
+findings or unique conversations. `opportunity_count_scope` labels the existing
+`opportunity_count` as comparable assessed observations. A zero there does not
+erase recorded contextual triggers. Neither count relaxes activation, criterion,
+context, timing, recurrence, or effect checks; old saved reports are unchanged.
+
+Conversation status schema 2 separates completion of a recorded review cycle
+(`assessment_complete`) from comparison coverage (`comparison_complete`). An
+inconclusive follow-up ends this review pass and waits for new evidence; causal
+effect flags remain explicit scope limits. Current comparison writes use input
+schema 2 with typed, canonical conditions, kept separate from work provenance.
+Null conditions cannot establish a match. The owning
+[conversation reference](../plugins/groundline/references/conversation-improvement.md)
+defines the fields and normal no-change exit. Existing immutable schema-1
+records are readable history, never upgraded into observed comparison evidence.
+
 ## Audit classification
 
 Bound scanning and retained memory independently. Stream large tool outputs with
