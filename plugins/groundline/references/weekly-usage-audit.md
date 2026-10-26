@@ -35,6 +35,14 @@ invocation or model comparability leaves effect claims inconclusive but does not
 replace this content review. Record unavailable context explicitly rather than
 reporting no opportunity from metadata alone.
 
+Complete this review pass once its authorized stages and contextual assessment
+are recorded. A justified no-change review is a normal completed result.
+An inconclusive effect comparison waits for new comparable work; it does not
+request another identical audit, retry unchanged evidence, or require a new
+feature. Use the conversation readout's per-chain `assessment_complete` for
+recorded-cycle completion and `comparison_complete` for effect comparison.
+Neither provider integrity nor a successful cycle proves causal benefit.
+
 Local native audit, semantic review, source changes, installed activation and
 Insights upload are separate paths. A stale central upload does not invalidate a
 working local audit. If installed Core lacks the required product commands,
