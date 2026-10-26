@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "kind": "groundline-binary-artifact",
+  "groundline_version": "2026.1026.3",
+  "target": "x86_64-unknown-linux-musl",
+  "executable": "groundline-insights",
+  "size_bytes": 7443280,
+  "sha256": "6f0ebdfc02570447644552ceee3fde65482d64c90ba77bf61f657dbda17085c5"
+}
