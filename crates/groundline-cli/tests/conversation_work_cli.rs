@@ -387,6 +387,115 @@ fn completed_review_with_changed_or_unknown_conditions_never_claims_comparison_s
 }
 
 #[test]
+fn activation_records_actual_conditions_without_using_unmatched_exposure_for_comparison() {
+    for (field, value) in [
+        ("model", json!("changed-fixture-model")),
+        ("effort", json!("changed-fixture-effort")),
+        ("service_tier", json!("changed-fixture-tier")),
+        ("runtime_family", json!("codex_app")),
+        ("runtime_version", json!("changed-fixture-version")),
+        ("tools_sha256", json!(hash(b"changed-tools"))),
+        ("permissions_sha256", json!(hash(b"changed-permissions"))),
+        ("permissions_sha256", Value::Null),
+        ("task_parameters_sha256", json!(hash(b"changed-parameters"))),
+    ] {
+        let f = Fixture::new(true);
+        let review = f.review(&f.review, true);
+        let change = f.change(
+            &f.change_input(&review["record_sha256"]),
+            Some(&f.project),
+            &f.target,
+            None,
+            true,
+        );
+        let original: Value = serde_json::from_slice(&fs::read(&f.comparison).unwrap()).unwrap();
+        let mut actual = original.clone();
+        actual[field] = value;
+        private_json(&f.comparison, &actual);
+        let activated = f.observe(&f.activation(&change["record_sha256"]), None, true);
+        assert_eq!(next(&activated), "wait_natural_opportunity");
+        assert_eq!(activated["conversation_work"]["activation_count"], 1);
+        assert_eq!(activated["conversation_work"]["observation_count"], 0);
+        assert_eq!(activated["conversation_work"]["comparison_complete"], false);
+
+        // Matching the change alone cannot make a different-context exposure
+        // qualify this follow-up. These are isolated fixture work units.
+        private_json(&f.comparison, &original);
+        let observation = f.observation(
+            &change["record_sha256"],
+            "fixture followup before matching exposure",
+            json!(true),
+            json!(false),
+        );
+        let result = f.observe(&observation, None, true);
+        assert_eq!(next(&result), "wait_comparable_followup");
+        assert_eq!(result["conversation_work"]["assessment_complete"], true);
+        assert_eq!(result["conversation_work"]["opportunity_count"], 0);
+        assert_eq!(result["conversation_work"]["inconclusive_count"], 1);
+        assert!(result["conversation_work"]["recurrence_rate"].is_null());
+
+        // A later matching exposure qualifies only later matching work, never
+        // the preceding observation retroactively.
+        assert_eq!(
+            f.observe(&f.activation(&change["record_sha256"]), None, false)["error"],
+            "learning_conversation_duplicate_conflict"
+        );
+        private(
+            &f.evidence,
+            b"Later matching-context fixture instruction read.\n",
+        );
+        f.observe(&f.activation(&change["record_sha256"]), None, true);
+        let later = f.observation(
+            &change["record_sha256"],
+            "fixture followup after matching exposure",
+            json!(true),
+            json!(false),
+        );
+        let result = f.observe(&later, None, true);
+        assert_eq!(result["conversation_work"]["opportunity_count"], 1);
+        assert_eq!(result["conversation_work"]["inconclusive_count"], 1);
+        assert_eq!(result["conversation_work"]["comparison_complete"], false);
+        assert_eq!(
+            result["conversation_work"]["causal_effect_established"],
+            false
+        );
+    }
+}
+
+#[test]
+fn changed_context_activation_keeps_revision_kind_and_timestamp_guards() {
+    let f = Fixture::new(true);
+    let review = f.review(&f.review, true);
+    let change = f.change(
+        &f.change_input(&review["record_sha256"]),
+        Some(&f.project),
+        &f.target,
+        None,
+        true,
+    );
+    let mut actual: Value = serde_json::from_slice(&fs::read(&f.comparison).unwrap()).unwrap();
+    actual["model"] = json!("changed-fixture-model");
+    private_json(&f.comparison, &actual);
+    let activation = f.activation(&change["record_sha256"]);
+    for (field, value) in [
+        ("target_after_sha256", json!(hash(b"another-target"))),
+        ("activation_kind", json!("skill_invoked")),
+        ("activated_at_utc", json!("2026-10-01T00:00:00Z")),
+    ] {
+        let mut invalid = activation.clone();
+        invalid[field] = value;
+        assert_eq!(
+            f.observe(&invalid, None, false)["error"],
+            "learning_conversation_activation_mismatch"
+        );
+    }
+    let result = f.observe(&activation, None, true);
+    assert_eq!(result["conversation_work"]["activation_count"], 1);
+    assert_eq!(result["conversation_work"]["observation_count"], 0);
+    assert_eq!(result["conversation_work"]["comparison_complete"], false);
+}
+
+#[test]
 fn comparison_contract_rejects_work_identity_and_retired_writer_inputs() {
     let f = Fixture::new(true);
     let review = f.review(&f.review, true);
