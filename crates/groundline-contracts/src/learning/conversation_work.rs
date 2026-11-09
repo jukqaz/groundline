@@ -509,8 +509,11 @@ pub fn validate_collection(values: &[Value]) -> Result<(), ContractError> {
                 };
                 if v.target_after_sha256 != applied.target.after_sha256
                     || v.schema != applied.schema
-                    || v.comparison_conditions != applied.comparison_conditions
-                    || v.comparison_context_sha256 != applied.comparison_context_sha256
+                    // Typed activation records actual exposure conditions;
+                    // effect comparison checks their match independently.
+                    // Historical opaque-context bindings remain unchanged.
+                    || (v.schema == 1
+                        && v.comparison_context_sha256 != applied.comparison_context_sha256)
                     || v.activation_kind != expected
                     || timestamp(&v.activated_at_utc)? < timestamp(&applied.applied_at_utc)?
                 {
@@ -547,9 +550,12 @@ fn comparable(
         && observation.comparison_context_sha256 == applied.comparison_context_sha256
         && observation.source_work_sha256 != origin.source_work_sha256
         && observed > timestamp(&applied.applied_at_utc)?
-        && activations
-            .iter()
-            .any(|a| timestamp(&a.activated_at_utc).is_ok_and(|t| observed > t)))
+        && activations.iter().any(|a| {
+            a.schema == observation.schema
+                && a.comparison_conditions == observation.comparison_conditions
+                && a.comparison_context_sha256 == observation.comparison_context_sha256
+                && timestamp(&a.activated_at_utc).is_ok_and(|t| observed > t)
+        }))
 }
 
 /// Safe derived status only. Owner-private summaries, evidence bodies and paths
