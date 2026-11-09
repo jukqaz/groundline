@@ -46,6 +46,8 @@ does not block acceptance; do not defer required work for convenience.
 
 Base cleanup and dependency replacement on actual use, current supported inputs,
 public contracts, data retention, the concrete problem, and verification evidence.
+Keep cleanup within the accepted task scope; linked chats and past plans
+provide context, not broader deletion authority.
 Names such as legacy, fallback, or compatibility do not establish dead code.
 Preserve protections still needed by current users; retire support only when the
 evidence establishes that it is outside the current contract.
