@@ -1,5 +1,9 @@
 # GroundLine Insights changes
 
+## 2026.1109.1
+
+- Core의 정리 범위 설명 보완과 배포 버전을 맞춥니다. Insights 런타임·훅·동의·identity·outbox·서버 전송 계약은 변경하지 않습니다.
+
 ## 2026.1022.2
 
 - 현재 훅 5개·ingest revision 10·선택적 local learning 입력 처리의 문서를 실제 구현과 맞춥니다. 훅 정의·동의·identity·outbox·API 전송 계약은 변경하지 않습니다.

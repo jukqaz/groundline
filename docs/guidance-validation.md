@@ -95,6 +95,7 @@ actions and accepted output, not just which skill name was selected.
 | A new finding appears during an approved change | Reproduce it, judge user impact and acceptance relevance, and distinguish required defect work from an optional improvement; no unrequested cross-project edit |
 | Explicitly fix all in-scope defects | Finish every authorized item and its required checks; report genuine blockers without deferring required fixes for convenience |
 | Cleanup finds a currently used fallback protecting data | Check actual callers, supported inputs, public contract, and data retention; preserve the needed protection despite its label |
+| Cleanup mentions linked historical work | Keep the current accepted target scope; linked context alone does not authorize broader deletion. Honor an explicit revised scope without adding a redundant approval gate |
 | Same task resumes or is refined | Reuse completed work and compatible authority; no unsolicited Goal, fork, or new task |
 | Narrow documentation change | Validate affected references; no automatic full build loop |
 | Previously passing check has changed inputs | Rerun the affected check; valid prior evidence remains reusable |
