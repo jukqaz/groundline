@@ -1,6 +1,14 @@
 # Changelog
 
+## 2026.11.09-b (`2026.1109.2`)
+
+- `pulldown-cmark`를 `0.13.6`, `zstd`를 `0.13.4`, `zstd-safe`를 `7.4.0`, `zstd-sys`를 `2.1.2` 이상의 호환 패치로 갱신합니다.
+- RustSec [0414](https://rustsec.org/advisories/RUSTSEC-2026-0414.html), [0433](https://rustsec.org/advisories/RUSTSEC-2026-0433.html), [0391](https://rustsec.org/advisories/RUSTSEC-2026-0391.html), [0398](https://rustsec.org/advisories/RUSTSEC-2026-0398.html), [0403](https://rustsec.org/advisories/RUSTSEC-2026-0403.html), [0410](https://rustsec.org/advisories/RUSTSEC-2026-0410.html)의 수정 버전을 적용합니다. 기존 feature와 입력·수집 계약을 보존하고 advisory 예외는 추가하지 않습니다.
+- 첫 순번은 의존성 검사에서 차단돼 asset·image·stable을 발행하지 않았습니다. 기존 소스 태그는 덮어쓰지 않고 새 순번으로 검증합니다.
+
 ## 2026.11.09-a (`2026.1109.1`)
+
+이 소스 태그는 의존성 검증에서 차단돼 정식 asset·image·stable을 발행하지 않았습니다.
 
 - 기존 task continuity 참조문에서 정리 범위와 과거 채팅의 참고 맥락을 구분하도록 명확히 합니다. 현재 승인 범위의 정리는 계속 수행하고, 링크만으로 삭제 권한을 넓히지 않습니다.
 - 같은 경계의 검증 사례를 문서화하고 Core·Insights·API의 배포 버전을 맞춥니다. 스킬 발동·모델 선택·런타임·훅·수집·동의·전송 계약은 변경하지 않습니다.
