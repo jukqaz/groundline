@@ -1,0 +1,11 @@
+{
+  "kind": "groundline-plugin-distribution",
+  "schema": 1,
+  "product": "core",
+  "plugin": "groundline",
+  "marketplace": "groundline-core",
+  "channel": "core-stable",
+  "version": "2026.1110.1",
+  "release_tag": "core-v2026.1110.1",
+  "source_sha": "5e215534ca3598c502ffec5a17964ded4f2bf825"
+}
