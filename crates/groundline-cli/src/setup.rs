@@ -215,9 +215,8 @@ pub fn run(options: Options) -> Result<Value, ContractError> {
         "mode":if options.apply { "apply" } else { "preview" },
         "model_policy":if selections.contains_key("model") { "explicit_selection" } else { "existing_or_native_default" },
         "migration_review":{
-            "guide":"references/installation-alignment.md#existing-settings-and-migration",
+            "guide":"references/codex-configuration.md",
             "native_schema_check_required":true,
-            "guidance_review":"groundline:align-agent-home",
             "unknown_settings_preserved":true,
             "context_overrides_removed_only_when_requested":true
         },

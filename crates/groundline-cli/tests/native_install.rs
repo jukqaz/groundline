@@ -636,3 +636,147 @@ fn real_codex_upgrades_metadata_repeats_and_preserves_settings_and_consent() {
         "real Codex and local stable transport: old metadata -> exact reviewed cache despite stable movement, add/upgrade failure rollback artifacts, disabled plugin and consent preservation, repeat, native catalog/model/effort/Fast PASS; old runtime execution, authenticated task and private delivery UNVERIFIED"
     );
 }
+
+#[test]
+#[ignore = "requires GROUNDLINE_NATIVE_CODEX; isolated native metadata only, no model turns"]
+fn real_codex_discovers_the_single_core_skill_without_changing_choices() {
+    let codex =
+        PathBuf::from(std::env::var_os("GROUNDLINE_NATIVE_CODEX").expect("real Codex path"));
+    let temporary = tempdir().unwrap();
+    let root = temporary.path().canonicalize().unwrap();
+    let home = root.join("isolated-home");
+    fs::create_dir(&home).unwrap();
+    let market = root.join("core candidate");
+    fs::create_dir_all(market.join(".agents/plugins")).unwrap();
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut catalog: Value =
+        serde_json::from_slice(&fs::read(repo.join(".agents/plugins/marketplace.json")).unwrap())
+            .unwrap();
+    catalog["name"] = serde_json::json!("groundline-core-fixture");
+    catalog["plugins"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|p| p["name"] == "groundline");
+    fs::write(
+        market.join(".agents/plugins/marketplace.json"),
+        serde_json::to_vec(&catalog).unwrap(),
+    )
+    .unwrap();
+    let core = Path::new(env!("CARGO_BIN_EXE_groundline"));
+    let platform: Value = serde_json::from_slice(
+        &checked(Command::new(core).args(["platform", "--json"]), "platform").stdout,
+    )
+    .unwrap();
+    let target = platform["target"].as_str().unwrap();
+    package::stage(
+        &market.join("plugins/groundline"),
+        core,
+        "groundline",
+        target,
+    );
+    let git_config = root.join("fixture.gitconfig");
+    fs::write(&git_config,format!("[url \"{}\"]\n insteadOf = git@github.com:jukqaz/groundline.git\n[user]\n name = GroundLine Test\n email = groundline-test@example.invalid\n[commit]\n gpgsign = false\n",market.display())).unwrap();
+    for args in [
+        vec!["init", "--initial-branch=stable"],
+        vec!["add", "."],
+        vec!["commit", "-m", "test: stage single-skill Core candidate"],
+    ] {
+        checked(
+            Command::new("git")
+                .current_dir(&market)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", &git_config)
+                .args(args),
+            "stage isolated candidate",
+        );
+    }
+    let config = home.join("config.toml");
+    groundline_runtime::local_file::atomic_write_private(
+        &config,
+        b"model='gpt-6.1-sol'\nmodel_reasoning_effort='max'\nservice_tier='default'\n",
+    )
+    .unwrap();
+    let native = || {
+        let mut c = Command::new(&codex);
+        c.env("CODEX_HOME", &home)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", &git_config)
+            .env_remove("OPENAI_API_KEY")
+            .env_remove("CODEX_API_KEY");
+        c
+    };
+    checked(
+        native().args([
+            "plugin",
+            "marketplace",
+            "add",
+            "git@github.com:jukqaz/groundline.git",
+            "--ref",
+            "stable",
+            "--json",
+        ]),
+        "register isolated candidate",
+    );
+    checked(
+        native().args([
+            "plugin",
+            "add",
+            "groundline@groundline-core-fixture",
+            "--json",
+        ]),
+        "install isolated candidate",
+    );
+    let installed = home
+        .join("plugins/cache/groundline-core-fixture/groundline")
+        .join(env!("CARGO_PKG_VERSION"));
+    let names: Vec<_> = fs::read_dir(installed.join("skills"))
+        .unwrap()
+        .map(|p| p.unwrap().file_name())
+        .collect();
+    assert_eq!(
+        names,
+        vec![std::ffi::OsString::from("optimize-codex-workflow")]
+    );
+    let before = fs::read(&config).unwrap();
+    checked(
+        Command::new(installed.join("bin").join(target).join("groundline"))
+            .args(["provider-smoke", "--plugin-root"])
+            .arg(&installed)
+            .args(["--require-installed", "--json"]),
+        "installed reduced Core integrity",
+    );
+    let values: toml::Table = toml::from_str(std::str::from_utf8(&before).unwrap()).unwrap();
+    assert_eq!(values["model"].as_str(), Some("gpt-6.1-sol"));
+    assert_eq!(values["model_reasoning_effort"].as_str(), Some("max"));
+    assert_eq!(values["service_tier"].as_str(), Some("default"));
+    let mut observation = Command::new(core);
+    observation
+        .env("CODEX_HOME", &home)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", &git_config)
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("CODEX_API_KEY")
+        .current_dir(&root)
+        .arg("environment-observe")
+        .arg("--app-cli")
+        .arg(&codex)
+        .arg("--path-cli")
+        .arg(&codex)
+        .arg("--codex-home")
+        .arg(&home)
+        .arg("--target")
+        .arg(installed.join("skills/optimize-codex-workflow/SKILL.md"));
+    let output = checked(&mut observation, "fresh native skill discovery");
+    let snapshot: Value = serde_json::from_slice(&output.stdout).unwrap();
+    for lane in ["app_cli", "path_cli"] {
+        assert_eq!(snapshot[lane]["skills"]["supported"], true, "{snapshot}");
+        assert_eq!(
+            snapshot[lane]["skills"]["observed"]["targets"][0]["enabled"], true,
+            "{snapshot}"
+        );
+    }
+    assert_eq!(snapshot["model_calls_requested"], 0);
+    assert_eq!(snapshot["native_mutations_requested"], 0);
+    assert_eq!(fs::read(&config).unwrap(), before);
+    assert!(!home.join("groundline").exists());
+}

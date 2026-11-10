@@ -110,8 +110,8 @@ doctor checks effective configuration separately from the bounded file review.
 There is no fixed model preset. An unsupported explicit selection stops settings
 changes without substitution. Resolve
 profile/provider/catalog overrides in their owning layer. See
-[existing settings and migration](../plugins/groundline/references/installation-alignment.md#existing-settings-and-migration).
-Personal guidance repair remains an explicit `groundline:align-agent-home` task.
+[configuration maintenance](../plugins/groundline/references/codex-configuration.md).
+Installation diagnosis is explicit manual maintenance, separate from the improvement skill.
 
 ## Add Insights in the same flow
 

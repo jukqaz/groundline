@@ -1,26 +1,13 @@
-# 문서 안내
+# 문서
 
-[English](../index.md) · [GroundLine](../../README.ko.md)
+[Core 예시](../examples.md)와 [개선 절차](../../plugins/groundline/references/conversation-improvement.md)부터 읽습니다.
 
-| 할 일 | 시작 문서 |
+| 목적 | 문서 |
 | --- | --- |
-| 설치·업데이트·복구 | [설치 안내](../installation.md) |
-| Core·Insights·동시 설치 선택 | [연동 경계](integrations.md) |
-| 실제 작업 감사와 결과 비교 | [CLI 예제](../examples.md) |
-| 업무·공식 변경·기기를 연결 | [학습 루프](../../plugins/groundline/references/learning-loop.md), [실행 계약](../adaptive-environment-implementation.md) |
-| Codex 실행 환경 호환성 확인 | [호환성](codex-compatibility.md) |
-| 운영자 서버 구축 | [셀프호스팅](self-hosting.md) |
-| 수집·서버 장애 진단 | [운영 안내](../insights-operations.md) |
-| 코드·파서 변경 | [기여 안내](../../CONTRIBUTING.md), [아키텍처](../architecture.md), [개발 계약](../development.md) |
-| 지침 변경 평가 | [행동 검증](../guidance-validation.md) |
-| 지속 개선·환경 통일 | [로컬 환경·학습 CLI](../adaptive-environment-implementation.md), [설계와 남은 범위](../adaptive-environment-design.md) |
-| 개선 순환에 native 기능 연결 | [Codex 기능 조사와 활용 기준](../codex-native-capabilities.md) |
-| 작업 결과와 비용 연결의 완성 기준 | [이번 설계와 근거](../goal-completion-design.md) |
-| 릴리스 검증·게시 | [체크리스트](../release-checklist.md), [버전 규칙](../versioning.md) |
+| 설치·갱신 | [설치와 복구](../installation.md) |
+| 작은 Core 이해 | [아키텍처](../architecture.md), [행동 검증](../guidance-validation.md) |
+| 구체적인 사용량 문제 진단 | [선택적 주간 감사](../../plugins/groundline/references/weekly-usage-audit.md) |
+| 선택적 Insights 운영 | [자가 호스팅](self-hosting.md), [운영](../insights-operations.md), [연동](integrations.md) |
+| 개발·패키지 | [개발 계약](../development.md), [릴리스 검증](../release-checklist.md) |
 
-설치된 명령과 계약은 플러그인 문서에서 확인합니다:
-[Core](../../plugins/groundline/README.ko.md) · [Insights](../../plugins/groundline-insights/README.ko.md).
-
-현재 절차는 위 문서에 모았습니다. 대체된 설계·조사 기록은 Git 이력에,
-릴리스별 변경은 [변경 기록](../../CHANGELOG.md)에 남습니다.
-[개인정보](../privacy.md) · [보안](../../SECURITY.md) · [약관](../terms.md)
+[English](../index.md)

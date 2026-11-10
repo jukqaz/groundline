@@ -109,11 +109,11 @@ and [integration profiles](https://github.com/jukqaz/groundline/blob/main/docs/i
 License: MIT.
 
 
-## Optional private learning boundaries
+## Existing private learning profiles
 
-When Core learning is explicitly enabled, the same five fail-open lifecycle hooks
-record small private event metadata and registered target digests. They do not
-store prompt text, inject developer context, infer success or extend collection
-consent. The background worker can run the pinned Core offline consumer with a
-bounded timeout. Insights-only installation and its existing upload contract
-remain independent. See the installed Core learning-loop reference for setup.
+Existing explicitly enabled profiles and pinned consumers keep their original
+bounded metadata and consent contract. The reduced Core does not create, enable
+or consume these profiles. Preserve their state and pinned executable; report an
+unavailable consumer without resetting records or changing collection. Insights
+collection remains independent. New Core improvement uses explicit contextual
+records and needs no hook, profile or upload.

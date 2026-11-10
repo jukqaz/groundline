@@ -14,14 +14,11 @@ use serde_json::{Value, json};
 mod audit_review;
 mod config_audit;
 mod config_repair;
-mod delivery;
-mod environment;
 mod environment_observation;
+mod improvement;
+mod improvement_io;
 mod learning;
-mod official_sources;
 mod operations;
-mod personal;
-mod routing;
 mod setup;
 
 #[derive(Debug, Parser)]
@@ -37,20 +34,15 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Align registered private guidance files with a revisioned baseline.
-    Environment {
+    /// Improve one guidance target and review its natural follow-up.
+    Improve {
         #[command(subcommand)]
-        command: environment::Command,
+        command: improvement::Command,
     },
-    /// Link actual outcomes and evaluate scoped private improvement candidates.
+    /// Read preserved conversation records; historical writers are retired.
     Learning {
         #[command(subcommand)]
         command: learning::Command,
-    },
-    /// Compare explicit official-source snapshots and identify affected guidance.
-    Sources {
-        #[command(subcommand)]
-        command: official_sources::Command,
     },
     /// Observe native App and PATH loading separately without starting model turns.
     EnvironmentObserve {
@@ -70,11 +62,6 @@ enum Command {
         /// Relative package files to compare (maximum 32; no directory scan).
         #[arg(long, requires_all = ["source_plugin_root", "installed_plugin_root"])]
         compare_file: Vec<PathBuf>,
-    },
-    /// Inspect or roll back an existing private personal-guidance trial.
-    Personal {
-        #[command(subcommand)]
-        command: personal::Command,
     },
     /// Compare one configuration layer to an explicit native model catalog, offline.
     ConfigAudit {
@@ -113,7 +100,7 @@ enum Command {
         #[command(subcommand)]
         command: AuditCommand,
     },
-    /// Compare observed usage and delivery outcomes for bounded recommendations.
+    /// Optional offline aggregate recommendation; never changes settings.
     Efficiency {
         #[command(subcommand)]
         command: EfficiencyCommand,
@@ -175,52 +162,11 @@ enum AuditCommand {
 
 #[derive(Debug, Subcommand)]
 enum EfficiencyCommand {
-    /// Compare private GPT-6 outcomes with a native catalog and optional aggregate context.
-    Route {
-        #[arg(long)]
-        input: PathBuf,
-        #[arg(long)]
-        catalog: PathBuf,
-        /// Optional native weekly audit or combined weekly review; - accepts stdin.
-        #[arg(long)]
-        audit: Option<PathBuf>,
-        /// Strict owner Insights report from ClickHouse; absence stays explicit.
-        #[arg(long)]
-        report: Option<PathBuf>,
-        /// Private completed-delivery receipts; input outcomes must be empty.
-        #[arg(long)]
-        deliveries: Option<PathBuf>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Record one delivery with local evidence in a NEW private receipt.
-    RecordDelivery {
-        #[arg(long)]
-        input: PathBuf,
-        #[arg(long)]
-        output: PathBuf,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Summarize observed delivery outcomes and all owned resources, offline.
-    DeliverySummary {
-        #[arg(long)]
-        deliveries: PathBuf,
-        #[arg(long)]
-        json: bool,
-    },
     /// Propose one bounded workflow change from a weekly aggregate.
     Recommend {
         /// Audit JSON file, or - to read at most 2 MiB from standard input.
         #[arg(long)]
         audit: PathBuf,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Gate a redacted before-and-after aggregate comparison.
-    Compare {
-        #[arg(long)]
-        input: PathBuf,
         #[arg(long)]
         json: bool,
     },
@@ -325,13 +271,7 @@ fn emit(value: &Value, json_output: bool) {
 }
 
 fn failure(error: ContractError) -> Value {
-    let mutation = if error.0.starts_with("delivery_summary_") {
-        json!(false)
-    } else if error.0.starts_with("personal_")
-        || error.0.starts_with("delivery_")
-        || error.0.starts_with("environment_")
-        || error.0.starts_with("learning_")
-    {
+    let mutation = if error.0.starts_with("improvement_") {
         Value::Null
     } else {
         json!(false)
@@ -350,9 +290,8 @@ fn failure(error: ContractError) -> Value {
 
 fn run(cli: Cli) -> Result<(), ExitCode> {
     let result: Result<(Value, bool), ContractError> = match cli.command {
-        Command::Environment { command } => environment::run(command).map(|value| (value, true)),
         Command::Learning { command } => learning::run(command).map(|value| (value, true)),
-        Command::Sources { command } => official_sources::run(command).map(|value| (value, true)),
+        Command::Improve { command } => improvement::run(command).map(|value| (value, true)),
         Command::EnvironmentObserve {
             app_cli,
             path_cli,
@@ -378,7 +317,6 @@ fn run(cli: Cli) -> Result<(), ExitCode> {
                 ),
         )
         .map(|value| (value, true)),
-        Command::Personal { command } => personal::run(command).map(|value| (value, true)),
         Command::ConfigRepair(options) => config_repair::run(options).map(|value| (value, true)),
         Command::Setup(options) => match setup::run(options) {
             Ok(value) => {
@@ -510,43 +448,9 @@ fn run(cli: Cli) -> Result<(), ExitCode> {
                 .map(|value| (value, json))
         }
         Command::Efficiency {
-            command:
-                EfficiencyCommand::Route {
-                    input,
-                    catalog,
-                    audit,
-                    report,
-                    deliveries,
-                    json,
-                },
-        } => routing::run(
-            &input,
-            &catalog,
-            audit.as_deref(),
-            report.as_deref(),
-            deliveries.as_deref(),
-        )
-        .map(|value| (value, json)),
-        Command::Efficiency {
-            command:
-                EfficiencyCommand::RecordDelivery {
-                    input,
-                    output,
-                    json,
-                },
-        } => delivery::record(&input, &output).map(|value| (value, json)),
-        Command::Efficiency {
-            command: EfficiencyCommand::DeliverySummary { deliveries, json },
-        } => delivery::summarize(&deliveries).map(|value| (value, json)),
-        Command::Efficiency {
             command: EfficiencyCommand::Recommend { audit, json },
         } => load_audit(&audit)
             .and_then(|audit| efficiency::recommend_weekly_optimization(&audit))
-            .map(|value| (value, json)),
-        Command::Efficiency {
-            command: EfficiencyCommand::Compare { input, json },
-        } => load_object(&input)
-            .and_then(|packet| efficiency::compare_aggregate_periods(&packet))
             .map(|value| (value, json)),
         Command::Platform { json } => platform::current_target()
             .and_then(|target| platform::packaged_binary_path(target).map(|path| (target, path)))

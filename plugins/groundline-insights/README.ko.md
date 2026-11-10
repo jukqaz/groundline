@@ -98,10 +98,9 @@ preview이며 TrueNAS는 선택형 overlay입니다. 운영에는 fresh-host, im
 License: MIT.
 
 
-## 선택적 비공개 학습 경계
+## 기존 비공개 학습 프로필
 
-Core learning을 명시적으로 활성화한 경우 같은 5개 훅이 작은 native metadata와
-등록 대상 digest를 비공개로 기록합니다. prompt 원문·developer context 주입·
-성공 추정은 하지 않으며 기존 업로드 동의와 분리합니다. background worker는
-검증된 Core 오프라인 소비기를 제한된 시간 안에 실행할 수 있습니다. Insights-only와
-기존 중앙 전송 계약은 유지됩니다. 설정은 설치된 Core learning-loop 참조문을 따릅니다.
+이미 명시적으로 활성화한 프로필과 고정 소비기는 기존의 제한된 metadata·동의 계약을
+유지합니다. 축소된 Core는 이 프로필을 생성·활성화·소비하지 않습니다. 기존 상태와
+고정 실행 파일을 보존하고, 소비기가 없으면 기록 초기화나 수집 변경 없이 보고합니다.
+Insights 수집은 독립이며 새 Core 개선에는 훅·프로필·업로드가 필요하지 않습니다.

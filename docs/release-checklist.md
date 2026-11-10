@@ -9,18 +9,17 @@
    bounded retries/diagnostics, and real loopback capability preflight tests.
    Confirm owner APIs advertise the new ingest contract before collector
    upgrades; public stable promotion alone cannot prove private API readiness.
-   Both native PR and artifact jobs must execute `delivery_cli`, `routing_cli`,
-   `adaptive_environment_cli`, `learning_loop_cli`, `environment_sync_cli`,
-   `learning_work_cli`, and `official_sources_cli`
+   Both native PR and artifact jobs must execute
+   `improvement_cli`, setup, config-repair and native installation suites.
    on every supported target. Listing tests or applying a test-name filter does
    not qualify these suites.
-   Before promoting revised routing or skill behavior as the default, compare
+   Before claiming improved skill behavior, compare
    candidate and current guidance on representative matched work with the same
    inputs and acceptance criteria. Protect completion quality and rework before
    optimizing owned tokens or elapsed time; include child, approval, failure,
    and retry resources. Unknown outcomes do not pass this gate. Deterministic
-   tests and GroundLine's 10-unit/5% selection policy are not proof of behavioral
-   non-regression. Retain the current baseline while that evidence is missing.
+   tests are not proof of behavioral improvement. Report missing natural follow-up
+   separately from source/package qualification.
 3. In the isolated qualification ClickHouse, run the explicit mutation-enabled
    integration lane. It must exercise API-owned schema migration, enrollment,
    accepted upload, duplicate retry, weekly reporting, every Grafana query, and

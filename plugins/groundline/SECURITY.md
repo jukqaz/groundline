@@ -12,7 +12,7 @@ reject symlinks. Codex SQLite is read-only with `NOFOLLOW`, owner checks, an 8 G
 limit, and a 100,000-row ceiling. Rollouts must belong to canonical non-symlinked
 session roots. Output contains aggregates or reason codes, not raw records or paths.
 See [audit scope](references/weekly-usage-audit.md) and
-[private delivery receipts](references/delivery-evidence.md).
+[private improvement records](references/conversation-improvement.md).
 
 Source qualification checks package boundaries, Core's zero hooks, Insights'
 five hooks, pinned CI actions, and private markers. Release qualification also

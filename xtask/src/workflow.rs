@@ -106,7 +106,7 @@ fn public_build_metadata_is_bounded(workflow: &str) -> bool {
     builds > 0
 }
 
-fn native_delivery_command_is_complete(line: &str) -> bool {
+fn native_core_command_is_complete(line: &str) -> bool {
     let Some(args) = shlex::split(line) else {
         return false;
     };
@@ -123,51 +123,34 @@ fn native_delivery_command_is_complete(line: &str) -> bool {
         return false;
     }
     let mut rest = args[7..].iter().copied();
-    let (mut delivery, mut routing, mut adaptive) = (false, false, false);
-    let (mut learning_loop, mut environment_sync, mut official_sources) = (false, false, false);
-    let (mut learning_work, mut conversation_work) = (false, false);
+    let mut required = std::collections::BTreeSet::from([
+        "improvement_cli",
+        "setup_cli",
+        "config_repair_cli",
+        "install_cli",
+    ]);
     while let Some(arg) = rest.next() {
         match arg {
             "--lib" => {}
             "--test" => match rest.next() {
-                Some("delivery_cli") => delivery = true,
-                Some("routing_cli") => routing = true,
-                Some("adaptive_environment_cli") => adaptive = true,
-                Some("learning_loop_cli") => learning_loop = true,
-                Some("learning_work_cli") => learning_work = true,
-                Some("conversation_work_cli") => conversation_work = true,
-                Some("environment_sync_cli") => environment_sync = true,
-                Some("official_sources_cli") => official_sources = true,
-                Some("setup_cli" | "config_repair_cli" | "install_cli") => {}
+                Some(
+                    name @ ("improvement_cli" | "setup_cli" | "config_repair_cli" | "install_cli"),
+                ) => {
+                    required.remove(name);
+                }
                 _ => return false,
             },
-            // Only output options may follow the test-runner separator. Filters,
-            // listing, and compilation-only modes do not execute the full suites.
             "--" => {
-                return delivery
-                    && routing
-                    && adaptive
-                    && learning_loop
-                    && learning_work
-                    && conversation_work
-                    && environment_sync
-                    && official_sources
+                return required.is_empty()
                     && rest.all(|arg| matches!(arg, "--show-output" | "--nocapture"));
             }
             _ => return false,
         }
     }
-    delivery
-        && routing
-        && adaptive
-        && learning_loop
-        && learning_work
-        && conversation_work
-        && environment_sync
-        && official_sources
+    required.is_empty()
 }
 
-fn native_delivery_checks_are_required(workflow: &str) -> bool {
+fn native_core_checks_are_required(workflow: &str) -> bool {
     let Ok(document) = serde_saphyr::from_str::<serde_json::Value>(workflow) else {
         return false;
     };
@@ -181,7 +164,7 @@ fn native_delivery_checks_are_required(workflow: &str) -> bool {
                     }
                     step["run"]
                         .as_str()
-                        .is_some_and(|run| run.lines().any(native_delivery_command_is_complete))
+                        .is_some_and(|run| run.lines().any(native_core_command_is_complete))
                 })
             })
     })
@@ -356,7 +339,7 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
         || !stable_promotion_cleans_staging
         || !actions_are_pinned(&rust)
         || !public_build_metadata_is_bounded(&rust)
-        || !native_delivery_checks_are_required(&rust)
+        || !native_core_checks_are_required(&rust)
         || !release_matrices_match_supported_targets(&rust)
         || !clickhouse_schema_reset_is_scoped(&rust)
         || !setup.contains("using: composite")
@@ -396,7 +379,7 @@ mod tests {
 
     use super::{
         SCHEMA_RESET_ENV, actions_are_pinned, clickhouse_schema_reset_is_scoped,
-        external_action_is_pinned, native_delivery_checks_are_required,
+        external_action_is_pinned, native_core_checks_are_required,
         public_build_metadata_is_bounded, release_matrices_match_supported_targets,
         verify_ci_cost_contract,
     };
@@ -479,19 +462,15 @@ mod tests {
     }
 
     #[test]
-    fn delivery_checks_cannot_disappear_from_either_native_job() {
+    fn core_checks_cannot_disappear_from_either_native_job() {
         let workflow = include_str!("../../.github/workflows/rust.yml");
-        assert!(native_delivery_checks_are_required(workflow));
+        assert!(native_core_checks_are_required(workflow));
         for job in ["native-setup", "artifacts"] {
             for removed in [
-                " --test delivery_cli",
-                " --test routing_cli",
-                " --test adaptive_environment_cli",
-                " --test learning_loop_cli",
-                " --test learning_work_cli",
-                " --test conversation_work_cli",
-                " --test environment_sync_cli",
-                " --test official_sources_cli",
+                " --test improvement_cli",
+                " --test setup_cli",
+                " --test config_repair_cli",
+                " --test install_cli",
             ] {
                 let mut document: serde_json::Value = serde_saphyr::from_str(workflow).unwrap();
                 for step in document["jobs"][job]["steps"].as_array_mut().unwrap() {
@@ -499,7 +478,7 @@ mod tests {
                         step["run"] = run.replace(removed, "").into();
                     }
                 }
-                assert!(!native_delivery_checks_are_required(&document.to_string()));
+                assert!(!native_core_checks_are_required(&document.to_string()));
             }
         }
         for extra in [
@@ -511,9 +490,9 @@ mod tests {
             " nonexistent_filter",
             " || true",
         ] {
-            assert!(!native_delivery_checks_are_required(&workflow.replace(
-                "--test routing_cli",
-                &format!("--test routing_cli{extra}")
+            assert!(!native_core_checks_are_required(&workflow.replace(
+                "--test improvement_cli",
+                &format!("--test improvement_cli{extra}")
             )));
         }
     }

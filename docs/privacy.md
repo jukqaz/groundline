@@ -5,27 +5,14 @@ Its audit commands open Codex state read-only and return aggregate counts withou
 prompt text, response text, task titles, repository names, filesystem paths,
 configuration values, credentials, or database rows.
 
-Delivery recording accepts explicit local manifests and evidence artifacts and
-creates new owner-private receipts. Requested and observed effective selections,
-verification, and resource gaps remain distinct. Receipt hashes and local outcome
-records are not included in Insights uploads. See the
-[delivery contract](../plugins/groundline/references/delivery-evidence.md).
-
-`personal status` reads existing private trial state; `personal rollback` may
-restore unchanged GroundLine-generated guidance while preserving user edits.
-These recovery commands do not create or evaluate new trials, call a model, or
-change Codex settings. See [personal recovery](../plugins/groundline/references/personal-recovery.md).
-
-Requested environment and learning commands keep separate owner-private state.
-Capture snapshots and outcome links carry digests and explicit scoped observations,
-not native conversation bodies. Official text snapshots are supplied by native
-tools; the Core comparison cache stores mappings, digests and freshness metadata.
-Core does not fetch the text or authenticate its source. Portable bundles contain
-selected managed guidance text and common baseline lineage, excluding device
-bindings, paths and host exception fields. Managed text may itself contain private
-information: review it before transport and keep bundles outside public source.
-Native credentials, memory, sessions, databases and provider caches are not synced.
-See [the learning loop](../plugins/groundline/references/learning-loop.md).
+Core improvement records retain short identifiers and digests of locally reviewed
+sources, actual owning guidance targets, changed bytes and later observations.
+They contain no copied native conversation bodies. Core never edits the target,
+changes settings, authenticates a semantic declaration, or verifies causal gains.
+Existing conversation records remain unchanged; unsupported managed records are
+rejected without migration or deletion. No learning profile, device baseline,
+portable bundle or model routing is part of Core's improvement flow. See the
+[conversation procedure](../plugins/groundline/references/conversation-improvement.md).
 
 GroundLine Insights is separately installed, does not require Core, and remains
 inactive until the owner configures and enables it. It writes only bounded

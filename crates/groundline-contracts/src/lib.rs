@@ -15,6 +15,8 @@ pub mod efficiency;
 pub mod event;
 #[cfg(feature = "insights")]
 pub mod grafana;
+#[cfg(feature = "efficiency")]
+pub mod improvement;
 #[cfg(feature = "insights")]
 pub mod insights;
 #[cfg(feature = "integrity")]

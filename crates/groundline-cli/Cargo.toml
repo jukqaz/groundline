@@ -13,7 +13,7 @@ path = "src/main.rs"
 chrono.workspace = true
 clap.workspace = true
 dirs.workspace = true
-groundline-contracts = { version = "2026.1109.3", path = "../groundline-contracts", features = ["insights"] }
+groundline-contracts = { version = "2026.1109.3", path = "../groundline-contracts" }
 groundline-runtime = { version = "2026.1109.3", path = "../groundline-runtime" }
 semver.workspace = true
 serde.workspace = true
