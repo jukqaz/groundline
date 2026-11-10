@@ -49,7 +49,7 @@ git switch --detach "$RELEASE_TAG"
 
 블록을 실행하기 전에 세 placeholder assignment를 모두 실제 값으로 교체합니다.
 `RELEASE_TAG`에는 canonical 숫자 버전의 태그를 지정합니다.
-예를 들어 `v2026.929.1`의 표시 이름은 `2026.09.29-a`입니다. 같은 release의
+예를 들어 `insights-v2026.1110.1`의 표시 이름은 `2026.11.10-a`입니다. 같은 release의
 binary checksum은 GitHub Release에서 확인하고,
 `ghcr.io/jukqaz/groundline-insights-api:$RELEASE_TAG`는 GHCR에서 inspect합니다.
 게시된 multi-platform index digest를

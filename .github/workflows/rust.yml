@@ -1,10 +1,9 @@
 name: GroundLine Rust
-
 on:
   workflow_dispatch:
     inputs:
       build_release_artifacts:
-        description: Build both products for all three supported targets
+        description: Build the selected product for all three supported targets
         required: true
         default: false
         type: boolean
@@ -24,41 +23,46 @@ on:
         description: Optional exact plugin ref or unversioned plugin ID for latest; set all four candidate inputs together
         required: false
         type: string
+      release_product:
+        description: Qualify or build one independently released product
+        required: true
+        default: core
+        type: choice
+        options:
+          - core
+          - insights
   pull_request:
     paths:
-      - ".gitattributes"
-      - ".agents/plugins/**"
-      - ".github/actions/**"
-      - ".github/workflows/**"
-      - ".cargo/**"
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "crates/**"
-      - "deny.toml"
-      - "docs/**"
-      - "infrastructure/**"
-      - "install.sh"
-      - "plugins/**"
-      - "rust-toolchain.toml"
-      - "services/**"
-      - "xtask/**"
-      - "*.md"
+      - .gitattributes
+      - .agents/plugins/**
+      - .github/actions/**
+      - .github/workflows/**
+      - .cargo/**
+      - Cargo.lock
+      - Cargo.toml
+      - crates/**
+      - deny.toml
+      - docs/**
+      - infrastructure/**
+      - install.sh
+      - plugins/**
+      - rust-toolchain.toml
+      - services/**
+      - xtask/**
+      - '*.md'
   push:
     tags:
-      - "v*.*.*"
-
+      - core-v*.*.*
+      - insights-v*.*.*
 permissions:
   contents: read
-
 env:
-  GIT_CONFIG_COUNT: "1"
+  GIT_CONFIG_COUNT: '1'
   GIT_CONFIG_KEY_0: init.defaultBranch
   GIT_CONFIG_VALUE_0: main
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
-
 jobs:
   fast:
     name: fast source checks
@@ -66,6 +70,9 @@ jobs:
     timeout-minutes: 12
     outputs:
       native_setup: ${{ steps.setup-changes.outputs.needed }}
+      product: ${{ steps.release.outputs.product }}
+      plugin: ${{ steps.release.outputs.plugin }}
+      version: ${{ steps.release.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -80,16 +87,30 @@ jobs:
             echo "needed=true" >> "$GITHUB_OUTPUT"
           fi
       - name: Reject an invalid or version-mismatched release tag before expensive work
-        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
-          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "release tag must be strict vMAJOR.MINOR.PATCH" >&2
-            exit 1
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            if [[ ! "$GITHUB_REF_NAME" =~ ^(core|insights)-v[0-9]{4}\.[1-9][0-9]{2,3}\.[1-9][0-9]*$ ]]; then
+              echo "release tag must select core or insights explicitly" >&2
+              exit 1
+            fi
+            product="${GITHUB_REF_NAME%%-v*}"
+            version="${GITHUB_REF_NAME#*-v}"
+          else
+            product="$REQUESTED_PRODUCT"
+            version=""
           fi
-          version="${GITHUB_REF_NAME#v}"
-          test "$(jq -r .version plugins/groundline/.codex-plugin/plugin.json)" = "$version"
-          test "$(jq -r .version plugins/groundline-insights/.codex-plugin/plugin.json)" = "$version"
+          case "$product" in core) plugin=groundline ;; insights) plugin=groundline-insights ;; *) exit 1 ;; esac
+          source_version="$(jq -r .version "plugins/$plugin/.codex-plugin/plugin.json")"
+          test -z "$version" || test "$source_version" = "$version"
+          {
+            echo "product=$product"
+            echo "plugin=$plugin"
+            echo "version=$source_version"
+          } >> "$GITHUB_OUTPUT"
+        id: release
+        env:
+          REQUESTED_PRODUCT: ${{ inputs.release_product || 'core' }}
       - name: Select the moving Rust stable channel
         uses: ./.github/actions/setup-rust-stable
         with:
@@ -108,18 +129,17 @@ jobs:
           cargo test --locked -p groundline-insights-cli --test cli_contract
       - name: Install and run actionlint
         env:
-          ACTIONLINT_VERSION: "1.7.12"
-          ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
         run: |
           mkdir -p .tools
           curl -sSfL "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" -o /tmp/actionlint.tar.gz
           echo "${ACTIONLINT_SHA256}  /tmp/actionlint.tar.gz" | shasum -a 256 -c -
           tar -xzf /tmp/actionlint.tar.gz -C .tools actionlint
           .tools/actionlint
-
   qualification:
     name: full source qualification
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/core-v') || startsWith(github.ref, 'refs/tags/insights-v')
     needs: fast
     runs-on: ubuntu-24.04
     timeout-minutes: 35
@@ -163,6 +183,7 @@ jobs:
           fi
           chmod 0600 "$profile"
           echo "path=$profile" >> "$GITHUB_OUTPUT"
+        if: needs.fast.outputs.product == 'insights'
       - name: Select the moving Rust stable channel
         uses: ./.github/actions/setup-rust-stable
         with:
@@ -174,14 +195,15 @@ jobs:
           sudo apt-get install --yes --no-install-recommends musl-tools=1.2.4-2
           echo "CC_x86_64_unknown_linux_musl=musl-gcc" >> "$GITHUB_ENV"
           echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc" >> "$GITHUB_ENV"
+        if: needs.fast.outputs.product == 'insights'
       - name: Reuse bounded source-check build cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: source-checks
       - name: Deny vulnerable, unlicensed, or untrusted crates
         env:
-          CARGO_DENY_VERSION: "0.20.2"
-          CARGO_DENY_SHA256: "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f"
+          CARGO_DENY_VERSION: 0.20.2
+          CARGO_DENY_SHA256: 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f
         run: |
           archive="cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl"
           curl -sSfL "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/${archive}.tar.gz" -o /tmp/cargo-deny.tar.gz
@@ -211,6 +233,7 @@ jobs:
             --profile "$COMPATIBILITY_PROFILE" \
             --allow-unpinned-dependencies \
             --json
+        if: needs.fast.outputs.product == 'insights'
       - name: Start the selected ClickHouse integration service
         id: clickhouse
         shell: bash
@@ -238,6 +261,7 @@ jobs:
           done
           docker logs "$container"
           exit 1
+        if: needs.fast.outputs.product == 'insights'
       - name: Run the portable Rust suite once
         run: cargo test --workspace --all-features --locked
       - name: Exercise the isolated ClickHouse and Grafana integration lane
@@ -245,11 +269,10 @@ jobs:
           GROUNDLINE_CLICKHOUSE_TEST_URL: http://127.0.0.1:8123
           GROUNDLINE_CLICKHOUSE_TEST_USER: groundline_test
           GROUNDLINE_CLICKHOUSE_TEST_PASSWORD: groundline_test_password
-          GROUNDLINE_CLICKHOUSE_TEST_ALLOW_MUTATION: "true"
-          GROUNDLINE_CLICKHOUSE_TEST_ALLOW_SCHEMA_RESET: "true"
-        run: >-
-          cargo test --locked -p groundline-insights-api --lib clickhouse_
-          -- --ignored --nocapture
+          GROUNDLINE_CLICKHOUSE_TEST_ALLOW_MUTATION: 'true'
+          GROUNDLINE_CLICKHOUSE_TEST_ALLOW_SCHEMA_RESET: 'true'
+        run: cargo test --locked -p groundline-insights-api --lib clickhouse_ -- --ignored --nocapture
+        if: needs.fast.outputs.product == 'insights'
       - name: Deny Rust warnings once
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: Verify canonical packages and public source
@@ -275,6 +298,7 @@ jobs:
             --access-url https://insights.example.invalid \
             --json
           docker compose -f "$compose_path" config --quiet
+        if: needs.fast.outputs.product == 'insights'
       - name: Exercise the rendered ClickHouse, API, and Grafana stack
         shell: bash
         env:
@@ -341,6 +365,7 @@ jobs:
             "http://$bind_ip:13000/d/groundline-insights/groundline-insights")"
           test "$unauthenticated_status" = "302"
           grep --quiet --ignore-case '^location: .*/login' "$unauthenticated_headers"
+        if: needs.fast.outputs.product == 'insights'
       - name: Stop the selected ClickHouse integration service
         if: always() && steps.clickhouse.outputs.container != ''
         env:
@@ -349,9 +374,9 @@ jobs:
       - name: Exercise offline operational commands
         run: |
           mkdir -p /tmp/groundline-empty-codex-home
-          cargo run --locked --bin groundline -- doctor --plugin-root plugins/groundline --codex-home /tmp/groundline-empty-codex-home --json
-          cargo run --locked --bin groundline-insights -- doctor --plugin-root plugins/groundline-insights --codex-home /tmp/groundline-empty-codex-home --json
-
+          cargo run --locked --bin "$RELEASE_PLUGIN" -- doctor --plugin-root "plugins/$RELEASE_PLUGIN" --codex-home /tmp/groundline-empty-codex-home --json
+        env:
+          RELEASE_PLUGIN: ${{ needs.fast.outputs.plugin }}
   native-setup:
     name: setup on ${{ matrix.target }}
     if: github.event_name == 'pull_request' && needs.fast.outputs.native_setup == 'true'
@@ -393,7 +418,7 @@ jobs:
           echo "${cc_key}=musl-gcc" >> "$GITHUB_ENV"
           echo "${linker_key}=musl-gcc" >> "$GITHUB_ENV"
       - name: Verify user ownership, repair, setup, and installer behavior
-        run: cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --lib --test config_repair_cli --test setup_cli --test install_cli --test delivery_cli --test routing_cli --test adaptive_environment_cli --test learning_loop_cli --test learning_work_cli --test conversation_work_cli --test environment_sync_cli --test official_sources_cli -- --show-output
+        run: cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --lib --test config_repair_cli --test improvement_cli --test setup_cli --test install_cli -- --show-output
       - name: Verify native checksum endings for both plugins
         run: |
           cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --test cli_contract provider_smoke
@@ -422,14 +447,12 @@ jobs:
           native_insights="$GITHUB_WORKSPACE/target/$TARGET/debug/groundline-insights"
           GROUNDLINE_NATIVE_CODEX="$native_codex" GROUNDLINE_NATIVE_INSIGHTS_BINARY="$native_insights" \
             cargo test --locked -p groundline-cli --target "$TARGET" --test native_install -- --ignored --nocapture
-
   artifacts:
-    name: package both products for ${{ matrix.target }}
-    if: >-
-      startsWith(github.ref, 'refs/tags/v') ||
-      (github.event_name == 'workflow_dispatch' &&
-       inputs.build_release_artifacts)
-    needs: qualification
+    name: package ${{ needs.fast.outputs.product }} for ${{ matrix.target }}
+    if: startsWith(github.ref, 'refs/tags/core-v') || startsWith(github.ref, 'refs/tags/insights-v') || (github.event_name == 'workflow_dispatch' && inputs.build_release_artifacts)
+    needs:
+      - fast
+      - qualification
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
     strategy:
@@ -469,38 +492,30 @@ jobs:
           echo "${linker_key}=musl-gcc" >> "$GITHUB_ENV"
       - name: Verify setup and installer behavior on each native target
         run: |
-          cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --lib --test setup_cli --test config_repair_cli --test install_cli --test delivery_cli --test routing_cli --test adaptive_environment_cli --test learning_loop_cli --test learning_work_cli --test conversation_work_cli --test environment_sync_cli --test official_sources_cli
-          cargo test --locked -p groundline-insights-cli --target "${{ matrix.target }}" --test cli_contract
+          cargo test --locked -p groundline-cli --target "${{ matrix.target }}" --lib --test improvement_cli --test setup_cli --test config_repair_cli --test install_cli
+          if [ "$RELEASE_PRODUCT" = insights ]; then
+            cargo test --locked -p groundline-insights-cli --target "${{ matrix.target }}" --test cli_contract
+          fi
       - name: Verify collection stop across native processes
         run: cargo test --locked -p groundline-runtime --all-features --target "${{ matrix.target }}" collection_stop_tests
+        if: env.RELEASE_PRODUCT == 'insights'
       - name: Verify scoped native response ownership on each supported target
         run: cargo test --locked -p groundline-runtime --lib --all-features --target "${{ matrix.target }}" learning_response::tests
-      - name: Build both release binaries and the host packager
+        if: env.RELEASE_PRODUCT == 'insights'
+      - name: Build the selected release binary and host packager
         run: |
           cargo build --locked -p xtask
-          cargo build --release --locked --bin groundline --bin groundline-insights --target "${{ matrix.target }}"
+          cargo build --release --locked --bin "$RELEASE_PLUGIN" --target "${{ matrix.target }}"
       - name: Build the Linux Insights API from the same moving stable toolchain
-        if: contains(matrix.target, 'unknown-linux-musl')
+        if: env.RELEASE_PRODUCT == 'insights' && contains(matrix.target, 'unknown-linux-musl')
         run: cargo build --release --locked --bin groundline-insights-api --target "${{ matrix.target }}"
-      - name: Package and smoke both artifacts
+      - name: Package and smoke the selected artifact
         shell: bash
         run: |
-          xtask="target/debug/xtask"
-          for product in core insights; do
-            if [ "$product" = core ]; then
-              executable="groundline"
-            else
-              executable="groundline-insights"
-            fi
-            "$xtask" package-binary \
-              --product "$product" \
-              --target "${{ matrix.target }}" \
-              --binary "target/${{ matrix.target }}/release/${executable}" \
-              --output "dist/${product}/${{ matrix.target }}"
-            "dist/${product}/${{ matrix.target }}/${executable}" platform --json
-          done
+          target/debug/xtask package-binary --product "$RELEASE_PRODUCT" --target "${{ matrix.target }}" --binary "target/${{ matrix.target }}/release/$RELEASE_PLUGIN" --output "dist/$RELEASE_PRODUCT/${{ matrix.target }}"
+          "dist/$RELEASE_PRODUCT/${{ matrix.target }}/$RELEASE_PLUGIN" platform --json
       - name: Stage the integrity-checked Insights API image input
-        if: contains(matrix.target, 'unknown-linux-musl')
+        if: env.RELEASE_PRODUCT == 'insights' && contains(matrix.target, 'unknown-linux-musl')
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
@@ -533,11 +548,15 @@ jobs:
           path: dist
           if-no-files-found: error
           retention-days: 14
-
+    env:
+      RELEASE_PRODUCT: ${{ needs.fast.outputs.product }}
+      RELEASE_PLUGIN: ${{ needs.fast.outputs.plugin }}
   publish-release:
-    name: publish versioned two-product release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: artifacts
+    name: publish one versioned product release
+    if: startsWith(github.ref, 'refs/tags/core-v') || startsWith(github.ref, 'refs/tags/insights-v')
+    needs:
+      - fast
+      - artifacts
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -554,21 +573,19 @@ jobs:
           pattern: groundline-*
           path: packages
           merge-multiple: true
-      - name: Verify and archive both package sets
-        env:
-          RELEASE_VERSION: ${{ github.ref_name }}
+      - name: Verify and archive the selected package set
         run: |
-          chmod 0755 packages/core/{aarch64-apple-darwin,aarch64-unknown-linux-musl,x86_64-unknown-linux-musl}/groundline
-          chmod 0755 packages/insights/{aarch64-apple-darwin,aarch64-unknown-linux-musl,x86_64-unknown-linux-musl}/groundline-insights
-          cargo run --locked -p xtask -- verify-package-set --product core --root packages/core --version "${RELEASE_VERSION#v}" --json
-          cargo run --locked -p xtask -- verify-package-set --product insights --root packages/insights --version "${RELEASE_VERSION#v}" --json
+          cargo run --quiet --locked -p xtask -- release-info --tag "$RELEASE_TAG" > "$RUNNER_TEMP/release-info.json"
+          test "$(jq -r .product "$RUNNER_TEMP/release-info.json")" = "$RELEASE_PRODUCT"
+          test "$(jq -r .version "$RUNNER_TEMP/release-info.json")" = "$RELEASE_VERSION"
+          chmod 0755 "packages/$RELEASE_PRODUCT/"{aarch64-apple-darwin,aarch64-unknown-linux-musl,x86_64-unknown-linux-musl}/"$RELEASE_PLUGIN"
+          cargo run --locked -p xtask -- verify-package-set --product "$RELEASE_PRODUCT" --root "packages/$RELEASE_PRODUCT" --version "$RELEASE_VERSION" --json
           mkdir release-assets
           for target in aarch64-apple-darwin aarch64-unknown-linux-musl x86_64-unknown-linux-musl; do
-            tar -czf "release-assets/groundline-${target}.tar.gz" -C packages/core "$target"
-            tar -czf "release-assets/groundline-insights-${target}.tar.gz" -C packages/insights "$target"
+            tar -czf "release-assets/$RELEASE_PLUGIN-$target.tar.gz" -C "packages/$RELEASE_PRODUCT" "$target"
           done
           cd release-assets
-          sha256sum groundline-*.tar.gz | LC_ALL=C sort > SHA256SUMS
+          sha256sum ./*.tar.gz | LC_ALL=C sort > SHA256SUMS
       - name: Attest every versioned binary release asset
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
@@ -576,21 +593,21 @@ jobs:
       - name: Create the release without replacing published assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             echo "release already exists; published releases are not replaced" >&2
             exit 1
           fi
-          release_name="$(cargo run --quiet --locked -p xtask -- release-name --version "${RELEASE_TAG#v}")"
-          gh release create "$RELEASE_TAG" release-assets/* \
-            --verify-tag \
-            --title "GroundLine ${release_name}" \
-            --notes "Core·Insights와 API를 같은 소스에서 빌드한 릴리스입니다. 일반 HTTPS와 선택형 Tailscale, 등록키 확인 API, 통합 서버 설정을 지원합니다. Codex 플러그인과 CLI로 연결하며, collector 업그레이드 전에 서버 API 호환성을 확인하세요."
-
+          title="$(jq -r .title "$RUNNER_TEMP/release-info.json")"
+          gh release create "$RELEASE_TAG" release-assets/* --verify-tag --title "$title" --notes "독립 $RELEASE_PRODUCT 릴리스입니다. 다른 제품의 발행·설치·수집 상태를 변경하지 않습니다. 소스·패키지 검증과 실제 업무 효과는 구분합니다."
+    env:
+      RELEASE_PRODUCT: ${{ needs.fast.outputs.product }}
+      RELEASE_PLUGIN: ${{ needs.fast.outputs.plugin }}
+      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_VERSION: ${{ needs.fast.outputs.version }}
   publish-image:
     name: publish attested multi-architecture Insights API image
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/insights-v')
     needs: artifacts
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -639,15 +656,13 @@ jobs:
       - name: Normalize the strict release version
         id: release
         shell: bash
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: echo "version=${GITHUB_REF_NAME#insights-v}" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
         with:
           platforms: arm64
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
         with:
           driver: docker-container
-          # GitHub event payloads can contain private contributor email addresses.
-          # Keep build provenance, but never copy the raw event into the builder.
           driver-opts: provenance-add-gha=false
       - name: Launch both downloaded API artifacts before publishing
         shell: bash
@@ -693,7 +708,7 @@ jobs:
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         id: build
         env:
-          DOCKER_BUILD_RECORD_UPLOAD: "false"
+          DOCKER_BUILD_RECORD_UPLOAD: 'false'
         with:
           context: .
           file: services/insights-api/Dockerfile
@@ -712,11 +727,11 @@ jobs:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
-
   promote-stable:
-    name: promote both plugins to stable
-    if: startsWith(github.ref, 'refs/tags/v')
+    name: promote the selected product channel
+    if: always() && (startsWith(github.ref, 'refs/tags/core-v') || startsWith(github.ref, 'refs/tags/insights-v')) && needs.artifacts.result == 'success' && needs.publish-release.result == 'success' && (startsWith(github.ref, 'refs/tags/core-v') || needs.publish-image.result == 'success')
     needs:
+      - fast
       - artifacts
       - publish-release
       - publish-image
@@ -730,36 +745,27 @@ jobs:
           fetch-depth: 0
       - name: Select the moving Rust stable channel
         uses: ./.github/actions/setup-rust-stable
-      - name: Assemble both exact three-target packages
+      - name: Download the selected exact three-target packages
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: groundline-*
-          path: distribution
+          path: ${{ runner.temp }}/groundline-channel-packages
           merge-multiple: true
-      - name: Verify and atomically advance stable
+      - name: Verify and atomically advance the selected channel
         env:
           RELEASE_TAG: ${{ github.ref_name }}
           SOURCE_SHA: ${{ github.sha }}
         run: |
-          mkdir -p plugins/groundline/bin plugins/groundline-insights/bin
-          mv distribution/core/* plugins/groundline/bin/
-          mv distribution/insights/* plugins/groundline-insights/bin/
-          chmod 0755 plugins/groundline/bin/{aarch64-apple-darwin,aarch64-unknown-linux-musl,x86_64-unknown-linux-musl}/groundline
-          chmod 0755 plugins/groundline-insights/bin/{aarch64-apple-darwin,aarch64-unknown-linux-musl,x86_64-unknown-linux-musl}/groundline-insights
-          rm -rf distribution
-          cargo run --locked -p xtask -- verify-source --root . --json
-          cargo run --locked -p xtask -- verify-package-set --product core --root plugins/groundline/bin --version "${RELEASE_TAG#v}" --json
-          cargo run --locked -p xtask -- verify-package-set --product insights --root plugins/groundline-insights/bin --version "${RELEASE_TAG#v}" --json
-          plugins/groundline/bin/x86_64-unknown-linux-musl/groundline provider-smoke --plugin-root plugins/groundline --require-installed --json
-          plugins/groundline-insights/bin/x86_64-unknown-linux-musl/groundline-insights provider-smoke --plugin-root plugins/groundline-insights --require-installed --json
+          packages="$RUNNER_TEMP/groundline-channel-packages/$RELEASE_PRODUCT"
+          chmod 0755 "$packages/"{aarch64-apple-darwin,aarch64-unknown-linux-musl,x86_64-unknown-linux-musl}/"$RELEASE_PLUGIN"
+          cargo run --locked -p xtask -- stage-distribution --root . --packages "$packages" --release-tag "$RELEASE_TAG"
+          "plugins/$RELEASE_PLUGIN/bin/x86_64-unknown-linux-musl/$RELEASE_PLUGIN" provider-smoke --plugin-root "plugins/$RELEASE_PLUGIN" --require-installed --json
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f plugins/groundline/bin plugins/groundline-insights/bin
-          git commit -m "release: assemble ${RELEASE_TAG} binaries"
+          git add -f "plugins/$RELEASE_PLUGIN/bin" .agents/plugins/marketplace.json distribution.json
+          git commit -m "release: assemble ${RELEASE_TAG} distribution"
           candidate_sha="$(git rev-parse HEAD)"
-          cargo run --locked -p xtask -- promote-stable \
-            --release-tag "$RELEASE_TAG" \
-            --source-sha "$SOURCE_SHA" \
-            --candidate-sha "$candidate_sha" \
-            --confirm \
-            --json
+          cargo run --locked -p xtask -- promote-stable --release-tag "$RELEASE_TAG" --source-sha "$SOURCE_SHA" --candidate-sha "$candidate_sha" --confirm --json
+    env:
+      RELEASE_PRODUCT: ${{ needs.fast.outputs.product }}
+      RELEASE_PLUGIN: ${{ needs.fast.outputs.plugin }}

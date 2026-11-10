@@ -131,7 +131,35 @@ fn installer_rejects_intel_before_native_calls_and_dispatches_supported_hardware
             include_bytes!("../../install.sh"),
         )
         .unwrap();
+        fs::create_dir_all(distribution.join(".agents/plugins")).unwrap();
+        fs::write(distribution.join(".agents/plugins/marketplace.json"),br#"{"name":"groundline-core","plugins":[{"name":"groundline","source":{"source":"local","path":"./plugins/groundline"}}]}"#).unwrap();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .arg("-c")
+                .arg("core.fsmonitor=false")
+                .arg("-c")
+                .arg("user.name=Fixture")
+                .arg("-c")
+                .arg("user.email=fixture@example.invalid")
+                .arg("-c")
+                .arg("commit.gpgsign=false")
+                .arg("-C")
+                .arg(&distribution)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{output:?}");
+            String::from_utf8(output.stdout).unwrap().trim().to_owned()
+        };
+        git(&["init"]);
+        git(&["add", "."]);
+        git(&["commit", "-m", "source fixture"]);
+        let source = git(&["rev-parse", "HEAD"]);
         fake_products(&distribution.join("plugins/groundline"), "groundline");
+        fs::write(distribution.join("distribution.json"),serde_json::json!({"kind":"groundline-plugin-distribution","schema":1,"product":"core","plugin":"groundline",
+            "marketplace":"groundline-core","channel":"core-stable","version":env!("CARGO_PKG_VERSION"),"release_tag":format!("core-v{}",env!("CARGO_PKG_VERSION")),"source_sha":source}).to_string()).unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-m", "distribution fixture"]);
         let codex = root.join("fake-codex");
         executable(&codex, b"#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$DISPATCH_NATIVE_LOG\"\ncase \"$*\" in\n  *' --help') exit 0;;\n  'plugin marketplace list --json') printf '%s\\n' '{\"marketplaces\":[]}' ;;\n  'plugin list --json') printf '%s\\n' '{\"installed\":[]}' ;;\n  *) exit 91;;\nesac\n");
         let home = root.join("codex-home");
@@ -160,11 +188,11 @@ fn installer_rejects_intel_before_native_calls_and_dispatches_supported_hardware
         assert_eq!(result["status"], "FAIL");
         if let Some(target) = target {
             assert_eq!(result["stages"]["preflight"]["status"], "PASS");
-            assert_eq!(result["stages"]["distribution_groundline"]["exit_code"], 17);
+            assert_eq!(result["stages"]["distribution_package"]["exit_code"], 17);
             assert!(observed(&binary_log).starts_with(&format!("{target}|provider-smoke ")));
-            assert_eq!(observed(&native_log).lines().count(), 6);
+            assert_eq!(observed(&native_log), "plugin marketplace upgrade --help\n");
         } else {
-            assert_eq!(result["stages"]["preflight"]["status"], "FAIL");
+            assert_eq!(result["stages"]["platform"]["status"], "FAIL");
             assert!(observed(&native_log).is_empty());
             assert!(observed(&binary_log).is_empty());
             assert!(result["stages"].get("native_source").is_none());

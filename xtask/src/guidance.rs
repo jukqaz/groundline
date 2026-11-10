@@ -8,7 +8,7 @@ use std::path::Path;
 use super::XtaskError;
 use super::package::regular_bytes;
 
-const IMPLICIT_SKILLS: &[&str] = &["align-agent-home", "optimize-codex-workflow"];
+const IMPLICIT_SKILLS: &[&str] = &["optimize-codex-workflow"];
 
 #[derive(Deserialize)]
 struct SkillIndex {
@@ -121,25 +121,25 @@ mod tests {
 
     fn fixture() -> (TempDir, BTreeSet<String>) {
         let root = tempdir().unwrap();
-        let skill = root.path().join("skills/align-agent-home");
+        let skill = root.path().join("skills/optimize-codex-workflow");
         fs::create_dir_all(skill.join("agents")).unwrap();
         fs::create_dir(root.path().join("references")).unwrap();
         fs::write(
             root.path().join("references/skill-index.json"),
-            r#"{"kind":"groundline-skill-index","schema":1,"skills":["align-agent-home"]}"#,
+            r#"{"kind":"groundline-skill-index","schema":1,"skills":["optimize-codex-workflow"]}"#,
         )
         .unwrap();
-        fs::write(skill.join("SKILL.md"), "---\nname: align-agent-home\ndescription: |\n  Verify live evidence.\n---\n# Live\n[Contract](../../references/live.md)\n").unwrap();
+        fs::write(skill.join("SKILL.md"), "---\nname: optimize-codex-workflow\ndescription: |\n  Verify live evidence.\n---\n# Live\n[Contract](../../references/live.md)\n").unwrap();
         fs::write(root.path().join("references/live.md"), "# Live proof\n").unwrap();
-        fs::write(skill.join("agents/openai.yaml"), "interface:\n  display_name: Live\n  short_description: Verify the requested live outcome\n  default_prompt: Use $align-agent-home to check evidence.\npolicy:\n  allow_implicit_invocation: true\n").unwrap();
-        (root, BTreeSet::from(["align-agent-home".to_owned()]))
+        fs::write(skill.join("agents/openai.yaml"), "interface:\n  display_name: Live\n  short_description: Verify the requested live outcome\n  default_prompt: Use $optimize-codex-workflow to check evidence.\npolicy:\n  allow_implicit_invocation: true\n").unwrap();
+        (root, BTreeSet::from(["optimize-codex-workflow".to_owned()]))
     }
 
     #[test]
     fn valid_metadata_supports_block_yaml_and_crlf() {
         let (root, names) = fixture();
         assert!(verify(root.path(), &names).is_ok());
-        let path = root.path().join("skills/align-agent-home/SKILL.md");
+        let path = root.path().join("skills/optimize-codex-workflow/SKILL.md");
         fs::write(
             &path,
             fs::read_to_string(&path).unwrap().replace('\n', "\r\n"),
@@ -152,7 +152,12 @@ mod tests {
     fn missing_entry_or_interface_fails_even_when_directory_exists() {
         for relative in ["SKILL.md", "agents/openai.yaml"] {
             let (root, names) = fixture();
-            fs::remove_file(root.path().join("skills/align-agent-home").join(relative)).unwrap();
+            fs::remove_file(
+                root.path()
+                    .join("skills/optimize-codex-workflow")
+                    .join(relative),
+            )
+            .unwrap();
             assert!(verify(root.path(), &names).is_err(), "{relative}");
         }
     }
@@ -162,12 +167,12 @@ mod tests {
         for header in [
             "name: [",
             "name: other\ndescription: Live",
-            "name: align-agent-home\ndescription: ''",
-            "name: align-agent-home\nname: other\ndescription: Live",
+            "name: optimize-codex-workflow\ndescription: ''",
+            "name: optimize-codex-workflow\nname: other\ndescription: Live",
         ] {
             let (root, names) = fixture();
             fs::write(
-                root.path().join("skills/align-agent-home/SKILL.md"),
+                root.path().join("skills/optimize-codex-workflow/SKILL.md"),
                 format!("---\n{header}\n---\n# Live\n"),
             )
             .unwrap();
@@ -180,7 +185,7 @@ mod tests {
         for skills in [
             vec![],
             vec!["other"],
-            vec!["align-agent-home", "align-agent-home"],
+            vec!["optimize-codex-workflow", "optimize-codex-workflow"],
         ] {
             let (root, names) = fixture();
             fs::write(root.path().join("references/skill-index.json"), serde_json::to_vec(&serde_json::json!({"kind":"groundline-skill-index","schema":1,"skills":skills})).unwrap()).unwrap();
@@ -191,8 +196,8 @@ mod tests {
     #[test]
     fn wrong_invocation_and_implicit_policy_are_rejected() {
         for (from, to) in [
-            ("$align-agent-home", "$other"),
-            ("$align-agent-home", "$align-agent-home-extra"),
+            ("$optimize-codex-workflow", "$other"),
+            ("$optimize-codex-workflow", "$optimize-codex-workflow-extra"),
             (
                 "allow_implicit_invocation: true",
                 "allow_implicit_invocation: false",
@@ -201,7 +206,7 @@ mod tests {
             let (root, names) = fixture();
             let path = root
                 .path()
-                .join("skills/align-agent-home/agents/openai.yaml");
+                .join("skills/optimize-codex-workflow/agents/openai.yaml");
             fs::write(&path, fs::read_to_string(&path).unwrap().replace(from, to)).unwrap();
             assert!(verify(root.path(), &names).is_err());
         }
@@ -216,7 +221,7 @@ mod tests {
             "C:\\private",
         ] {
             let (root, names) = fixture();
-            let path = root.path().join("skills/align-agent-home/SKILL.md");
+            let path = root.path().join("skills/optimize-codex-workflow/SKILL.md");
             fs::write(
                 &path,
                 fs::read_to_string(&path)
@@ -262,7 +267,7 @@ mod tests {
         ] {
             let (root, _) = fixture();
             let canonical = root.path().canonicalize().unwrap();
-            let file = canonical.join("skills/align-agent-home/SKILL.md");
+            let file = canonical.join("skills/optimize-codex-workflow/SKILL.md");
             assert!(local_links(&canonical, &file, body).is_err());
         }
     }
@@ -271,7 +276,7 @@ mod tests {
     fn markdown_links_support_unicode_spaces_escapes_and_encoded_fragments() {
         let (root, _) = fixture();
         let canonical = root.path().canonicalize().unwrap();
-        let file = canonical.join("skills/align-agent-home/SKILL.md");
+        let file = canonical.join("skills/optimize-codex-workflow/SKILL.md");
         fs::write(canonical.join("references/연동 안내 (새)#1.md"), "ok").unwrap();
         for body in [
             "[Read](<../../references/연동 안내 (새)%231.md>)",
@@ -286,7 +291,7 @@ mod tests {
     fn code_examples_are_not_treated_as_document_links() {
         let (root, _) = fixture();
         let canonical = root.path().canonicalize().unwrap();
-        let file = canonical.join("skills/align-agent-home/SKILL.md");
+        let file = canonical.join("skills/optimize-codex-workflow/SKILL.md");
         assert!(
             local_links(
                 &canonical,
@@ -301,7 +306,7 @@ mod tests {
     fn encoded_local_targets_cannot_escape_or_change_to_other_schemes() {
         let (root, _) = fixture();
         let canonical = root.path().canonicalize().unwrap();
-        let file = canonical.join("skills/align-agent-home/SKILL.md");
+        let file = canonical.join("skills/optimize-codex-workflow/SKILL.md");
         for target in [
             "%2Fprivate",
             "C%3A%5Cprivate",

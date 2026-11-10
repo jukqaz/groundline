@@ -54,26 +54,18 @@ Use the shared Unix file helpers for bounded regular-file reads, owner/private
 mode checks, exclusive creation, fsync, and rename. Do not weaken permissions or
 replace a bounded failure with unlimited retries.
 
-## Conversation observation readouts
+## Compact improvement records
 
-`learning status` separates recorded content-review inputs from comparable
-outcomes. `conversation_work.recorded_opportunities` counts deduplicated
-observation inputs with a present, absent, or unknown opportunity before the
-comparison gate. These are recorded declarations, not authenticated semantic
-findings or unique conversations. `opportunity_count_scope` labels the existing
-`opportunity_count` as comparable assessed observations. A zero there does not
-erase recorded contextual triggers. Neither count relaxes activation, criterion,
-context, timing, recurrence, or effect checks; old saved reports are unchanged.
+The owning [conversation procedure](../plugins/groundline/references/conversation-improvement.md)
+defines capture, native edit/verification, record and independent follow-up.
+Reuse the bounded owner-private and no-clobber file helpers. The CLI never edits
+its guidance target or user settings. Exclude raw conversations and secrets.
 
-Conversation status schema 2 separates completion of a recorded review cycle
-(`assessment_complete`) from comparison coverage (`comparison_complete`). An
-inconclusive follow-up ends this review pass and waits for new evidence; causal
-effect flags remain explicit scope limits. Current comparison writes use input
-schema 2 with typed, canonical conditions, kept separate from work provenance.
-Null conditions cannot establish a match. The owning
-[conversation reference](../plugins/groundline/references/conversation-improvement.md)
-defines the fields and normal no-change exit. Existing immutable schema-1
-records are readable history, never upgraded into observed comparison evidence.
+Content assessment requires known exposure, a real opportunity and known
+behavior. It does not require a complete model/tier/tool comparison. All causal
+and efficiency claims remain unverified. Preserve historical conversation
+validation and comparison semantics without rewriting old records. Unsupported
+managed records/layouts fail explicitly; a reset requires separate authority.
 
 ## Audit classification
 

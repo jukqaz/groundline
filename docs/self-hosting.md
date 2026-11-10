@@ -49,7 +49,7 @@ git switch --detach "$RELEASE_TAG"
 
 Replace the tag, image digest, and access URL placeholders before running.
 `RELEASE_TAG` uses the canonical numeric release version, for example
-`v2026.929.1` (display name `2026.09.29-a`). Obtain the
+`insights-v2026.1110.1` (display name `2026.11.10-a`). Obtain the
 matching binary checksums from GitHub Releases and inspect
 `ghcr.io/jukqaz/groundline-insights-api:$RELEASE_TAG` in GHCR. Copy the published
 multi-platform index digest into an immutable image reference such as

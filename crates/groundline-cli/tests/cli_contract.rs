@@ -55,6 +55,15 @@ fn retired_commands_are_rejected_before_reading_or_writing_state() {
     let sentinel = home.path().join("private-state.json");
     fs::write(&sentinel, b"private-state-must-survive").unwrap();
     for arguments in [
+        vec!["environment", "register"],
+        vec!["sources", "compare"],
+        vec!["efficiency", "route"],
+        vec!["efficiency", "compare"],
+        vec!["efficiency", "record-delivery"],
+        vec!["learning", "configure"],
+        vec!["learning", "enable"],
+        vec!["learning", "task-start"],
+        vec!["learning", "capture-conversation-target"],
         vec!["efficiency", "simulate"],
         vec!["efficiency", "fuse"],
         vec!["efficiency", "batch"],
@@ -80,61 +89,6 @@ fn retired_commands_are_rejected_before_reading_or_writing_state() {
         assert_eq!(fs::read(&sentinel).unwrap(), b"private-state-must-survive");
         assert_eq!(fs::read_dir(home.path()).unwrap().count(), 1);
     }
-}
-
-#[test]
-fn observed_comparison_runs_without_projecting_savings_or_mutating_input() {
-    let snapshot = json!({
-        "cohort": {
-            "schema_version":3, "groundline_version":"0.28.0", "os_family":"macos",
-            "runtime_family":"codex_app", "execution_mode":"desktop",
-            "model_family":"gpt-6-sol", "effort":"high"
-        },
-        "sample": {
-            "root_count":30, "installation_count":1, "sample_sufficient":true,
-            "unreadable_root_count":0, "fallback_rollout_count":0
-        },
-        "metrics": {
-            "tokens_per_completed_root":1000, "compactions_per_root":2.0,
-            "compactions_per_completed_turn":0.5, "long_turn_ratio":0.2,
-            "repeated_call_ratio":0.1, "failed_call_ratio":0.04,
-            "verification_success_ratio":0.8, "verification_outcome_coverage":1.0,
-            "broad_scope_ratio":0.3, "wall_turn_p90_ms":120000
-        }
-    });
-    let mut candidate = snapshot.clone();
-    candidate["cohort"]["groundline_version"] = json!(env!("CARGO_PKG_VERSION"));
-    candidate["metrics"]["tokens_per_completed_root"] = json!(800);
-    let packet = json!({
-        "kind":"groundline-comparison-input", "schema":1,
-        "mode":"personal_longitudinal", "changed_dimension":"groundline_version",
-        "same_installation_confirmed":true, "baseline":snapshot, "candidate":candidate,
-        "privacy": {"aggregate_only":true, "installation_ids_included":false,
-            "raw_content_included":false, "private_paths_included":false}
-    });
-    let home = tempdir().unwrap();
-    let input = home.path().join("observed-comparison.json");
-    let bytes = serde_json::to_vec(&packet).unwrap();
-    fs::write(&input, &bytes).unwrap();
-    let output = run(&[
-        "efficiency",
-        "compare",
-        "--input",
-        path_argument(&input),
-        "--json",
-    ]);
-    assert!(output.status.success(), "{output:?}");
-    let report = parse_stdout(&output);
-    assert_eq!(report["status"], "READY");
-    assert_eq!(
-        report["metric_deltas"]["tokens_per_completed_root"]["absolute_delta"],
-        -200.0
-    );
-    assert_eq!(report["statistical_confidence"], "not_estimated");
-    assert_eq!(report["causal_effect_estimated"], false);
-    assert_eq!(report["mutation_performed"], false);
-    assert_eq!(fs::read(&input).unwrap(), bytes);
-    assert_eq!(fs::read_dir(home.path()).unwrap().count(), 1);
 }
 
 #[test]
@@ -490,8 +444,8 @@ fn invalid_input_fails_without_emitting_paths_or_content() {
 
     let output = run(&[
         "efficiency",
-        "compare",
-        "--input",
+        "recommend",
+        "--audit",
         path_argument(&input),
         "--json",
     ]);

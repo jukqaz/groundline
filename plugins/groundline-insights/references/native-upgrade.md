@@ -1,9 +1,9 @@
 # Native GroundLine Insights Upgrade
 
-Core and Insights share Codex's Git marketplace but install independently.
-Refreshing it can update both installed products, including Insights during a
-Core-only setup. Source tags contain no binaries; use a reviewed, complete
-binary-bearing `stable` distribution.
+Insights uses marketplace `groundline` and channel `stable`. Core uses the
+independent `groundline-core` marketplace and `core-stable` channel. A Core
+upgrade leaves this collector and its API untouched. Source tags contain no
+binaries; use a reviewed, complete binary-bearing Insights distribution.
 
 ## Before mutation
 
@@ -21,7 +21,7 @@ collector requires Basic schema 5 and ingest contract revision 10 or newer.
 
 Use that reviewed distribution's `install.sh`. Before native writes it checks
 the candidate artifacts and runs the candidate's read-only `worker check-server`
-when Insights is installed or has local state. Missing profiles make no request;
+for the selected Insights update. Missing profiles make no request;
 malformed profiles, transport failures, and incompatible APIs block the update.
 The installer preserves identity, consent, pending windows, disabled flags, and
 the registered official HTTPS/SSH transport; it pins the exact reviewed commit.
@@ -49,7 +49,7 @@ and accepted upload. Missing lanes remain `UNVERIFIED`; restart the App only if
 fresh-task/hook evidence stays stale after refresh.
 
 Caught source-transition failures attempt recovery to the previous actual SHA,
-verify old artifact bytes and installed flags, and report `previous_commit_pinned`.
+verify old artifact bytes and installed flags, and report `previous_product_registration_restored`.
 The old symbolic ref is unavailable in native JSON. Unsupported sources fail
 before writes; interrupted transitions or failed rollback need review, not reset.
 Upgrades never convert unsupported local state or skip incomplete windows.

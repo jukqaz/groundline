@@ -1,114 +1,17 @@
-# GroundLine
+# GroundLine Core
 
-GroundLine connects contextual conversation feedback to scoped guidance and skill
-changes, activation, and natural follow-up. Local activity and observed delivery
-outcomes support requested workflow improvements and model, effort, and subagent choices. Codex owns
-execution, settings, permissions, agents, worktrees, review, and upgrades.
-Historical records remain intact.
+One skill, `$groundline:optimize-codex-workflow`, helps correct evidenced repeated
+friction. Use native Codex to read context, edit the owning AGENTS/skill and
+verify the actual change. Follow [conversation improvement](references/conversation-improvement.md)
+for compact private capture, record and natural observation. Ordinary work and
+no-change reviews require no audit, receipt, model comparison or learning profile.
 
-Conversation improvement follows **review → capture → change → activation →
-natural follow-up** in Core's existing private learning state. It needs no
-fabricated delivery or enabled background profile. Start with
-[conversation improvement](references/conversation-improvement.md).
-The separate **audit → delivery → route** path compares matched direct outcomes.
-A proposal, installed package, or passing synthetic test does not prove better
-behavior or savings. See the [optimization loop](references/codex-optimization-loop.md).
+Core is offline, with no hooks, collector or background process. Insights is
+independent. Existing conversation records remain read-only history; unsupported
+managed formats fail without migration or deletion. `learning status --state
+PRIVATE_RECORDS` reads history; `improve status` also summarizes compact changes.
 
-## Skills
-
-| Skill | Scope |
-| --- | --- |
-| `align-agent-home` | Requested installation, configuration, and guidance alignment |
-| `audit-agent-history` | Explicit history inspection and redacted usage evidence |
-| `optimize-codex-workflow` | Conversation-pattern and workflow improvement, model/effort selection, and quality/resource comparison |
-
-Alignment and optimization are implicitly invocable; history inspection requires
-an explicit request. Planning, Goals, handoffs, and reviewed edits stay native.
-
-Shared guidance covers execution principles. Project behavior, technology,
-compatibility, acceptance and release choices stay in that project's guidance.
-Skills load only the references needed for their selected route. Empirical CLI
-comparisons retain their documented model and evidence contracts; those limits
-do not prescribe choices for other native Codex work.
-
-## Install and upgrade
-
-Use `install.sh` from the reviewed binary-bearing `stable` distribution for
-installation and application. Native package-only installation is also available:
-
-```console
-codex plugin marketplace add https://github.com/jukqaz/groundline.git --ref stable --json
-codex plugin add groundline@groundline --json
-```
-
-Core does not add or activate Insights. Package delivery alone does not repair
-personal settings. For requested application, use `$groundline:align-agent-home`
-and [installation alignment](references/installation-alignment.md). Setup preserves
-existing choices and native defaults; explicit settings, backups, previews, and
-context restoration follow [configuration review](references/codex-configuration.md).
-
-Follow [native upgrade](references/native-upgrade.md) for candidate API checks,
-commit pinning, and recovery. Then verify the installed package separately from
-live behavior:
-
-```console
-groundline provider-smoke --plugin-root /path/to/installed/groundline --require-installed --json
-groundline doctor --plugin-root /path/to/installed/groundline --json
-```
-
-Packages support Apple Silicon macOS (ARM64) and Linux on ARM64 and x86_64. Resolve the installed executable
-from `bin/<target>` using [platform commands](references/platform-commands.md);
-installation does not promise a shell `PATH` entry. Source tags contain no binaries.
-
-## Usage evidence and delivery comparison
-
-Run these examples in an owner-private directory outside the public repository:
-
-```console
-groundline audit weekly --days 7 --review --json > weekly.json
-groundline audit review --input weekly.json --json
-groundline efficiency record-delivery --input manifest.json --output receipts/delivery.json --json
-groundline efficiency delivery-summary --deliveries receipts --json
-groundline efficiency route --input routing.json --catalog native-models.json --audit weekly.json --deliveries receipts --json
-```
-
-[Weekly audit](references/weekly-usage-audit.md) covers the selected task-window
-sample, with full-population coverage unknown. Saved review scans no history and
-recomputes one recommendation. `groundline audit store --json` is a separate
-whole-store diagnostic.
-
-The [delivery contract](references/delivery-evidence.md) records effective
-selections, quality, rework, resources, failures, and unknowns. For
-[routing](references/evidence-routing.md), use a dedicated receipt directory and
-an empty packet `outcomes` array. Aggregate reports are optional context; routing
-changes no settings and does not establish automatically learned improvement.
-Existing `personal status`/`rollback` are [recovery only](references/personal-recovery.md).
-
-For requested ongoing adaptation, [the learning loop](references/learning-loop.md)
-connects capture and prepared outcome links to candidate readouts, official text
-snapshot comparison, and portable private guidance bundles. Native Codex remains
-the executor; explicit decisions and observed effectiveness stay separate.
-An enabled private learning profile connects a criterion declared before work
-to `learning assess` and the actual native end. The consumer records owned
-response costs; readiness shows pending work and missing evidence. Automatic
-connection does not establish improved quality or authorize candidate adoption.
-
-## Privacy boundary
-
-Core has no hooks, background process, scheduler, collector identity, or network
-client. Audit is bounded and read-only; delivery receipts are private local files.
-Audit output and delivery receipts exclude raw session text, paths and
-configuration values. Explicit private environment bundles contain owner-selected
-managed guidance text and common baseline metadata; review that text before
-transport and keep the bundle out of public repositories.
-Provider smoke rejects owner hook manifests. Optional Insights has separate
-installation and consent. See [Security](SECURITY.md) and
-[Privacy](https://github.com/jukqaz/groundline/blob/main/docs/privacy.md).
-
-## Development
-
-Use [CONTRIBUTING](https://github.com/jukqaz/groundline/blob/main/CONTRIBUTING.md)
-for validation commands and CI lanes. See also
-[architecture](https://github.com/jukqaz/groundline/blob/main/docs/architecture.md),
-[integration profiles](https://github.com/jukqaz/groundline/blob/main/docs/integrations.md),
-and the [release checklist](https://github.com/jukqaz/groundline/blob/main/docs/release-checklist.md).
+[Optional audit](references/weekly-usage-audit.md) ·
+[Manual installation diagnosis](references/installation-alignment.md) ·
+[Command resolution](references/platform-commands.md) ·
+[한국어](README.ko.md)

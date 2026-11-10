@@ -25,15 +25,20 @@ cargo run --quiet --locked -p xtask -- release-name --version 2026.929.1
 
 `--version`, 두 플러그인의 `plugin.json`, 바이너리 artifact manifest,
 Insights 전송 버전, 설치 캐시 경로는 모두 숫자 정본을 사용합니다.
-Git 태그는 `v2026.929.1`, GitHub 릴리스 제목은 공용 변환 결과를 사용한
-`GroundLine 2026.09.29-a`입니다. 표시 이름을 API나 설치 버전으로 보내지 않습니다.
+Git 태그는 제품별 `core-v2026.1110.1` 또는 `insights-v2026.1110.1`입니다.
+릴리스 제목은 공용 변환 결과를 사용한 `GroundLine Core 2026.11.10-a`처럼
+제품을 표시합니다. 기존 `v...` 태그는 과거 기록이며 새 발행 입력이 아닙니다.
+표시 이름을 API나 설치 버전으로 보내지 않습니다.
 
 릴리스 준비 시 workspace·내부 dependency·lockfile·두 플러그인 manifest를
 같은 숫자 버전으로 맞춥니다. `verify-source`와 `verify-package-set`이 버전
-일치 및 새 날짜 형식을 검증합니다. 같은 날에는 순번을 늘리고 날짜가 바뀌면
+일치 및 새 날짜 형식을 검증합니다. 이 공유 버전은 소스 빌드의 정본이며,
+태그로 선택한 제품만 게시합니다. Core 태그는 API 이미지·Insights asset·Insights
+채널을 변경하지 않습니다. 같은 날에는 순번을 늘리고 날짜가 바뀌면
 1부터 시작합니다. 이미 게시한 태그·asset은 교체하지 않습니다.
 
-stable 승격은 현재 버전보다 큰 후보만 허용하며 날짜 또는 당일 순번의
+Core의 `core-stable`과 Insights의 `stable`은 별도 채널입니다. 각 채널 승격은
+해당 제품의 현재 버전보다 큰 후보만 허용하며 날짜 또는 당일 순번의
 역행과 같은 버전의 다른 commit을 거절합니다. 이미 승격한 같은 commit만
 변경 없는 재확인이 가능합니다. SemVer 정렬이 일·월·년 경계에서도 이 순서를
 유지합니다.

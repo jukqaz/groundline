@@ -12,9 +12,9 @@ GroundLine은 Apple Silicon macOS(ARM64)와 Linux(ARM64·x86-64)에서 독립적
 | Insights만 | `groundline-insights` | 사용자 소유 Insights 서비스 | Core skill이 필요 없는 collector·운영 노드 |
 | Core + Insights | 플러그인 둘 다 | 사용자 소유 Insights 서비스 | 로컬 GroundLine 작업과 비공개 집계 분석을 함께 사용 |
 
-하나를 설치해도 다른 플러그인이 자동 설치되거나 활성화되지 않습니다. 다만 공유
-marketplace 업데이트는 **이미 설치된 두 플러그인을 함께 갱신**할 수 있습니다.
-설치기는 기존 활성·비활성 상태를 보존하고 Insights API 호환성을 먼저 확인합니다.
+한 제품을 설치·갱신해도 다른 제품은 유지합니다. Core는 `groundline-core`·`core-stable`,
+Insights는 `groundline`·`stable`을 사용합니다. 설치기는 기존 활성·비활성 상태를
+보존하며 Insights API 호환성 검사는 Insights 갱신에만 적용합니다.
 
 ## 현재 Insights 연동
 

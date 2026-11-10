@@ -1,62 +1,41 @@
-# GroundLine 아키텍처
+# GroundLine architecture
 
-GroundLine은 실제 대화의 정정·지침 및 스킬 변경·후속 관측을 연결해
-Codex의 작업 방식을 개선합니다. 프로젝트마다 다른 조건은 해당 프로젝트에
-남기며, 사용량과 직접 작업 결과·공식 지침은 개선 판단의 별도 근거입니다.
-실행·모델 적용·권한·에이전트·작업 관리는 Codex가 담당합니다.
-
-아래는 현재 구현 경계입니다. 개인 기준·기기 예외·실제 적용과 후속 결과를 연결하는
-[로컬 구현](adaptive-environment-implementation.md)과 [다음 배포의 최종 범위](release-design.md)를 구분합니다.
+Core owns one narrow workflow: contextual review, a real scoped guidance change,
+and later natural observation. Native Codex owns semantic judgment and editing.
+AGENTS and skills carry the result into work. Optional Insights owns consented
+operational collection and server analytics independently.
 
 ```mermaid
 flowchart LR
-  Native[Codex 기록] --> Window[기간 내 표본]
-  Native --> Sequence[대화 문맥 검토]
-  Sequence --> Scoped[프로젝트·공통 적용 범위]
-  Scoped --> Changed[실제 지침·스킬 변경]
-  Changed --> Activated[실제 읽기·호출 관측]
-  Activated --> Natural[자연 후속 기회·재발]
-  Natural --> Sequence
-  Native --> Store[별도 전체 저장소 진단]
-  Window --> Review[현재 정책으로 재해석]
-  Evidence[실행 및 검증 근거] --> Receipt[비공개 작업 결과]
-  Receipt --> Compare[동일 작업군 비교]
-  Catalog[현재 native 카탈로그] --> Compare
-  Insights[선택적 Insights 집계] -. 설명용 맥락 .-> Compare
-  Compare --> Decision[근거와 불확실성]
-  Decision --> Codex[다음 작업 판단]
-  Receipt --> Context[작업 당시 revision·정정 sidecar]
-  Context --> Candidate[범위가 정해진 개선 후보]
-  Baseline[공통 기준·기기 예외] --> Plan[비공개 계획·적용·복구]
-  Candidate --> Plan
-  Plan --> Followup[후속 직접 결과]
-  Followup --> Context
+  Feedback[Relevant conversation feedback] --> Review[Context and counterexample]
+  Review --> Decision[No change or small scoped change]
+  Decision --> Native[Native guidance edit and verification]
+  Native --> Record[Actual before and after digests]
+  Record --> Followup[Natural work: met, violated or unassessed]
 ```
 
-| 경계 | 소유 책임 | 제외 |
-| --- | --- | --- |
-| `groundline-contracts` | 구조·수치·소유권 검증, 관측 해석, 결과 비교 | 파일·네트워크·설정 변경 |
-| `groundline-runtime` | 제한된 native 읽기, 저장소 진단, Insights 연결·수집 | root 모델 자동 변경, 개인 작업 분류 추정 |
-| `groundline-cli` | 명령 입출력, 비공개 결과·환경·학습 상태, 등록 지침 적용·복구와 App/PATH metadata 관측 | background 수집, 별도 실험 정책 |
-| Insights CLI/API | 동의된 전송, 서버 집계, 운영 상태 | 대화 원문 업로드, 집계만으로 품질 판정 |
-| `xtask` | 소스·패키지·설치 검증, 명시적 배포 | 사용자 작업마다 강제하는 절차 |
+| Boundary | Responsibility |
+| --- | --- |
+| groundline-contracts::improvement | Strict compact records, independent follow-up and qualitative readouts |
+| Core CLI | Bounded private I/O, actual target binding, no-clobber publication and manual diagnostics |
+| Historical conversation contract | Read and validate immutable conversation records without requalifying old comparisons |
+| Native Codex | Interpret feedback, choose scope, edit and verify owning files, observe actual later work |
+| Insights | Separately consented collection, HTTPS delivery, ClickHouse and Grafana |
+| xtask | Source/package/native validation and explicit publication |
 
-## 유지할 계약
+There is no Core model router, environment baseline writer, device synchronizer
+or ongoing learning profile. Configuration setup/repair remain explicit manual
+maintenance and preserve unrelated choices. Ordinary work does not invoke Core.
 
-- **관측:** `audit weekly`는 기간 내 인덱스 표본, `audit store`는 전체 저장소 메타데이터 진단입니다. 미확인 모집단 분모는 `null`이며 선택 표본을 전체 이력으로 일반화하지 않습니다. 저장 audit는 관측만 재사용하고 현재 추천을 다시 계산합니다. [감사 계약](../plugins/groundline/references/weekly-usage-audit.md)
-- **결과:** 실제 근거의 hash와 명시적 해석을 연결하며 요청·실행·완료를 구분합니다. child 선택을 root에서 상속하지 않고 실패·재시도·위임 비용을 한 번씩 계산합니다. 없는 관측은 unknown, 로컬 hash는 provider 인증이 아닙니다. [결과 계약](../plugins/groundline/references/delivery-evidence.md)
-- **비교:** 현재 카탈로그와 같은 작업군의 직접 결과를 비교하며 품질·재작업·자원 보호를 적용합니다. 집계가 불완전해도 직접 증거는 별도로 판단합니다. 운영 임계값은 통계적 확신이나 자동 개선의 증명이 아닙니다. [라우팅 계약](../plugins/groundline/references/evidence-routing.md)
-- **상태:** Core는 Insights 동의·전송 상태를 파일 존재로 추측하지 않습니다. 기존 개인 상태는 status/rollback으로만 복구하며 사용자 설정·기록을 삭제하거나 폐기 형식을 자동 변환하지 않습니다. [복구 계약](../plugins/groundline/references/personal-recovery.md)
-- **환경·학습:** 새 owner-private 상태는 기준·계획·파일 적용·후속 결과를 연결하고 오래된 revision과 사용자 편집을 보존합니다. native 발견·지침 사용·업무 효과와 실제 비교 기준·현재 계획 기준을 구분합니다. [실행 계약](adaptive-environment-implementation.md)
-- **대화 개선:** `learning review-conversation`, `capture-conversation-target`, `record-conversation-change`, `observe-conversation`은 같은 학습 저장소에서 문맥 해석·변경 전 대상 캡처·실제 변경·활성화·후속 기회를 연결합니다. 직접 delivery가 없는 회고에도 가짜 완료·수락·사용량을 만들지 않습니다. `learning status`가 다음 확인 사항을 보여주며, 주간 루틴은 이 제품 경로를 호출합니다. [대화 개선 경로](../plugins/groundline/references/conversation-improvement.md)
+The existing private record directory holds compact captures, changes and
+observations beside unchanged historical conversation records. No new scheduler
+ledger, transcript copy or automatic migration is introduced. The current reader
+rejects unsupported managed records/layouts without changing them.
 
-공용 계약에 I/O를 넣거나 새 실행기·지침 registry·상태 추측 경로를 만들기 전에
-기존 소유 경계에서 해결할 수 있는지 확인합니다. 폐기 기능은
-[변경 기록](../CHANGELOG.md)에만 기록하며 현재 사용 흐름에 남기지 않습니다.
+Content assessments require exact changed guidance exposure, an actual later
+opportunity and known behavior. Model/tool/tier equality is not required for that
+qualitative judgment. Causal benefit and efficiency improvement stay unverified.
+Old comparison gates remain historical validation, never retroactive claims.
 
-## 검증
-
-[개발 계약](development.md)은 파싱·파일·설정 보호를,
-[행동 검증](guidance-validation.md)은 지침과 실제 결과 비교를,
-[릴리스 체크리스트](release-checklist.md)는 패키지·배포·실사용 확인을 담당합니다.
-소스 테스트 통과만으로 설치 완료·품질 향상·토큰 절약을 주장하지 않습니다.
+[Development](development.md) · [Examples](examples.md) ·
+[Guidance validation](guidance-validation.md) · [Release checks](release-checklist.md)

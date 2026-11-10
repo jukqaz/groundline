@@ -104,7 +104,7 @@ no retired format is migrated, and no package or hook is installed by this comma
 
 ## Native context and instruction scope
 
-Follow [model and effort guidance](model-effort-routing.md) on demand. Use the
+For an explicit setting request, use the
 native catalog's supported efforts instead of translating effort names or
 hard-coding context sizes. Leave context window and compaction thresholds unset
 unless evidence justifies an override; unset compaction uses the model default.
@@ -112,9 +112,7 @@ Do not transfer API-only request parameters into Codex TOML.
 
 For persistent instruction changes, use the native instruction chain and the
 owning scope. Keep project behavior, technology choices, acceptance commands and
-release rules in that project's guidance. Use
-[task continuity](task-continuity.md) for shared workflow principles and load
-specialist detail only for the matching operation. Keep one authoritative rule
+release rules in that project's guidance. Load specialist detail only for the matching operation. Keep one authoritative rule
 instead of duplicating it across loaded skills.
 
 Experimental context management and asynchronous question tools are native

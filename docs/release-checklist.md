@@ -1,5 +1,12 @@
 # Release checklist
 
+Select one product: `core-vYEAR.MMDD.N` or `insights-vYEAR.MMDD.N`.
+Core publishes only Core binaries and advances `core-stable` / `groundline-core`.
+Insights publishes its collector and API image and advances `stable` / `groundline`.
+Steps involving API compatibility, ClickHouse, Grafana, collection or deployment
+apply only to an Insights release. A Core release preserves those deployed systems
+and installed state; no server qualification or image job is required for it.
+
 1. Freeze scope and update the workspace plus both plugin manifests to the same
    strict semantic version.
 2. Run formatting and targeted CLI/xtask tests while editing. On final source,
@@ -9,18 +16,18 @@
    bounded retries/diagnostics, and real loopback capability preflight tests.
    Confirm owner APIs advertise the new ingest contract before collector
    upgrades; public stable promotion alone cannot prove private API readiness.
-   Both native PR and artifact jobs must execute `delivery_cli`, `routing_cli`,
-   `adaptive_environment_cli`, `learning_loop_cli`, `environment_sync_cli`,
-   `learning_work_cli`, and `official_sources_cli`
-   on every supported target. Listing tests or applying a test-name filter does
+   Both native PR and artifact jobs must execute
+   `improvement_cli`, setup, config-repair and shell installer suites.
+   Native PR jobs additionally execute the real Codex independent-installation
+   regression on every supported target. Listing tests or applying a test-name filter does
    not qualify these suites.
-   Before promoting revised routing or skill behavior as the default, compare
+   Before claiming improved skill behavior, compare
    candidate and current guidance on representative matched work with the same
    inputs and acceptance criteria. Protect completion quality and rework before
    optimizing owned tokens or elapsed time; include child, approval, failure,
    and retry resources. Unknown outcomes do not pass this gate. Deterministic
-   tests and GroundLine's 10-unit/5% selection policy are not proof of behavioral
-   non-regression. Retain the current baseline while that evidence is missing.
+   tests are not proof of behavioral improvement. Report missing natural follow-up
+   separately from source/package qualification.
 3. In the isolated qualification ClickHouse, run the explicit mutation-enabled
    integration lane. It must exercise API-owned schema migration, enrollment,
    accepted upload, duplicate retry, weekly reporting, every Grafana query, and
@@ -31,8 +38,8 @@
    has exactly five fail-open hooks using `groundline-insights`. Confirm starter
    prompts contain at most three nonempty entries of at most 128 characters
    each, and neither native CLI emits a manifest warning.
-   Confirm public metadata and documentation describe Core-only, Insights-only,
-   and combined installation without implying an automatic sibling dependency.
+   Confirm public metadata and documentation describe separate Core and Insights
+   distributions; selecting both means installing each independently.
    Ship only Core, Insights, and the API; no separate GUI artifact or build job.
    Verify the installed native collector and a real Codex lifecycle hook,
    preserving existing settings and consent. Record an accepted receipt and
@@ -60,15 +67,17 @@
 7. Run the manual qualification workflow once if the release tag path has not
    already done so.
    To prepare a candidate before merging, dispatch the exact candidate branch
-   with `build_release_artifacts=true`. This builds all three target packages
+   with `release_product=core|insights` and `build_release_artifacts=true`.
+   This builds the selected product's three target packages
    after qualification; release, image publication, and stable promotion still
    require a version tag. Candidate artifacts do not replace tagged release
    assets or their source attestations.
-8. Build both binaries for the three supported macOS/Linux targets from the exact release commit. Verify
-   each product's target set, executable name, manifest, size, and SHA-256. Remap
+8. Build the selected binary for the three supported macOS/Linux targets from the exact release commit. Verify
+   its target set, executable name, manifest, size, and SHA-256. Remap
    GitHub runner workspace and home paths before compiling release binaries.
-9. Publish one versioned GitHub release without replacing an existing release,
-   and publish the Insights API image. Record the launch smoke for both API
+9. Publish one versioned product GitHub release without replacing an existing release:
+   three selected binary archives plus `SHA256SUMS`. Only Insights tags publish
+   the API image. For Insights, record the launch smoke for both API
    artifacts after downloading them from Actions:
    the image must restore executable permissions lost during artifact transport,
    and its real entrypoint must reach the API configuration check without secrets.
@@ -93,13 +102,15 @@
    Pass the exact owner-rendered private Compose file explicitly, confirm it is
    a bounded regular file private to the current user rather than a symlink, and
    that the authenticated, redacted preflight passes before any mutation.
-11. Assemble both plugin binary trees in one generated commit and advance `stable`
-   only with a verified tag, monotonic version, exact artifact diff, and
-   `force-with-lease`.
+11. Run `xtask stage-distribution --release-tag <product-tag> --packages <selected-packages>`
+   on the clean tagged source. The generated commit adds only the selected nine
+   artifact files, selected native catalog and `distribution.json` (eleven paths).
+   Advance only that product's channel with a verified tag, source parent,
+   manifest/checksum bytes, monotonic product version and `force-with-lease`.
 12. Refresh the marketplace in Codex. Verify Core and Insights package fingerprints
    independently, then verify hook dispatch, upload, ClickHouse, Grafana, and any
    production deployment as separate live lanes.
-   Version tags contain source; `stable` adds the verified native binaries.
+   Version tags contain source; the selected product channel adds its verified binaries.
    If refresh leaves an installed version unchanged, inspect the reviewed source
    pin and cache evidence, then resume the reviewed installer. Preserve disabled
    state; re-adding an existing disabled plugin would enable it.

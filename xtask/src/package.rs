@@ -38,11 +38,7 @@ const PRIVATE_MARKERS: &[&[u8]] = &[
     b"xoxp-",
 ];
 static PRIVATE_MATCHER: OnceLock<AhoCorasick> = OnceLock::new();
-const CORE_SKILLS: &[&str] = &[
-    "align-agent-home",
-    "audit-agent-history",
-    "optimize-codex-workflow",
-];
+const CORE_SKILLS: &[&str] = &["optimize-codex-workflow"];
 const HOOK_EVENTS: &[&str] = &[
     "PostCompact",
     "SessionEnd",

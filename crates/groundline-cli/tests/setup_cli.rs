@@ -85,6 +85,13 @@ fn default_setup_preserves_sol_choices_and_native_defaults_without_writes() {
     let (code, report) = f.run_options(true, &[]);
     assert_eq!(code, 0, "{report}");
     assert_eq!(report["model_policy"], "existing_or_native_default");
+    let guide = report["migration_review"]["guide"].as_str().unwrap();
+    assert!(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../plugins/groundline")
+            .join(guide)
+            .is_file()
+    );
     assert_eq!(report["mutation_performed"], false);
     assert!(!f.home.join("config.toml").exists());
     let catalog = fs::read_to_string(&f.catalog)

@@ -1,26 +1,14 @@
 # Documentation
 
-[한국어](ko/index.md) · [GroundLine](../README.md)
+Start with [Core examples](examples.md) and the [conversation improvement procedure](../plugins/groundline/references/conversation-improvement.md).
 
-| Task | Start here |
+| Need | Read |
 | --- | --- |
-| Install, update, or recover | [Installation](installation.md) |
-| Choose Core, Insights, or both | [Integration boundaries](integrations.md) |
-| Audit and compare actual work | [CLI examples](examples.md) |
-| Connect work, guidance changes, and devices | [Learning loop](../plugins/groundline/references/learning-loop.md), [implementation](adaptive-environment-implementation.md) |
-| Connect direct outcomes and owned response costs | [Design and completion criteria](goal-completion-design.md) |
-| Check Codex runtime compatibility | [Compatibility](codex-compatibility.md) |
-| Build an owner-operated server | [Self-hosting](self-hosting.md) |
-| Diagnose collection and server state | [Operations](insights-operations.md) |
-| Change code or parsing | [Contributing](../CONTRIBUTING.md), [architecture](architecture.md), [development contracts](development.md) |
-| Evaluate guidance changes | [Behavioral validation](guidance-validation.md) |
-| Improve and align a personal environment | [Local environment and learning CLI](adaptive-environment-implementation.md), [design and remaining scope](adaptive-environment-design.md) |
-| Select native Codex capabilities for that loop | [Capability research and mapping](codex-native-capabilities.md) |
-| Qualify and publish a release | [Release checklist](release-checklist.md), [versioning](versioning.md) |
+| Install or update | [Installation and recovery](installation.md) |
+| Understand the small Core | [Architecture](architecture.md), [guidance validation](guidance-validation.md) |
+| Diagnose a concrete usage problem | [Optional weekly audit](../plugins/groundline/references/weekly-usage-audit.md) |
+| Run optional Insights | [Self-hosting](self-hosting.md), [operations](insights-operations.md), [integrations](integrations.md) |
+| Develop and package | [Development](development.md), [release checklist](release-checklist.md), [versioning](versioning.md) |
+| Privacy and support | [Privacy](privacy.md), [security](../SECURITY.md), [Codex compatibility](codex-compatibility.md) |
 
-Plugin READMEs and their local references document packaged commands and contracts:
-[Core](../plugins/groundline/README.md) · [Insights](../plugins/groundline-insights/README.md).
-
-Current procedures live in these guides. Superseded design investigations remain
-in Git history; released changes remain in the [changelog](../CHANGELOG.md).
-[Privacy](privacy.md) · [Security](../SECURITY.md) · [Terms](terms.md)
+[한국어](ko/index.md)
