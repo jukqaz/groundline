@@ -186,13 +186,116 @@ fn clickhouse_schema_reset_is_scoped(workflow: &str) -> bool {
         .is_some_and(|steps| {
             steps.iter().any(|step| {
                 step["name"] == "Exercise the isolated ClickHouse and Grafana integration lane"
-                    && step.get("if").is_none()
+                    && step["if"] == "needs.fast.outputs.product == 'insights'"
                     && step.get("continue-on-error").is_none()
                     && step["env"][SCHEMA_RESET_ENV] == "true"
                     && step["env"]["GROUNDLINE_CLICKHOUSE_TEST_ALLOW_MUTATION"] == "true"
                     && step["env"]["GROUNDLINE_CLICKHOUSE_TEST_URL"] == "http://127.0.0.1:8123"
             })
         })
+}
+
+const PRODUCT_TAGS: &str =
+    "startsWith(github.ref, 'refs/tags/core-v') || startsWith(github.ref, 'refs/tags/insights-v')";
+const INSIGHTS_SCOPE: &str = "needs.fast.outputs.product == 'insights'";
+
+fn independent_releases_are_scoped(workflow: &str) -> bool {
+    let Ok(doc) = serde_saphyr::from_str::<serde_json::Value>(workflow) else {
+        return false;
+    };
+    let jobs = &doc["jobs"];
+    if doc["on"]["push"]["tags"] != serde_json::json!(["core-v*.*.*", "insights-v*.*.*"])
+        || jobs["publish-image"]["if"] != "startsWith(github.ref, 'refs/tags/insights-v')"
+        || jobs["publish-release"]["if"] != PRODUCT_TAGS
+        || jobs["artifacts"]["env"]["RELEASE_PRODUCT"] != "${{ needs.fast.outputs.product }}"
+        || jobs["artifacts"]["env"]["RELEASE_PLUGIN"] != "${{ needs.fast.outputs.plugin }}"
+        || jobs["qualification"]["if"]
+            != format!("github.event_name == 'workflow_dispatch' || {PRODUCT_TAGS}")
+        || jobs["promote-stable"]["if"]
+            != format!(
+                "always() && ({PRODUCT_TAGS}) && needs.artifacts.result == 'success' && needs.publish-release.result == 'success' && (startsWith(github.ref, 'refs/tags/core-v') || needs.publish-image.result == 'success')"
+            )
+    {
+        return false;
+    }
+    let Some(steps) = jobs["qualification"]["steps"].as_array() else {
+        return false;
+    };
+    for name in [
+        "Prepare one coherent compatibility profile",
+        "Install the pinned Ubuntu Noble musl toolchain",
+        "Validate the release-tested and selected compatibility profiles",
+        "Start the selected ClickHouse integration service",
+        "Exercise the isolated ClickHouse and Grafana integration lane",
+        "Validate the generic compose template",
+        "Exercise the rendered ClickHouse, API, and Grafana stack",
+    ] {
+        let matches: Vec<_> = steps.iter().filter(|s| s["name"] == name).collect();
+        if matches.len() != 1
+            || matches[0]["if"] != INSIGHTS_SCOPE
+            || matches[0].get("continue-on-error").is_some()
+        {
+            return false;
+        }
+    }
+    for name in [
+        "Run the portable Rust suite once",
+        "Deny Rust warnings once",
+        "Verify canonical packages and public source",
+        "Deny vulnerable, unlicensed, or untrusted crates",
+    ] {
+        let Some(step) = steps.iter().find(|s| s["name"] == name) else {
+            return false;
+        };
+        if step.get("if").is_some() || step.get("continue-on-error").is_some() {
+            return false;
+        }
+        if name == "Deny vulnerable, unlicensed, or untrusted crates"
+            && (step["env"]["CARGO_DENY_VERSION"] != "0.20.2"
+                || step["env"]["CARGO_DENY_SHA256"]
+                    != "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f")
+        {
+            return false;
+        }
+    }
+    let Some(steps) = jobs["artifacts"]["steps"].as_array() else {
+        return false;
+    };
+    for name in [
+        "Build the Linux Insights API from the same moving stable toolchain",
+        "Stage the integrity-checked Insights API image input",
+    ] {
+        let Some(step) = steps.iter().find(|s| s["name"] == name) else {
+            return false;
+        };
+        if step["if"]
+            != "env.RELEASE_PRODUCT == 'insights' && contains(matrix.target, 'unknown-linux-musl')"
+            || step.get("continue-on-error").is_some()
+        {
+            return false;
+        }
+    }
+    let Some(build) = steps
+        .iter()
+        .find(|s| s["name"] == "Build the selected release binary and host packager")
+    else {
+        return false;
+    };
+    if build.get("if").is_some()
+        || build.get("continue-on-error").is_some()
+        || !build["run"]
+            .as_str()
+            .is_some_and(|run| run.contains("--bin \"$RELEASE_PLUGIN\""))
+    {
+        return false;
+    }
+    let Some(steps) = jobs["promote-stable"]["steps"].as_array() else {
+        return false;
+    };
+    steps.iter().any(|s| {
+        s["name"] == "Download the selected exact three-target packages"
+            && s["with"]["path"] == "${{ runner.temp }}/groundline-channel-packages"
+    })
 }
 
 pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
@@ -210,94 +313,37 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
     let compose = text(&root.join("infrastructure/compose.template.yaml"))?;
     let api_dockerfile = text(&root.join("services/insights-api/Dockerfile"))?;
     let dockerignore = text(&root.join(".dockerignore"))?;
-    let stable_promotion_cleans_staging = rust
-        .split_once("\n  promote-stable:")
-        .and_then(|(_, stable)| {
-            Some((
-                stable.find("rm -rf distribution")?,
-                stable.find("cargo run --locked -p xtask -- verify-source --root . --json")?,
-            ))
-        })
-        .is_some_and(|(cleanup, verification)| cleanup < verification);
+    let independent_release_scope = independent_releases_are_scoped(&rust);
     super::compose::verify_compatibility_profile(
         &root.join("infrastructure/compatibility.json"),
         false,
     )?;
     for required in [
         "workflow_dispatch:",
+        "release_product:",
         "build_release_artifacts:",
-        "startsWith(github.ref, 'refs/tags/v') ||\n      (github.event_name == 'workflow_dispatch' &&\n       inputs.build_release_artifacts)",
         "clickhouse_image:",
         "nginx_image:",
         "grafana_image:",
         "grafana_clickhouse_plugin:",
         "pull_request:",
-        "push:\n    tags:",
-        "concurrency:",
         "cancel-in-progress: true",
-        "Reject an invalid or version-mismatched release tag before expensive work",
-        "release tag must be strict vMAJOR.MINOR.PATCH",
-        "cargo run --quiet --locked -p xtask -- release-name --version \"${RELEASE_TAG#v}\"",
-        "--title \"GroundLine ${release_name}\"",
-        "name: fast source checks",
-        "Select native setup checks for relevant PR changes",
-        "if: github.event_name == 'pull_request' && needs.fast.outputs.native_setup == 'true'",
-        "name: full source qualification",
-        "if: github.event_name == 'workflow_dispatch'",
-        "needs: fast",
+        "release tag must select core or insights explicitly",
         "cargo test --locked -p xtask --all-targets",
         "cargo test --locked -p groundline-cli",
-        "Verify setup and installer behavior on each native target",
-        "CARGO_DENY_VERSION: \"0.20.2\"",
-        "CARGO_DENY_SHA256: \"9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f\"",
-        "\"$RUNNER_TEMP/groundline-tools/cargo-deny\" --locked --all-features check --show-stats",
-        "Verify collection stop across native processes",
-        "--all-features --target \"${{ matrix.target }}\" collection_stop_tests",
-        "target/debug/xtask verify-binary-privacy --binary \"target/$TARGET/release/groundline-insights-api\"",
-        "--test setup_cli --test config_repair_cli --test install_cli",
-        "cargo test --locked -p groundline-insights-cli --test cli_contract",
         "cargo test --workspace --all-features --locked",
-        "cargo test --locked -p groundline-insights-api --lib clickhouse_",
-        r#"GROUNDLINE_CLICKHOUSE_TEST_ALLOW_MUTATION: "true""#,
         "cargo clippy --workspace --all-targets --all-features --locked -- -D warnings",
         "cargo run --locked -p xtask -- verify-source --root . --json",
         "cargo run --locked -p xtask -- verify-history --root . --json",
-        "fetch-depth: 0",
-        "name: Exercise the rendered ClickHouse, API, and Grafana stack",
-        "name: Prepare one coherent compatibility profile",
-        "name: Validate the release-tested and selected compatibility profiles",
-        "name: Start the selected ClickHouse integration service",
-        "name: Stop the selected ClickHouse integration service",
-        "all four compatibility candidate inputs must be supplied together",
-        "cargo run --locked -p xtask -- verify-compatibility-profile",
-        "cargo run --locked -p xtask --bin groundline-deploy -- verify-stack",
-        "--secrets-file \"$secrets_path\"",
-        "docker compose --project-name \"$project\" -f \"$compose_path\" up --detach --wait --wait-timeout 240",
-        "test \"$unauthenticated_status\" = \"302\"",
-        "grep --quiet --ignore-case '^location: .*/login' \"$unauthenticated_headers\"",
-        "--noproxy '*'",
-        "--connect-timeout 5",
-        "--max-time 10",
-        "retention-days: 14",
-        "name: promote both plugins to stable",
-        "name: publish versioned two-product release\n    if: startsWith(github.ref, 'refs/tags/v')\n    needs: artifacts",
-        "name: promote both plugins to stable\n    if: startsWith(github.ref, 'refs/tags/v')",
-        "rm -rf distribution",
-        "--product core",
-        "--product insights",
-        "linux/amd64,linux/arm64",
-        "cargo run --locked -p xtask -- render-compose",
-        "--compatibility-profile \"$COMPATIBILITY_PROFILE\"",
+        "cargo run --locked -p xtask -- stage-distribution",
         "cargo run --locked -p xtask -- promote-stable",
-        "uses: ./.github/actions/setup-rust-stable",
-        "name: publish attested multi-architecture Insights API image\n    if: startsWith(github.ref, 'refs/tags/v')\n    needs: artifacts",
-        "name: Remap GitHub runner paths from release binaries",
+        "cargo run --locked -p xtask -- verify-package-set",
         "--remap-path-prefix=%s=/_groundline --remap-path-prefix=%s=/_cargo_home",
-        "name: Stage the integrity-checked Insights API image input",
-        "sha256sum --check groundline-insights-api.sha256",
-        "GROUNDLINE_RUSTC_VERSION=${{ steps.image-inputs.outputs.rustc-version }}",
-        "GROUNDLINE_BUILD_PACKAGES=${{ steps.image-inputs.outputs.musl-packages }}",
         "musl-tools=1.2.4-2",
+        "--noproxy",
+        "Launch both downloaded API artifacts before publishing",
+        "sha256sum --check groundline-insights-api.sha256",
+        "--test improvement_cli --test setup_cli --test config_repair_cli --test install_cli",
     ] {
         if !rust.contains(required) {
             return Err(XtaskError::InvalidSource);
@@ -336,7 +382,7 @@ pub fn verify_ci_cost_contract(root: &Path) -> Result<(), XtaskError> {
             .count()
             != 1
         || rust.matches("runs-on:").count() != rust.matches("timeout-minutes:").count()
-        || !stable_promotion_cleans_staging
+        || !independent_release_scope
         || !actions_are_pinned(&rust)
         || !public_build_metadata_is_bounded(&rust)
         || !native_core_checks_are_required(&rust)
@@ -411,54 +457,43 @@ mod tests {
     }
 
     #[test]
-    fn schema_reset_requires_the_disposable_clickhouse_step_only() {
+    fn schema_reset_requires_the_disposable_insights_step_only() {
         let workflow = include_str!("../../.github/workflows/rust.yml");
         assert!(clickhouse_schema_reset_is_scoped(workflow));
-        for replacement in ["", "false"] {
-            let changed = workflow.replace(
-                &format!("{SCHEMA_RESET_ENV}: \"true\""),
-                &format!("{SCHEMA_RESET_ENV}: \"{replacement}\""),
-            );
-            assert!(!clickhouse_schema_reset_is_scoped(&changed));
-        }
-        assert!(!clickhouse_schema_reset_is_scoped(&workflow.replace(
-            &format!("          {SCHEMA_RESET_ENV}: \"true\"\n"),
-            ""
-        )));
-        for path in ["/env", "/jobs/qualification/env", "/jobs/fast/steps/0/env"] {
-            for relocate in [false, true] {
-                let mut document: serde_json::Value = serde_saphyr::from_str(workflow).unwrap();
-                if relocate {
-                    for step in document["jobs"]["qualification"]["steps"]
-                        .as_array_mut()
+        for action in 0..7 {
+            let mut doc: serde_json::Value = serde_saphyr::from_str(workflow).unwrap();
+            let step = doc["jobs"]["qualification"]["steps"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|s| {
+                    s["name"] == "Exercise the isolated ClickHouse and Grafana integration lane"
+                })
+                .unwrap();
+            match action {
+                0 => {
+                    step["env"]
+                        .as_object_mut()
                         .unwrap()
-                    {
-                        if let Some(env) = step["env"].as_object_mut() {
-                            env.remove(SCHEMA_RESET_ENV);
-                        }
-                    }
+                        .remove(SCHEMA_RESET_ENV);
                 }
-                let env = document.pointer_mut(path);
-                if let Some(env) = env {
-                    env.as_object_mut()
-                        .unwrap()
-                        .insert(SCHEMA_RESET_ENV.to_owned(), "true".into());
-                } else {
-                    let (parent, _) = path.rsplit_once('/').unwrap();
-                    let parent = if parent.is_empty() {
-                        &mut document
-                    } else {
-                        document.pointer_mut(parent).unwrap()
-                    };
-                    parent["env"] = serde_json::json!({SCHEMA_RESET_ENV: "true"});
+                1 => step["env"][SCHEMA_RESET_ENV] = "false".into(),
+                2 => {
+                    step["env"]["GROUNDLINE_CLICKHOUSE_TEST_URL"] =
+                        "https://clickhouse.example.invalid".into()
                 }
-                assert!(!clickhouse_schema_reset_is_scoped(&document.to_string()));
+                3 => step["if"] = "always()".into(),
+                4 => {
+                    step.as_object_mut().unwrap().remove("if");
+                }
+                5 => step["continue-on-error"] = true.into(),
+                _ => doc["env"][SCHEMA_RESET_ENV] = "true".into(),
             }
+            assert!(
+                !clickhouse_schema_reset_is_scoped(&doc.to_string()),
+                "action {action}"
+            );
         }
-        assert!(!clickhouse_schema_reset_is_scoped(&workflow.replace(
-            "GROUNDLINE_CLICKHOUSE_TEST_URL: http://127.0.0.1:8123",
-            "GROUNDLINE_CLICKHOUSE_TEST_URL: https://clickhouse.example.invalid"
-        )));
     }
 
     #[test]
@@ -501,39 +536,71 @@ mod tests {
     fn public_builds_exclude_raw_events_without_dropping_attestations() {
         let workflow = include_str!("../../.github/workflows/rust.yml");
         assert!(public_build_metadata_is_bounded(workflow));
-        for (before, after) in [
-            (
-                "driver-opts: provenance-add-gha=false",
-                "driver-opts: provenance-add-gha=true",
-            ),
-            (
-                "driver-opts: provenance-add-gha=false",
-                "# missing privacy option",
-            ),
-            (
-                "DOCKER_BUILD_RECORD_UPLOAD: \"false\"",
-                "DOCKER_BUILD_RECORD_UPLOAD: \"true\"",
-            ),
-            ("provenance: mode=max", "provenance: false"),
-            ("sbom: true", "sbom: false"),
-            ("driver: docker-container", "driver: remote"),
-            (
-                "driver: docker-container",
-                "driver: docker-container\n          endpoint: remote-builder",
-            ),
-            (
-                "provenance: mode=max",
-                "provenance: mode=max\n          builder: unreviewed-builder",
-            ),
-        ] {
-            assert_ne!(workflow.replace(before, after), workflow);
+        for action in 0..7 {
+            let mut doc: serde_json::Value = serde_saphyr::from_str(workflow).unwrap();
+            for step in doc["jobs"]["publish-image"]["steps"]
+                .as_array_mut()
+                .unwrap()
+            {
+                let name = step["uses"].as_str().unwrap_or("").to_owned();
+                if name.starts_with("docker/setup-buildx-action@") {
+                    match action {
+                        0 => step["with"]["driver-opts"] = "provenance-add-gha=true".into(),
+                        4 => step["with"]["driver"] = "remote".into(),
+                        5 => step["with"]["endpoint"] = "remote-builder".into(),
+                        _ => {}
+                    }
+                }
+                if name.starts_with("docker/build-push-action@") {
+                    match action {
+                        1 => step["env"]["DOCKER_BUILD_RECORD_UPLOAD"] = "true".into(),
+                        2 => step["with"]["provenance"] = false.into(),
+                        3 => step["with"]["sbom"] = false.into(),
+                        6 => step["with"]["builder"] = "unreviewed-builder".into(),
+                        _ => {}
+                    }
+                }
+            }
             assert!(
-                !public_build_metadata_is_bounded(&workflow.replace(before, after)),
-                "accepted {after}"
+                !public_build_metadata_is_bounded(&doc.to_string()),
+                "action {action}"
             );
         }
         assert!(!public_build_metadata_is_bounded("jobs: {}"));
-        assert!(!public_build_metadata_is_bounded("invalid: ["));
+    }
+
+    #[test]
+    fn core_releases_cannot_publish_or_depend_on_insights_images() {
+        let workflow = include_str!("../../.github/workflows/rust.yml");
+        assert!(super::independent_releases_are_scoped(workflow));
+        for action in 0..5 {
+            let mut doc: serde_json::Value = serde_saphyr::from_str(workflow).unwrap();
+            match action {
+                0 => doc["jobs"]["publish-image"]["if"] = "always()".into(),
+                1 => doc["jobs"]["promote-stable"]["if"] = "success()".into(),
+                2 => doc["on"]["push"]["tags"] = serde_json::json!(["v*.*.*"]),
+                3 => {
+                    doc["jobs"]["artifacts"]["env"]["RELEASE_PLUGIN"] = "groundline-insights".into()
+                }
+                _ => {
+                    doc["jobs"]["qualification"]["steps"]
+                        .as_array_mut()
+                        .unwrap()
+                        .iter_mut()
+                        .find(|s| {
+                            s["name"] == "Exercise the rendered ClickHouse, API, and Grafana stack"
+                        })
+                        .unwrap()
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("if");
+                }
+            }
+            assert!(
+                !super::independent_releases_are_scoped(&doc.to_string()),
+                "action {action}"
+            );
+        }
     }
 
     #[test]

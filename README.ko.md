@@ -21,14 +21,16 @@ Core는 모델 라우팅·기기별 환경 기준·지속 학습을 관리하지
 기존 대화 기록은 변경 없이 조회합니다. 기준을 지켰다는 내용 판단과 인과적
 품질·비용 개선은 구분합니다. 설치·테스트 통과는 행동 개선 증거가 아닙니다.
 
-Git·Codex·Bash·jq가 있는 환경에서 완전한 stable 배포본을 검토하고 설치합니다.
+Git·Codex·Bash·jq가 있는 환경에서 완전한 Core 배포본을 검토하고 설치합니다.
 
 ```console
-git clone --branch stable --single-branch https://github.com/jukqaz/groundline.git groundline-install
+git clone --branch core-stable --single-branch https://github.com/jukqaz/groundline.git groundline-install
 bash groundline-install/install.sh
 ```
 
-기본은 Core이며 `--profile insights` 또는 `--profile both`로 Insights를 선택합니다.
+Core는 `core-stable`·`groundline-core`, Insights는 `stable`·`groundline`을 사용합니다.
+둘 다 필요하면 각 배포본을 따로 설치합니다. Core 릴리스는 Insights나 API 이미지를
+발행·갱신하지 않습니다.
 모델·effort·권한·비활성 플러그인 선택은 명시 요청 없이 바꾸지 않습니다.
 설치는 검토한 배포본에 고정됩니다. 소스 수정은 설치 갱신과 다릅니다.
 [설치·복구](docs/installation.md) · [검증](docs/guidance-validation.md) ·

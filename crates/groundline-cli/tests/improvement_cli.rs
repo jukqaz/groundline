@@ -48,11 +48,14 @@ impl Fixture {
         "interpretation":"assistant_error","scope":"project","target_kind":"agents_block","transferability_sha256":null})
     }
     fn run(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_groundline"))
-            .args(args)
-            .env("CODEX_HOME", self.root.join("unused-codex-home"))
-            .output()
-            .unwrap()
+        Command::new(
+            std::env::var_os("GROUNDLINE_TEST_CORE_BINARY")
+                .unwrap_or_else(|| env!("CARGO_BIN_EXE_groundline").into()),
+        )
+        .args(args)
+        .env("CODEX_HOME", self.root.join("unused-codex-home"))
+        .output()
+        .unwrap()
     }
     fn capture(&self) -> Value {
         self.write_input(&self.brief());

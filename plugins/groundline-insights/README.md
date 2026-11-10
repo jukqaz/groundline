@@ -20,7 +20,7 @@ authentication, collection limits, and excluded raw content.
 ## Install and upgrade
 
 For package installation, connection, consent, and verification together, use the
-reviewed distribution's `install.sh --profile insights` (or `both`). For package-only
+reviewed Insights distribution's `install.sh`. For package-only
 installation:
 
 ```console

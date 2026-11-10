@@ -12,9 +12,10 @@ updates, and recovery. There is no separate GroundLine Desktop app.
 | Insights only | `groundline-insights` | Owner-operated Insights service | Collector or operations nodes that do not need Core skills |
 | Core and Insights | Both plugins | Owner-operated Insights service | Local GroundLine workflows plus private aggregate reporting |
 
-Installing one plugin does not install or activate its sibling. Refreshing their
-shared marketplace can update both **already installed** plugins; the installer
-preserves enabled/disabled states and checks existing Insights API compatibility.
+Installing or updating one product leaves its sibling unchanged. Core uses the
+`groundline-core` marketplace and `core-stable` channel; Insights retains
+`groundline` and `stable`. The reviewed installer preserves enabled/disabled
+states. Insights API compatibility is checked only for an Insights update.
 
 ## Current Insights integrations
 

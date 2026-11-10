@@ -27,15 +27,17 @@ installation and test success do not prove either. See [validation](docs/guidanc
 
 ## Install and maintain
 
-With Git, Codex, Bash and `jq`, review a complete binary-bearing stable distribution:
+With Git, Codex, Bash and `jq`, review a complete binary-bearing Core distribution:
 
 ```console
-git clone --branch stable --single-branch https://github.com/jukqaz/groundline.git groundline-install
+git clone --branch core-stable --single-branch https://github.com/jukqaz/groundline.git groundline-install
 bash groundline-install/install.sh
 ```
 
-The default is Core. Insights is installed independently with `--profile insights`
-or `--profile both`; it is not needed for local improvement. Existing model,
+Core uses `core-stable` / marketplace `groundline-core`. Insights uses its own
+`stable` distribution / marketplace `groundline`; install each reviewed distribution
+separately when both are wanted. A Core release does not publish an API image or
+update Insights. Existing model,
 effort, permissions and disabled plugins are preserved unless explicitly changed.
 The installer pins the reviewed distribution. Source changes are not installed
 updates. See [installation](docs/installation.md) and [versioning](docs/versioning.md).

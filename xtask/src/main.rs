@@ -41,6 +41,20 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Describe one current product-specific release tag.
+    ReleaseInfo {
+        #[arg(long)]
+        tag: String,
+    },
+    /// Stage one validated product in a clean source checkout.
+    StageDistribution {
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        #[arg(long)]
+        packages: PathBuf,
+        #[arg(long)]
+        release_tag: String,
+    },
     /// Derive the human release name from a canonical year.MMDD.ordinal version.
     ReleaseName {
         #[arg(long)]
@@ -473,6 +487,21 @@ fn verify_binary_privacy(binary: &Path) -> Result<(), XtaskError> {
 
 fn run(cli: Cli) -> Result<(), XtaskError> {
     match cli.command {
+        Command::ReleaseInfo { tag } => {
+            println!("{}", serde_json::to_string_pretty(&release::info(&tag)?)?);
+            Ok(())
+        }
+        Command::StageDistribution {
+            root,
+            packages,
+            release_tag,
+        } => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&release::stage(&root, &packages, &release_tag)?)?
+            );
+            Ok(())
+        }
         Command::ReleaseName { version } => {
             let name = groundline_contracts::version::release_display_name(&version)
                 .map_err(|_| XtaskError::InvalidReleaseChannel)?;
