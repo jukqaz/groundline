@@ -40,10 +40,20 @@ if a fresh child is justified and the previous assignment will not duplicate it.
 
 Use a next-turn override only through an available native control with a known
 target and authority for that action. A user-visible follow-up message requires
-the user's explicit authorization to message that thread. If the current host
-offers no authorized control for the next root turn, leave its selection as a
-recommendation and continue the current task. Keep this path scoped to the task
-the user authorized.
+the user's explicit authorization to message that thread. Prefer a separate
+authorized thread when the override can affect later turns. For example,
+[App Server `turn/start`](https://learn.chatgpt.com/docs/app-server#start-a-turn)
+makes its model and effort overrides defaults for later turns on the same thread.
+
+Use a same-thread override only when it is verified to expire with the turn or
+when the active interface can read and restore the thread defaults. Before a
+persistent override, capture the original model and effort defaults and how to
+restore their inheritance if applicable. At the end of the scoped work,
+including on early exit, recheck the defaults. Restore the settings still owned
+by the override and preserve any newer user choices. Confirm the resulting pair
+through native readback before the next unrelated turn. If persistence or
+restoration is unknown, use a separate authorized thread or leave the change as
+a recommendation and continue with current settings.
 
 ## Verify and continue
 
