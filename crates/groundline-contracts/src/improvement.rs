@@ -2,7 +2,7 @@
 //! authenticate native execution or establish causal quality/cost effects.
 use crate::ContractError;
 use crate::learning::{content_sha256, digest};
-use chrono::{DateTime, FixedOffset};
+use crate::timestamp::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -11,8 +11,8 @@ fn error(code: &str) -> ContractError {
     ContractError(format!("improvement_{code}"))
 }
 
-fn time(value: &str) -> Result<DateTime<FixedOffset>, ContractError> {
-    DateTime::parse_from_rfc3339(value).map_err(|_| error("invalid_time"))
+fn time(value: &str) -> Result<Timestamp, ContractError> {
+    Timestamp::parse_rfc3339(value).map_err(|_| error("invalid_time"))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

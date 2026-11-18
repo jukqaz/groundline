@@ -24,8 +24,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Router, serve};
 use base64::Engine;
-use chrono::{DateTime, Duration as ChronoDuration, SecondsFormat, Utc};
 use groundline_contracts::insights::{WeeklyReport, validate_basic_event_bytes};
+use groundline_contracts::timestamp::{Duration as SignedDuration, Timestamp, TimestampFormat};
 use ipnet::Ipv4Net;
 use reqwest::redirect::Policy;
 use secrecy::{ExposeSecret, SecretString};
@@ -669,7 +669,7 @@ impl ClickHouse {
             "latest_version":config.latest_version,
             "minimum_supported_version":config.minimum_supported_version,
             "retention_days":config.retention_days,
-            "updated_at":Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+            "updated_at":Timestamp::now().format_rfc3339(TimestampFormat::Millis, true),
         });
         let mut body = serde_json::to_vec(&policy).map_err(|_| ApiError::storage())?;
         body.push(b'\n');
@@ -891,7 +891,7 @@ impl Collector {
             "current_generation":self.current_generation,
             "enrollment_schema_version":self.enrollment_schema_version,
             "created_at":self.created_at,
-            "updated_at":Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+            "updated_at":Timestamp::now().format_rfc3339(TimestampFormat::Millis, true),
             "revoked":self.revoked,
             "os_family":self.os_family,
             "runtime_family":self.runtime_family,
@@ -1296,7 +1296,7 @@ async fn enroll(
     {
         return Err(ApiError::new(StatusCode::FORBIDDEN, "collector_revoked"));
     }
-    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+    let now = Timestamp::now().format_rfc3339(TimestampFormat::Millis, true);
     let existing = state
         .clickhouse
         .collector(input.collector_instance_id)
@@ -1389,7 +1389,7 @@ fn checked_u32_sum(left: u64, right: u64) -> Result<u64, ApiError> {
         .ok_or_else(|| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid_event"))
 }
 
-pub fn event_row(event: &Value, received_at: DateTime<Utc>) -> Result<Value, ApiError> {
+pub fn event_row(event: &Value, received_at: Timestamp) -> Result<Value, ApiError> {
     let encoded = serde_json::to_vec(event)
         .map_err(|_| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid_event"))?;
     validate_basic_event_bytes(&encoded)
@@ -1397,7 +1397,11 @@ pub fn event_row(event: &Value, received_at: DateTime<Utc>) -> Result<Value, Api
     let mut row = projection::row(event)?;
     row.insert(
         "received_at".to_owned(),
-        Value::from(received_at.to_rfc3339_opts(SecondsFormat::Millis, true)),
+        Value::from(
+            received_at
+                .to_utc()
+                .format_rfc3339(TimestampFormat::Millis, true),
+        ),
     );
     row.insert(
         "payload_json".to_owned(),
@@ -1421,19 +1425,19 @@ async fn event_exists(state: &AppState, event_id: Uuid) -> Result<bool, ApiError
         .map(|value| value != b"0\n" && value != b"0")
 }
 
-fn collection_window(event: &Value, now: DateTime<Utc>) -> Result<(String, String), ApiError> {
+fn collection_window(event: &Value, now: Timestamp) -> Result<(String, String), ApiError> {
     let invalid = || ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid_event");
     let timestamp = |key: &str| {
         event["period"][key]
             .as_str()
-            .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
-            .map(|value| value.with_timezone(&Utc))
+            .and_then(|value| Timestamp::parse_rfc3339(value).ok())
+            .map(Timestamp::to_utc)
             .ok_or_else(invalid)
     };
     let start = timestamp("start_utc")?;
     let end = timestamp("end_utc")?;
     let generated = timestamp("generated_at_utc")?;
-    if start >= end || end > generated || generated > now + ChronoDuration::minutes(5) {
+    if start >= end || end > generated || generated > now + SignedDuration::minutes(5) {
         return Err(invalid());
     }
     Ok((start.to_rfc3339(), end.to_rfc3339()))
@@ -1570,10 +1574,10 @@ async fn ingest_event(
     let candidate_payload_bytes = u64::try_from(body.len()).map_err(|_| ApiError::storage())?;
     let duplicate = event_exists(&state, event_id).await?;
     if !duplicate {
-        let (start, end) = collection_window(&event, Utc::now())?;
+        let (start, end) = collection_window(&event, Timestamp::now())?;
         reject_overlapping_window(&state, collector_id, generation, start, end).await?;
         enforce_ingestion_capacity(&state, collector_id, candidate_payload_bytes).await?;
-        let row = event_row(&event, Utc::now())?;
+        let row = event_row(&event, Timestamp::now())?;
         let mut body = serde_json::to_vec(&row).map_err(|_| ApiError::storage())?;
         body.push(b'\n');
         state
@@ -1851,11 +1855,14 @@ async fn weekly_report(
     // Keep every report component on the same single-writer state. Enrollment,
     // ingestion, activation, and deletion must not change between these reads.
     let _ingestion_guard = state.ingestion_gate.lock().await;
-    let end = Utc::now();
-    let start = end - ChronoDuration::days(i64::from(query.days));
+    let end = Timestamp::now();
+    let start = end - SignedDuration::days(i64::from(query.days));
     let params = [
-        ("start", start.to_rfc3339_opts(SecondsFormat::Secs, true)),
-        ("end", end.to_rfc3339_opts(SecondsFormat::Secs, true)),
+        (
+            "start",
+            start.format_rfc3339(TimestampFormat::Seconds, true),
+        ),
+        ("end", end.format_rfc3339(TimestampFormat::Seconds, true)),
     ];
     let summary = state
         .clickhouse
@@ -1930,7 +1937,7 @@ struct ReportRows {
     model_effort: Vec<Value>,
 }
 
-fn build_report(days: u16, end: DateTime<Utc>, latest_version: &str, rows: &ReportRows) -> Value {
+fn build_report(days: u16, end: Timestamp, latest_version: &str, rows: &ReportRows) -> Value {
     let ReportRows {
         model_tokens,
         model_pattern_rows,
@@ -2074,7 +2081,7 @@ fn build_report(days: u16, end: DateTime<Utc>, latest_version: &str, rows: &Repo
         "kind":"groundline-insights-weekly-report",
         "status":"PASS",
         "reason_code":"accepted",
-        "generated_at_utc":end.to_rfc3339_opts(SecondsFormat::Secs, true),
+        "generated_at_utc":end.format_rfc3339(TimestampFormat::Seconds, true),
         "requested_days":days,
         "source_contract":{
             "dataset":"basic_active","time_basis":"utc","metric_time_field":"period_end_or_generated_at",
@@ -2265,7 +2272,7 @@ pub async fn run() -> Result<(), RunError> {
         None,
         env!("CARGO_PKG_VERSION"),
         Uuid::new_v4(),
-        &Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+        &Timestamp::now().format_rfc3339(TimestampFormat::Millis, true),
     )
     .await
     .map_err(|_| RunError::Storage)?;
@@ -2592,10 +2599,10 @@ mod tests {
     }
 
     fn integration_event(collector_id: Uuid, generation: u32) -> Value {
-        let end = Utc::now();
-        let start = end - ChronoDuration::minutes(1);
-        let start = start.to_rfc3339_opts(SecondsFormat::Secs, true);
-        let end = end.to_rfc3339_opts(SecondsFormat::Secs, true);
+        let end = Timestamp::now();
+        let start = end - SignedDuration::minutes(1);
+        let start = start.format_rfc3339(TimestampFormat::Seconds, true);
+        let end = end.format_rfc3339(TimestampFormat::Seconds, true);
         let audit = json!({
             "kind":"groundline-codex-activity-audit",
             "schema":1,
@@ -2698,7 +2705,23 @@ mod tests {
     #[test]
     fn admission_requires_bounded_non_future_collection() {
         let original = integration_event(Uuid::new_v4(), 1);
-        assert!(collection_window(&original, Utc::now()).is_ok());
+        assert!(collection_window(&original, Timestamp::now()).is_ok());
+
+        let mut offset_window = original.clone();
+        offset_window["period"] = json!({
+            "start_utc":"2026-11-05T00:00:00.123456+09:00",
+            "end_utc":"2026-11-05T00:00:00.123457+09:00",
+            "generated_at_utc":"2026-11-04T15:00:00.123457Z",
+        });
+        let now = Timestamp::parse_rfc3339("2026-11-04T15:00:00.123457Z").unwrap();
+        assert_eq!(
+            collection_window(&offset_window, now).unwrap(),
+            (
+                "2026-11-04T15:00:00.123456+00:00".to_owned(),
+                "2026-11-04T15:00:00.123457+00:00".to_owned(),
+            ),
+        );
+
         for (key, value) in [
             ("start_utc", Value::Null),
             ("end_utc", Value::Null),
@@ -2706,19 +2729,24 @@ mod tests {
             ("generated_at_utc", original["period"]["start_utc"].clone()),
             (
                 "generated_at_utc",
-                json!((Utc::now() + ChronoDuration::minutes(6)).to_rfc3339()),
+                json!((Timestamp::now() + SignedDuration::minutes(6)).to_rfc3339()),
             ),
         ] {
             let mut event = original.clone();
             event["period"][key] = value;
-            assert!(collection_window(&event, Utc::now()).is_err(), "{key}");
+            assert!(
+                collection_window(&event, Timestamp::now()).is_err(),
+                "{key}"
+            );
         }
     }
 
     #[test]
     fn event_row_preserves_all_metric_groups() {
         let event = integration_event(Uuid::new_v4(), 7);
-        let row = event_row(&event, Utc::now()).unwrap();
+        let received_at = Timestamp::parse_rfc3339("2026-11-05T00:00:00.123456+09:00").unwrap();
+        let row = event_row(&event, received_at).unwrap();
+        assert_eq!(row["received_at"], "2026-11-04T15:00:00.123Z");
         assert_eq!(row["root_status"], "PASS");
         assert_eq!(row["delegated_status"], "PASS");
         assert_eq!(row["guardian_status"], "PASS");
@@ -3398,8 +3426,8 @@ mod tests {
         }]);
         reseal_event(&mut newly_valid);
         let rows = [
-            event_row(&old_valid, Utc::now()).unwrap(),
-            event_row(&newly_valid, Utc::now()).unwrap(),
+            event_row(&old_valid, Timestamp::now()).unwrap(),
+            event_row(&newly_valid, Timestamp::now()).unwrap(),
         ];
         for row in &rows {
             let mut body = serde_json::to_vec(row).unwrap();
@@ -3461,7 +3489,7 @@ mod tests {
             "model_family":"gpt-7.3-sol-2026-10-04", "effort":"medium", "tokens":zero_tokens
         }]);
         reseal_event(&mut event);
-        let mut body = serde_json::to_vec(&event_row(&event, Utc::now()).unwrap()).unwrap();
+        let mut body = serde_json::to_vec(&event_row(&event, Timestamp::now()).unwrap()).unwrap();
         body.push(b'\n');
         db.request(
             "INSERT INTO groundline.basic_weekly FORMAT JSONEachRow",
@@ -3593,10 +3621,10 @@ mod tests {
         reseal_event(&mut legacy_sol);
         let malformed = integration_event(collector_id, 0);
         let mut rows = vec![
-            event_row(&old_valid, Utc::now()).unwrap(),
-            event_row(&newly_valid, Utc::now()).unwrap(),
-            event_row(&legacy_sol, Utc::now()).unwrap(),
-            event_row(&malformed, Utc::now()).unwrap(),
+            event_row(&old_valid, Timestamp::now()).unwrap(),
+            event_row(&newly_valid, Timestamp::now()).unwrap(),
+            event_row(&legacy_sol, Timestamp::now()).unwrap(),
+            event_row(&malformed, Timestamp::now()).unwrap(),
         ];
         rows[3]["root_count"] = json!(999);
         for row in &rows {
@@ -3875,7 +3903,7 @@ mod tests {
             assert!(validate_basic_event_bytes(&serde_json::to_vec(&bad).unwrap()).is_err());
             // Direct storage writes are an independent guard: the database
             // must quarantine malformed analysis even if ingest is bypassed.
-            let mut row = event_row(&valid, Utc::now()).unwrap();
+            let mut row = event_row(&valid, Timestamp::now()).unwrap();
             row["payload_json"] = json!(serde_json::to_string(&bad).unwrap());
             row["event_id"] = bad["event_id"].clone();
             row["idempotency_key"] = bad["idempotency_key"].clone();
@@ -3986,13 +4014,13 @@ mod tests {
             .replace("groundline.release_policy FINAL", "(SELECT 'stable' AS policy_key, '9.9.9' AS latest_version, now() AS updated_at)")
             .replace("groundline.collectors FINAL", "(SELECT toUUID(concat('00000000-0000-4000-8000-', leftPad(toString(number+1),12,'0'))) AS collector_id, now() AS created_at, toUInt32(2) AS enrollment_schema_version, 'linux' AS os_family, 'codex_cli' AS runtime_family, 'local_headless' AS execution_mode, if(number=1,'0.0.1','9.9.9') AS groundline_version, toUInt8(0) AS revoked FROM numbers(3))")
             .replace("groundline.basic_active", "(SELECT toUUID(concat('00000000-0000-4000-8000-', leftPad(toString(number+1),12,'0'))) AS collector_id, now() AS received_at, now() AS generated_at, now() AS period_end, if(number=1,'0.0.1','9.9.9') AS groundline_version FROM numbers(2)) AS fixture_events");
-        let now = Utc::now();
+        let now = Timestamp::now();
         let fleet = clickhouse
             .json_row(
                 &fleet_fixture,
                 &[
-                    ("start", (now - ChronoDuration::days(7)).to_rfc3339()),
-                    ("end", (now + ChronoDuration::minutes(1)).to_rfc3339()),
+                    ("start", (now - SignedDuration::days(7)).to_rfc3339()),
+                    ("end", (now + SignedDuration::minutes(1)).to_rfc3339()),
                 ],
             )
             .await
@@ -4131,11 +4159,11 @@ mod tests {
         let mut events = Vec::new();
         for bank in 0..2 {
             let mut event = integration_event(collector, 0);
-            let end = Utc::now() - ChronoDuration::minutes(2 * bank);
+            let end = Timestamp::now() - SignedDuration::minutes(2 * bank);
             event["period"]["start_utc"] = json!(
-                (end - ChronoDuration::minutes(1)).to_rfc3339_opts(SecondsFormat::Secs, true)
+                (end - SignedDuration::minutes(1)).format_rfc3339(TimestampFormat::Seconds, true)
             );
-            event["period"]["end_utc"] = json!(end.to_rfc3339_opts(SecondsFormat::Secs, true));
+            event["period"]["end_utc"] = json!(end.format_rfc3339(TimestampFormat::Seconds, true));
             let models = (0..128)
                 .map(|n| match n {
                     0 => "gpt-6-sol".to_owned(),
@@ -4230,10 +4258,11 @@ mod tests {
             events.push(event);
         }
         let mut historical = integration_event(collector, 0);
-        let end = Utc::now() - ChronoDuration::days(20);
-        historical["period"]["start_utc"] =
-            json!((end - ChronoDuration::minutes(1)).to_rfc3339_opts(SecondsFormat::Secs, true));
-        historical["period"]["end_utc"] = json!(end.to_rfc3339_opts(SecondsFormat::Secs, true));
+        let end = Timestamp::now() - SignedDuration::days(20);
+        historical["period"]["start_utc"] = json!(
+            (end - SignedDuration::minutes(1)).format_rfc3339(TimestampFormat::Seconds, true)
+        );
+        historical["period"]["end_utc"] = json!(end.format_rfc3339(TimestampFormat::Seconds, true));
         historical["metrics"]["root"]["model_effort"] = json!([
             {"model_family":"gpt-6-sol","effort":"medium","count":1},{"model_family":"sol","effort":"medium","count":1}]);
         historical["metrics"]["root"]["activity"]["turn_contexts"] = json!(2);
@@ -4462,7 +4491,7 @@ mod tests {
             let mut row = projection::row(&bad).unwrap();
             row.insert(
                 "received_at".to_owned(),
-                json!(Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)),
+                json!(Timestamp::now().format_rfc3339(TimestampFormat::Millis, true)),
             );
             row.insert(
                 "payload_json".to_owned(),
@@ -4496,11 +4525,11 @@ mod tests {
         assert_eq!(response.status(), StatusCode::CREATED);
         for offset in [10, 12] {
             let mut event = integration_event(oversized_collector, 0);
-            let end = Utc::now() - ChronoDuration::minutes(offset);
+            let end = Timestamp::now() - SignedDuration::minutes(offset);
             event["period"]["start_utc"] = json!(
-                (end - ChronoDuration::minutes(1)).to_rfc3339_opts(SecondsFormat::Secs, true)
+                (end - SignedDuration::minutes(1)).format_rfc3339(TimestampFormat::Seconds, true)
             );
-            event["period"]["end_utc"] = json!(end.to_rfc3339_opts(SecondsFormat::Secs, true));
+            event["period"]["end_utc"] = json!(end.format_rfc3339(TimestampFormat::Seconds, true));
             event["analysis"]["root"]["observed_response_count"] = json!(u64::MAX);
             event["analysis"]["root"]["unattributed_response_count"] = json!(u64::MAX);
             event["analysis"]["root"]["overflow_response_count"] = json!(0);
@@ -4701,7 +4730,7 @@ mod tests {
         );
         // The database also excludes a directly inserted analysis whose token
         // split no longer matches the intact authoritative counters.
-        let mut row = event_row(&event, Utc::now()).unwrap();
+        let mut row = event_row(&event, Timestamp::now()).unwrap();
         event["analysis"]["root"]["unattributed"]["total_tokens"] = json!(2);
         row["payload_json"] = json!(serde_json::to_string(&event).unwrap());
         db.request(
@@ -4908,11 +4937,11 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
         // An adjacent earlier delivery is disjoint and reaches the quota guard.
-        let end =
-            DateTime::parse_from_rfc3339(event["period"]["start_utc"].as_str().unwrap()).unwrap();
+        let end = Timestamp::parse_rfc3339(event["period"]["start_utc"].as_str().unwrap()).unwrap();
         second_event["period"]["end_utc"] = event["period"]["start_utc"].clone();
-        second_event["period"]["start_utc"] =
-            json!((end - ChronoDuration::minutes(1)).to_rfc3339_opts(SecondsFormat::Secs, true));
+        second_event["period"]["start_utc"] = json!(
+            (end - SignedDuration::minutes(1)).format_rfc3339(TimestampFormat::Seconds, true)
+        );
         reseal_event(&mut second_event);
         let second_headers = [
             ("x-groundline-collector-id", collector_id.to_string()),
@@ -4948,14 +4977,17 @@ mod tests {
             .expect("physical event count");
         assert_eq!(physical_count, b"1\n");
 
-        let report_end = Utc::now();
-        let report_start = report_end - ChronoDuration::days(7);
+        let report_end = Timestamp::now();
+        let report_start = report_end - SignedDuration::days(7);
         let report_params = [
             (
                 "start",
-                report_start.to_rfc3339_opts(SecondsFormat::Secs, true),
+                report_start.format_rfc3339(TimestampFormat::Seconds, true),
             ),
-            ("end", report_end.to_rfc3339_opts(SecondsFormat::Secs, true)),
+            (
+                "end",
+                report_end.format_rfc3339(TimestampFormat::Seconds, true),
+            ),
         ];
         for (name, query, params) in [
             ("summary", REPORT_SUMMARY_QUERY, report_params.as_slice()),
@@ -5043,7 +5075,7 @@ mod tests {
         unmeasured["metrics"]["root"]["usage"]["fallback_rollout_count"] = json!(0);
         reseal_event(&mut unmeasured);
         assert!(validate_basic_event_bytes(&serde_json::to_vec(&unmeasured).unwrap()).is_ok());
-        let mut row = event_row(&unmeasured, Utc::now()).unwrap();
+        let mut row = event_row(&unmeasured, Timestamp::now()).unwrap();
         clickhouse
             .request(
                 "INSERT INTO groundline.basic_weekly FORMAT JSONEachRow",
@@ -5061,7 +5093,9 @@ mod tests {
             .request(
                 "INSERT INTO groundline.basic_weekly FORMAT JSONEachRow",
                 &[],
-                Some(serde_json::to_vec(&event_row(&incomplete, Utc::now()).unwrap()).unwrap()),
+                Some(
+                    serde_json::to_vec(&event_row(&incomplete, Timestamp::now()).unwrap()).unwrap(),
+                ),
             )
             .await
             .unwrap();
@@ -5099,7 +5133,7 @@ mod tests {
             &format!("SELECT countIf(trusted_event_v5 != ({trust_expression})) FROM groundline.basic_weekly WHERE collector_id={{id:UUID}} FORMAT TabSeparated"),
             &identity_params, None,
         ).await.unwrap(), b"0\n");
-        let mut forged_trust = event_row(&incomplete, Utc::now()).unwrap();
+        let mut forged_trust = event_row(&incomplete, Timestamp::now()).unwrap();
         forged_trust["trusted_event_v5"] = json!(1);
         // Reject an attempted override instead of silently ignoring the field.
         assert!(
@@ -5202,8 +5236,8 @@ mod tests {
 
         // Only this isolated test database is forced to merge. The same-age
         // measured and unmeasured records survive; incomplete reads expire.
-        let received = Utc::now() - ChronoDuration::days(8);
-        let old_end = Utc::now() - ChronoDuration::days(9);
+        let received = Timestamp::now() - SignedDuration::days(8);
+        let old_end = Timestamp::now() - SignedDuration::days(9);
         let mut retained_id = String::new();
         let mut unmeasured_id = String::new();
         let mut expired_id = String::new();
@@ -5213,9 +5247,9 @@ mod tests {
             (&incomplete, &mut expired_id),
         ] {
             let mut old = candidate.clone();
-            old["period"] = json!({"start_utc":(old_end-ChronoDuration::minutes(1)).to_rfc3339_opts(SecondsFormat::Secs,true),
-                "end_utc":old_end.to_rfc3339_opts(SecondsFormat::Secs,true),
-                "generated_at_utc":old_end.to_rfc3339_opts(SecondsFormat::Secs,true)});
+            old["period"] = json!({"start_utc":(old_end-SignedDuration::minutes(1)).format_rfc3339(TimestampFormat::Seconds,true),
+                "end_utc":old_end.format_rfc3339(TimestampFormat::Seconds,true),
+                "generated_at_utc":old_end.format_rfc3339(TimestampFormat::Seconds,true)});
             reseal_event(&mut old);
             *id = old["event_id"].as_str().unwrap().to_owned();
             row = event_row(&old, received).unwrap();
@@ -5256,7 +5290,10 @@ mod tests {
                 "payload_json".to_owned(),
                 json!(serde_json::to_string(&forged).unwrap()),
             );
-            raw.insert("received_at".to_owned(), json!(Utc::now().to_rfc3339()));
+            raw.insert(
+                "received_at".to_owned(),
+                json!(Timestamp::now().to_rfc3339()),
+            );
             clickhouse
                 .request(
                     "INSERT INTO groundline.basic_weekly FORMAT JSONEachRow",
@@ -5273,7 +5310,8 @@ mod tests {
         let mut revoked_row = preserved.as_row();
         revoked_row["revoked"] = json!(1);
         revoked_row["updated_at"] = json!(
-            (Utc::now() + ChronoDuration::seconds(1)).to_rfc3339_opts(SecondsFormat::Millis, true)
+            (Timestamp::now() + SignedDuration::seconds(1))
+                .format_rfc3339(TimestampFormat::Millis, true)
         );
         clickhouse
             .request(

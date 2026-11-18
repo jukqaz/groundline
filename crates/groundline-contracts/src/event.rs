@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, SecondsFormat, Timelike, Utc};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+use crate::timestamp::{Timestamp, TimestampFormat};
 use crate::{ContractError, insights::validate_basic_event_bytes, version::strict_version};
 
 const COLLECTION_TRIGGERS: &[&str] = &[
@@ -49,14 +49,14 @@ fn optional_number(value: Option<&Value>) -> Value {
 }
 
 fn timestamp(value: Option<&Value>) -> Option<String> {
-    let parsed = DateTime::parse_from_rfc3339(value?.as_str()?).ok()?;
-    let utc = parsed.with_timezone(&Utc);
+    let parsed = Timestamp::parse_rfc3339(value?.as_str()?).ok()?;
+    let utc = parsed.to_utc();
     let format = if utc.nanosecond() == 0 {
-        SecondsFormat::Secs
+        TimestampFormat::Seconds
     } else {
-        SecondsFormat::Micros
+        TimestampFormat::Micros
     };
-    Some(utc.to_rfc3339_opts(format, true))
+    Some(utc.format_rfc3339(format, true))
 }
 
 fn component_status(component: &Map<String, Value>) -> &'static str {
@@ -435,8 +435,8 @@ mod tests {
         });
         let audit = json!({
             "schema":1,"kind":"groundline-codex-activity-audit","status":"PARTIAL","collection_complete":true,
-            "scope":{"generated_at":"1970-01-01T00:00:10Z","selection_mode":"activity_window",
-                "requested_window_start":"1970-01-01T00:00:00Z","requested_window_end":"1970-01-01T00:00:10Z",
+            "scope":{"generated_at":"1970-01-01T09:00:10.123456789+09:00","selection_mode":"activity_window",
+                "requested_window_start":"1970-01-01T00:00:00Z","requested_window_end":"1970-01-01T09:00:10+09:00",
                 "eligible_root_count":1,"selected_root_count":1,"observed_root_sample_count":1,
                 "minimum_root_sample_count":5,"sample_sufficient":false,"selection_coverage":1.0,
                 "delegated_rollout_count":1,"guardian_rollout_count":1},
@@ -448,22 +448,40 @@ mod tests {
         let event = build_basic_event(
             &audit,
             CollectorIdentity {
-                instance_id: Uuid::new_v4(),
+                instance_id: Uuid::from_u128(0xaaaaaaaa_aaaa_4aaa_8aaa_aaaaaaaaaaaa),
                 os_family: "macos",
                 runtime_family: "codex_app",
                 execution_mode: "desktop",
             },
             ConsentReceipt {
-                receipt_id: Uuid::new_v4(),
-                accepted_at_utc: "1970-01-01T00:00:00Z",
+                receipt_id: Uuid::from_u128(0xbbbbbbbb_bbbb_4bbb_8bbb_bbbbbbbbbbbb),
+                accepted_at_utc: "1969-12-31T19:00:00.5-05:00",
             },
-            env!("CARGO_PKG_VERSION"),
+            "2026.1110.1",
             7,
             "stop_hook",
         )
         .unwrap();
         assert_eq!(audit, before);
         assert_eq!(event["schema_version"], 5);
+        assert_eq!(
+            event["period"],
+            json!({
+                "start_utc": "1970-01-01T00:00:00Z",
+                "end_utc": "1970-01-01T00:00:10Z",
+                "generated_at_utc": "1970-01-01T00:00:10.123456Z",
+            })
+        );
+        assert_eq!(
+            event["consent"]["accepted_at_utc"],
+            "1970-01-01T00:00:00.500000Z"
+        );
+        // Canonical timestamp bytes are part of persisted event identity.
+        assert_eq!(
+            event["idempotency_key"],
+            "sha256:dde65c055800bc1745a4ff931248d61e489dcb8870241d4611042b851d96a48c"
+        );
+        assert_eq!(event["event_id"], "e272f84a-5966-5013-b1fb-6d6228fd2826");
         for component in ["root", "delegated", "guardian"] {
             assert_eq!(event["metrics"][component]["status"], "PASS", "{component}");
             assert_eq!(event["metrics"][component]["usage"]["total_tokens"], 7);

@@ -1,7 +1,7 @@
 //! Private, operator-supplied delivery receipts. Hashes identify checked local
 //! artifacts; they do not authenticate the origin of the observations.
 use crate::ContractError;
-use chrono::{DateTime, Utc};
+use crate::timestamp::{Duration, Timestamp};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -100,7 +100,7 @@ impl Receipt {
             || !digest(&self.unit_hash)
             || !digest(&self.cohort_sha256)
             || !PHASES.contains(&self.phase.as_str())
-            || DateTime::parse_from_rfc3339(&self.completed_at_utc).is_err()
+            || Timestamp::parse_rfc3339(&self.completed_at_utc).is_err()
             || self.activation_verified
             || self.observed_selection_matches_requested
                 != self.requested.as_ref().zip(self.effective.as_ref()).map(
@@ -111,10 +111,9 @@ impl Receipt {
         {
             return Err(error("invalid_receipt"));
         }
-        let completed = DateTime::parse_from_rfc3339(&self.completed_at_utc)
-            .map_err(|_| error("invalid_timestamp"))?
-            .with_timezone(&Utc);
-        if completed > Utc::now() + chrono::Duration::minutes(5) {
+        let completed = Timestamp::parse_rfc3339(&self.completed_at_utc)
+            .map_err(|_| error("invalid_timestamp"))?;
+        if completed > Timestamp::now() + Duration::minutes(5) {
             return Err(error("invalid_timestamp"));
         }
         for observed in [&self.recommendation, &self.requested, &self.effective]
@@ -618,7 +617,7 @@ mod tests {
         json!({
             "kind":"groundline-delivery-receipt","schema":1,"unit_hash":h(1),
             "cohort_sha256":h(2),"phase":"implementation",
-            "completed_at_utc":Utc::now().to_rfc3339(),
+            "completed_at_utc":Timestamp::now().to_rfc3339(),
             "recommendation":{"model":"gpt-6-sol","effort":"medium","evidence_sha256":h(3)},
             "requested":{"model":"gpt-6-sol","effort":"medium","evidence_sha256":h(4)},
             "effective":{"model":"gpt-6-sol","effort":"medium","evidence_sha256":h(5)},
@@ -800,7 +799,7 @@ mod tests {
         failed["verification"]["rework"] = json!(true);
         // Old records remain in the observational summary, unlike routing's
         // preceding-30-day matched-cohort comparison.
-        failed["completed_at_utc"] = json!((Utc::now() - chrono::Duration::days(60)).to_rfc3339());
+        failed["completed_at_utc"] = json!((Timestamp::now() - Duration::days(60)).to_rfc3339());
         failed["cohort_sha256"] = json!(h(12));
         let mut unknown = separate_receipt(receipt(), 13, 14);
         unknown["phase"] = json!("runtime_verification");

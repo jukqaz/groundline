@@ -1,6 +1,5 @@
 use std::collections::BTreeSet;
 
-use chrono::{DateTime, SecondsFormat, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -8,6 +7,7 @@ use uuid::Uuid;
 
 use crate::ContractError;
 use crate::model::{EFFORTS, MAX_MODEL_CONTEXTS, MODEL_FAMILIES, identity_kind, valid_label};
+use crate::timestamp::{Timestamp, TimestampFormat};
 
 pub mod analysis;
 
@@ -416,14 +416,14 @@ fn invalid<T>() -> Result<T, ContractError> {
 }
 
 fn normalized_timestamp(value: &str) -> bool {
-    DateTime::parse_from_rfc3339(value).is_ok_and(|parsed| {
-        let utc = parsed.with_timezone(&Utc);
+    Timestamp::parse_rfc3339(value).is_ok_and(|parsed| {
+        let utc = parsed.to_utc();
         let format = if utc.nanosecond() == 0 {
-            SecondsFormat::Secs
+            TimestampFormat::Seconds
         } else {
-            SecondsFormat::Micros
+            TimestampFormat::Micros
         };
-        utc.to_rfc3339_opts(format, true) == value
+        utc.format_rfc3339(format, true) == value
     })
 }
 

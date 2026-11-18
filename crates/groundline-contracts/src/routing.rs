@@ -1,7 +1,7 @@
 //! Offline comparison of private GPT-6 delivery outcomes and a native catalog.
 //! Native Codex owns task-scoped model/effort judgment and catalog provenance.
 use crate::ContractError;
-use chrono::{DateTime, Duration, Utc};
+use crate::timestamp::{Duration, Timestamp};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -25,9 +25,9 @@ fn digest(value: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
-fn timestamp(value: &str) -> Result<DateTime<Utc>, ContractError> {
-    DateTime::parse_from_rfc3339(value)
-        .map(|t| t.with_timezone(&Utc))
+fn timestamp(value: &str) -> Result<Timestamp, ContractError> {
+    Timestamp::parse_rfc3339(value)
+        .map(Timestamp::to_utc)
         .map_err(|_| error("invalid_timestamp"))
 }
 
@@ -106,8 +106,8 @@ fn validate(
     packet: &Packet,
     catalog: &Catalog,
     catalog_value: &Value,
-) -> Result<(DateTime<Utc>, DateTime<Utc>), ContractError> {
-    let now = Utc::now();
+) -> Result<(Timestamp, Timestamp), ContractError> {
+    let now = Timestamp::now();
     let generated = timestamp(&packet.generated_at_utc)?;
     let catalog_checked = timestamp(&packet.catalog_checked_at_utc)?;
     let catalog_bytes = serde_json::to_vec(catalog_value).map_err(|_| error("invalid_catalog"))?;
@@ -209,7 +209,7 @@ pub fn propose(packet: &Value, catalog: &Value) -> Result<Value, ContractError> 
                 "source":"operator_supplied_native_catalog",
                 "checked_at_utc":packet.catalog_checked_at_utc,
                 "sha256":packet.catalog_sha256,
-                "fresh":Utc::now() - catalog_checked <= Duration::hours(24),
+                "fresh":Timestamp::now() - catalog_checked <= Duration::hours(24),
                 "freshness_basis":"operator_timestamp_as_of_evaluation",
                 "host_identity":"unobserved","refresh_channel":"unobserved",
                 "source_authenticity_verified":false,"account_availability_verified":false
@@ -220,10 +220,10 @@ pub fn propose(packet: &Value, catalog: &Value) -> Result<Value, ContractError> 
     if !crate::model::optimization_model(&packet.current.model) {
         selection_limits.push("current_selection_outside_optimization_scope");
     }
-    if Utc::now() - generated > Duration::hours(24) {
+    if Timestamp::now() - generated > Duration::hours(24) {
         selection_limits.push("routing_evidence_stale");
     }
-    if Utc::now() - catalog_checked > Duration::hours(24) {
+    if Timestamp::now() - catalog_checked > Duration::hours(24) {
         selection_limits.push("native_catalog_stale");
     }
     if crate::model::optimization_model(&packet.current.model)
@@ -412,7 +412,7 @@ mod tests {
         ]})
     }
     fn packet(catalog: &Value) -> Value {
-        let now = Utc::now().to_rfc3339();
+        let now = Timestamp::now().to_rfc3339();
         json!({
             "kind":"groundline-routing-evidence","schema":2,
             "generated_at_utc":now,"catalog_checked_at_utc":now,
@@ -427,7 +427,7 @@ mod tests {
         json!({"unit_hash":h(n),"evidence_sha256":h(1000+n),"evidence_kind":"runtime_check",
             "cohort_sha256":h(2),"model":model,"effort":effort,"outcome":"verified",
             "rework":false,"owned_total_tokens":tokens,"wall_duration_ms":1000,
-            "owned_resources_complete":true,"completed_at_utc":(Utc::now()-Duration::seconds(1)).to_rfc3339()})
+            "owned_resources_complete":true,"completed_at_utc":(Timestamp::now()-Duration::seconds(1)).to_rfc3339()})
     }
     fn twenty(packet: &mut Value) {
         packet["outcomes"] = json!(
@@ -574,7 +574,7 @@ mod tests {
             assert!(result["suggestion"].is_null());
         }
         p["current"]["model"] = json!("gpt-6.1-sol");
-        p["catalog_checked_at_utc"] = json!((Utc::now() - Duration::days(2)).to_rfc3339());
+        p["catalog_checked_at_utc"] = json!((Timestamp::now() - Duration::days(2)).to_rfc3339());
         let result = propose(&p, &c).unwrap();
         assert_eq!(result["status"], "INCONCLUSIVE");
         assert_eq!(result["reason_codes"], json!(["native_catalog_stale"]));
@@ -667,7 +667,7 @@ mod tests {
         ]);
         assert!(propose(&p, &c).is_err());
         p["outcomes"] = json!([]);
-        p["catalog_checked_at_utc"] = json!((Utc::now() - Duration::days(2)).to_rfc3339());
+        p["catalog_checked_at_utc"] = json!((Timestamp::now() - Duration::days(2)).to_rfc3339());
         assert_eq!(
             propose(&p, &c).unwrap()["reason_codes"],
             json!(["native_catalog_stale"])

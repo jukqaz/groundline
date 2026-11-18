@@ -12,7 +12,6 @@ path = "src/main.rs"
 [dependencies]
 axum.workspace = true
 base64.workspace = true
-chrono.workspace = true
 groundline-contracts = { version = "2026.1110.1", path = "../groundline-contracts", features = ["insights", "integrity", "version"] }
 ipnet.workspace = true
 reqwest.workspace = true

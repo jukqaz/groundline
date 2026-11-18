@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use chrono::{SecondsFormat, Utc};
+use groundline_contracts::timestamp::{Timestamp, TimestampFormat};
 use serde::Deserialize;
 use serde_json::json;
 use thiserror::Error;
@@ -73,7 +73,7 @@ pub fn capture_trigger(codex_home: &Path, trigger: &str) -> Result<(), Checkpoin
         "schema_version":1,
         "kind":"groundline-insights-hook-capture",
         "trigger":trigger,
-        "captured_at_utc":Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+        "captured_at_utc":Timestamp::now().format_rfc3339(TimestampFormat::Millis, true),
     }))
     .map_err(|_| CheckpointError::CaptureFailed)?;
     value.push(b'\n');
@@ -105,7 +105,7 @@ fn capture_time(path: &Path, trigger: &str) -> Result<Option<String>, Checkpoint
     if value.schema_version != 1
         || value.kind != "groundline-insights-hook-capture"
         || value.trigger != trigger
-        || chrono::DateTime::parse_from_rfc3339(&value.captured_at_utc).is_err()
+        || Timestamp::parse_rfc3339(&value.captured_at_utc).is_err()
     {
         return Err(CheckpointError::CaptureFailed);
     }
@@ -126,8 +126,7 @@ pub fn capture_status(codex_home: &Path) -> Result<serde_json::Value, Checkpoint
             if let Some(time) = capture_time(&path, trigger)? {
                 *count += 1;
                 if latest.as_ref().is_none_or(|previous: &String| {
-                    chrono::DateTime::parse_from_rfc3339(&time).ok()
-                        > chrono::DateTime::parse_from_rfc3339(previous).ok()
+                    Timestamp::parse_rfc3339(&time).ok() > Timestamp::parse_rfc3339(previous).ok()
                 }) {
                     latest = Some(time);
                 }
