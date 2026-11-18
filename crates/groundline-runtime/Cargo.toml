@@ -45,7 +45,7 @@ insights-state = [
 [dependencies]
 command-group = { workspace = true, optional = true }
 dirs = { workspace = true, optional = true }
-groundline-contracts = { version = "2026.1110.1", path = "../groundline-contracts", default-features = false }
+groundline-contracts = { version = "2026.1118.1", path = "../groundline-contracts", default-features = false }
 ipnet = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 rusqlite = { workspace = true, optional = true }
