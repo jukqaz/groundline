@@ -1,9 +1,11 @@
 # GroundLine architecture
 
-Core owns one narrow workflow: contextual review, a real scoped guidance change,
-and later natural observation. Native Codex owns semantic judgment and editing.
-AGENTS and skills carry the result into work. Optional Insights owns consented
-operational collection and server analytics independently.
+Core provides one skill for contextual review, a scoped guidance change and
+later natural observation. The same skill guides model and effort selection
+when the user delegates that decision for the current task. Native Codex owns
+judgment, editing and execution. AGENTS and skills carry guidance into work.
+Optional Insights owns consented operational collection and server analytics
+independently.
 
 ```mermaid
 flowchart LR
@@ -19,13 +21,15 @@ flowchart LR
 | groundline-contracts::improvement | Strict compact records, independent follow-up and qualitative readouts |
 | Core CLI | Bounded private I/O, actual target binding, no-clobber publication and manual diagnostics |
 | Historical conversation contract | Read and validate immutable conversation records without requalifying old comparisons |
-| Native Codex | Interpret feedback, choose scope, edit and verify owning files, observe actual later work |
+| Native Codex | Interpret feedback, edit and verify guidance, observe later work, and apply model and effort selections through native controls |
 | Insights | Separately consented collection, HTTPS delivery, ClickHouse and Grafana |
 | xtask | Source/package/native validation and explicit publication |
 
-There is no Core model router, environment baseline writer, device synchronizer
-or ongoing learning profile. Configuration setup/repair remain explicit manual
-maintenance and preserve unrelated choices. Ordinary work does not invoke Core.
+Model and effort guidance runs on request within the current task. When the
+active native interface supports it, Codex can select a model and effort when
+spawning a new subagent. Use the native client for a later turn. Configuration
+setup and repair remain explicit manual maintenance. Core's offline CLI handles
+records and diagnostics.
 
 The existing private record directory holds compact captures, changes and
 observations beside unchanged historical conversation records. No new scheduler

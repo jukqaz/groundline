@@ -499,7 +499,10 @@ pub fn recommend_weekly_optimization(audit: &Value) -> Result<Value, ContractErr
     for (label, raw_count) in model_counts {
         let count = raw_count.as_u64().unwrap_or(0);
         let supported = label.split_once('|').is_some_and(|(model, effort)| {
-            crate::model::optimization_model(model) && !effort.contains('|') && count > 0
+            // Extend weekly advice without changing retained routing and receipt contracts.
+            let eligible_model = crate::model::optimization_model(model)
+                || matches!(model, "gpt-6.2-sol" | "gpt-6.2-astra");
+            eligible_model && !effort.contains('|') && count > 0
         });
         gpt6_only &= supported;
         turn_contexts = turn_contexts
@@ -853,6 +856,38 @@ mod tests {
     }
 
     #[test]
+    fn weekly_advice_includes_gpt_6_2_models() {
+        for model in ["gpt-6.2-sol", "gpt-6.2-astra"] {
+            let mut audit = weekly_audit();
+            audit["root"]["model_effort"]["counts"] = json!({(format!("{model}|ultra")): 20});
+            let result = recommend_weekly_optimization(&audit).unwrap();
+            assert_eq!(
+                result["optimization_model_cohort_eligible"], true,
+                "{model}"
+            );
+            assert_eq!(
+                result["recommendation_scope"],
+                "selected_completed_root_sample"
+            );
+            assert_eq!(
+                result["recommended_change"]["code"],
+                "reconcile_in_current_task"
+            );
+            assert_eq!(
+                result["deferred_candidate_codes"],
+                json!([
+                    "diagnose_before_retry",
+                    "measure_outcomes_before_effort_change"
+                ])
+            );
+            assert_eq!(
+                result["quality_contract"]["model_or_effort_change_allowed"],
+                false
+            );
+        }
+    }
+
+    #[test]
     fn weekly_advice_excludes_older_mixed_and_unversioned_model_cohorts() {
         for counts in [
             json!({"gpt-5.6-sol|xhigh":20}),
@@ -860,6 +895,8 @@ mod tests {
             json!({"astra|high":20}),
             json!({"gpt-6-sol|high":19,"gpt-5.6-luna|high":1}),
             json!({"gpt-6-luna|high":19,"unknown|unset":1}),
+            json!({"gpt-6.2-sol|ultra":19,"unknown|unset":1}),
+            json!({"gpt-6.2-sol-2026-11-17|ultra":20}),
             json!({}),
         ] {
             let mut audit = weekly_audit();

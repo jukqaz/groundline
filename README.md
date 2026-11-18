@@ -14,16 +14,21 @@ defaults live in native AGENTS layers; project requirements remain project-local
 
 ## Use
 
-Use `$groundline:optimize-codex-workflow` for an evidenced repeated friction.
-Follow [one compact path](plugins/groundline/references/conversation-improvement.md):
-capture the actual target, edit and verify through native Codex, record changed
-bytes, then observe independent later work. No justified change is a normal
-result. Usage audits are optional diagnosis, not a recurring prerequisite.
-Core does not route models, manage device baselines or run continuous learning.
+Use `$groundline:optimize-codex-workflow` for repeated friction with evidence.
+The [improvement workflow](plugins/groundline/references/conversation-improvement.md)
+captures the actual target, edits and verifies through native Codex, records
+changed bytes, then observes independent later work. No justified change is a
+normal result. Usage audits are available for targeted diagnosis.
+
+Use the same skill when you delegate model or reasoning-effort selection for the
+current task. If the task calls for a new subagent, use the choices the active
+Codex client exposes and honor explicit selections and permissions. Use native
+client controls for a later turn.
 
 Existing conversation records remain readable and unchanged. A contextual
-criterion being met is separate from causal quality or cost improvement;
-installation and test success do not prove either. See [validation](docs/guidance-validation.md).
+criterion being met is separate from causal quality or cost improvement.
+Verify package contents, available native choices, and actual behavior and cost
+with their respective evidence. See [validation](docs/guidance-validation.md).
 
 ## Install and maintain
 
