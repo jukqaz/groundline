@@ -1,0 +1,11 @@
+{
+  "kind": "groundline-plugin-distribution",
+  "schema": 1,
+  "product": "insights",
+  "plugin": "groundline-insights",
+  "marketplace": "groundline",
+  "channel": "stable",
+  "version": "2026.1118.1",
+  "release_tag": "insights-v2026.1118.1",
+  "source_sha": "0bb38a51d0f9f0b1a2b168ae7497d31d611378e3"
+}
