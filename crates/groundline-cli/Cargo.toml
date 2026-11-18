@@ -10,7 +10,6 @@ name = "groundline"
 path = "src/main.rs"
 
 [dependencies]
-chrono.workspace = true
 clap.workspace = true
 dirs.workspace = true
 groundline-contracts = { version = "2026.1110.1", path = "../groundline-contracts" }

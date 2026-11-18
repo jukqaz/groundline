@@ -11,15 +11,15 @@ required-features = ["audit"]
 
 [features]
 default = ["audit", "efficiency", "version"]
-audit = ["dep:chrono", "dep:serde", "dep:serde_json", "serde_json/raw_value", "dep:sha2", "dep:regex", "dep:shlex", "dep:oxc_allocator", "dep:oxc_ast", "dep:oxc_parser", "dep:oxc_span"]
-efficiency = ["dep:chrono", "dep:serde", "dep:serde_json", "dep:sha2", "dep:regex", "dep:url", "version"]
-insights = ["dep:chrono", "dep:serde", "dep:serde_json", "dep:sha2", "dep:regex", "dep:uuid", "version"]
+audit = ["timestamp", "dep:serde", "dep:serde_json", "serde_json/raw_value", "dep:sha2", "dep:regex", "dep:shlex", "dep:oxc_allocator", "dep:oxc_ast", "dep:oxc_parser", "dep:oxc_span"]
+efficiency = ["timestamp", "dep:serde", "dep:serde_json", "dep:sha2", "dep:regex", "dep:url", "version"]
+insights = ["timestamp", "dep:serde", "dep:serde_json", "dep:sha2", "dep:regex", "dep:uuid", "version"]
 integrity = ["dep:hmac", "dep:sha2"]
 guidance = ["dep:serde", "dep:serde-saphyr"]
-version = ["dep:chrono", "dep:semver"]
+timestamp = ["dep:time"]
+version = ["timestamp", "dep:semver"]
 
 [dependencies]
-chrono = { workspace = true, optional = true }
 hmac = { workspace = true, optional = true }
 oxc_allocator = { workspace = true, optional = true }
 oxc_ast = { workspace = true, optional = true }
@@ -33,5 +33,6 @@ serde_json = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
 shlex = { workspace = true, optional = true }
 thiserror.workspace = true
+time = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }

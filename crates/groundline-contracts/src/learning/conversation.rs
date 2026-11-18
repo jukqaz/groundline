@@ -4,7 +4,7 @@
 //! observations, establish universal applicability, or authorize a mutation.
 use super::{OutcomeLink, Proposal, content_sha256, digest, error, identifier};
 use crate::ContractError;
-use chrono::{DateTime, Utc};
+use crate::timestamp::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -317,21 +317,17 @@ pub fn assess_application(
     {
         return Err(error("invalid_conversation_application"));
     }
-    let applied = DateTime::parse_from_rfc3339(&application.applied_at_utc)
+    let applied = Timestamp::parse_rfc3339(&application.applied_at_utc)
         .map_err(|_| error("invalid_conversation_application_timestamp"))?;
-    let activated = DateTime::parse_from_rfc3339(&application.activated_at_utc)
+    let activated = Timestamp::parse_rfc3339(&application.activated_at_utc)
         .map_err(|_| error("invalid_conversation_application_timestamp"))?;
-    if applied > activated
-        || applied.with_timezone(&Utc) > Utc::now()
-        || activated.with_timezone(&Utc) > Utc::now()
-    {
+    if applied > activated || applied > Timestamp::now() || activated > Timestamp::now() {
         return Err(error("invalid_conversation_application_timestamp"));
     }
     assessment.application_observation = "observed";
     assessment.activation_observation = "observed";
     if baseline_links.iter().any(|link| {
-        DateTime::parse_from_rfc3339(&link.completed_at_utc)
-            .is_ok_and(|completed| completed > applied)
+        Timestamp::parse_rfc3339(&link.completed_at_utc).is_ok_and(|completed| completed > applied)
     }) {
         assessment
             .comparison_reasons
@@ -341,7 +337,7 @@ pub fn assess_application(
         match link
             .observed_at_utc
             .as_deref()
-            .and_then(|at| DateTime::parse_from_rfc3339(at).ok())
+            .and_then(|at| Timestamp::parse_rfc3339(at).ok())
         {
             None => {
                 assessment

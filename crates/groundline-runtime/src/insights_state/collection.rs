@@ -4,7 +4,7 @@ use super::*;
 const FILE: &str = "collection-window.json";
 const MAX_WINDOW_BYTES: u64 = 128 * 1024;
 const MAX_ATTEMPTS: u32 = 3;
-const INITIAL_LOOKBACK: chrono::Duration = chrono::Duration::days(7);
+const INITIAL_LOOKBACK: SignedDuration = SignedDuration::days(7);
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -80,11 +80,11 @@ pub(super) struct Source<'a> {
 pub(super) fn stage(
     directory: &Path,
     cursor: Option<&str>,
-    now: DateTime<Utc>,
+    now: Timestamp,
     identity: &Identity,
     consent: &Consent,
     source: Source<'_>,
-    audit: impl FnOnce(DateTime<Utc>, DateTime<Utc>) -> Result<Value, StateError>,
+    audit: impl FnOnce(Timestamp, Timestamp) -> Result<Value, StateError>,
 ) -> Result<String, StateError> {
     let Source {
         generation,
@@ -103,8 +103,8 @@ pub(super) fn stage(
             }
             let window = Window {
                 schema_version: 1,
-                start_utc: start.to_rfc3339_opts(SecondsFormat::Millis, true),
-                end_utc: now.to_rfc3339_opts(SecondsFormat::Millis, true),
+                start_utc: start.format_rfc3339(TimestampFormat::Millis, true),
+                end_utc: now.format_rfc3339(TimestampFormat::Millis, true),
                 attempts: 0,
                 prepared: false,
                 event: None,
@@ -195,8 +195,8 @@ mod tests {
     use super::*;
     use rusqlite::{Connection, params};
 
-    fn at(n: i64) -> DateTime<Utc> {
-        DateTime::from_timestamp(1_800_000_000 + n, 0).unwrap()
+    fn at(n: i64) -> Timestamp {
+        Timestamp::from_timestamp(1_800_000_000 + n, 0).unwrap()
     }
     fn fixture() -> (tempfile::TempDir, PathBuf, PathBuf, Identity, Consent) {
         let temp = tempfile::tempdir().unwrap();
@@ -207,7 +207,7 @@ mod tests {
         db.execute_batch("CREATE TABLE threads (rollout_path TEXT, source TEXT, has_user_event INTEGER, updated_at INTEGER)").unwrap();
         db.execute(
             "INSERT INTO threads VALUES (?1,'cli',1,?2)",
-            params![rollout.to_str(), at(20).timestamp()],
+            params![rollout.to_str(), at(20).unix_timestamp()],
         )
         .unwrap();
         let directory = state_directory(&root).unwrap();
@@ -281,7 +281,7 @@ mod tests {
         }
     }
 
-    fn audit(root: &Path, start: DateTime<Utc>, end: DateTime<Utc>) -> Result<Value, StateError> {
+    fn audit(root: &Path, start: Timestamp, end: Timestamp) -> Result<Value, StateError> {
         collect_audit(root, start, end, Some("codex_cli"), false)
             .map_err(CollectionFailure::audit_read)
     }
@@ -302,7 +302,7 @@ mod tests {
         connection
             .execute(
                 "INSERT INTO threads VALUES (?1,?2,0,?3)",
-                params![child.to_str(), child_source, at(20).timestamp()],
+                params![child.to_str(), child_source, at(20).unix_timestamp()],
             )
             .unwrap();
         drop(connection);
@@ -389,7 +389,7 @@ mod tests {
     fn audit_read_failure_keeps_fixed_diagnostic_window_and_cadence_through_recovery() {
         let (_temp, root, rollout, identity, consent) = fixture();
         let directory = state_directory(&root).unwrap();
-        let cursor = at(0).to_rfc3339();
+        let cursor = "2027-01-15T17:00:00+09:00".to_owned();
         std::fs::remove_file(root.join("state_5.sqlite")).unwrap();
         let error = stage(
             &directory,
@@ -440,14 +440,14 @@ mod tests {
         let window = read(&directory).unwrap().unwrap();
         assert_eq!(window.attempts, 1);
         assert!(!window.prepared);
-        assert_eq!(parse_timestamp(&window.start_utc).unwrap(), at(0));
-        assert_eq!(parse_timestamp(&window.end_utc).unwrap(), at(10));
+        assert_eq!(window.start_utc, "2027-01-15T08:00:00.000Z");
+        assert_eq!(window.end_utc, "2027-01-15T08:00:10.000Z");
 
         let db = Connection::open(root.join("state_5.sqlite")).unwrap();
         db.execute_batch("CREATE TABLE threads (rollout_path TEXT, source TEXT, has_user_event INTEGER, updated_at INTEGER)").unwrap();
         db.execute(
             "INSERT INTO threads VALUES (?1,'cli',1,?2)",
-            params![rollout.to_str(), at(20).timestamp()],
+            params![rollout.to_str(), at(20).unix_timestamp()],
         )
         .unwrap();
         drop(db);

@@ -6,11 +6,11 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use chrono::{DateTime, SecondsFormat, Utc};
 use groundline_contracts::event::{
     CollectorIdentity as EventIdentity, ConsentReceipt as EventConsent, build_basic_event,
 };
 use groundline_contracts::insights::validate_basic_event_bytes;
+use groundline_contracts::timestamp::{Duration as SignedDuration, Timestamp, TimestampFormat};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use reqwest::redirect::Policy;
 use secrecy::{ExposeSecret, SecretString};
@@ -62,8 +62,8 @@ const UPLOAD_CYCLE_TIMEOUT: Duration = Duration::from_secs(45);
 const RETRY_BASE_SECONDS: u64 = 60;
 const RETRY_MAX_SECONDS: u64 = 60 * 60;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
-const COLLECTION_STALE_AFTER: chrono::Duration = chrono::Duration::days(7);
-const MAX_CLOCK_SKEW: chrono::Duration = chrono::Duration::minutes(5);
+const COLLECTION_STALE_AFTER: SignedDuration = SignedDuration::days(7);
+const MAX_CLOCK_SKEW: SignedDuration = SignedDuration::minutes(5);
 static CRYPTO_PROVIDER: OnceLock<Result<(), ()>> = OnceLock::new();
 
 #[derive(Debug, Error)]
@@ -416,9 +416,9 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<(), StateError> {
     atomic_write_private(path, &bytes).map_err(|_| StateError::LocalState)
 }
 
-fn parse_timestamp(value: &str) -> Result<DateTime<Utc>, StateError> {
-    DateTime::parse_from_rfc3339(value)
-        .map(|value| value.with_timezone(&Utc))
+fn parse_timestamp(value: &str) -> Result<Timestamp, StateError> {
+    Timestamp::parse_rfc3339(value)
+        .map(Timestamp::to_utc)
         .map_err(|_| StateError::LocalState)
 }
 
@@ -572,7 +572,7 @@ fn consent_status(directory: &Path) -> Result<&'static str, StateError> {
     })
 }
 
-fn grant_consent(directory: &Path, now: DateTime<Utc>) -> Result<Consent, StateError> {
+fn grant_consent(directory: &Path, now: Timestamp) -> Result<Consent, StateError> {
     let path = directory.join(CONSENT_FILE);
     if path.exists() {
         return active_consent(directory);
@@ -584,7 +584,7 @@ fn grant_consent(directory: &Path, now: DateTime<Utc>) -> Result<Consent, StateE
         scope: "basic_weekly".to_owned(),
         status: "active".to_owned(),
         receipt_id: Uuid::new_v4(),
-        accepted_at_utc: now.to_rfc3339_opts(SecondsFormat::Millis, true),
+        accepted_at_utc: now.format_rfc3339(TimestampFormat::Millis, true),
         diagnostic_enabled: false,
         owner_service_upload_enabled: true,
         third_party_upload_enabled: false,
@@ -593,7 +593,7 @@ fn grant_consent(directory: &Path, now: DateTime<Utc>) -> Result<Consent, StateE
     Ok(value)
 }
 
-fn initialize(directory: &Path, now: DateTime<Utc>) -> Result<(Identity, Consent), StateError> {
+fn initialize(directory: &Path, now: Timestamp) -> Result<(Identity, Consent), StateError> {
     let consent = active_consent(directory)?;
     let (os, runtime, mode) = environment()?;
     if os == "unknown" {
@@ -623,7 +623,7 @@ fn initialize(directory: &Path, now: DateTime<Utc>) -> Result<(Identity, Consent
             os_family: os.to_owned(),
             runtime_family: runtime,
             execution_mode: mode,
-            created_at_utc: now.to_rfc3339_opts(SecondsFormat::Millis, true),
+            created_at_utc: now.format_rfc3339(TimestampFormat::Millis, true),
             resettable: true,
         };
         write_json(&identity_path, &value)?;
@@ -667,7 +667,7 @@ fn policy_enabled(directory: &Path) -> Result<bool, StateError> {
     Ok(current_policy(directory)?.is_some_and(|policy| policy.status == "active"))
 }
 
-fn set_policy(directory: &Path, enabled: bool, now: DateTime<Utc>) -> Result<(), StateError> {
+fn set_policy(directory: &Path, enabled: bool, now: Timestamp) -> Result<(), StateError> {
     write_json(
         &directory.join(POLICY_FILE),
         &json!({
@@ -675,7 +675,7 @@ fn set_policy(directory: &Path, enabled: bool, now: DateTime<Utc>) -> Result<(),
             "status":if enabled {"active"} else {"revoked"},
             "automatic_activity_checkpoints":enabled,"collection_scope":"all_activity",
             "diagnostic_enabled":false,"trigger_mode":"native_hook_checkpoints",
-            "updated_at_utc":now.to_rfc3339_opts(SecondsFormat::Millis, true),
+            "updated_at_utc":now.format_rfc3339(TimestampFormat::Millis, true),
         }),
     )
 }
@@ -977,7 +977,7 @@ async fn enroll(
         &directory.join(TOKEN_METADATA_FILE),
         &json!({
             "schema_version":2,"kind":"groundline-insights-token-metadata","collector_instance_id":identity.collector_instance_id,
-            "enrolled_at_utc":Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),"os_family":identity.os_family,
+            "enrolled_at_utc":Timestamp::now().format_rfc3339(TimestampFormat::Millis, true),"os_family":identity.os_family,
             "runtime_family":identity.runtime_family,"execution_mode":identity.execution_mode,"groundline_version":env!("CARGO_PKG_VERSION"),
         }),
     )?;
@@ -1162,7 +1162,7 @@ async fn upload(
     delivery_confirmation::read(directory)?;
     let mut uploaded = 0_u64;
     let mut acknowledged_paths = Vec::new();
-    let mut collected_through = None::<DateTime<Utc>>;
+    let mut collected_through = None::<Timestamp>;
     for (path, event) in events {
         let _permit = match collection_permit(directory) {
             Ok(permit) => permit,
@@ -1217,7 +1217,7 @@ async fn upload(
         }
         acknowledged_paths.push(path);
         uploaded = uploaded.checked_add(1).ok_or(StateError::LocalState)?;
-        delivery_confirmation::record(directory, uploaded, Utc::now())?;
+        delivery_confirmation::record(directory, uploaded, Timestamp::now())?;
         let outcome = if value["outcome"] == "duplicate" {
             activity_history::Outcome::Duplicate
         } else {
@@ -1227,14 +1227,14 @@ async fn upload(
             directory,
             outcome,
             value["outcome"].as_str().unwrap_or_default(),
-            Utc::now(),
+            Timestamp::now(),
         );
     }
     Ok(UploadReceipt {
         uploaded_count: uploaded,
         acknowledged_paths,
         collected_through_utc: collected_through
-            .map(|value| value.to_rfc3339_opts(SecondsFormat::Millis, true)),
+            .map(|value| value.format_rfc3339(TimestampFormat::Millis, true)),
     })
 }
 
@@ -1305,7 +1305,7 @@ fn retry_delay_seconds(directory: &Path, attempt_count: u32) -> u64 {
 
 fn record_delivery_retry(
     directory: &Path,
-    now: DateTime<Utc>,
+    now: Timestamp,
     error: &StateError,
 ) -> Result<DeliveryRetry, StateError> {
     let previous = read_delivery_retry(directory)?;
@@ -1320,8 +1320,8 @@ fn record_delivery_retry(
         None
     } else {
         Some(
-            (now + chrono::Duration::seconds(retry_delay_seconds(directory, attempt_count) as i64))
-                .to_rfc3339_opts(SecondsFormat::Millis, true),
+            (now + SignedDuration::seconds(retry_delay_seconds(directory, attempt_count) as i64))
+                .format_rfc3339(TimestampFormat::Millis, true),
         )
     };
     let value = DeliveryRetry {
@@ -1338,15 +1338,15 @@ fn record_delivery_retry(
 
 fn schedule_remaining_delivery(
     directory: &Path,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<DeliveryRetry, StateError> {
     let value = DeliveryRetry {
         schema_version: 1,
         kind: "groundline-insights-delivery-retry".to_owned(),
         attempt_count: 0,
         next_attempt_utc: Some(
-            (now + chrono::Duration::seconds(RETRY_BASE_SECONDS as i64))
-                .to_rfc3339_opts(SecondsFormat::Millis, true),
+            (now + SignedDuration::seconds(RETRY_BASE_SECONDS as i64))
+                .format_rfc3339(TimestampFormat::Millis, true),
         ),
         last_error_code: "delivery_batch_pending".to_owned(),
         operator_required: false,
@@ -1369,7 +1369,7 @@ fn clear_delivery_retry(directory: &Path) -> Result<(), StateError> {
     std::fs::remove_file(path).map_err(|_| StateError::LocalState)
 }
 
-fn delivery_is_due(trigger: &str, retry: Option<&DeliveryRetry>, now: DateTime<Utc>) -> bool {
+fn delivery_is_due(trigger: &str, retry: Option<&DeliveryRetry>, now: Timestamp) -> bool {
     if matches!(trigger, "manual" | "history_sync") {
         return true;
     }
@@ -1407,7 +1407,7 @@ fn valid_status_trigger(trigger: &str) -> bool {
 fn collection_is_due(
     trigger: &str,
     previous: Option<&Status>,
-    now: DateTime<Utc>,
+    now: Timestamp,
     minimum_interval_seconds: u64,
 ) -> bool {
     if trigger == "user_prompt_submit_hook" {
@@ -1420,9 +1420,9 @@ fn collection_is_due(
     else {
         return true;
     };
-    let elapsed = now.signed_duration_since(last_check);
-    elapsed < chrono::Duration::zero()
-        || elapsed >= chrono::Duration::seconds(minimum_interval_seconds as i64)
+    let elapsed = now - last_check;
+    elapsed < SignedDuration::ZERO
+        || elapsed >= SignedDuration::seconds(minimum_interval_seconds as i64)
 }
 
 fn valid_tailnet_status(status: &str) -> bool {
@@ -1482,7 +1482,7 @@ fn write_status(directory: &Path, status: &Status) -> Result<(), StateError> {
 
 pub fn enable(codex_home: &Path) -> Result<Value, StateError> {
     let directory = state_directory(codex_home)?;
-    let now = Utc::now();
+    let now = Timestamp::now();
     load_profile(codex_home)?;
     enrollment_token(codex_home).map_err(|_| StateError::InvalidProfile)?;
     let _control = collection_control_lock(&directory)?;
@@ -1503,13 +1503,13 @@ pub fn enable(codex_home: &Path) -> Result<Value, StateError> {
 
 pub fn disable(codex_home: &Path) -> Result<Value, StateError> {
     let directory = state_directory(codex_home)?;
-    set_policy(&directory, false, Utc::now())?;
+    set_policy(&directory, false, Timestamp::now())?;
     // Revoke first so an in-flight request cannot start the next batch item.
     // Success waits for its bounded request/read to finish. A previously sent
     // request can still be received by the server; it cannot be recalled.
     let _control = collection_control_lock(&directory)?;
     _control.lock().map_err(|_| StateError::LocalState)?;
-    set_policy(&directory, false, Utc::now())?;
+    set_policy(&directory, false, Timestamp::now())?;
     Ok(json!({"status":"PASS","disabled":true,"mutation_performed":true}))
 }
 
@@ -1525,8 +1525,8 @@ fn current_status(directory: &Path) -> Result<Option<Status>, StateError> {
 
 fn observation_status(
     at: Option<&str>,
-    active_since: Option<DateTime<Utc>>,
-    now: DateTime<Utc>,
+    active_since: Option<Timestamp>,
+    now: Timestamp,
 ) -> &'static str {
     let Some(at) = at else {
         return "unobserved";
@@ -1552,7 +1552,7 @@ fn observation_status(
 fn status_with_tailnet_at(
     codex_home: &Path,
     tailnet: Value,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<Value, StateError> {
     let directory = state_directory(codex_home)?;
     let policy_configured = tailnet::is_regular_file(&directory.join(POLICY_FILE));
@@ -1743,7 +1743,7 @@ fn status_with_tailnet_at(
 }
 
 fn status_with_tailnet(codex_home: &Path, tailnet: Value) -> Result<Value, StateError> {
-    status_with_tailnet_at(codex_home, tailnet, Utc::now())
+    status_with_tailnet_at(codex_home, tailnet, Timestamp::now())
 }
 
 pub fn status(codex_home: &Path) -> Result<Value, StateError> {
@@ -1778,7 +1778,7 @@ struct StatusUpdate<'a> {
 fn persist_cycle_status(
     directory: &Path,
     previous: Option<&Status>,
-    now: DateTime<Utc>,
+    now: Timestamp,
     update: StatusUpdate<'_>,
 ) -> Result<(), StateError> {
     persist_cycle_status_with_failure(directory, previous, now, update, None)
@@ -1787,7 +1787,7 @@ fn persist_cycle_status(
 fn persist_cycle_status_with_failure(
     directory: &Path,
     previous: Option<&Status>,
-    now: DateTime<Utc>,
+    now: Timestamp,
     update: StatusUpdate<'_>,
     collection_failure: Option<CollectionFailure>,
 ) -> Result<(), StateError> {
@@ -1799,9 +1799,9 @@ fn persist_cycle_status_with_failure(
             kind: "groundline-insights-owner-auto-status".to_owned(),
             enabled: true,
             last_result_code: update.result_code.to_owned(),
-            last_check_utc: now.to_rfc3339_opts(SecondsFormat::Millis, true),
+            last_check_utc: now.format_rfc3339(TimestampFormat::Millis, true),
             last_success_utc: if update.successful {
-                Some(now.to_rfc3339_opts(SecondsFormat::Millis, true))
+                Some(now.format_rfc3339(TimestampFormat::Millis, true))
             } else {
                 previous.and_then(|value| value.last_success_utc.clone())
             },
@@ -1844,7 +1844,7 @@ pub async fn run_once(
     let _lock = CycleLock::acquire(&directory)?;
     require_collection(&directory)?;
     crate::checkpoint::claim_triggers(codex_home).map_err(|_| StateError::LocalState)?;
-    let now = Utc::now();
+    let now = Timestamp::now();
     let previous = current_status(&directory)?;
     collection::finish_committed(
         &directory,
@@ -2132,7 +2132,7 @@ pub fn resolve_roots(
 
 #[cfg(test)]
 mod tests {
-    use chrono::{DateTime, Utc};
+    use groundline_contracts::timestamp::{Duration as SignedDuration, Timestamp};
     use serde_json::{Value, json};
     use tempfile::tempdir;
 
@@ -2356,11 +2356,11 @@ mod tests {
         enable(home.path()).unwrap();
         native_store(home.path());
         let directory = state_directory(home.path()).unwrap();
-        let now = DateTime::parse_from_rfc3339("2026-09-30T12:00:00Z")
+        let now = Timestamp::parse_rfc3339("2026-09-30T12:00:00Z")
             .unwrap()
-            .with_timezone(&Utc);
-        let before_activation = now - chrono::Duration::hours(2);
-        set_policy(&directory, true, now - chrono::Duration::hours(1)).unwrap();
+            .to_utc();
+        let before_activation = now - SignedDuration::hours(2);
+        set_policy(&directory, true, now - SignedDuration::hours(1)).unwrap();
         let update = |successful| StatusUpdate {
             result_code: "pass",
             collected_through_utc: Some(before_activation.to_rfc3339()),
@@ -2412,7 +2412,7 @@ mod tests {
         persist_cycle_status(
             &directory,
             None,
-            now - chrono::Duration::minutes(10),
+            now - SignedDuration::minutes(10),
             update(true),
         )
         .unwrap();
@@ -2513,7 +2513,7 @@ mod tests {
     fn enabled_but_incomplete_configuration_is_not_reported_as_pass() {
         let home = tempdir().expect("temporary Codex home");
         let directory = state_directory(home.path()).unwrap();
-        set_policy(&directory, true, Utc::now()).expect("write policy fixture");
+        set_policy(&directory, true, Timestamp::now()).expect("write policy fixture");
         let result = status_with_tailnet(
             home.path(),
             json!({"tailnet_connected":true,"tailnet_status":"connected"}),
@@ -2541,13 +2541,13 @@ mod tests {
                 "collection_scope":"all_activity",
                 "diagnostic_enabled":false,
                 "trigger_mode":"native_hook_checkpoints",
-                "updated_at_utc":Utc::now().to_rfc3339(),
+                "updated_at_utc":Timestamp::now().to_rfc3339(),
             }),
         )
         .expect("write malformed policy");
         assert!(policy_enabled(&directory).is_err());
 
-        set_policy(&directory, false, Utc::now()).expect("replace valid policy");
+        set_policy(&directory, false, Timestamp::now()).expect("replace valid policy");
         write_json(
             &directory.join(OUTBOX_DIR).join("unexpected.txt"),
             &json!({"x":1}),
@@ -2675,9 +2675,9 @@ mod tests {
         enable(home.path()).expect("enable collection");
         native_store(home.path());
         let directory = state_directory(home.path()).unwrap();
-        let now = DateTime::parse_from_rfc3339("2026-08-31T00:00:00Z")
+        let now = Timestamp::parse_rfc3339("2026-08-31T00:00:00Z")
             .expect("fixed now")
-            .with_timezone(&Utc);
+            .to_utc();
         let mut stored = Status {
             schema_version: 4,
             kind: "groundline-insights-owner-auto-status".to_owned(),
@@ -2723,9 +2723,9 @@ mod tests {
 
     #[test]
     fn collection_cadence_and_delivery_retry_are_independent() {
-        let now = DateTime::parse_from_rfc3339("2026-08-31T00:10:00Z")
+        let now = Timestamp::parse_rfc3339("2026-08-31T00:10:00Z")
             .expect("fixed now")
-            .with_timezone(&Utc);
+            .to_utc();
         let status = Status {
             schema_version: 4,
             kind: "groundline-insights-owner-auto-status".to_owned(),
@@ -2758,7 +2758,7 @@ mod tests {
             assert!(collection_is_due(
                 trigger,
                 Some(&status),
-                now + chrono::Duration::seconds(301),
+                now + SignedDuration::seconds(301),
                 900
             ));
         }
@@ -2771,7 +2771,7 @@ mod tests {
         assert!(!collection_is_due(
             "user_prompt_submit_hook",
             Some(&status),
-            now + chrono::Duration::hours(1),
+            now + SignedDuration::hours(1),
             900
         ));
         assert!(collection_is_due("manual", Some(&status), now, 900));
@@ -2798,7 +2798,7 @@ mod tests {
         assert!(delivery_is_due(
             "session_end_hook",
             Some(&retry),
-            now + chrono::Duration::minutes(2)
+            now + SignedDuration::minutes(2)
         ));
         assert!(delivery_is_due("manual", Some(&retry), now));
     }
@@ -2812,7 +2812,7 @@ mod tests {
         enable(home.path()).unwrap();
         native_store(home.path());
         let directory = state_directory(home.path()).unwrap();
-        let now = Utc::now();
+        let now = Timestamp::now();
         let update = |successful| StatusUpdate {
             result_code: if successful { "pass" } else { "audit_failed" },
             collected_through_utc: None,
@@ -3035,9 +3035,9 @@ mod tests {
         assert_eq!(inventory.observed_count, MAX_OUTBOX_EVENTS + 1);
         assert!(inventory.batch.is_empty());
 
-        let now = DateTime::parse_from_rfc3339("2026-08-31T00:10:00Z")
+        let now = Timestamp::parse_rfc3339("2026-08-31T00:10:00Z")
             .expect("fixed now")
-            .with_timezone(&Utc);
+            .to_utc();
         let retry =
             record_delivery_retry(&directory, now, &StateError::UploadFailed).expect("retry state");
         assert_eq!(retry.attempt_count, 1);
@@ -3188,8 +3188,12 @@ fn api_capability_matrix_requires_semantic_contract_without_version_pinning() {
         Err(StateError::UploadFailed)
     ));
     let home = tempfile::tempdir().unwrap();
-    let retry =
-        record_delivery_retry(home.path(), Utc::now(), &StateError::ApiUpgradeRequired).unwrap();
+    let retry = record_delivery_retry(
+        home.path(),
+        Timestamp::now(),
+        &StateError::ApiUpgradeRequired,
+    )
+    .unwrap();
     assert!(retry.operator_required);
     assert!(retry.next_attempt_utc.is_none());
 }
@@ -3264,7 +3268,7 @@ fn auth_rejections_preserve_bounded_server_reason_codes() {
         assert_eq!(error.to_string(), expected);
         assert!(error.network_performed());
         let home = tempfile::tempdir().unwrap();
-        let retry = record_delivery_retry(home.path(), Utc::now(), &error).unwrap();
+        let retry = record_delivery_retry(home.path(), Timestamp::now(), &error).unwrap();
         assert!(retry.operator_required);
         assert!(retry.next_attempt_utc.is_none());
     }

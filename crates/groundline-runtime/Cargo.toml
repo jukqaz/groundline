@@ -8,7 +8,6 @@ repository.workspace = true
 [features]
 default = ["audit-store"]
 audit-store = [
-  "dep:chrono",
   "dep:dirs",
   "groundline-contracts/audit",
   "groundline-contracts/efficiency",
@@ -19,7 +18,6 @@ audit-store = [
   "dep:zstd",
 ]
 insights-client = [
-  "dep:chrono",
   "dep:dirs",
   "groundline-contracts/insights",
   "dep:ipnet",
@@ -33,7 +31,7 @@ insights-client = [
   "dep:uuid",
   "dep:zeroize",
 ]
-tailnet-probe = ["dep:chrono", "dep:command-group", "dep:serde_json"]
+tailnet-probe = ["groundline-contracts/timestamp", "dep:command-group", "dep:serde_json"]
 insights-state = [
   "audit-store",
   "insights-client",
@@ -45,7 +43,6 @@ insights-state = [
 ]
 
 [dependencies]
-chrono = { workspace = true, optional = true }
 command-group = { workspace = true, optional = true }
 dirs = { workspace = true, optional = true }
 groundline-contracts = { version = "2026.1110.1", path = "../groundline-contracts", default-features = false }

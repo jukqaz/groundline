@@ -1,8 +1,8 @@
 //! Scoped natural-work records. Hook correlation is never an outcome or proof
 //! of response ownership; direct receipts remain the resource authority.
 use super::{RuntimeObservation, digest, error, identifier};
+use crate::timestamp::{Duration, Timestamp};
 use crate::{ContractError, delivery};
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -22,9 +22,9 @@ fn absolute_path(value: &str) -> bool {
             .any(|c| matches!(c, Component::ParentDir | Component::CurDir))
 }
 
-pub fn timestamp(value: &str) -> Result<DateTime<chrono::FixedOffset>, ContractError> {
-    let at = DateTime::parse_from_rfc3339(value).map_err(|_| error("invalid_task_timestamp"))?;
-    if at.with_timezone(&Utc) > Utc::now() + chrono::Duration::minutes(5) {
+pub fn timestamp(value: &str) -> Result<Timestamp, ContractError> {
+    let at = Timestamp::parse_rfc3339(value).map_err(|_| error("invalid_task_timestamp"))?;
+    if at > Timestamp::now() + Duration::minutes(5) {
         return Err(error("invalid_task_timestamp"));
     }
     Ok(at)

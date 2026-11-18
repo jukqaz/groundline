@@ -1,5 +1,5 @@
 #![cfg(unix)]
-use chrono::Utc;
+use groundline_contracts::timestamp::{Duration, Timestamp};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -107,7 +107,7 @@ impl Fixture {
         behavior: &str,
     ) -> Output {
         self.write_input(&json!({"source_work_sha256":hash(work.as_bytes()),"evidence_sha256":hash(format!("evidence-{work}").as_bytes()),
-            "target_after_sha256":hash(&fs::read(&self.target).unwrap()),"observed_at_utc":Utc::now().to_rfc3339(),
+            "target_after_sha256":hash(&fs::read(&self.target).unwrap()),"observed_at_utc":Timestamp::now().to_rfc3339(),
             "exposure":exposure,"opportunity":opportunity,"behavior":behavior}));
         self.run(&[
             "improve",
@@ -426,7 +426,7 @@ fn future_and_contradictory_observations_and_conflicting_writer_are_read_only_fa
     assert!(!out.status.success());
     assert_eq!(f.files(), snapshot);
     f.write_input(&json!({"source_work_sha256":hash(b"later-work"),"evidence_sha256":hash(b"later-evidence"),
-        "target_after_sha256":hash(&fs::read(&f.target).unwrap()),"observed_at_utc":(Utc::now()+chrono::Duration::hours(1)).to_rfc3339(),
+        "target_after_sha256":hash(&fs::read(&f.target).unwrap()),"observed_at_utc":(Timestamp::now()+Duration::hours(1)).to_rfc3339(),
         "exposure":"observed","opportunity":"present","behavior":"met"}));
     let out = f.run(&[
         "improve",

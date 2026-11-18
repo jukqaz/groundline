@@ -6,12 +6,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use chrono::{DateTime, Utc};
 use groundline_contracts::ContractError;
 use groundline_contracts::delivery::{
     MAX_RESOURCE_ENTRIES, ResourceEntry, Resources, SelectionObservation,
 };
 use groundline_contracts::learning::continuous::bytes_sha256;
+use groundline_contracts::timestamp::{Duration, Timestamp};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -229,8 +229,8 @@ struct TurnData {
     context_seen: bool,
     pair: Option<Pair>,
     context_conflict: bool,
-    started_at: Option<DateTime<Utc>>,
-    closed_at: Option<DateTime<Utc>>,
+    started_at: Option<Timestamp>,
+    closed_at: Option<Timestamp>,
     aborted: bool,
     response_count: usize,
     sum: [Option<u64>; 5],
@@ -260,7 +260,7 @@ struct Response {
     scope_turn: String,
     exact_turn: Option<String>,
     usage: Tokens,
-    at: DateTime<Utc>,
+    at: Timestamp,
 }
 
 struct Notification {
@@ -275,8 +275,8 @@ struct Parsed {
     is_child: bool,
     root_session: String,
     root_turns: BTreeSet<String>,
-    start: DateTime<Utc>,
-    end: DateTime<Utc>,
+    start: Timestamp,
+    end: Timestamp,
     metadata: Option<Metadata>,
     turns: BTreeMap<String, TurnData>,
     seen: BTreeMap<String, ResponseSignature>,
@@ -295,7 +295,7 @@ impl Parsed {
         self.missing.insert(code.to_owned());
     }
 
-    fn in_window(&self, at: Option<DateTime<Utc>>) -> bool {
+    fn in_window(&self, at: Option<Timestamp>) -> bool {
         at.is_some_and(|at| at >= self.start && at <= self.end)
     }
 
@@ -378,8 +378,8 @@ impl Parsed {
         }
         let at = record["timestamp"]
             .as_str()
-            .and_then(|v| DateTime::parse_from_rfc3339(v).ok())
-            .map(|v| v.with_timezone(&Utc));
+            .and_then(|v| Timestamp::parse_rfc3339(v).ok())
+            .map(Timestamp::to_utc);
         let turn_hash = turn(payload["turn_id"].as_str());
         // Identical response replay is allowed even if its replay ordinal is
         // not increasing. Every conflicting stable response record fails.
@@ -473,7 +473,7 @@ impl Parsed {
     fn response(
         &mut self,
         payload: &Value,
-        at: Option<DateTime<Utc>>,
+        at: Option<Timestamp>,
         ordinal: Option<u64>,
     ) -> Result<(), ContractError> {
         let turn_hash = turn(payload["turn_id"].as_str());
@@ -613,7 +613,7 @@ impl Parsed {
     fn event(
         &mut self,
         payload: &Value,
-        at: Option<DateTime<Utc>>,
+        at: Option<Timestamp>,
         turn_hash: Option<String>,
     ) -> Result<(), ContractError> {
         let kind = payload["type"].as_str().unwrap_or_default();
@@ -806,15 +806,15 @@ fn observe_with_recheck(
     before_recheck: impl FnOnce(),
 ) -> Result<ResponseProof, ContractError> {
     let started = Instant::now();
-    let start = DateTime::parse_from_rfc3339(&request.start_utc)
+    let start = Timestamp::parse_rfc3339(&request.start_utc)
         .map_err(|_| error("invalid_timestamp"))?
-        .with_timezone(&Utc);
-    let end = DateTime::parse_from_rfc3339(&request.end_utc)
+        .to_utc();
+    let end = Timestamp::parse_rfc3339(&request.end_utc)
         .map_err(|_| error("invalid_timestamp"))?
-        .with_timezone(&Utc);
+        .to_utc();
     if !digest(&request.unit_hash)
         || end < start
-        || end > Utc::now() + chrono::Duration::minutes(5)
+        || end > Timestamp::now() + Duration::minutes(5)
         || request.children.len() + 1 > MAX_NATIVE_REFS
         || request.owned_root_turn_hashes.len() >= MAX_TURNS
     {
@@ -954,7 +954,7 @@ fn observe_with_recheck(
         })
         .flatten();
     let wall_duration_ms =
-        latest_closure.and_then(|at| u64::try_from((at - start).num_milliseconds()).ok());
+        latest_closure.and_then(|at| u64::try_from((at - start).whole_milliseconds()).ok());
     let mut evidence = BTreeMap::<String, SelectionEvidence>::new();
     let mut root_effective = None;
     let mut entries = Vec::new();

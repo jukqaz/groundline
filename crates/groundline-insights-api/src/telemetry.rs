@@ -80,11 +80,11 @@ pub(super) async fn lifecycle(
 }
 
 pub(super) async fn run(state: AppState) {
-    let mut start = Utc::now();
+    let mut start = Timestamp::now();
     let mut dropped = 0_u64;
     loop {
         tokio::time::sleep(Duration::from_secs(60)).await;
-        let end = Utc::now();
+        let end = Timestamp::now();
         let values = match state.metrics.lock() {
             Ok(mut m) => std::mem::take(&mut m.values),
             Err(_) => return,
@@ -96,8 +96,8 @@ pub(super) async fn run(state: AppState) {
             ("heartbeat", "success"),
             Counter::default(),
         ))) {
-            rows.push(json!({"sample_id":sample,"period_start":start.to_rfc3339_opts(SecondsFormat::Millis,true),
-                "period_end":end.to_rfc3339_opts(SecondsFormat::Millis,true),"received_at":end.to_rfc3339_opts(SecondsFormat::Millis,true),
+            rows.push(json!({"sample_id":sample,"period_start":start.format_rfc3339(TimestampFormat::Millis,true),
+                "period_end":end.format_rfc3339(TimestampFormat::Millis,true),"received_at":end.format_rfc3339(TimestampFormat::Millis,true),
                 "route":route,"outcome":outcome,"requests":c.requests,"duration_us":c.duration_us,"max_duration_us":c.max_duration_us,
                 "dropped_requests":if route=="heartbeat" {dropped} else {0}}));
         }

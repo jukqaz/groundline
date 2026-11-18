@@ -1,7 +1,7 @@
 //! One small change, native editing, and a later contextual observation.
 use crate::improvement_io::{self as io, State};
-use chrono::Utc;
 use clap::Subcommand;
+use groundline_contracts::timestamp::Timestamp;
 use groundline_contracts::{ContractError, improvement as contract, learning};
 use serde_json::{Value, json};
 use std::os::unix::fs::MetadataExt;
@@ -183,7 +183,7 @@ pub(crate) fn run(command: Command) -> Result<Value, ContractError> {
                 brief,
                 target_binding_sha256: target_binding,
                 before_sha256,
-                captured_at_utc: Utc::now().to_rfc3339(),
+                captured_at_utc: Timestamp::now().to_rfc3339(),
             };
             if let contract::Record::Capture { before_sha256, .. } = &record
                 && io::sha256(&io::read_conversation_target(&target)?) != *before_sha256
@@ -235,7 +235,7 @@ pub(crate) fn run(command: Command) -> Result<Value, ContractError> {
                 schema: 1,
                 capture_sha256: capture,
                 after_sha256,
-                changed_at_utc: Utc::now().to_rfc3339(),
+                changed_at_utc: Timestamp::now().to_rfc3339(),
             };
             if let contract::Record::Change { after_sha256, .. } = &record
                 && io::sha256(&io::read_conversation_target(&target)?) != *after_sha256
@@ -252,9 +252,9 @@ pub(crate) fn run(command: Command) -> Result<Value, ContractError> {
         } => {
             let followup: contract::Followup = load(&input)?;
             followup.validate()?;
-            if chrono::DateTime::parse_from_rfc3339(&followup.observed_at_utc)
+            if Timestamp::parse_rfc3339(&followup.observed_at_utc)
                 .map_err(|_| error("invalid_time"))?
-                > Utc::now()
+                > Timestamp::now()
             {
                 return Err(error("future_observation"));
             }

@@ -29,6 +29,8 @@ pub mod model;
 pub mod rollout;
 #[cfg(feature = "efficiency")]
 pub mod routing;
+#[cfg(feature = "timestamp")]
+pub mod timestamp;
 #[cfg(any(feature = "audit", feature = "insights"))]
 mod usage;
 #[cfg(feature = "version")]

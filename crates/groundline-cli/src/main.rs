@@ -4,8 +4,8 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use chrono::{Duration as ChronoDuration, Utc};
 use clap::{Parser, Subcommand};
+use groundline_contracts::timestamp::{Duration, Timestamp};
 use groundline_contracts::{ContractError, efficiency};
 use groundline_runtime::local_file::open_bounded_regular_file;
 use groundline_runtime::{audit_store, platform};
@@ -385,7 +385,7 @@ fn run(cli: Cli) -> Result<(), ExitCode> {
                     json,
                 },
         } => {
-            let end = Utc::now();
+            let end = Timestamp::now();
             codex_home
                 .map(Ok)
                 .unwrap_or_else(default_codex_home)
@@ -393,7 +393,7 @@ fn run(cli: Cli) -> Result<(), ExitCode> {
                 .and_then(|home| {
                     audit_store::collect_audit(
                         &home,
-                        end - ChronoDuration::days(i64::from(days)),
+                        end - Duration::days(i64::from(days)),
                         end,
                         runtime_family.as_deref(),
                         true,
@@ -419,14 +419,12 @@ fn run(cli: Cli) -> Result<(), ExitCode> {
                     json,
                 },
         } => {
-            let window = chrono::DateTime::parse_from_rfc3339(&start)
-                .map(|value| value.with_timezone(&Utc))
+            let window = Timestamp::parse_rfc3339(&start)
+                .map(Timestamp::to_utc)
                 .ok()
                 .zip(match end.as_deref() {
-                    Some(value) => chrono::DateTime::parse_from_rfc3339(value)
-                        .map(|value| value.with_timezone(&Utc))
-                        .ok(),
-                    None => Some(Utc::now()),
+                    Some(value) => Timestamp::parse_rfc3339(value).map(Timestamp::to_utc).ok(),
+                    None => Some(Timestamp::now()),
                 });
             window
                 .ok_or_else(|| ContractError("invalid_audit_window".to_owned()))

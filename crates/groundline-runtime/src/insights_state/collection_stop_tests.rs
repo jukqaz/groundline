@@ -118,9 +118,9 @@ async fn revision_eight_api_preserves_prepared_window_cursor_identity_and_ack() 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let home = setup(&format!("http://{}", listener.local_addr().unwrap()));
     let directory = state_directory(home.path()).unwrap();
-    let now = Utc::now();
-    let start = (now - chrono::Duration::hours(2)).to_rfc3339();
-    let end = (now - chrono::Duration::hours(1)).to_rfc3339();
+    let now = Timestamp::now();
+    let start = (now - SignedDuration::hours(2)).to_rfc3339();
+    let end = (now - SignedDuration::hours(1)).to_rfc3339();
     // A prepared empty window is valid and must survive an API incompatibility.
     write_json(
         &directory.join("collection-window.json"),
@@ -133,7 +133,7 @@ async fn revision_eight_api_preserves_prepared_window_cursor_identity_and_ack() 
     persist_cycle_status(
         &directory,
         None,
-        now - chrono::Duration::hours(2),
+        now - SignedDuration::hours(2),
         StatusUpdate {
             result_code: "pass",
             collected_through_utc: Some(start.clone()),
@@ -145,7 +145,7 @@ async fn revision_eight_api_preserves_prepared_window_cursor_identity_and_ack() 
         },
     )
     .unwrap();
-    delivery_confirmation::record(&directory, 1, now - chrono::Duration::hours(2)).unwrap();
+    delivery_confirmation::record(&directory, 1, now - SignedDuration::hours(2)).unwrap();
     let files = [
         IDENTITY_FILE,
         CONSENT_FILE,
@@ -248,12 +248,12 @@ async fn stop_after_first_upload_preserves_unsent_events_and_received_ack() {
     let home = setup(&format!("http://{}", listener.local_addr().unwrap()));
     let directory = state_directory(home.path()).unwrap();
     let profile = load_profile(home.path()).unwrap();
-    let (identity, _) = initialize(&directory, Utc::now()).unwrap();
+    let (identity, _) = initialize(&directory, Timestamp::now()).unwrap();
     let paths: Vec<_> = (0..2)
         .map(|i| directory.join(format!("event-{i}.json")))
         .collect();
     let events: Vec<_> = paths.iter().map(|path| {
-        let event = json!({"idempotency_key":Uuid::new_v4(),"period":{"end_utc":Utc::now().to_rfc3339()}});
+        let event = json!({"idempotency_key":Uuid::new_v4(),"period":{"end_utc":Timestamp::now().to_rfc3339()}});
         write_json(path, &event).unwrap();
         (path.clone(), event)
     }).collect();
@@ -301,7 +301,7 @@ async fn rejected_upload_never_creates_a_server_confirmation() {
     let home = setup(&format!("http://{}", listener.local_addr().unwrap()));
     let directory = state_directory(home.path()).unwrap();
     let profile = load_profile(home.path()).unwrap();
-    let (identity, _) = initialize(&directory, Utc::now()).unwrap();
+    let (identity, _) = initialize(&directory, Timestamp::now()).unwrap();
     let upload_dir = directory.clone();
     let worker = tokio::spawn(async move {
         upload(
@@ -329,10 +329,10 @@ async fn user_prompt_submit_preserves_state_and_stop_collects_the_original_windo
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let home = setup(&format!("http://{}", listener.local_addr().unwrap()));
     let directory = state_directory(home.path()).unwrap();
-    let now = Utc::now();
+    let now = Timestamp::now();
     let (identity, _) = initialize(&directory, now).unwrap();
-    let start = (now - chrono::Duration::minutes(40)).to_rfc3339_opts(SecondsFormat::Millis, true);
-    let end = (now - chrono::Duration::minutes(20)).to_rfc3339_opts(SecondsFormat::Millis, true);
+    let start = (now - SignedDuration::minutes(40)).format_rfc3339(TimestampFormat::Millis, true);
+    let end = (now - SignedDuration::minutes(20)).format_rfc3339(TimestampFormat::Millis, true);
     let source = if identity.runtime_family == "codex_app" {
         "vscode"
     } else {
@@ -343,7 +343,7 @@ async fn user_prompt_submit_preserves_state_and_stop_collects_the_original_windo
     let rollout = sessions.join("active.jsonl");
     let records = [
         json!({"timestamp":start,"type":"session_meta","payload":{"id":"collection-owner"}}),
-        json!({"timestamp":(now - chrono::Duration::minutes(30)).to_rfc3339(),
+        json!({"timestamp":(now - SignedDuration::minutes(30)).to_rfc3339(),
             "type":"event_msg","payload":{"type":"token_count", "info":{
                 "total_token_usage":{"total_tokens":7}}}}),
     ];
@@ -361,7 +361,7 @@ async fn user_prompt_submit_preserves_state_and_stop_collects_the_original_windo
     db.execute_batch("CREATE TABLE threads (rollout_path TEXT, source TEXT, has_user_event INTEGER, updated_at INTEGER)").unwrap();
     db.execute(
         "INSERT INTO threads VALUES (?1,?2,1,?3)",
-        rusqlite::params![rollout.to_str(), source, now.timestamp()],
+        rusqlite::params![rollout.to_str(), source, now.unix_timestamp()],
     )
     .unwrap();
     drop(db);
@@ -376,7 +376,7 @@ async fn user_prompt_submit_preserves_state_and_stop_collects_the_original_windo
     persist_cycle_status_with_failure(
         &directory,
         None,
-        now - chrono::Duration::minutes(20),
+        now - SignedDuration::minutes(20),
         StatusUpdate {
             result_code: "audit_failed",
             collected_through_utc: Some(start.clone()),
@@ -394,7 +394,7 @@ async fn user_prompt_submit_preserves_state_and_stop_collects_the_original_windo
     .unwrap();
     record_delivery_retry(
         &directory,
-        now - chrono::Duration::minutes(20),
+        now - SignedDuration::minutes(20),
         &StateError::UploadFailed,
     )
     .unwrap();
@@ -507,7 +507,7 @@ async fn user_prompt_submit_preserves_state_and_stop_collects_the_original_windo
     enqueue(&directory, &event).unwrap();
     record_delivery_retry(
         &directory,
-        now - chrono::Duration::minutes(2),
+        now - SignedDuration::minutes(2),
         &StateError::UploadFailed,
     )
     .unwrap();
@@ -521,7 +521,7 @@ async fn user_prompt_submit_preserves_state_and_stop_collects_the_original_windo
     assert!(delivery_is_due(
         "user_prompt_submit_hook",
         read_delivery_retry(&directory).unwrap().as_ref(),
-        Utc::now()
+        Timestamp::now()
     ));
     let result = run_once(Path::new("."), home.path(), "user_prompt_submit_hook")
         .await

@@ -8,6 +8,7 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use groundline_contracts::ContractError;
+use groundline_contracts::timestamp::Timestamp;
 use groundline_runtime::local_file::{open_bounded_regular_file, owned_by_current_user};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -686,7 +687,7 @@ pub(crate) fn inspect(
     Ok(
         json!({"kind":"groundline-environment-observation","schema":2,
         "status":status, "status_scope":"local_metadata_and_requested_package_comparison",
-        "metadata_status":metadata_status, "observed_at":chrono::Utc::now().to_rfc3339(),
+        "metadata_status":metadata_status, "observed_at":Timestamp::now().to_rfc3339(),
         "visibility":"owner_private","home_fingerprint":path_fingerprint(&home),"cwd_fingerprint":path_fingerprint(&cwd),
         "host":{"os":std::env::consts::OS,"architecture":std::env::consts::ARCH},
         "per_call_timeout_ms":CALL_TIMEOUT.as_millis(),"native_methods_allowed":METHODS,

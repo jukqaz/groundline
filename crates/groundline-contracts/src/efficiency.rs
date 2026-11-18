@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{Map, Value, json};
 
 use crate::ContractError;
+use crate::timestamp::{Timestamp, TimestampFormat};
 
 const COMPARISON_COHORT_FIELDS: &[&str] = &[
     "schema_version",
@@ -97,12 +97,8 @@ fn bounded_ratio(numerator: u64, denominator: u64) -> f64 {
 }
 
 fn normalized_utc_timestamp(value: Option<&Value>) -> Option<String> {
-    let parsed = DateTime::parse_from_rfc3339(value?.as_str()?).ok()?;
-    Some(
-        parsed
-            .with_timezone(&Utc)
-            .to_rfc3339_opts(SecondsFormat::AutoSi, true),
-    )
+    let parsed = Timestamp::parse_rfc3339(value?.as_str()?).ok()?;
+    Some(parsed.to_utc().format_rfc3339(TimestampFormat::Auto, true))
 }
 
 fn exact_keys(map: &Map<String, Value>, keys: &[&str]) -> bool {

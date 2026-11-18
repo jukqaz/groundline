@@ -30,7 +30,7 @@ pub(super) fn read(directory: &Path) -> Result<Option<Confirmation>, StateError>
     Ok(Some(value))
 }
 
-pub(super) fn record(directory: &Path, count: u64, now: DateTime<Utc>) -> Result<(), StateError> {
+pub(super) fn record(directory: &Path, count: u64, now: Timestamp) -> Result<(), StateError> {
     if count == 0 || count > UPLOAD_BATCH_EVENTS as u64 {
         return Err(StateError::LocalState);
     }
@@ -39,7 +39,7 @@ pub(super) fn record(directory: &Path, count: u64, now: DateTime<Utc>) -> Result
         &Confirmation {
             schema: 1,
             kind: "groundline-insights-delivery-confirmation".into(),
-            confirmed_at_utc: now.to_rfc3339_opts(SecondsFormat::Millis, true),
+            confirmed_at_utc: now.format_rfc3339(TimestampFormat::Millis, true),
             event_count: count,
         },
     )
@@ -52,11 +52,11 @@ mod tests {
     fn confirmation_is_private_bounded_and_does_not_claim_a_zero_upload() {
         let directory = tempfile::tempdir().unwrap();
         assert!(read(directory.path()).unwrap().is_none());
-        record(directory.path(), 2, Utc::now()).unwrap();
+        record(directory.path(), 2, Timestamp::now()).unwrap();
         let path = directory.path().join(FILE);
         let bytes = std::fs::read(&path).unwrap();
-        assert!(record(directory.path(), 0, Utc::now()).is_err());
-        assert!(record(directory.path(), 17, Utc::now()).is_err());
+        assert!(record(directory.path(), 0, Timestamp::now()).is_err());
+        assert!(record(directory.path(), 17, Timestamp::now()).is_err());
         assert_eq!(std::fs::read(&path).unwrap(), bytes);
         assert_eq!(read(directory.path()).unwrap().unwrap().event_count, 2);
         assert!(private_for_current_user(

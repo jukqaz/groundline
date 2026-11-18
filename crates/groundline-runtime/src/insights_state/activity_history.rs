@@ -94,14 +94,14 @@ pub(super) fn record(
     directory: &Path,
     outcome: Outcome,
     code: &str,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), StateError> {
     let mut value = read(directory)?;
     let count = u64::from(matches!(outcome, Outcome::Accepted | Outcome::Duplicate));
     value.entries.insert(
         0,
         Entry {
-            at_utc: now.to_rfc3339_opts(SecondsFormat::Millis, true),
+            at_utc: now.format_rfc3339(TimestampFormat::Millis, true),
             outcome,
             event_count: count,
             reason: reason(code).into(),
@@ -111,12 +111,12 @@ pub(super) fn record(
     write_json(&directory.join(FILE), &value)
 }
 
-pub(super) fn cycle(directory: &Path, update: &StatusUpdate<'_>, now: DateTime<Utc>) {
+pub(super) fn cycle(directory: &Path, update: &StatusUpdate<'_>, now: Timestamp) {
     // This diagnostic log must not change delivery/ACK or retry semantics.
     let result = (|| -> Result<(), StateError> {
         if update.trigger.ends_with("_hook") && valid_status_trigger(update.trigger) {
             let mut value = read(directory)?;
-            value.last_hook_at_utc = Some(now.to_rfc3339_opts(SecondsFormat::Millis, true));
+            value.last_hook_at_utc = Some(now.format_rfc3339(TimestampFormat::Millis, true));
             write_json(&directory.join(FILE), &value)?;
         }
         match update.result_code {
@@ -136,10 +136,22 @@ mod tests {
     fn retains_twenty_safe_results_and_preserves_unsupported_history() {
         let dir = tempfile::tempdir().unwrap();
         for _ in 0..25 {
-            record(dir.path(), Outcome::Failed, "private free text", Utc::now()).unwrap();
+            record(
+                dir.path(),
+                Outcome::Failed,
+                "private free text",
+                Timestamp::now(),
+            )
+            .unwrap();
         }
-        record(dir.path(), Outcome::Accepted, "accepted", Utc::now()).unwrap();
-        record(dir.path(), Outcome::Duplicate, "duplicate", Utc::now()).unwrap();
+        record(dir.path(), Outcome::Accepted, "accepted", Timestamp::now()).unwrap();
+        record(
+            dir.path(),
+            Outcome::Duplicate,
+            "duplicate",
+            Timestamp::now(),
+        )
+        .unwrap();
         let value = read(dir.path()).unwrap();
         assert_eq!(value.entries.len(), 20);
         assert_eq!(value.entries[0].event_count, 1);
@@ -151,7 +163,7 @@ mod tests {
         invalid["schema"] = json!(99);
         write_json(&path, &invalid).unwrap();
         let before = std::fs::read(&path).unwrap();
-        assert!(record(dir.path(), Outcome::Checked, "pass", Utc::now()).is_err());
+        assert!(record(dir.path(), Outcome::Checked, "pass", Timestamp::now()).is_err());
         assert_eq!(before, std::fs::read(&path).unwrap());
     }
 }

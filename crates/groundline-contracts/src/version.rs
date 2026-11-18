@@ -1,7 +1,9 @@
-use chrono::NaiveDate;
 use semver::Version;
 
-use crate::ContractError;
+use crate::{
+    ContractError,
+    timestamp::{Date, Month},
+};
 
 pub fn strict_version(value: &str) -> Result<Version, ContractError> {
     let parsed = Version::parse(value).map_err(|_| ContractError("invalid_version".to_owned()))?;
@@ -26,9 +28,10 @@ pub fn release_display_name(value: &str) -> Result<String, ContractError> {
     if !(1..=9999).contains(&version.major) || version.patch == 0 {
         return Err(invalid());
     }
-    let month = u32::try_from(version.minor / 100).map_err(|_| invalid())?;
-    let day = (version.minor % 100) as u32;
-    let date = NaiveDate::from_ymd_opt(version.major as i32, month, day).ok_or_else(invalid)?;
+    let month = u8::try_from(version.minor / 100).map_err(|_| invalid())?;
+    let month = Month::try_from(month).map_err(|_| invalid())?;
+    let day = (version.minor % 100) as u8;
+    let date = Date::from_calendar_date(version.major as i32, month, day).map_err(|_| invalid())?;
     let mut ordinal = version.patch;
     let mut suffix = Vec::new();
     while ordinal > 0 {
@@ -37,7 +40,12 @@ pub fn release_display_name(value: &str) -> Result<String, ContractError> {
         ordinal /= 26;
     }
     let suffix: String = suffix.into_iter().rev().collect();
-    Ok(format!("{}-{suffix}", date.format("%Y.%m.%d")))
+    Ok(format!(
+        "{:04}.{:02}.{:02}-{suffix}",
+        date.year(),
+        u8::from(date.month()),
+        date.day(),
+    ))
 }
 
 #[cfg(test)]

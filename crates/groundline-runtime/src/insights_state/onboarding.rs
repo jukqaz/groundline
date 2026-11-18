@@ -107,7 +107,7 @@ async fn verify_connection(home: &Path) -> Result<(), StateError> {
     {
         return Err(StateError::TailnetDisconnected);
     }
-    let (identity, _) = initialize(&directory, Utc::now())?;
+    let (identity, _) = initialize(&directory, Timestamp::now())?;
     enroll(&profile, home, &directory, &identity).await?;
     Ok(())
 }
@@ -162,11 +162,11 @@ pub async fn setup(
     let hook_seen = current["activity_history"]["last_hook_at_utc"]
         .as_str()
         .and_then(|s| parse_timestamp(s).ok())
-        .is_some_and(|t| t <= Utc::now() && Utc::now() - t <= COLLECTION_STALE_AFTER);
+        .is_some_and(|t| t <= Timestamp::now() && Timestamp::now() - t <= COLLECTION_STALE_AFTER);
     let delivery_seen = current["delivery_confirmation"]["confirmed_at_utc"]
         .as_str()
         .and_then(|s| parse_timestamp(s).ok())
-        .is_some_and(|t| t <= Utc::now() && Utc::now() - t <= COLLECTION_STALE_AFTER);
+        .is_some_and(|t| t <= Timestamp::now() && Timestamp::now() - t <= COLLECTION_STALE_AFTER);
     let active = current["collection_state"] == "active";
     let scope = crate::environment::Environment::current()?;
     let mut actions = Vec::new();
