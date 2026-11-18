@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "kind": "groundline-binary-artifact",
+  "groundline_version": "2026.1118.1",
+  "target": "aarch64-unknown-linux-musl",
+  "executable": "groundline",
+  "size_bytes": 4608152,
+  "sha256": "77bb916717041c91bfeba101426a9c40e7ab27bbfcbb621a22da68c84b3e44b1"
+}
