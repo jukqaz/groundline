@@ -1,9 +1,13 @@
 ---
 name: optimize-codex-workflow
-description: Improve repeated Codex friction through a scoped guidance or skill change and natural follow-up. Skip ordinary implementation, model selection, and installation.
+description: Improve repeated Codex friction through a scoped guidance or skill change and natural follow-up. Use for explicit requests to adapt model or effort within the current task. Skip ordinary implementation and installation.
 ---
 
 # Reduce repeated workflow friction
+
+Read [model and effort adaptation](../../references/model-effort-routing.md) when
+the user asks Codex to adapt model or effort for the current task. Use that path
+for the requested selection and continue the task under its existing authority.
 
 Read [conversation improvement](../../references/conversation-improvement.md)
 when the user requests improvement or an authorized routine reviews actual

@@ -1,14 +1,21 @@
 # Validate useful guidance
 
-Source and package checks validate callable metadata and links; they do not
-prove behavioral improvement. Core exposes one implicitly callable improvement
-skill. Installation and model-selection requests use native maintenance rather
-than selecting this skill.
+Source and package checks validate callable metadata and links. Core exposes
+one implicitly callable skill for workflow improvement and explicitly delegated
+model or effort selection for the current task. Installation remains native
+maintenance.
 
 For a guidance change, check the existing criterion, relevant context and a
 counterexample. Verify actual scoped file content and its native exposure path.
 Code defects belong in code/tests. Project-specific requirements stay local;
 common rules require transferability and no competing owner.
+
+For model or effort guidance, check ordinary inheritance, preservation of
+explicit choices and permissions, and selection for a new subagent where the
+active client exposes the required controls. Check later-turn selection through
+the native client. Confirm available choices in the actual runtime separately
+from the package check. Record the effective selection, outcome and owned usage
+when observed. Keep missing evidence unknown.
 
 The compact CLI's isolated regression cases cover target scope, symlinks and
 hardlinks, private inputs, no-change exits, duplicate/conflicting observations,

@@ -12,8 +12,8 @@ path = "src/main.rs"
 [dependencies]
 clap.workspace = true
 dirs.workspace = true
-groundline-contracts = { version = "2026.1110.1", path = "../groundline-contracts" }
-groundline-runtime = { version = "2026.1110.1", path = "../groundline-runtime" }
+groundline-contracts = { version = "2026.1118.1", path = "../groundline-contracts" }
+groundline-runtime = { version = "2026.1118.1", path = "../groundline-runtime" }
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -27,7 +27,7 @@ uuid.workspace = true
 rustix.workspace = true
 
 [dev-dependencies]
-groundline-runtime = { version = "2026.1110.1", path = "../groundline-runtime", features = ["insights-state"] }
+groundline-runtime = { version = "2026.1118.1", path = "../groundline-runtime", features = ["insights-state"] }
 walkdir.workspace = true
 rusqlite.workspace = true
 divan.workspace = true

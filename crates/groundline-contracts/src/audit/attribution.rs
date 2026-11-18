@@ -181,20 +181,43 @@ mod tests {
             .clone()
     }
     #[test]
-    fn mixed_models_missing_links_and_residual_conserve_usage() {
+    fn routed_models_and_conflicting_effort_conserve_usage() {
         let mut r = Responses::default();
-        r.context(&context("one", "gpt-6-astra"));
-        r.context(&context("two", "gpt-5.6-sol"));
-        for (turn, n) in [("one", 10), ("two", 20), ("missing", 3)] {
+        let routes = [
+            ("one", "gpt-6.2-sol", "ultra", 10),
+            ("two", "gpt-6.1-terra", "medium", 20),
+            ("three", "gpt-6-luna", "low", 5),
+        ];
+        for (turn, model, effort, n) in routes {
+            let mut label = context(turn, model);
+            label.insert("effort".to_owned(), json!(effort));
+            r.context(&label);
+            r.response(&context(turn, "unused"), &usage(n)).unwrap();
+        }
+        let mut conflicting = context("conflicting", "gpt-6.2-sol");
+        r.context(&conflicting);
+        conflicting.insert("effort".to_owned(), json!("max"));
+        r.context(&conflicting);
+        for (turn, n) in [("missing", 3), ("conflicting", 4)] {
             r.response(&context(turn, "unused"), &usage(n)).unwrap();
         }
         let mut a = Aggregate::default();
-        a.add(r, &usage(40)).unwrap();
+        let total = 49;
+        a.add(r, &usage(total)).unwrap();
         let v = a.json();
-        assert_eq!(v["buckets"].as_array().unwrap().len(), 2);
-        assert_eq!(v["unattributed"]["total_tokens"], 10);
-        assert_eq!(v["observed_response_count"], 3);
-        assert_eq!(v["unattributed_response_count"], 1);
+        let buckets = v["buckets"].as_array().unwrap();
+        assert_eq!(buckets.len(), routes.len());
+        for (_, model, effort, n) in routes {
+            assert!(buckets.iter().any(|bucket| {
+                bucket["model_family"] == model
+                    && bucket["effort"] == effort
+                    && bucket["tokens"]["total_tokens"] == n
+                    && bucket["response_count"] == 1
+            }));
+        }
+        assert_eq!(v["unattributed"]["total_tokens"], 14);
+        assert_eq!(v["observed_response_count"], 5);
+        assert_eq!(v["unattributed_response_count"], 2);
         assert_eq!(v["overflow_response_count"], 0);
         assert_eq!(
             a.buckets
@@ -202,7 +225,7 @@ mod tests {
                 .map(|r| r.usage.values["total_tokens"])
                 .sum::<u64>()
                 + a.unknown.values["total_tokens"],
-            40
+            total
         );
     }
     #[test]

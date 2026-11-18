@@ -192,12 +192,18 @@ unattributed residual. `overflow_response_count` is a subset of
 
 Context counts describe native turn-context records. Observed responses count
 unique owned native usage records, with model/effort attribution only when an
-explicit turn link is coherent. Neither is a completed-task count. Response
-counts absent from historical events remain unobserved, not zero. All six token
+explicit turn link is coherent. Each attributed pair names the model and effort
+in that recorded turn context. The context can retain the initial selection
+after a model or effort update within the active turn or a provider reroute.
+Establishing the served model and effort for the affected response requires
+response-level evidence. Billed cost and verified task completion require their
+own evidence.
+
+Response counts absent from historical events remain unobserved. All six token
 counters conserve the authoritative component totals, including cache-write
 input. Missing links, conflicting contexts, or inconsistent native/UI baselines
-remain unattributed; totals are never allocated by context frequency. Usage
-provenance remains a shared bounded allowlist with distinct native response-only
+leave the associated usage unattributed. Usage provenance remains a shared
+bounded allowlist with distinct native response-only
 and mixed-source labels.
 
 Contract revision 10 requires API support before updated collectors are enabled;
