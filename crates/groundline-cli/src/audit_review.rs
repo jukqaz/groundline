@@ -3,7 +3,7 @@ use std::io::Read;
 use std::path::Path;
 use std::time::Instant;
 
-use chrono::{DateTime, Duration, Utc};
+use groundline_contracts::timestamp::{Duration, Timestamp};
 use groundline_contracts::{ContractError, weekly_review};
 use groundline_runtime::local_file::open_bounded_regular_file;
 use serde_json::{Value, json};
@@ -21,11 +21,11 @@ fn error(code: &str) -> ContractError {
     ContractError(format!("audit_reuse_{code}"))
 }
 
-fn timestamp(audit: &Value, key: &str) -> Result<DateTime<Utc>, ContractError> {
+fn timestamp(audit: &Value, key: &str) -> Result<Timestamp, ContractError> {
     audit["scope"][key]
         .as_str()
-        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-        .map(|t| t.with_timezone(&Utc))
+        .and_then(|s| Timestamp::parse_rfc3339(s).ok())
+        .map(Timestamp::to_utc)
         .ok_or_else(|| error("invalid_window"))
 }
 
@@ -64,7 +64,7 @@ pub(crate) fn reuse(input: &Path, max_age_hours: u16) -> Result<Value, ContractE
     {
         return Err(error("invalid_snapshot"));
     }
-    let now = Utc::now();
+    let now = Timestamp::now();
     let start = timestamp(audit, "requested_window_start")?;
     let end = timestamp(audit, "requested_window_end")?;
     let generated = timestamp(audit, "generated_at")?;
@@ -76,7 +76,8 @@ pub(crate) fn reuse(input: &Path, max_age_hours: u16) -> Result<Value, ContractE
         return Err(error("invalid_window"));
     }
     // A fresh wrapper date cannot rejuvenate an old observation window.
-    if now.signed_duration_since(end) > Duration::hours(i64::from(max_age_hours)) {
+    let age = now - end;
+    if age > Duration::hours(i64::from(max_age_hours)) {
         return Err(error("stale_snapshot"));
     }
     let mut original_scope = json!({
@@ -112,7 +113,7 @@ pub(crate) fn reuse(input: &Path, max_age_hours: u16) -> Result<Value, ContractE
         "source_sha256":format!("{:x}", Sha256::digest(&bytes)),
         "source_bytes":bytes.len(), "source_kind":if combined {"groundline-codex-weekly-review"} else {"groundline-codex-weekly-audit"},
         "source_scope":original_scope, "source_execution":original_execution,
-        "max_age_hours":max_age_hours, "age_seconds":now.signed_duration_since(end).num_seconds().max(0),
+        "max_age_hours":max_age_hours, "age_seconds":age.whole_seconds().max(0),
         "window_advanced":false, "current_history_rescanned":false,
         "history_changed_since_snapshot":"unknown", "input_modified":false,
         "recommendation_policy_revalidated":true,

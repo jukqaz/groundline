@@ -1,7 +1,7 @@
 //! Owner-private learning sidecars. Supplied hashes identify evidence; they do
 //! not authenticate its origin or prove native activation or a causal effect.
+use crate::timestamp::{Duration, Timestamp};
 use crate::{ContractError, delivery};
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -112,9 +112,9 @@ impl OutcomeLink {
         {
             return Err(error("invalid_link"));
         }
-        let completed = DateTime::parse_from_rfc3339(&self.completed_at_utc)
+        let completed = Timestamp::parse_rfc3339(&self.completed_at_utc)
             .map_err(|_| error("invalid_link_timestamp"))?;
-        if completed.with_timezone(&Utc) > Utc::now() + chrono::Duration::minutes(5) {
+        if completed > Timestamp::now() + Duration::minutes(5) {
             return Err(error("invalid_link_timestamp"));
         }
         if self.environment_revision.is_some()
@@ -126,14 +126,14 @@ impl OutcomeLink {
                 .observed_at_utc
                 .as_deref()
                 .ok_or_else(|| error("historical_observation_required"))?;
-            let observed = DateTime::parse_from_rfc3339(observed)
-                .map_err(|_| error("invalid_link_timestamp"))?;
+            let observed =
+                Timestamp::parse_rfc3339(observed).map_err(|_| error("invalid_link_timestamp"))?;
             if observed > completed {
                 return Err(error("observation_after_delivery"));
             }
         } else if let Some(observed) = &self.observed_at_utc {
-            let observed = DateTime::parse_from_rfc3339(observed)
-                .map_err(|_| error("invalid_link_timestamp"))?;
+            let observed =
+                Timestamp::parse_rfc3339(observed).map_err(|_| error("invalid_link_timestamp"))?;
             if observed > completed {
                 return Err(error("observation_after_delivery"));
             }
@@ -239,11 +239,11 @@ impl Snapshot {
             runtime: self.runtime.clone(),
         }
         .validate()?;
-        let captured = DateTime::parse_from_rfc3339(&self.captured_at_utc)
+        let captured = Timestamp::parse_rfc3339(&self.captured_at_utc)
             .map_err(|_| error("invalid_snapshot_timestamp"))?;
         if self.kind != "groundline-learning-snapshot"
             || self.native_activation != "UNVERIFIED"
-            || captured.with_timezone(&Utc) > Utc::now() + chrono::Duration::minutes(5)
+            || captured > Timestamp::now() + Duration::minutes(5)
             || !digest(&self.environment_provenance_sha256)
             || !digest(&self.capture_input_sha256)
             || [&self.environment_revision, &self.source_revision]
@@ -333,9 +333,9 @@ pub fn prepare_outcome(
     let completed = receipt["completed_at_utc"]
         .as_str()
         .ok_or_else(|| error("invalid_link_timestamp"))?;
-    if DateTime::parse_from_rfc3339(&snapshot.captured_at_utc)
+    if Timestamp::parse_rfc3339(&snapshot.captured_at_utc)
         .map_err(|_| error("invalid_snapshot_timestamp"))?
-        > DateTime::parse_from_rfc3339(completed).map_err(|_| error("invalid_link_timestamp"))?
+        > Timestamp::parse_rfc3339(completed).map_err(|_| error("invalid_link_timestamp"))?
     {
         return Err(error("snapshot_after_delivery"));
     }
@@ -419,8 +419,8 @@ impl SourceObservation {
             Some("developers.openai.com" | "learn.chatgpt.com" | "openai.com")
         ) || (url.host_str() == Some("github.com")
             && url.path().starts_with("/openai/"));
-        let checked = DateTime::parse_from_rfc3339(&self.checked_at_utc)
-            .map_err(|_| error("invalid_source"))?;
+        let checked =
+            Timestamp::parse_rfc3339(&self.checked_at_utc).map_err(|_| error("invalid_source"))?;
         let mut ids = BTreeSet::new();
         if self.url.len() > 2048
             || url.scheme() != "https"
@@ -430,7 +430,7 @@ impl SourceObservation {
             || url.port().is_some_and(|p| p != 443)
             || url.query().is_some()
             || url.fragment().is_some()
-            || checked.with_timezone(&Utc) > Utc::now() + chrono::Duration::minutes(5)
+            || checked > Timestamp::now() + Duration::minutes(5)
             || !digest(&self.content_sha256)
             || self
                 .model
@@ -658,9 +658,9 @@ impl Decision {
             return Err(error("invalid_decision"));
         }
         if let Some(timestamp) = &self.recorded_at_utc {
-            let recorded = DateTime::parse_from_rfc3339(timestamp)
+            let recorded = Timestamp::parse_rfc3339(timestamp)
                 .map_err(|_| error("invalid_decision_timestamp"))?;
-            if recorded.with_timezone(&Utc) > Utc::now() + chrono::Duration::minutes(5) {
+            if recorded > Timestamp::now() + Duration::minutes(5) {
                 return Err(error("invalid_decision_timestamp"));
             }
         }

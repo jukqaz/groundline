@@ -93,14 +93,14 @@ fn retired_commands_are_rejected_before_reading_or_writing_state() {
 
 #[test]
 fn weekly_review_runs_the_installed_command_contract_without_mutating_history() {
-    use chrono::{Duration, Utc};
+    use groundline_contracts::timestamp::{Duration, Timestamp};
     let home = tempdir().unwrap();
     let sessions = home.path().join("sessions");
     fs::create_dir(&sessions).unwrap();
     let database = home.path().join("state_5.sqlite");
     let connection = rusqlite::Connection::open(&database).unwrap();
     connection.execute_batch("CREATE TABLE threads (rollout_path TEXT, source TEXT, has_user_event INTEGER, updated_at INTEGER)").unwrap();
-    let now = Utc::now();
+    let now = Timestamp::now();
     let mut expected = Vec::new();
     for n in 0..5 {
         let owner = format!("test-owner-{n}");
@@ -149,7 +149,7 @@ fn weekly_review_runs_the_installed_command_contract_without_mutating_history() 
         connection
             .execute(
                 "INSERT INTO threads VALUES (?1,'cli',1,?2)",
-                rusqlite::params![path.to_str().unwrap(), now.timestamp()],
+                rusqlite::params![path.to_str().unwrap(), now.unix_timestamp()],
             )
             .unwrap();
     }
@@ -288,14 +288,14 @@ fn weekly_review_runs_the_installed_command_contract_without_mutating_history() 
 
 #[test]
 fn weekly_review_keeps_unsupported_composed_browser_input_partial_and_private() {
-    use chrono::{Duration, Utc};
+    use groundline_contracts::timestamp::{Duration, Timestamp};
     let home = tempdir().unwrap();
     let sessions = home.path().join("sessions");
     fs::create_dir(&sessions).unwrap();
     let database = home.path().join("state_5.sqlite");
     let connection = rusqlite::Connection::open(&database).unwrap();
     connection.execute_batch("CREATE TABLE threads (rollout_path TEXT, source TEXT, has_user_event INTEGER, updated_at INTEGER)").unwrap();
-    let now = Utc::now();
+    let now = Timestamp::now();
     let mut expected = Vec::new();
     for n in 0..5 {
         let path = sessions.join(format!("private-composed-{n}.jsonl"));
@@ -322,7 +322,7 @@ fn weekly_review_keeps_unsupported_composed_browser_input_partial_and_private() 
         connection
             .execute(
                 "INSERT INTO threads VALUES (?1,'cli',1,?2)",
-                rusqlite::params![path.to_str().unwrap(), now.timestamp()],
+                rusqlite::params![path.to_str().unwrap(), now.unix_timestamp()],
             )
             .unwrap();
     }

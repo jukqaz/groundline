@@ -6,7 +6,7 @@ use super::conversation::{
 };
 use super::{content_sha256, digest, error, identifier, text};
 use crate::ContractError;
-use chrono::{DateTime, FixedOffset, Utc};
+use crate::timestamp::{Duration, Timestamp};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -201,10 +201,10 @@ pub struct Record {
     pub input: Input,
 }
 
-fn timestamp(value: &str) -> Result<DateTime<FixedOffset>, ContractError> {
-    let parsed = DateTime::parse_from_rfc3339(value)
+fn timestamp(value: &str) -> Result<Timestamp, ContractError> {
+    let parsed = Timestamp::parse_rfc3339(value)
         .map_err(|_| error("invalid_conversation_work_timestamp"))?;
-    if parsed.with_timezone(&Utc) > Utc::now() + chrono::Duration::minutes(5) {
+    if parsed > Timestamp::now() + Duration::minutes(5) {
         return Err(error("invalid_conversation_work_timestamp"));
     }
     Ok(parsed)

@@ -1,10 +1,10 @@
-use chrono::{Duration, Utc};
+use groundline_contracts::timestamp::{Duration, Timestamp};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{fs, path::Path, process::Command};
 
 fn audit() -> Value {
-    let end = Utc::now() - Duration::minutes(1);
+    let end = Timestamp::now() - Duration::minutes(1);
     json!({"kind":"groundline-codex-weekly-audit","schema":1,"status":"PARTIAL",
         "collection_complete":false,"mutation_performed":false,
         "raw_content_emitted":false,"private_paths_emitted":false,
@@ -189,14 +189,16 @@ fn freshness_uses_observation_window_not_new_wrapper_date() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("audit.json");
     let mut value = audit();
-    value["scope"]["requested_window_end"] = json!((Utc::now() - Duration::hours(25)).to_rfc3339());
-    value["scope"]["generated_at"] = json!(Utc::now().to_rfc3339());
+    value["scope"]["requested_window_end"] =
+        json!((Timestamp::now() - Duration::hours(25)).to_rfc3339());
+    value["scope"]["generated_at"] = json!(Timestamp::now().to_rfc3339());
     fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
     let (ok, result) = run(&path, &[]);
     assert!(!ok);
     assert_eq!(result["error"], "audit_reuse_stale_snapshot");
     assert_eq!(result["mutation_performed"], false);
-    value["scope"]["requested_window_end"] = json!((Utc::now() + Duration::hours(1)).to_rfc3339());
+    value["scope"]["requested_window_end"] =
+        json!((Timestamp::now() + Duration::hours(1)).to_rfc3339());
     fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
     assert_eq!(run(&path, &[]).1["error"], "audit_reuse_invalid_window");
 }

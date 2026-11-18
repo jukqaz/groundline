@@ -56,7 +56,7 @@ pub fn set_purpose(codex_home: &Path, value: &str) -> Result<Value, StateError> 
     // The profile must already be configured; this command does not enroll,
     // grant consent, start collection, or rewrite previously collected data.
     load_profile(codex_home)?;
-    let effective_at_utc = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+    let effective_at_utc = Timestamp::now().format_rfc3339(TimestampFormat::Millis, true);
     write_json(
         &directory(codex_home).join("purpose.json"),
         &Purpose {
@@ -71,7 +71,7 @@ pub fn set_purpose(codex_home: &Path, value: &str) -> Result<Value, StateError> 
     )
 }
 
-pub(super) fn purpose(directory: &Path, start: DateTime<Utc>) -> Result<String, StateError> {
+pub(super) fn purpose(directory: &Path, start: Timestamp) -> Result<String, StateError> {
     let path = directory
         .parent()
         .ok_or(StateError::LocalState)?
@@ -119,7 +119,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let state = directory(home.path()).join("codex_app-desktop");
         std::fs::create_dir_all(&state).unwrap();
-        let at = Utc::now();
+        let at = Timestamp::now();
         write_json(
             &state.parent().unwrap().join("purpose.json"),
             &Purpose {
@@ -130,11 +130,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            purpose(&state, at - chrono::Duration::seconds(1)).unwrap(),
+            purpose(&state, at - SignedDuration::seconds(1)).unwrap(),
             "unclassified"
         );
         assert_eq!(
-            purpose(&state, at + chrono::Duration::seconds(1)).unwrap(),
+            purpose(&state, at + SignedDuration::seconds(1)).unwrap(),
             "verification"
         );
     }

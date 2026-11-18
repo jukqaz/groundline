@@ -6,8 +6,8 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use chrono::{SecondsFormat, Utc};
 use command_group::{CommandGroup, GroupChild};
+use groundline_contracts::timestamp::{Timestamp, TimestampFormat};
 use serde_json::{Value, json};
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
@@ -16,7 +16,7 @@ const MAX_DIAGNOSTIC_BYTES: u64 = 64 * 1024;
 const PROBE_ENV_ALLOWLIST: &[&str] = &["HOME", "TEMP", "TMP", "TMPDIR", "XDG_RUNTIME_DIR"];
 
 pub fn checked_at_utc() -> String {
-    Utc::now().to_rfc3339_opts(SecondsFormat::AutoSi, true)
+    Timestamp::now().format_rfc3339(TimestampFormat::Auto, true)
 }
 
 fn candidates(os: &str) -> Vec<PathBuf> {

@@ -2,10 +2,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
 use groundline_contracts::ContractError;
 use groundline_contracts::audit::{AuditWindow, audit_rollouts};
 use groundline_contracts::rollout::Record;
+use groundline_contracts::timestamp::Timestamp;
 use rusqlite::{Connection, OpenFlags};
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -249,7 +249,7 @@ fn latest_turn_completed(contents: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn has_window_records(contents: &str, start: DateTime<Utc>, end: DateTime<Utc>) -> bool {
+fn has_window_records(contents: &str, start: Timestamp, end: Timestamp) -> bool {
     // SQLite clocks also change when a thread is archived or resumed. Exclude
     // an inactive candidate only after its entire readable log proves that all
     // records are outside this window. Missing or invalid timestamps remain
@@ -262,7 +262,7 @@ fn has_window_records(contents: &str, start: DateTime<Utc>, end: DateTime<Utc>) 
         };
         let Some(at) = record
             .string("timestamp")
-            .and_then(|value| DateTime::parse_from_rfc3339(&value).ok())
+            .and_then(|value| Timestamp::parse_rfc3339(&value).ok())
         else {
             return true;
         };
@@ -337,8 +337,8 @@ fn audit_component(
 
 pub fn collect_audit(
     codex_home: &Path,
-    start: DateTime<Utc>,
-    end: DateTime<Utc>,
+    start: Timestamp,
+    end: Timestamp,
     runtime_filter: Option<&str>,
     completed_only: bool,
 ) -> Result<Value, AuditStoreError> {
@@ -349,7 +349,7 @@ pub fn collect_audit(
     }
     let rows = thread_rows(&state_database(codex_home)?)?;
     let allowed_roots = rollout_roots(codex_home)?;
-    let start_ms = start.timestamp_millis();
+    let start_ms = start.unix_timestamp_millis();
     let mut root = Vec::new();
     let mut delegated = Vec::new();
     let mut guardian = Vec::new();
@@ -575,7 +575,7 @@ pub fn collect_audit(
     let mut result = json!({
         "schema":1,"kind":kind,"status":status,"errors":[],"collection_complete":collection_complete,
         "scope":{
-            "generated_at":end.to_rfc3339(),"requested_days":((end-start).num_seconds().max(1) as u64).div_ceil(86_400),
+            "generated_at":end.to_rfc3339(),"requested_days":((end-start).whole_seconds().max(1) as u64).div_ceil(86_400),
             "requested_window_start":start.to_rfc3339(),"requested_window_end":end.to_rfc3339(),"selection_mode":selection_mode,
             "runtime_family":runtime_filter.unwrap_or("all"),"observed_root_sample_count":if completed_only {0} else {sample},
             "completed_root_sample_count":if completed_only {sample} else {0},"eligible_root_count":sample,"selected_root_count":sample,
@@ -622,6 +622,7 @@ pub fn contract_error(error: AuditStoreError) -> ContractError {
 #[cfg(test)]
 mod tests {
     use crate::rollout::read_audit_rollout;
+    use groundline_contracts::timestamp::{Duration as SignedDuration, Timestamp};
     use serde_json::Value;
     use std::fs;
 
@@ -719,8 +720,8 @@ mod tests {
         .unwrap();
         let audit = collect_audit(
             home.path(),
-            chrono::DateTime::from_timestamp(0, 0).unwrap(),
-            chrono::DateTime::from_timestamp(2, 0).unwrap(),
+            Timestamp::from_timestamp(0, 0).unwrap(),
+            Timestamp::from_timestamp(2, 0).unwrap(),
             None,
             false,
         )
@@ -785,7 +786,7 @@ mod tests {
         let conn = Connection::open(db).unwrap();
         conn.execute("UPDATE threads SET updated_at=20", [])
             .unwrap();
-        let time = |n| chrono::DateTime::from_timestamp(n, 0).unwrap();
+        let time = |n| Timestamp::from_timestamp(n, 0).unwrap();
         let a = collect_audit(home.path(), time(0), time(10), None, false).unwrap();
         let b = collect_audit(home.path(), time(10), time(30), None, false).unwrap();
         assert_eq!(a["root"]["provider_reported_usage"]["total_tokens"], 5);
@@ -843,7 +844,7 @@ mod tests {
                 params![second.to_string_lossy()],
             )
             .unwrap();
-        let time = |n| chrono::DateTime::from_timestamp(n, 0).unwrap();
+        let time = |n| Timestamp::from_timestamp(n, 0).unwrap();
         for completed_only in [false, true] {
             let audit = collect_audit(home.path(), time(0), time(2), None, completed_only).unwrap();
             assert_eq!(audit["scope"]["selected_root_count"], 2);
@@ -906,7 +907,7 @@ mod tests {
                 .unwrap();
         }
         drop(connection);
-        let time = |n| chrono::DateTime::from_timestamp(n, 0).unwrap();
+        let time = |n| Timestamp::from_timestamp(n, 0).unwrap();
         for completed_only in [false, true] {
             let audit = collect_audit(home.path(), time(0), time(2), None, completed_only).unwrap();
             assert_eq!(audit["scope"]["selected_root_count"], 1);
@@ -948,7 +949,7 @@ mod tests {
         let conn = Connection::open(db).unwrap();
         conn.execute("UPDATE threads SET updated_at=30, archived=1", [])
             .unwrap();
-        let time = |n| chrono::DateTime::from_timestamp(n, 0).unwrap();
+        let time = |n| Timestamp::from_timestamp(n, 0).unwrap();
         // A metadata-only update and records after the requested window do not
         // make old ambiguous history part of this window. Its start is exclusive.
         fs::write(&rollout, format!("{metadata}{}{}", usage(10), usage(21))).unwrap();
@@ -1013,7 +1014,7 @@ mod tests {
         }
         drop(connection);
         let database_before = fs::read(&db).unwrap();
-        let time = |n| chrono::DateTime::from_timestamp(n, 0).unwrap();
+        let time = |n| Timestamp::from_timestamp(n, 0).unwrap();
         for (family, tokens, roots) in [
             (Some("codex_app"), 7, 1),
             (Some("codex_cli"), 11, 1),
@@ -1091,7 +1092,7 @@ mod tests {
         }
         drop(connection);
         let database_before = fs::read(&database).unwrap();
-        let time = |n| chrono::DateTime::from_timestamp(n, 0).unwrap();
+        let time = |n| Timestamp::from_timestamp(n, 0).unwrap();
         for completed_only in [false, true] {
             for (family, roots, children, root_tokens, child_tokens) in [
                 (Some("codex_app"), 1, 0, 7, 0),
@@ -1130,7 +1131,7 @@ mod tests {
         fs::create_dir(&sessions).unwrap();
         let rollout = sessions.join("unknown.jsonl");
         fixture_database(home.path(), &rollout, "vscode");
-        let time = |n| chrono::DateTime::from_timestamp(n, 0).unwrap();
+        let time = |n| Timestamp::from_timestamp(n, 0).unwrap();
         for originator in [
             "future-originator",
             "Claude Code unknown",
@@ -1288,8 +1289,8 @@ mod tests {
         fixture_database(home.path(), &path, "cli");
         let result = collect_audit(
             home.path(),
-            chrono::DateTime::from_timestamp(0, 0).unwrap(),
-            chrono::DateTime::from_timestamp(2, 0).unwrap(),
+            Timestamp::from_timestamp(0, 0).unwrap(),
+            Timestamp::from_timestamp(2, 0).unwrap(),
             None,
             true,
         )
@@ -1348,8 +1349,8 @@ mod tests {
         }
         let result = collect_audit(
             home.path(),
-            chrono::DateTime::from_timestamp(0, 0).unwrap(),
-            chrono::DateTime::from_timestamp(2, 0).unwrap(),
+            Timestamp::from_timestamp(0, 0).unwrap(),
+            Timestamp::from_timestamp(2, 0).unwrap(),
             None,
             true,
         )
@@ -1436,7 +1437,7 @@ mod tests {
         drop(connection);
         let before = fs::read(&database).unwrap();
         let first_before = fs::read(&first).unwrap();
-        let time = |n| chrono::DateTime::from_timestamp(n, 0).unwrap();
+        let time = |n| Timestamp::from_timestamp(n, 0).unwrap();
         let audit = collect_audit(home.path(), time(0), time(2), None, true).unwrap();
         let diagnostic = super::inspect_store(home.path()).unwrap();
         let inventory = &diagnostic["store_integrity"];
@@ -1486,7 +1487,7 @@ mod tests {
         )
         .unwrap();
         fixture_database(home.path(), &plain.with_extension("jsonl.zst"), "cli");
-        let time = |n| chrono::DateTime::from_timestamp(n, 0).unwrap();
+        let time = |n| Timestamp::from_timestamp(n, 0).unwrap();
         let audit = collect_audit(home.path(), time(0), time(2), None, true).unwrap();
         let diagnostic = super::inspect_store(home.path()).unwrap();
         assert_eq!(
@@ -1510,10 +1511,10 @@ mod tests {
         let first = sessions.join("indexed-0.jsonl");
         let db = fixture_database(home.path(), &first, "cli");
         let connection = Connection::open(&db).unwrap();
-        let start = chrono::DateTime::parse_from_rfc3339("1970-07-01T00:00:00Z")
+        let start = Timestamp::parse_rfc3339("1970-07-01T00:00:00Z")
             .unwrap()
-            .with_timezone(&chrono::Utc);
-        let end = start + chrono::Duration::days(7);
+            .to_utc();
+        let end = start + SignedDuration::days(7);
         for index in 0..5 {
             let path = sessions.join(format!("indexed-{index}.jsonl"));
             let content = completed_fixture(&format!("owner-{index}"))
@@ -1531,7 +1532,7 @@ mod tests {
         connection
             .execute(
                 "UPDATE threads SET updated_at=?1",
-                params![start.timestamp() + 1],
+                params![start.unix_timestamp() + 1],
             )
             .unwrap();
         let before = collect_audit(home.path(), start, end, None, true).unwrap();
@@ -1565,7 +1566,7 @@ mod tests {
         connection
             .execute(
                 "UPDATE threads SET updated_at=?1 WHERE archived=1",
-                params![start.timestamp() + 1],
+                params![start.unix_timestamp() + 1],
             )
             .unwrap();
         let affected = collect_audit(home.path(), start, end, None, true).unwrap();
@@ -1600,7 +1601,7 @@ mod tests {
                 params![second.to_string_lossy()],
             )
             .unwrap();
-        let time = |n| chrono::DateTime::from_timestamp(n, 0).unwrap();
+        let time = |n| Timestamp::from_timestamp(n, 0).unwrap();
         let audit = collect_audit(home.path(), time(0), time(2), None, true).unwrap();
         assert_eq!(audit["scope"]["selected_root_count"], 0);
         assert_eq!(audit["root"]["provider_reported_usage"]["total_tokens"], 0);
@@ -1720,8 +1721,8 @@ mod tests {
         )).unwrap();
         let audit = collect_audit(
             home.path(),
-            chrono::DateTime::from_timestamp(0, 0).unwrap(),
-            chrono::DateTime::from_timestamp(2, 0).unwrap(),
+            Timestamp::from_timestamp(0, 0).unwrap(),
+            Timestamp::from_timestamp(2, 0).unwrap(),
             None,
             false,
         )
@@ -1800,8 +1801,8 @@ mod tests {
         .unwrap();
         let audit = collect_audit(
             home.path(),
-            chrono::DateTime::from_timestamp(0, 0).unwrap(),
-            chrono::DateTime::from_timestamp(2, 0).unwrap(),
+            Timestamp::from_timestamp(0, 0).unwrap(),
+            Timestamp::from_timestamp(2, 0).unwrap(),
             None,
             false,
         )

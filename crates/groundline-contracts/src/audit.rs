@@ -1,11 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use chrono::{DateTime, Utc};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::ContractError;
 use crate::rollout::Record;
+use crate::timestamp::Timestamp;
 
 mod attribution;
 mod command_category;
@@ -48,8 +48,8 @@ impl Diagnostics {
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AuditWindow {
-    pub start: Option<DateTime<Utc>>,
-    pub end: Option<DateTime<Utc>>,
+    pub start: Option<Timestamp>,
+    pub end: Option<Timestamp>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -147,13 +147,11 @@ fn increment<K: Ord>(
     Ok(())
 }
 
-fn timestamp(value: Option<&str>) -> Option<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(value?)
-        .ok()
-        .map(|parsed| parsed.with_timezone(&Utc))
+fn timestamp(value: Option<&str>) -> Option<Timestamp> {
+    Timestamp::parse_rfc3339(value?).ok().map(Timestamp::to_utc)
 }
 
-fn in_window(value: Option<DateTime<Utc>>, window: AuditWindow) -> bool {
+fn in_window(value: Option<Timestamp>, window: AuditWindow) -> bool {
     match value {
         Some(value) => {
             window.start.is_none_or(|start| value > start)
@@ -266,8 +264,8 @@ pub fn audit_rollouts(
     let mut processed_records = 0_usize;
     let mut known_scope_exclusions = 0_u64;
     let mut record_count = 0_u64;
-    let mut first_timestamp: Option<DateTime<Utc>> = None;
-    let mut last_timestamp: Option<DateTime<Utc>> = None;
+    let mut first_timestamp: Option<Timestamp> = None;
+    let mut last_timestamp: Option<Timestamp> = None;
     let mut event_counts = BTreeMap::<String, u64>::new();
     let mut model_effort = BTreeMap::<String, u64>::new();
     let mut transitions = 0_u64;
@@ -367,7 +365,7 @@ pub fn audit_rollouts(
         let mut attribution = attribution::Responses::default();
         let mut last_ordinal = None;
         let mut previous_model = None;
-        let mut active_tasks = BTreeMap::<String, DateTime<Utc>>::new();
+        let mut active_tasks = BTreeMap::<String, Timestamp>::new();
         let mut verifications = verification::Verifications::default();
         let mut latest_usage: Option<Usage> = None;
         let mut baseline_usage: Option<Usage> = None;
@@ -640,12 +638,8 @@ pub fn audit_rollouts(
                         (payload.get("turn_id").and_then(Value::as_str), observed_at)
                         && let Some(started) = active_tasks.get(turn_id)
                     {
-                        completed_durations.push(
-                            observed_at
-                                .signed_duration_since(*started)
-                                .num_milliseconds()
-                                .max(0) as u64,
-                        );
+                        completed_durations
+                            .push((observed_at - *started).whole_milliseconds().max(0) as u64);
                     }
                 } else if event_type == "token_count" && !inherited {
                     let info = payload.get("info").and_then(Value::as_object);
@@ -838,8 +832,8 @@ pub fn audit_rollouts(
         .saturating_sub(verification_success)
         .saturating_sub(verification_failure);
     let duration_threshold = long_turn_minutes.saturating_mul(60_000);
-    let start = first_timestamp.as_ref().map(DateTime::<Utc>::to_rfc3339);
-    let end = last_timestamp.as_ref().map(DateTime::<Utc>::to_rfc3339);
+    let start = first_timestamp.map(|at| at.to_rfc3339());
+    let end = last_timestamp.map(|at| at.to_rfc3339());
     completed_durations.sort_unstable();
     user_lengths.sort_unstable();
     let usage_source = if response_rollouts > 0 {
@@ -997,8 +991,8 @@ pub fn audit_rollouts(
 mod tests {
     use super::*;
 
-    fn at(seconds: i64) -> DateTime<Utc> {
-        DateTime::from_timestamp(seconds, 0).unwrap()
+    fn at(seconds: i64) -> Timestamp {
+        Timestamp::from_timestamp(seconds, 0).unwrap()
     }
     #[test]
     fn poll_completion_respects_window_and_rollout_scope_after_projection() {

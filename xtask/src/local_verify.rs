@@ -9,8 +9,8 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use chrono::{SecondsFormat, Utc};
 use command_group::CommandGroup;
+use groundline_contracts::timestamp::{Timestamp, TimestampFormat};
 use semver::Version;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -541,7 +541,7 @@ pub fn verify(root: &Path) -> Result<Value, XtaskError> {
         });
     }
 
-    let generated_at = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+    let generated_at = Timestamp::now().format_rfc3339(TimestampFormat::Seconds, true);
     let receipt = json!({
         "kind":"groundline-local-verification-receipt",
         "schema":1,

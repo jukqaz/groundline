@@ -8,10 +8,10 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use chrono::{SecondsFormat, Utc};
 use groundline_contracts::learning::continuous::{
     Boundary, BoundaryTarget, LearningProfile, bytes_sha256,
 };
+use groundline_contracts::timestamp::{Timestamp, TimestampFormat};
 use rustix::fs::{
     AtFlags, Mode, OFlags, RenameFlags, fcntl_getfl, fcntl_setfl, mkdirat, open, openat, renameat,
     renameat_with, unlinkat,
@@ -57,7 +57,7 @@ fn safe_id(value: &str) -> bool {
 }
 
 fn now() -> String {
-    Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+    Timestamp::now().format_rfc3339(TimestampFormat::Millis, true)
 }
 
 fn serialized<T: Serialize>(value: &T) -> Result<Vec<u8>, BoundaryError> {
@@ -1134,7 +1134,7 @@ fn read_worker_status(directory: &Directory) -> Result<Option<WorkerStatusSlot>,
             || v.network_performed
             || v.native_activation != "UNVERIFIED"
             || v.core_counts_scope != "last_core_attempt"
-            || chrono::DateTime::parse_from_rfc3339(&v.observed_at_utc).is_err()
+            || Timestamp::parse_rfc3339(&v.observed_at_utc).is_err()
             || v.consume_attempt_count > MAX_CORE_ATTEMPTS
             || v.retry_count != v.consume_attempt_count.saturating_sub(1)
             || (v.retry_count == 0) != v.last_retry_reason.is_none()
@@ -1187,7 +1187,7 @@ fn read_status(
             || value.source_verified
             || value.network_performed
             || value.native_activation != "UNVERIFIED"
-            || chrono::DateTime::parse_from_rfc3339(&value.observed_at_utc).is_err()
+            || Timestamp::parse_rfc3339(&value.observed_at_utc).is_err()
             || ![
                 "captured",
                 "unavailable",
