@@ -19,11 +19,13 @@ when observed. Keep missing evidence unknown.
 
 For a same-thread control that changes later-turn defaults, use isolated native
 readback or a fixture to verify the initial model and effort, the changed defaults
-and the final pair. Cover a one-setting override, cleanup on early exit, and
-preservation of newer user choices. In a turn fixture, check that a later turn
-without overrides uses the final pair. If an override may persist and the
-original defaults or a verified restoration control is unavailable, keep the
-thread defaults unchanged. A settings acknowledgment alone does not establish
+and the final pair. If an original default was inherited, verify its restored
+inheritance through native readback that distinguishes inheritance from a fixed
+choice. Cover a one-setting override, cleanup on early exit, and preservation of
+newer user choices. In a turn fixture, check that a later turn without overrides
+uses the final effective pair. If an override may persist and the original
+defaults or a verified restoration control is unavailable, keep the thread
+defaults unchanged. A settings acknowledgment alone does not establish
 restoration.
 
 The compact CLI's isolated regression cases cover target scope, symlinks and
